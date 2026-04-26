@@ -14,6 +14,7 @@ id = "placeholder-kv-id"
 binding = "TREND_DB"
 database_name = "trend-skill-db"
 database_id = "placeholder-d1-id"
+migrations_dir = "migrations"
 
 [[vectorize]]
 binding = "TREND_VECTORIZE"

@@ -1,0 +1,38 @@
+{
+  "name": "trend",
+  "version": "0.1.0",
+  "description": "聚合多平台社交媒体热点，支持语义搜索和 AI 写作",
+  "author": "uniscrm",
+  "commands": [
+    {
+      "name": "trend",
+      "description": "查询当前热点趋势",
+      "args": [
+        { "name": "query", "type": "string", "optional": true },
+        { "name": "platform", "type": "string", "optional": true },
+        { "name": "limit", "type": "number", "optional": true, "default": 20 }
+      ],
+      "tier": "free"
+    },
+    {
+      "name": "write",
+      "description": "基于热点生成内容（需授权）",
+      "args": [
+        { "name": "format", "type": "string", "required": true },
+        { "name": "query", "type": "string", "optional": true },
+        { "name": "tone", "type": "string", "optional": true, "default": "professional" },
+        { "name": "locale", "type": "string", "optional": true, "default": "zh-CN" },
+        { "name": "audience", "type": "string", "optional": true, "default": "general" }
+      ],
+      "tier": "premium"
+    }
+  ],
+  "mcp": {
+    "endpoint": "https://trend-skill.your-domain.workers.dev/mcp",
+    "auth": "api-key"
+  },
+  "pricing": {
+    "free": { "description": "热点查询，10次/小时" },
+    "premium": { "description": "热点查询 + AI 写作，300次/小时" }
+  }
+}

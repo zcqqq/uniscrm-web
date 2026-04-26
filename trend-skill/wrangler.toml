@@ -8,12 +8,12 @@ crons = ["*/10 * * * *"]
 
 [[kv_namespaces]]
 binding = "TREND_KV"
-id = "placeholder-kv-id"
+id = "817a8d2901ef41c19d2021415241e915"
 
 [[d1_databases]]
 binding = "TREND_DB"
 database_name = "trend-skill-db"
-database_id = "placeholder-d1-id"
+database_id = "d8c26e02-42e7-4478-8127-9b1559da6bf9"
 migrations_dir = "migrations"
 
 [[vectorize]]
@@ -23,6 +23,4 @@ index_name = "trend-embeddings"
 [ai]
 binding = "AI"
 
-[vars]
-TWITTER_BEARER_TOKEN = ""
-ADMIN_SECRET = ""
+# TWITTER_BEARER_TOKEN and ADMIN_SECRET are set via `wrangler secret put`

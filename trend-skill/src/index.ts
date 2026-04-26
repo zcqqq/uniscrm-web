@@ -10,7 +10,7 @@ import { createAdminRouter } from "./api/admin";
 import { resolveAuth } from "./auth/middleware";
 import { RateLimiter } from "./auth/rate-limit";
 import { createMcpServer } from "./mcp/server";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -53,7 +53,7 @@ app.all("/mcp", async (c) => {
   }
 
   const server = createMcpServer(c.env, tier);
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   await server.connect(transport);
   return transport.handleRequest(c.req.raw);
 });

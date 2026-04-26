@@ -1,0 +1,27 @@
+name = "trend-skill"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+[[kv_namespaces]]
+binding = "TREND_KV"
+id = "placeholder-kv-id"
+
+[[d1_databases]]
+binding = "TREND_DB"
+database_name = "trend-skill-db"
+database_id = "placeholder-d1-id"
+
+[[vectorize]]
+binding = "TREND_VECTORIZE"
+index_name = "trend-embeddings"
+
+[ai]
+binding = "AI"
+
+[vars]
+TWITTER_BEARER_TOKEN = ""
+ADMIN_SECRET = ""

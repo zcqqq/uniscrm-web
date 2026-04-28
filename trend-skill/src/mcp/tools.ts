@@ -1,106 +1,72 @@
-import type { Env, TrendItem, WriteFormat, Tier } from "../types";
-import { TrendCache } from "../storage/cache";
+import type { TrendItem, Env } from "../types";
 import { TrendVectorStore } from "../storage/vectorize";
-import { listFormats, renderTemplate } from "../core/templates";
+import { buildDailyDigest } from "../push/digest";
 
-export async function handleListPlatforms() {
-  return {
-    platforms: [{ name: "twitter", status: "active", description: "X/Twitter trends via API v2" }],
-  };
-}
-
-export async function handleListFormats() {
-  return { formats: listFormats() };
-}
-
-export async function handleQueryTrends(
+export async function handleTrendingNow(
   env: Env,
-  args: { platform?: string; category?: string; limit?: number }
-) {
-  const cache = new TrendCache(env.TREND_KV);
-  const limit = args.limit ?? 20;
+  params: { location?: string; language?: string; limit?: number }
+): Promise<{ items: TrendItem[] }> {
+  const raw = await env.TREND_KV.get("trends:latest");
+  let items: TrendItem[] = raw ? JSON.parse(raw) : [];
 
-  if (args.platform) {
-    const items = await cache.getPlatformLatest(args.platform);
-    return { trends: (items ?? []).slice(0, limit) };
-  }
+  if (params.location) items = items.filter((t) => t.location === params.location);
+  if (params.language) items = items.filter((t) => t.language === params.language);
 
-  const items = await cache.getLatest();
-  return { trends: (items ?? []).slice(0, limit) };
+  return { items: items.slice(0, params.limit ?? 20) };
 }
 
 export async function handleSearchTrends(
   env: Env,
-  args: { query: string; limit?: number }
-) {
-  const vectorStore = new TrendVectorStore(env.TREND_VECTORIZE, env.AI);
-  const results = await vectorStore.search(args.query, args.limit ?? 20);
+  params: { query: string; platform?: string; location?: string; language?: string; limit?: number }
+): Promise<{ results: { item: TrendItem; similarity: number }[] }> {
+  const store = new TrendVectorStore(env.TREND_VECTORIZE, env.AI);
+  const filter: Record<string, string> = {};
+  if (params.platform) filter.platform = params.platform;
+  if (params.location) filter.location = params.location;
+  if (params.language) filter.language = params.language;
+
+  const results = await store.search(
+    params.query,
+    params.limit ?? 20,
+    Object.keys(filter).length > 0 ? filter : undefined
+  );
+
   return { results };
 }
 
-export async function handleGetTrendDetail(env: Env, args: { id: string }) {
-  const cache = new TrendCache(env.TREND_KV);
-  const all = await cache.getLatest();
-  const item = all?.find((t) => t.id === args.id);
-  if (!item) return { error: "Trend not found" };
-  return { trend: item };
-}
-
-export async function handleGetWriteContext(
+export async function handleQueryTrends(
   env: Env,
-  args: { trendIds: string[]; format: WriteFormat; locale?: string; tone?: string; audience?: string },
-  tier: "anonymous" | Tier
-) {
-  if (tier !== "premium") {
-    return { error: "Premium tier required. Upgrade your API key to use writing features." };
-  }
+  params: { platform?: string; location?: string; language?: string; date?: string; limit?: number }
+): Promise<{ items: TrendItem[] }> {
+  const store = new TrendVectorStore(env.TREND_VECTORIZE, env.AI);
+  const filter: Record<string, string> = {};
+  if (params.platform) filter.platform = params.platform;
+  if (params.location) filter.location = params.location;
+  if (params.language) filter.language = params.language;
+  if (params.date) filter.date = params.date;
 
-  const cache = new TrendCache(env.TREND_KV);
-  const all = await cache.getLatest();
-  const idSet = new Set(args.trendIds);
-  const trends = (all ?? []).filter((t) => idSet.has(t.id));
-
-  const template = renderTemplate(args.format, trends, {
-    tone: args.tone,
-    locale: args.locale ?? "zh-CN",
-    audience: args.audience,
-  });
-
-  return {
-    trends,
-    template,
-    format: args.format,
-    locale: args.locale ?? "zh-CN",
-  };
+  const results = await store.search("", params.limit ?? 20, Object.keys(filter).length > 0 ? filter : undefined);
+  return { items: results.map((r) => r.item) };
 }
 
-export async function handleTrendingNow(env: Env, args: { limit?: number }) {
-  return handleQueryTrends(env, { limit: args.limit ?? 20 });
-}
-
-export async function handleWriteFromTrend(
+export async function handleGetTrendDetail(
   env: Env,
-  args: { query: string; format: WriteFormat; locale?: string; tone?: string; audience?: string },
-  tier: "anonymous" | Tier
-) {
-  if (tier !== "premium") {
-    return { error: "Premium tier required. Upgrade your API key to use writing features." };
-  }
+  params: { id: string }
+): Promise<TrendItem | null> {
+  const store = new TrendVectorStore(env.TREND_VECTORIZE, env.AI);
+  const results = await store.search(params.id, 1);
+  return results.length > 0 ? results[0].item : null;
+}
 
-  const vectorStore = new TrendVectorStore(env.TREND_VECTORIZE, env.AI);
-  const results = await vectorStore.search(args.query, 5);
-  const trends = results.map((r) => r.item);
+export async function handleGetDailyDigest(
+  env: Env
+): Promise<{ persistent_topics: any[]; cross_platform_topics: any[] }> {
+  const store = new TrendVectorStore(env.TREND_VECTORIZE, env.AI);
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
 
-  const template = renderTemplate(args.format, trends, {
-    tone: args.tone,
-    locale: args.locale ?? "zh-CN",
-    audience: args.audience,
-  });
+  const yesterdayResults = await store.search("", 100, { date: yesterday });
+  const yesterdayItems = yesterdayResults.map((r) => r.item);
 
-  return {
-    trends,
-    template,
-    format: args.format,
-    locale: args.locale ?? "zh-CN",
-  };
+  return buildDailyDigest(store, yesterdayItems, today);
 }

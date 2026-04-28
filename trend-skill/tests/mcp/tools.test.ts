@@ -1,58 +1,70 @@
 import { describe, it, expect, vi } from "vitest";
-import { handleListPlatforms, handleListFormats, handleQueryTrends } from "../../src/mcp/tools";
-import type { Env, TrendItem } from "../../src/types";
+import { handleTrendingNow, handleSearchTrends, handleGetDailyDigest } from "../../src/mcp/tools";
+import type { TrendItem, Env } from "../../src/types";
 
-const sampleTrends: TrendItem[] = [
-  {
-    id: "twitter:1",
-    platform: "twitter",
-    title: "Test Trend",
-    url: "https://x.com/1",
-    score: 100,
-    rawMetrics: { tweet_volume: 5000 },
-    categories: ["tech"],
-    timestamp: "2026-04-25T10:00:00Z",
-  },
-];
-
-function createMockEnv(kvData: Record<string, string> = {}): Env {
+function makeTrend(title: string, location = "global"): TrendItem {
   return {
-    TREND_KV: {
-      get: vi.fn(async (key: string) => kvData[key] ?? null),
-    } as unknown as KVNamespace,
-    TREND_VECTORIZE: {} as VectorizeIndex,
-    AI: {} as Ai,
-    TREND_DB: {} as D1Database,
-    TWITTER_BEARER_TOKEN: "",
-    ADMIN_SECRET: "",
+    id: `2026-04-28:tw:gl:test`,
+    platform: "twitter",
+    location,
+    language: "en",
+    title,
+    score: 80,
+    metrics: {},
+    categories: [],
+    timestamp: "2026-04-28T00:00:00Z",
   };
 }
 
-describe("MCP tool handlers", () => {
-  it("list_platforms returns twitter as available", async () => {
-    const result = await handleListPlatforms();
-    expect(result.platforms).toContainEqual(
-      expect.objectContaining({ name: "twitter", status: "active" })
-    );
+const makeEnv = (kvData: TrendItem[] | null = null) =>
+  ({
+    TREND_KV: {
+      get: vi.fn().mockResolvedValue(kvData ? JSON.stringify(kvData) : null),
+    },
+    TREND_VECTORIZE: {
+      query: vi.fn().mockResolvedValue({ matches: [] }),
+    },
+    AI: {
+      run: vi.fn().mockResolvedValue({ data: [[0.1, 0.2]] }),
+    },
+  }) as unknown as Env;
+
+describe("handleTrendingNow", () => {
+  it("returns top trends from KV", async () => {
+    const trends = [makeTrend("AI"), makeTrend("Climate")];
+    const env = makeEnv(trends);
+    const result = await handleTrendingNow(env, { limit: 10 });
+    expect(result.items).toHaveLength(2);
   });
 
-  it("list_formats returns 5 formats", async () => {
-    const result = await handleListFormats();
-    expect(result.formats).toHaveLength(5);
+  it("filters by location", async () => {
+    const trends = [makeTrend("AI", "global"), makeTrend("Topic", "china")];
+    const env = makeEnv(trends);
+    const result = await handleTrendingNow(env, { location: "china", limit: 10 });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].location).toBe("china");
   });
+});
 
-  it("query_trends returns cached trends", async () => {
-    const env = createMockEnv({ "trends:latest": JSON.stringify(sampleTrends) });
-    const result = await handleQueryTrends(env, {});
-    expect(result.trends).toHaveLength(1);
-    expect(result.trends[0].title).toBe("Test Trend");
-  });
-
-  it("query_trends filters by platform", async () => {
-    const env = createMockEnv({
-      "trends:twitter:latest": JSON.stringify(sampleTrends),
+describe("handleSearchTrends", () => {
+  it("calls vectorize search with filters", async () => {
+    const item = makeTrend("AI");
+    const env = makeEnv();
+    (env.TREND_VECTORIZE as any).query.mockResolvedValue({
+      matches: [{ id: item.id, score: 0.95, metadata: { item: JSON.stringify(item) } }],
     });
-    const result = await handleQueryTrends(env, { platform: "twitter" });
-    expect(result.trends).toHaveLength(1);
+
+    const result = await handleSearchTrends(env, { query: "artificial intelligence", limit: 10 });
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].similarity).toBe(0.95);
+  });
+});
+
+describe("handleGetDailyDigest", () => {
+  it("returns digest structure", async () => {
+    const env = makeEnv([makeTrend("AI")]);
+    const result = await handleGetDailyDigest(env);
+    expect(result).toHaveProperty("persistent_topics");
+    expect(result).toHaveProperty("cross_platform_topics");
   });
 });

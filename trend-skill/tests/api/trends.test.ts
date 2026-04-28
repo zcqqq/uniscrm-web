@@ -40,7 +40,7 @@ describe("GET /api/trends", () => {
     const app = makeApp(trends);
     const res = await app.request("/api/trends");
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = (await res.json()) as { items: TrendItem[] };
     expect(data.items).toHaveLength(2);
   });
 
@@ -48,7 +48,7 @@ describe("GET /api/trends", () => {
     const trends = [makeTrend("AI", "global"), makeTrend("Topic", "china", "zh")];
     const app = makeApp(trends);
     const res = await app.request("/api/trends?location=china");
-    const data = await res.json();
+    const data = (await res.json()) as { items: TrendItem[] };
     expect(data.items).toHaveLength(1);
     expect(data.items[0].location).toBe("china");
   });
@@ -56,7 +56,7 @@ describe("GET /api/trends", () => {
   it("returns empty array when KV is empty", async () => {
     const app = makeApp(null);
     const res = await app.request("/api/trends");
-    const data = await res.json();
+    const data = (await res.json()) as { items: TrendItem[] };
     expect(data.items).toEqual([]);
   });
 });

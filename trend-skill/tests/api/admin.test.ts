@@ -40,7 +40,7 @@ describe("Admin API", () => {
       body: JSON.stringify({ tier: "free", owner_name: "test" }),
     });
     expect(res.status).toBe(201);
-    const data = await res.json();
+    const data = (await res.json()) as { key: string };
     expect(data.key).toMatch(/^sk_trend_/);
   });
 

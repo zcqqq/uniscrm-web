@@ -1,7 +1,5 @@
 import type { TrendItem } from "../types";
 
-const TTL_SECONDS = 900; // 15 minutes
-
 export class TrendCache {
   constructor(private kv: KVNamespace) {}
 
@@ -11,17 +9,15 @@ export class TrendCache {
   }
 
   async setLatest(items: TrendItem[]): Promise<void> {
-    await this.kv.put("trends:latest", JSON.stringify(items), { expirationTtl: TTL_SECONDS });
+    await this.kv.put("trends:latest", JSON.stringify(items));
   }
 
-  async getPlatformLatest(platform: string): Promise<TrendItem[] | null> {
-    const raw = await this.kv.get(`trends:${platform}:latest`);
+  async getPlatformLatest(platform: string, location: string): Promise<TrendItem[] | null> {
+    const raw = await this.kv.get(`trends:${platform}:${location}:latest`);
     return raw ? JSON.parse(raw) : null;
   }
 
-  async setPlatformLatest(platform: string, items: TrendItem[]): Promise<void> {
-    await this.kv.put(`trends:${platform}:latest`, JSON.stringify(items), {
-      expirationTtl: TTL_SECONDS,
-    });
+  async setPlatformLatest(platform: string, location: string, items: TrendItem[]): Promise<void> {
+    await this.kv.put(`trends:${platform}:${location}:latest`, JSON.stringify(items));
   }
 }

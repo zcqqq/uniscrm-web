@@ -1,53 +1,62 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { TrendCache } from "../../src/storage/cache";
 import type { TrendItem } from "../../src/types";
 
-const sampleTrends: TrendItem[] = [
-  {
-    id: "twitter:1",
-    platform: "twitter",
-    title: "Test Trend",
-    url: "https://x.com/trend/1",
-    score: 100,
-    rawMetrics: { tweet_volume: 5000 },
+function makeTrend(title: string, platform = "twitter", location = "global"): TrendItem {
+  return {
+    id: `2026-04-28:tw:gl:${title}`,
+    platform: platform as TrendItem["platform"],
+    location,
+    language: "en",
+    title,
+    score: 50,
+    metrics: {},
     categories: [],
-    timestamp: "2026-04-25T10:00:00Z",
-  },
-];
+    timestamp: "2026-04-28T00:00:00Z",
+  };
+}
 
-function createMockKV() {
+const makeKvMock = () => {
   const store = new Map<string, string>();
   return {
-    get: vi.fn(async (key: string) => store.get(key) ?? null),
-    put: vi.fn(async (key: string, value: string, _opts?: { expirationTtl?: number }) => {
-      store.set(key, value);
-    }),
+    get: (key: string) => Promise.resolve(store.get(key) ?? null),
+    put: (key: string, value: string) => { store.set(key, value); return Promise.resolve(); },
+    _store: store,
   } as unknown as KVNamespace;
-}
+};
 
 describe("TrendCache", () => {
   let kv: KVNamespace;
   let cache: TrendCache;
 
   beforeEach(() => {
-    kv = createMockKV();
+    kv = makeKvMock();
     cache = new TrendCache(kv);
   });
 
-  it("stores and retrieves latest trends", async () => {
-    await cache.setLatest(sampleTrends);
+  it("setLatest and getLatest round-trip", async () => {
+    const items = [makeTrend("A"), makeTrend("B")];
+    await cache.setLatest(items);
     const result = await cache.getLatest();
-    expect(result).toEqual(sampleTrends);
+    expect(result).toEqual(items);
   });
 
-  it("stores and retrieves platform-specific trends", async () => {
-    await cache.setPlatformLatest("twitter", sampleTrends);
-    const result = await cache.getPlatformLatest("twitter");
-    expect(result).toEqual(sampleTrends);
+  it("getLatest returns null when empty", async () => {
+    expect(await cache.getLatest()).toBeNull();
   });
 
-  it("returns null when cache is empty", async () => {
+  it("setPlatformLatest and getPlatformLatest round-trip", async () => {
+    const items = [makeTrend("X", "twitter", "china")];
+    await cache.setPlatformLatest("twitter", "china", items);
+    const result = await cache.getPlatformLatest("twitter", "china");
+    expect(result).toEqual(items);
+  });
+
+  it("overwrites on second set (no TTL)", async () => {
+    await cache.setLatest([makeTrend("old")]);
+    await cache.setLatest([makeTrend("new")]);
     const result = await cache.getLatest();
-    expect(result).toBeNull();
+    expect(result).toHaveLength(1);
+    expect(result![0].title).toBe("new");
   });
 });

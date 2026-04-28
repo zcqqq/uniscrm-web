@@ -1,12 +1,7 @@
-import type { TrendItem } from "../types";
-
-export interface FetchTrendsOptions {
-  category?: string;
-  limit?: number;
-}
+import type { Platform, TrendItem } from "../types";
 
 export interface TrendSource {
-  platform: string;
-  fetchTrends(options?: FetchTrendsOptions): Promise<TrendItem[]>;
+  platform: Platform;
+  fetchTrends(): Promise<TrendItem[]>;
   isAvailable(): Promise<boolean>;
 }

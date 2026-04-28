@@ -1,69 +1,76 @@
-import type { TrendItem } from "../types";
-import type { TrendSource, FetchTrendsOptions } from "./interface";
+import type { Platform, TrendItem } from "../types";
+import { PLATFORM_SHORT, LOCATION_SHORT } from "../types";
+import type { TrendSource } from "./interface";
 
-type FetchFn = typeof globalThis.fetch;
+const WOEID_CONFIGS = [
+  { woeid: 1, location: "global", language: "en" },
+  { woeid: 23424781, location: "china", language: "zh" },
+] as const;
 
-interface TwitterTrend {
-  trend_name: string;
-  tweet_count: number;
+export function generateTrendId(
+  date: string,
+  platform: Platform,
+  location: string,
+  title: string
+): string {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(title);
+  let h = 0x811c9dc5;
+  for (const byte of data) {
+    h ^= byte;
+    h = Math.imul(h, 0x01000193);
+  }
+  const hex = (h >>> 0).toString(16).padStart(8, "0");
+  const ps = PLATFORM_SHORT[platform];
+  const ls = LOCATION_SHORT[location] ?? location.slice(0, 2);
+  return `${date}:${ps}:${ls}:${hex}`;
 }
-
-interface TwitterTrendsResponse {
-  data: TwitterTrend[];
-}
-
-const TWITTER_TRENDS_URL = "https://api.x.com/2/trends/by/woeid/1";
 
 export class TwitterTrendSource implements TrendSource {
-  platform = "twitter" as const;
-  private bearerToken: string;
-  private fetchFn: FetchFn;
+  platform: Platform = "twitter";
 
-  constructor(bearerToken: string, fetchFn: FetchFn = globalThis.fetch) {
-    this.bearerToken = bearerToken;
-    this.fetchFn = fetchFn;
-  }
+  constructor(private bearerToken: string) {}
 
-  async fetchTrends(options?: FetchTrendsOptions): Promise<TrendItem[]> {
-    try {
-      const resp = await this.fetchFn(TWITTER_TRENDS_URL, {
-        headers: { Authorization: `Bearer ${this.bearerToken}` },
-      });
-      if (!resp.ok) return [];
+  async fetchTrends(): Promise<TrendItem[]> {
+    const today = new Date().toISOString().slice(0, 10);
+    const allItems: TrendItem[] = [];
 
-      const body = (await resp.json()) as TwitterTrendsResponse;
-      const now = new Date().toISOString();
+    for (const config of WOEID_CONFIGS) {
+      try {
+        const response = await fetch(
+          `https://api.x.com/2/trends/by/woeid/${config.woeid}`,
+          { headers: { Authorization: `Bearer ${this.bearerToken}` } }
+        );
 
-      let items: TrendItem[] = body.data.map((trend) => ({
-        id: `twitter:${encodeURIComponent(trend.trend_name)}`,
-        platform: "twitter",
-        title: trend.trend_name,
-        url: `https://x.com/search?q=${encodeURIComponent(trend.trend_name)}`,
-        score: 0,
-        rawMetrics: { tweet_volume: trend.tweet_count },
-        categories: [],
-        timestamp: now,
-      }));
+        if (!response.ok) continue;
 
-      if (options?.limit && options.limit < items.length) {
-        items = items.slice(0, options.limit);
+        const trends: { trend_name: string; tweet_count: number; trend_url?: string }[] =
+          await response.json();
+
+        for (const trend of trends) {
+          const id = generateTrendId(today, "twitter", config.location, trend.trend_name);
+          allItems.push({
+            id,
+            platform: "twitter",
+            location: config.location,
+            language: config.language,
+            title: trend.trend_name,
+            url: trend.trend_url,
+            score: trend.tweet_count ?? 0,
+            metrics: { tweet_volume: trend.tweet_count ?? 0 },
+            categories: [],
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch {
+        continue;
       }
-
-      return items;
-    } catch {
-      return [];
     }
+
+    return allItems;
   }
 
   async isAvailable(): Promise<boolean> {
-    try {
-      const resp = await this.fetchFn(TWITTER_TRENDS_URL, {
-        method: "HEAD",
-        headers: { Authorization: `Bearer ${this.bearerToken}` },
-      });
-      return resp.ok;
-    } catch {
-      return false;
-    }
+    return this.bearerToken.length > 0;
   }
 }

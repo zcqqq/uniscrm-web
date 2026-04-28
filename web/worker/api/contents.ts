@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../types";
 import { ContentService } from "../services/content";
+import { RecommendService } from "../services/recommend";
 
 export function createContentsRouter() {
   const router = new Hono<{ Bindings: Env }>();
@@ -13,6 +14,10 @@ export function createContentsRouter() {
 
     const service = new ContentService(c.env.DB, c.env.VECTORIZE, c.env.AI);
     const results = await service.importBatch(userId, items);
+
+    const recommend = new RecommendService(c.env.DB, c.env.VECTORIZE, c.env.KV);
+    await recommend.computeForUser(userId);
+
     return c.json({ items: results });
   });
 

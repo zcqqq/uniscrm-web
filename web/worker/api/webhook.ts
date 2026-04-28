@@ -15,7 +15,11 @@ async function verifySignature(body: string, signature: string, secret: string):
   const expected = Array.from(new Uint8Array(signed))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-  return expected === signature;
+  const enc = new TextEncoder();
+  const a = enc.encode(expected);
+  const b = enc.encode(signature);
+  if (a.byteLength !== b.byteLength) return false;
+  return crypto.subtle.timingSafeEqual(a, b);
 }
 
 export function createWebhookRouter() {

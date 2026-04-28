@@ -50,11 +50,11 @@ export class RecommendService {
     await this.kv.put(`recommendations:${userId}`, JSON.stringify(recommendations));
   }
 
-  async getForUser(userId: string): Promise<(ContentMatch & { title: string })[]> {
+  async getForUser(userId: string): Promise<ContentMatch[]> {
     const cached = await this.kv.get(`recommendations:${userId}`);
     if (!cached) return [];
 
-    const recommendations = JSON.parse(cached) as (ContentMatch & { title: string })[];
+    const recommendations = JSON.parse(cached) as ContentMatch[];
     return recommendations.sort((a, b) => {
       const aMax = Math.max(...a.matches.map((m) => m.similarity));
       const bMax = Math.max(...b.matches.map((m) => m.similarity));

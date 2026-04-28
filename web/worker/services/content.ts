@@ -70,6 +70,11 @@ export class ContentService {
       .first<ContentItem>();
     if (!existing) throw new Error("Content not found");
 
+    const VALID_STATUSES = ["new", "pending", "published", "ignored"];
+    if (fields.status !== undefined && !VALID_STATUSES.includes(fields.status)) {
+      throw new Error("Invalid status");
+    }
+
     const sets: string[] = [];
     const values: (string | null)[] = [];
     if (fields.title !== undefined) { sets.push("title = ?"); values.push(fields.title); }

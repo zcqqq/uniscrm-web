@@ -12,6 +12,15 @@ export function createContentsRouter() {
       items: { filename: string; title: string; summary: string | null; file_modified_at: string | null }[];
     }>();
 
+    if (!Array.isArray(items) || items.length === 0) {
+      return c.json({ error: "Items array is required" }, 400);
+    }
+    for (const item of items) {
+      if (!item.filename || !item.title) {
+        return c.json({ error: "Each item must have filename and title" }, 400);
+      }
+    }
+
     const service = new ContentService(c.env.DB, c.env.VECTORIZE, c.env.AI);
     const results = await service.importBatch(userId, items);
 

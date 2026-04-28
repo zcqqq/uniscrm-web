@@ -1,33 +1,23 @@
 import { Hono } from "hono";
-import type { Env } from "../types";
-import { TrendCache } from "../storage/cache";
-import { TrendVectorStore } from "../storage/vectorize";
+import type { Env, TrendItem } from "../types";
 
 export function createTrendsRouter() {
   const router = new Hono<{ Bindings: Env }>();
 
   router.get("/trends", async (c) => {
-    const query = c.req.query("query");
+    const location = c.req.query("location");
+    const language = c.req.query("language");
     const platform = c.req.query("platform");
-    const limit = parseInt(c.req.query("limit") ?? "20", 10);
+    const limit = parseInt(c.req.query("limit") ?? "50", 10);
 
-    if (query) {
-      const vectorStore = new TrendVectorStore(c.env.TREND_VECTORIZE, c.env.AI);
-      const results = await vectorStore.search(query, limit);
-      return c.json({ results });
-    }
+    const raw = await c.env.TREND_KV.get("trends:latest");
+    let items: TrendItem[] = raw ? JSON.parse(raw) : [];
 
-    const cache = new TrendCache(c.env.TREND_KV);
+    if (location) items = items.filter((t) => t.location === location);
+    if (language) items = items.filter((t) => t.language === language);
+    if (platform) items = items.filter((t) => t.platform === platform);
 
-    if (platform) {
-      const items = await cache.getPlatformLatest(platform);
-      if (!items) return c.json({ error: "No data for platform" }, 503);
-      return c.json({ trends: items.slice(0, limit) });
-    }
-
-    const items = await cache.getLatest();
-    if (!items) return c.json({ error: "Trend data not yet available" }, 503);
-    return c.json({ trends: items.slice(0, limit) });
+    return c.json({ items: items.slice(0, limit) });
   });
 
   return router;

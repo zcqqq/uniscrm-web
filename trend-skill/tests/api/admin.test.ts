@@ -1,54 +1,54 @@
 import { describe, it, expect, vi } from "vitest";
-import { createAdminRouter } from "../../src/api/admin";
 import { Hono } from "hono";
+import { createAdminRouter } from "../../src/api/admin";
 import type { Env } from "../../src/types";
 
-function createTestApp() {
-  const keys: Record<string, { key: string; tier: string }> = {};
-  const mockDB = {
-    prepare: vi.fn((sql: string) => ({
-      bind: vi.fn((...args: unknown[]) => ({
-        run: vi.fn(async () => {
-          if (sql.startsWith("INSERT")) {
-            keys[args[0] as string] = { key: args[0] as string, tier: args[1] as string };
-          }
-          return { success: true };
-        }),
-        first: vi.fn(async () => keys[args[0] as string] ?? null),
-      })),
-    })),
-  } as unknown as D1Database;
+const makeApp = (adminSecret = "test-secret") => {
+  const mockDb = {
+    prepare: vi.fn().mockReturnValue({
+      bind: vi.fn().mockReturnValue({
+        run: vi.fn().mockResolvedValue({}),
+        first: vi.fn().mockResolvedValue({ key: "sk_trend_abc", tier: "free", is_active: 1 }),
+      }),
+    }),
+  };
 
   const app = new Hono<{ Bindings: Env }>();
+  app.use("*", async (c, next) => {
+    (c.env as any) = { TREND_DB: mockDb, ADMIN_SECRET: adminSecret };
+    await next();
+  });
   app.route("/admin", createAdminRouter());
-
-  const env = { TREND_DB: mockDB, ADMIN_SECRET: "test-secret" } as unknown as Env;
-
-  return {
-    request: (path: string, init?: RequestInit) =>
-      app.request(path, init ?? {}, env),
-  };
-}
+  return app;
+};
 
 describe("Admin API", () => {
-  it("rejects requests without admin secret", async () => {
-    const { request } = createTestApp();
-    const res = await request("/admin/keys", { method: "POST", body: "{}" });
+  it("rejects requests without valid Bearer token", async () => {
+    const app = makeApp();
+    const res = await app.request("/admin/keys", { method: "POST" });
     expect(res.status).toBe(401);
   });
 
-  it("creates a key with correct auth", async () => {
-    const { request } = createTestApp();
-    const res = await request("/admin/keys", {
+  it("creates a key with valid auth", async () => {
+    const app = makeApp();
+    const res = await app.request("/admin/keys", {
       method: "POST",
       headers: {
         Authorization: "Bearer test-secret",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ tier: "premium", owner_name: "Test" }),
+      body: JSON.stringify({ tier: "free", owner_name: "test" }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
-    expect(body.key).toMatch(/^sk_trend_/);
+    const data = await res.json();
+    expect(data.key).toMatch(/^sk_trend_/);
+  });
+
+  it("gets key info", async () => {
+    const app = makeApp();
+    const res = await app.request("/admin/keys/sk_trend_abc", {
+      headers: { Authorization: "Bearer test-secret" },
+    });
+    expect(res.status).toBe(200);
   });
 });

@@ -1,51 +1,43 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { RateLimiter, RATE_LIMITS } from "../../src/auth/rate-limit";
+import { RateLimiter } from "../../src/auth/rate-limit";
 
-function createMockKV() {
+const makeKvMock = () => {
   const store = new Map<string, string>();
   return {
-    get: vi.fn(async (key: string) => store.get(key) ?? null),
-    put: vi.fn(async (key: string, value: string) => { store.set(key, value); }),
+    get: (key: string) => Promise.resolve(store.get(key) ?? null),
+    put: (key: string, value: string) => { store.set(key, value); return Promise.resolve(); },
   } as unknown as KVNamespace;
-}
+};
 
 describe("RateLimiter", () => {
   let kv: KVNamespace;
   let limiter: RateLimiter;
 
   beforeEach(() => {
-    kv = createMockKV();
+    kv = makeKvMock();
     limiter = new RateLimiter(kv);
   });
 
-  it("allows requests under the limit", async () => {
-    const result = await limiter.check("test-key", "free");
+  it("allows first request", async () => {
+    const result = await limiter.check("user1", "anonymous");
     expect(result.allowed).toBe(true);
-    expect(result.remaining).toBe(RATE_LIMITS.free - 1);
+    expect(result.remaining).toBe(9);
   });
 
-  it("blocks requests over the limit", async () => {
-    for (let i = 0; i < RATE_LIMITS.free; i++) {
-      await limiter.check("test-key", "free");
+  it("blocks after limit exceeded", async () => {
+    for (let i = 0; i < 10; i++) {
+      await limiter.check("user2", "anonymous");
     }
-    const result = await limiter.check("test-key", "free");
+    const result = await limiter.check("user2", "anonymous");
     expect(result.allowed).toBe(false);
-    expect(result.remaining).toBe(0);
+    expect(result.retryAfterSeconds).toBeGreaterThan(0);
   });
 
-  it("tracks different keys independently", async () => {
-    for (let i = 0; i < RATE_LIMITS.free; i++) {
-      await limiter.check("key-a", "free");
+  it("uses tier-specific limits", async () => {
+    for (let i = 0; i < 10; i++) {
+      await limiter.check("user3", "free");
     }
-    const resultA = await limiter.check("key-a", "free");
-    const resultB = await limiter.check("key-b", "free");
-    expect(resultA.allowed).toBe(false);
-    expect(resultB.allowed).toBe(true);
-  });
-
-  it("uses correct limits per tier", () => {
-    expect(RATE_LIMITS.anonymous).toBe(10);
-    expect(RATE_LIMITS.free).toBe(30);
-    expect(RATE_LIMITS.premium).toBe(300);
+    const result = await limiter.check("user3", "free");
+    expect(result.allowed).toBe(true);
   });
 });

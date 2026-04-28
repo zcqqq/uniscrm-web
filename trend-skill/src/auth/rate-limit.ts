@@ -1,33 +1,29 @@
-import type { Tier } from "../types";
-
-export const RATE_LIMITS: Record<"anonymous" | Tier, number> = {
-  anonymous: 10,
-  free: 30,
-  premium: 300,
-};
-
-export interface RateLimitResult {
-  allowed: boolean;
-  remaining: number;
-  retryAfterSeconds?: number;
-}
+import type { Tier, RateLimitResult } from "../types";
+import { TIER_RATE_LIMITS } from "../types";
 
 export class RateLimiter {
   constructor(private kv: KVNamespace) {}
 
-  async check(identifier: string, tier: "anonymous" | Tier): Promise<RateLimitResult> {
-    const hourBucket = Math.floor(Date.now() / 3600000);
-    const kvKey = `ratelimit:${identifier}:${hourBucket}`;
-    const limit = RATE_LIMITS[tier];
+  async check(identifier: string, tier: Tier): Promise<RateLimitResult> {
+    const limit = TIER_RATE_LIMITS[tier];
+    const hourBucket = Math.floor(Date.now() / 3_600_000);
+    const key = `ratelimit:${identifier}:${hourBucket}`;
 
-    const current = parseInt((await this.kv.get(kvKey)) ?? "0", 10);
+    const current = parseInt((await this.kv.get(key)) ?? "0", 10);
 
     if (current >= limit) {
-      const secondsUntilReset = 3600 - Math.floor((Date.now() % 3600000) / 1000);
-      return { allowed: false, remaining: 0, retryAfterSeconds: secondsUntilReset };
+      const secondsIntoHour = Math.floor((Date.now() % 3_600_000) / 1000);
+      return {
+        allowed: false,
+        remaining: 0,
+        retryAfterSeconds: 3600 - secondsIntoHour,
+      };
     }
 
-    await this.kv.put(kvKey, String(current + 1), { expirationTtl: 3600 });
-    return { allowed: true, remaining: limit - current - 1 };
+    await this.kv.put(key, String(current + 1), { expirationTtl: 3600 });
+    return {
+      allowed: true,
+      remaining: limit - current - 1,
+    };
   }
 }

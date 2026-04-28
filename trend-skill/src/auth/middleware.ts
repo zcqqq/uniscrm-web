@@ -1,33 +1,29 @@
-import type { ApiKeyRecord, Tier } from "../types";
-
-export type AuthContext =
-  | { tier: "anonymous" | Tier; identifier: string | null }
-  | { error: string; status: number };
+import type { AuthResult, AuthError, Tier } from "../types";
 
 export async function resolveAuth(
   apiKey: string | undefined,
   db: D1Database
-): Promise<AuthContext> {
+): Promise<AuthResult | AuthError> {
   if (!apiKey) {
-    return { tier: "anonymous", identifier: null };
+    return { tier: "anonymous", identifier: "anonymous" };
   }
 
-  const record = await db
-    .prepare("SELECT * FROM api_keys WHERE key = ?")
+  const row = await db
+    .prepare("SELECT key, tier, is_active, expires_at FROM api_keys WHERE key = ?")
     .bind(apiKey)
-    .first<ApiKeyRecord>();
+    .first<{ key: string; tier: Tier; is_active: number; expires_at: string | null }>();
 
-  if (!record) {
+  if (!row) {
     return { error: "Invalid API key", status: 401 };
   }
 
-  if (!record.is_active) {
+  if (!row.is_active) {
     return { error: "API key deactivated", status: 403 };
   }
 
-  if (record.expires_at && new Date(record.expires_at) < new Date()) {
+  if (row.expires_at && new Date(row.expires_at) < new Date()) {
     return { error: "API key expired", status: 403 };
   }
 
-  return { tier: record.tier, identifier: record.key };
+  return { tier: row.tier, identifier: row.key };
 }

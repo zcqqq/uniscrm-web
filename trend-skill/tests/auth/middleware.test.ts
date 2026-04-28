@@ -1,69 +1,40 @@
-import { describe, it, expect, vi } from "vitest";
-import { resolveAuth, type AuthContext } from "../../src/auth/middleware";
-import type { ApiKeyRecord } from "../../src/types";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { resolveAuth } from "../../src/auth/middleware";
 
-function createMockD1(record: ApiKeyRecord | null) {
-  return {
-    prepare: vi.fn(() => ({
-      bind: vi.fn(() => ({
-        first: vi.fn(async () => record),
-      })),
-    })),
-  } as unknown as D1Database;
-}
+const makeD1Mock = (row: any = null) => ({
+  prepare: vi.fn().mockReturnValue({
+    bind: vi.fn().mockReturnValue({
+      first: vi.fn().mockResolvedValue(row),
+    }),
+  }),
+}) as unknown as D1Database;
 
 describe("resolveAuth", () => {
-  it("returns anonymous tier when no key provided", async () => {
-    const db = createMockD1(null);
-    const result = await resolveAuth(undefined, db);
-    expect(result).toEqual({ tier: "anonymous", identifier: null });
+  it("returns anonymous when no API key provided", async () => {
+    const result = await resolveAuth(undefined, makeD1Mock());
+    expect(result).toEqual({ tier: "anonymous", identifier: "anonymous" });
   });
 
-  it("returns the key's tier when key is valid and active", async () => {
-    const record: ApiKeyRecord = {
-      key: "sk_trend_abc",
-      tier: "premium",
-      owner_name: null,
-      created_at: "2026-01-01T00:00:00Z",
-      expires_at: null,
-      is_active: 1,
-    };
-    const db = createMockD1(record);
-    const result = await resolveAuth("sk_trend_abc", db);
-    expect(result).toEqual({ tier: "premium", identifier: "sk_trend_abc" });
-  });
-
-  it("returns error when key does not exist", async () => {
-    const db = createMockD1(null);
-    const result = await resolveAuth("sk_trend_invalid", db);
+  it("returns error for invalid key", async () => {
+    const result = await resolveAuth("sk_trend_bad", makeD1Mock(null));
     expect(result).toEqual({ error: "Invalid API key", status: 401 });
   });
 
-  it("returns error when key is deactivated", async () => {
-    const record: ApiKeyRecord = {
-      key: "sk_trend_abc",
-      tier: "free",
-      owner_name: null,
-      created_at: "2026-01-01T00:00:00Z",
-      expires_at: null,
-      is_active: 0,
-    };
-    const db = createMockD1(record);
-    const result = await resolveAuth("sk_trend_abc", db);
+  it("returns error for deactivated key", async () => {
+    const db = makeD1Mock({ key: "sk_trend_x", tier: "free", is_active: 0, expires_at: null });
+    const result = await resolveAuth("sk_trend_x", db);
     expect(result).toEqual({ error: "API key deactivated", status: 403 });
   });
 
-  it("returns error when key is expired", async () => {
-    const record: ApiKeyRecord = {
-      key: "sk_trend_abc",
-      tier: "free",
-      owner_name: null,
-      created_at: "2026-01-01T00:00:00Z",
-      expires_at: "2025-01-01T00:00:00Z",
-      is_active: 1,
-    };
-    const db = createMockD1(record);
-    const result = await resolveAuth("sk_trend_abc", db);
+  it("returns error for expired key", async () => {
+    const db = makeD1Mock({ key: "sk_trend_x", tier: "free", is_active: 1, expires_at: "2020-01-01T00:00:00Z" });
+    const result = await resolveAuth("sk_trend_x", db);
     expect(result).toEqual({ error: "API key expired", status: 403 });
+  });
+
+  it("returns tier and identifier for valid key", async () => {
+    const db = makeD1Mock({ key: "sk_trend_abc", tier: "premium", is_active: 1, expires_at: null });
+    const result = await resolveAuth("sk_trend_abc", db);
+    expect(result).toEqual({ tier: "premium", identifier: "sk_trend_abc" });
   });
 });

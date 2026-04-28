@@ -44,6 +44,20 @@ app.use("/api/*", async (c, next) => {
 app.route("/api", createTrendsRouter());
 app.route("/admin", createAdminRouter());
 
+app.post("/admin/trigger-fetch", async (c) => {
+  const auth = c.req.header("Authorization");
+  if (auth !== `Bearer ${c.env.ADMIN_SECRET}`) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  try {
+    await handleCron(c.env);
+    return c.json({ status: "ok", message: "Fetch pipeline completed" });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return c.json({ status: "error", message: msg }, 500);
+  }
+});
+
 app.all("/mcp", async (c) => {
   const apiKey = c.req.header("X-API-Key");
   const authResult = await resolveAuth(apiKey, c.env.TREND_DB);
@@ -92,7 +106,7 @@ async function handleCron(env: Env): Promise<void> {
   // 4. Push: daily digest webhook
   const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
   const today = new Date().toISOString().slice(0, 10);
-  const yesterdayResults = await vectorStore.search("", 100, { date: yesterday });
+  const yesterdayResults = await vectorStore.search("", 50, { date: yesterday });
   const digest = await buildDailyDigest(vectorStore, yesterdayResults.map((r) => r.item), today);
 
   const payload: DigestPayload = {

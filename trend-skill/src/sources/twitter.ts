@@ -44,10 +44,13 @@ export class TwitterTrendSource implements TrendSource {
 
         if (!response.ok) continue;
 
-        const trends: { trend_name: string; tweet_count: number; trend_url?: string }[] =
-          await response.json();
+        const body = await response.json() as
+          | { trend_name: string; tweet_count?: number; trend_url?: string }[]
+          | { data: { trend_name: string; tweet_count?: number; trend_url?: string }[] };
+        const trends = Array.isArray(body) ? body : body.data ?? [];
 
-        for (const trend of trends) {
+        for (let idx = 0; idx < trends.length; idx++) {
+          const trend = trends[idx];
           const id = generateTrendId(today, "twitter", config.location, trend.trend_name);
           allItems.push({
             id,
@@ -56,7 +59,7 @@ export class TwitterTrendSource implements TrendSource {
             language: config.language,
             title: trend.trend_name,
             url: trend.trend_url,
-            score: trend.tweet_count ?? 0,
+            score: trend.tweet_count ?? (trends.length - idx),
             metrics: { tweet_volume: trend.tweet_count ?? 0 },
             categories: [],
             timestamp: new Date().toISOString(),

@@ -67,7 +67,7 @@ export class TrendVectorStore {
     const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
 
     const allResults = await this.vectorize.query(new Array(768).fill(0), {
-      topK: 100,
+      topK: 50,
       returnMetadata: "all",
     });
 

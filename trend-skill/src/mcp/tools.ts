@@ -65,7 +65,7 @@ export async function handleGetDailyDigest(
   const today = new Date().toISOString().slice(0, 10);
   const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
 
-  const yesterdayResults = await store.search("", 100, { date: yesterday });
+  const yesterdayResults = await store.search("", 50, { date: yesterday });
   const yesterdayItems = yesterdayResults.map((r) => r.item);
 
   return buildDailyDigest(store, yesterdayItems, today);

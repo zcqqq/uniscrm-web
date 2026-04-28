@@ -9,14 +9,17 @@ TREND_RETENTION_DAYS = "30"
 [env.dev]
 name = "trend-skill-dev"
 
+[env.dev.vars]
+TREND_RETENTION_DAYS = "30"
+
 [[env.dev.kv_namespaces]]
 binding = "TREND_KV"
-id = "<dev-kv-id>"
+id = "ac8b64b59ac540e0ab482f25bb78d41e"
 
 [[env.dev.d1_databases]]
 binding = "TREND_DB"
 database_name = "trend-skill-db-dev"
-database_id = "<dev-d1-id>"
+database_id = "b322777d-6617-4dbf-a4d2-f734166b7737"
 
 [[env.dev.vectorize]]
 binding = "TREND_VECTORIZE"

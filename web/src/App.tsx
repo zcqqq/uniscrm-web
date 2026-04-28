@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { Login } from "./pages/Login";
 import { Verify } from "./pages/Verify";
 import { Contents } from "./pages/Contents";
+import { Home } from "./pages/Home";
 
 function Nav() {
   const { user, logout } = useAuth();
@@ -31,15 +32,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
-}
-
-function Home() {
-  return (
-    <div className="max-w-4xl mx-auto p-8">
-      <h1 className="text-2xl font-bold">Recommendations</h1>
-      <p className="text-gray-500 mt-2">Coming in next task...</p>
-    </div>
-  );
 }
 
 export function App() {

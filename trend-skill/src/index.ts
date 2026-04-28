@@ -1,15 +1,17 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
+import { createTrendsRouter } from "./api/trends";
+import { createAdminRouter } from "./api/admin";
+import { resolveAuth } from "./auth/middleware";
+import { RateLimiter } from "./auth/rate-limit";
 import { Aggregator } from "./core/aggregator";
 import { TwitterTrendSource } from "./sources/twitter";
 import { TrendCache } from "./storage/cache";
 import { TrendVectorStore } from "./storage/vectorize";
-import { createTrendsRouter } from "./api/trends";
-import { createContextRouter } from "./api/context";
-import { createAdminRouter } from "./api/admin";
-import { resolveAuth } from "./auth/middleware";
-import { RateLimiter } from "./auth/rate-limit";
+import { buildDailyDigest } from "./push/digest";
+import { sendWebhook } from "./push/webhook";
 import { createMcpServer } from "./mcp/server";
+import type { DigestPayload } from "./types";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -40,7 +42,6 @@ app.use("/api/*", async (c, next) => {
 });
 
 app.route("/api", createTrendsRouter());
-app.route("/api", createContextRouter());
 app.route("/admin", createAdminRouter());
 
 app.all("/mcp", async (c) => {
@@ -66,20 +67,41 @@ async function handleCron(env: Env): Promise<void> {
 
   const { items } = await aggregator.fetchAll();
 
+  // 1. KV: overwrite latest snapshots
   await cache.setLatest(items);
 
-  const byPlatform = new Map<string, typeof items>();
+  const byKey = new Map<string, typeof items>();
   for (const item of items) {
-    const list = byPlatform.get(item.platform) ?? [];
+    const key = `${item.platform}:${item.location}`;
+    const list = byKey.get(key) ?? [];
     list.push(item);
-    byPlatform.set(item.platform, list);
+    byKey.set(key, list);
   }
-  for (const [platform, platformItems] of byPlatform) {
-    await cache.setPlatformLatest(platform, platformItems);
+  for (const [key, platformItems] of byKey) {
+    const [platform, location] = key.split(":");
+    await cache.setPlatformLatest(platform, location, platformItems);
   }
 
+  // 2. Vectorize: upsert trends
   await vectorStore.upsertTrends(items);
-  await vectorStore.cleanupOld();
+
+  // 3. Vectorize: cleanup expired data
+  const retentionDays = parseInt(env.TREND_RETENTION_DAYS || "30", 10);
+  await vectorStore.cleanupOld(retentionDays);
+
+  // 4. Push: daily digest webhook
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterdayResults = await vectorStore.search("", 100, { date: yesterday });
+  const digest = await buildDailyDigest(vectorStore, yesterdayResults.map((r) => r.item), today);
+
+  const payload: DigestPayload = {
+    event: "trend.daily_digest",
+    timestamp: new Date().toISOString(),
+    data: digest,
+  };
+
+  await sendWebhook(env.WEBHOOK_URL, env.WEBHOOK_SECRET, payload);
 }
 
 export default {

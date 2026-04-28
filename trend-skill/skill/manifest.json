@@ -1,38 +1,40 @@
 {
   "name": "trend",
   "version": "0.1.0",
-  "description": "聚合多平台社交媒体热点，支持语义搜索和 AI 写作",
+  "description": "Aggregates trending topics from social media platforms with semantic search and daily digest.",
   "author": "uniscrm",
   "commands": [
     {
       "name": "trend",
-      "description": "查询当前热点趋势",
-      "args": [
-        { "name": "query", "type": "string", "optional": true },
-        { "name": "platform", "type": "string", "optional": true },
-        { "name": "limit", "type": "number", "optional": true, "default": 20 }
-      ],
-      "tier": "free"
-    },
-    {
-      "name": "write",
-      "description": "基于热点生成内容（需授权）",
-      "args": [
-        { "name": "format", "type": "string", "required": true },
-        { "name": "query", "type": "string", "optional": true },
-        { "name": "tone", "type": "string", "optional": true, "default": "professional" },
-        { "name": "locale", "type": "string", "optional": true, "default": "zh-CN" },
-        { "name": "audience", "type": "string", "optional": true, "default": "general" }
-      ],
-      "tier": "premium"
+      "description": "Query trending topics across platforms",
+      "parameters": [
+        { "name": "query", "type": "string", "description": "Semantic search query", "required": false },
+        { "name": "platform", "type": "string", "description": "Filter by platform", "required": false },
+        { "name": "location", "type": "string", "description": "Filter by location (global, china)", "required": false, "default": "global" },
+        { "name": "language", "type": "string", "description": "Filter by language (en, zh)", "required": false, "default": "en" },
+        { "name": "limit", "type": "number", "description": "Max results", "required": false, "default": 20 }
+      ]
     }
   ],
-  "mcp": {
-    "endpoint": "https://trend-skill.your-domain.workers.dev/mcp",
-    "auth": "api-key"
-  },
   "pricing": {
-    "free": { "description": "热点查询，10次/小时" },
-    "premium": { "description": "热点查询 + AI 写作，300次/小时" }
+    "tiers": [
+      {
+        "name": "free",
+        "rate_limit": "30 requests/hour",
+        "features": ["Current trends", "Semantic search"]
+      },
+      {
+        "name": "premium",
+        "rate_limit": "300 requests/hour",
+        "features": ["Current trends", "Semantic search", "Historical queries", "All filters"]
+      }
+    ]
+  },
+  "integration": {
+    "type": "mcp",
+    "auth": {
+      "type": "api_key",
+      "header": "X-API-Key"
+    }
   }
 }

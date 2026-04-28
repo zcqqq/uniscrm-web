@@ -59,6 +59,7 @@ describe("TrendVectorStore", () => {
           id: items[0].id,
           values: [0.1, 0.2, 0.3],
           metadata: expect.objectContaining({
+            type: "trend",
             platform: "twitter",
             location: "global",
             language: "en",

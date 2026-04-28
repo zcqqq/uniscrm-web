@@ -25,6 +25,7 @@ export class TrendVectorStore {
       id: item.id,
       values: embedResult.data[i],
       metadata: {
+        type: "trend",
         platform: item.platform,
         location: item.location,
         language: item.language,

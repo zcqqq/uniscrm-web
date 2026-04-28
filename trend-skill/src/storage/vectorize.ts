@@ -1,8 +1,6 @@
 import type { TrendItem, TrendSearchResult } from "../types";
 
 const EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5";
-const MAX_24H_MS = 24 * 60 * 60 * 1000;
-const MAX_48H_MS = 48 * 60 * 60 * 1000;
 
 export class TrendVectorStore {
   constructor(
@@ -21,49 +19,60 @@ export class TrendVectorStore {
     if (items.length === 0) return;
 
     const texts = items.map((item) => this.buildEmbeddingText(item));
-    const embedResult = await this.ai.run(EMBEDDING_MODEL, { text: texts }) as { data: number[][] };
-    const vectors = embedResult.data;
+    const embedResult = (await this.ai.run(EMBEDDING_MODEL, { text: texts })) as { data: number[][] };
 
     const records = items.map((item, i) => ({
       id: item.id,
-      values: vectors[i],
-      metadata: { item: JSON.stringify(item) },
+      values: embedResult.data[i],
+      metadata: {
+        platform: item.platform,
+        location: item.location,
+        language: item.language,
+        timestamp_ms: new Date(item.timestamp).getTime(),
+        date: item.timestamp.slice(0, 10),
+        categories: JSON.stringify(item.categories),
+        title: item.title,
+        item: JSON.stringify(item),
+      },
     }));
 
     await this.vectorize.upsert(records);
   }
 
-  async search(query: string, limit = 20): Promise<TrendSearchResult[]> {
+  async search(
+    query: string,
+    limit = 20,
+    filter?: Record<string, string | number>
+  ): Promise<TrendSearchResult[]> {
     const cappedLimit = Math.min(limit, 50);
-    const embedResult = await this.ai.run(EMBEDDING_MODEL, { text: [query] }) as { data: number[][] };
-    const queryVector = embedResult.data[0];
+    const embedResult = (await this.ai.run(EMBEDDING_MODEL, { text: [query] })) as { data: number[][] };
 
-    const matches = await this.vectorize.query(queryVector, {
+    const options: VectorizeQueryOptions = {
       topK: cappedLimit,
       returnMetadata: "all",
-    });
+    };
+    if (filter) {
+      options.filter = filter;
+    }
 
-    const now = Date.now();
-    return matches.matches
-      .map((m) => {
-        const item: TrendItem = JSON.parse(m.metadata!.item as string);
-        return { item, similarity: m.score };
-      })
-      .filter((r) => now - new Date(r.item.timestamp).getTime() < MAX_24H_MS);
+    const matches = await this.vectorize.query(embedResult.data[0], options);
+
+    return matches.matches.map((m) => ({
+      item: JSON.parse(m.metadata!.item as string) as TrendItem,
+      similarity: m.score,
+    }));
   }
 
-  async cleanupOld(): Promise<void> {
-    const now = Date.now();
+  async cleanupOld(retentionDays: number): Promise<void> {
+    const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+
     const allResults = await this.vectorize.query(new Array(768).fill(0), {
-      topK: 50,
+      topK: 100,
       returnMetadata: "all",
     });
 
     const staleIds = allResults.matches
-      .filter((m) => {
-        const item: TrendItem = JSON.parse(m.metadata!.item as string);
-        return now - new Date(item.timestamp).getTime() > MAX_48H_MS;
-      })
+      .filter((m) => (m.metadata!.timestamp_ms as number) < cutoffMs)
       .map((m) => m.id);
 
     if (staleIds.length > 0) {

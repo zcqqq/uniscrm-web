@@ -1,30 +1,24 @@
 import type { TrendItem } from "../types";
 
-export function normalize(items: TrendItem[]): TrendItem[] {
+export function normalizeScores(items: TrendItem[]): TrendItem[] {
   if (items.length === 0) return [];
   if (items.length === 1) return [{ ...items[0], score: 100 }];
 
-  const metricKey = Object.keys(items[0].rawMetrics)[0];
-  const sorted = [...items].sort(
-    (a, b) => (b.rawMetrics[metricKey] ?? 0) - (a.rawMetrics[metricKey] ?? 0)
-  );
+  const sorted = [...items].sort((a, b) => b.score - a.score || b.timestamp.localeCompare(a.timestamp));
+  const n = sorted.length;
 
-  const total = sorted.length;
-  const scored = sorted.map((item, rank) => {
-    let effectiveRank = rank;
-    while (effectiveRank > 0 && sorted[effectiveRank - 1].rawMetrics[metricKey] === item.rawMetrics[metricKey]) {
-      effectiveRank--;
+  // Map each unique score value to items with that score, tracking their first rank
+  const scoreToRank = new Map<number, number>();
+  for (let i = 0; i < sorted.length; i++) {
+    const score = sorted[i].score;
+    if (!scoreToRank.has(score)) {
+      scoreToRank.set(score, i);
     }
-    return {
-      ...item,
-      score: Math.round(((total - 1 - effectiveRank) / (total - 1)) * 100),
-    };
-  });
+  }
 
-  scored.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+  return sorted.map((item) => {
+    const rank = scoreToRank.get(item.score)!;
+    const percentile = Math.round(((n - 1 - rank) / (n - 1)) * 100);
+    return { ...item, score: percentile };
   });
-
-  return scored;
 }

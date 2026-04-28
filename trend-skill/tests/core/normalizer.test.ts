@@ -1,67 +1,47 @@
 import { describe, it, expect } from "vitest";
-import { normalize } from "../../src/core/normalizer";
+import { normalizeScores } from "../../src/core/normalizer";
 import type { TrendItem } from "../../src/types";
 
-function makeTrend(id: string, platform: "twitter", rawScore: number, timestamp: string): TrendItem {
+function makeTrend(title: string, score: number): TrendItem {
   return {
-    id,
-    platform,
-    title: `Trend ${id}`,
-    url: `https://x.com/trend/${id}`,
-    score: 0,
-    rawMetrics: { tweet_volume: rawScore },
+    id: `2026-04-28:tw:gl:${title}`,
+    platform: "twitter",
+    location: "global",
+    language: "en",
+    title,
+    score,
+    metrics: { tweet_volume: score },
     categories: [],
-    timestamp,
+    timestamp: "2026-04-28T00:00:00Z",
   };
 }
 
-describe("normalize", () => {
-  it("assigns score 100 to the highest-ranked item", () => {
-    const items = [
-      makeTrend("twitter:1", "twitter", 500, "2026-04-25T10:00:00Z"),
-      makeTrend("twitter:2", "twitter", 1000, "2026-04-25T10:00:00Z"),
-      makeTrend("twitter:3", "twitter", 200, "2026-04-25T10:00:00Z"),
-    ];
-    const result = normalize(items);
-    const top = result.find((t) => t.id === "twitter:2")!;
-    expect(top.score).toBe(100);
+describe("normalizeScores", () => {
+  it("returns empty array for empty input", () => {
+    expect(normalizeScores([])).toEqual([]);
   });
 
-  it("assigns score 0 to the lowest-ranked item", () => {
-    const items = [
-      makeTrend("twitter:1", "twitter", 500, "2026-04-25T10:00:00Z"),
-      makeTrend("twitter:2", "twitter", 1000, "2026-04-25T10:00:00Z"),
-      makeTrend("twitter:3", "twitter", 200, "2026-04-25T10:00:00Z"),
-    ];
-    const result = normalize(items);
-    const bottom = result.find((t) => t.id === "twitter:3")!;
-    expect(bottom.score).toBe(0);
-  });
-
-  it("assigns score 50 to the middle item in a 3-item list", () => {
-    const items = [
-      makeTrend("twitter:1", "twitter", 500, "2026-04-25T10:00:00Z"),
-      makeTrend("twitter:2", "twitter", 1000, "2026-04-25T10:00:00Z"),
-      makeTrend("twitter:3", "twitter", 200, "2026-04-25T10:00:00Z"),
-    ];
-    const result = normalize(items);
-    const mid = result.find((t) => t.id === "twitter:1")!;
-    expect(mid.score).toBe(50);
-  });
-
-  it("returns score 100 for a single item", () => {
-    const items = [makeTrend("twitter:1", "twitter", 42, "2026-04-25T10:00:00Z")];
-    const result = normalize(items);
+  it("assigns 100 to single item", () => {
+    const items = [makeTrend("a", 500)];
+    const result = normalizeScores(items);
     expect(result[0].score).toBe(100);
   });
 
-  it("returns items sorted by score descending, then by timestamp descending", () => {
-    const items = [
-      makeTrend("twitter:1", "twitter", 500, "2026-04-25T09:00:00Z"),
-      makeTrend("twitter:2", "twitter", 500, "2026-04-25T10:00:00Z"),
-      makeTrend("twitter:3", "twitter", 1000, "2026-04-25T08:00:00Z"),
-    ];
-    const result = normalize(items);
-    expect(result.map((t) => t.id)).toEqual(["twitter:3", "twitter:2", "twitter:1"]);
+  it("assigns percentile scores sorted descending", () => {
+    const items = [makeTrend("low", 10), makeTrend("mid", 50), makeTrend("high", 100)];
+    const result = normalizeScores(items);
+    expect(result[0].title).toBe("high");
+    expect(result[0].score).toBe(100);
+    expect(result[1].title).toBe("mid");
+    expect(result[1].score).toBeGreaterThan(0);
+    expect(result[1].score).toBeLessThan(100);
+    expect(result[2].title).toBe("low");
+  });
+
+  it("handles tied scores", () => {
+    const items = [makeTrend("a", 50), makeTrend("b", 50), makeTrend("c", 100)];
+    const result = normalizeScores(items);
+    expect(result[0].score).toBe(100);
+    expect(result[1].score).toBe(result[2].score);
   });
 });

@@ -24,8 +24,12 @@ export function createContentsRouter() {
     const service = new ContentService(c.env.DB, c.env.VECTORIZE, c.env.AI);
     const results = await service.importBatch(userId, items);
 
-    const recommend = new RecommendService(c.env.DB, c.env.VECTORIZE, c.env.KV);
-    await recommend.computeForUser(userId);
+    try {
+      const recommend = new RecommendService(c.env.DB, c.env.VECTORIZE, c.env.KV);
+      await recommend.computeForUser(userId);
+    } catch (e) {
+      console.error("Recommendation computation failed:", e instanceof Error ? e.message : e);
+    }
 
     return c.json({ items: results });
   });

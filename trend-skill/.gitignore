@@ -1,0 +1,7 @@
+node_modules/
+.wrangler/
+dist/
+!dist/uniscrm-plugin/
+!dist/clawhub-plugin/
+.dev.vars
+*.log

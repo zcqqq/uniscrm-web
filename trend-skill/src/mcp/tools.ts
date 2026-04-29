@@ -10,7 +10,10 @@ export async function handleTrendingNow(
   let items: TrendItem[] = raw ? JSON.parse(raw) : [];
 
   if (params.location) items = items.filter((t) => t.location === params.location);
-  if (params.language) items = items.filter((t) => t.language === params.language);
+  if (params.language) {
+    const langMatched = items.filter((t) => t.language === params.language);
+    if (langMatched.length > 0) items = langMatched;
+  }
 
   return { items: items.slice(0, params.limit ?? 20) };
 }

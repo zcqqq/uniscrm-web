@@ -1,0 +1,11 @@
+{
+  "name": "uniscrm-plugin",
+  "plugins": [
+    {
+      "name": "trend-skill",
+      "source": "./",
+      "description": "Aggregates trending topics from social media platforms with semantic search and daily digest.",
+      "version": "0.1.0"
+    }
+  ]
+}

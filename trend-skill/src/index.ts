@@ -59,6 +59,7 @@ app.post("/admin/trigger-fetch", async (c) => {
 });
 
 app.all("/mcp", async (c) => {
+  const startMs = Date.now();
   const apiKey = c.req.header("X-API-Key");
   const authResult = await resolveAuth(apiKey, c.env.TREND_DB);
 
@@ -68,9 +69,45 @@ app.all("/mcp", async (c) => {
   }
 
   const server = createMcpServer(c.env, tier);
-  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
-  return transport.handleRequest(c.req.raw);
+
+  const accept = c.req.header("Accept") ?? "";
+  const headers = new Headers(c.req.raw.headers);
+  if (!accept.includes("text/event-stream")) {
+    headers.set("Accept", "application/json, text/event-stream");
+  }
+
+  let parsedBody: unknown;
+  let rpcMethod = "";
+  let toolName = "";
+  let toolArgs: Record<string, unknown> = {};
+
+  if (c.req.method === "POST") {
+    parsedBody = await c.req.json();
+    const msg = parsedBody as { method?: string; params?: { name?: string; arguments?: Record<string, unknown> } };
+    rpcMethod = msg.method ?? "";
+    if (rpcMethod === "tools/call") {
+      toolName = msg.params?.name ?? "";
+      toolArgs = msg.params?.arguments ?? {};
+    }
+  }
+
+  const req = new Request(c.req.url, { method: c.req.method, headers });
+  const response = await transport.handleRequest(req, { parsedBody });
+
+  if (rpcMethod === "tools/call" && toolName) {
+    console.log(JSON.stringify({
+      event: "mcp.tool_call",
+      tool: toolName,
+      args: toolArgs,
+      tier,
+      durationMs: Date.now() - startMs,
+      status: response.status,
+    }));
+  }
+
+  return response;
 });
 
 async function handleCron(env: Env): Promise<void> {

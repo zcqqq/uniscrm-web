@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "trend-skill": {
+      "type": "http",
+      "url": "https://trend-skill-dev.zhengchao-qqqqq.workers.dev/mcp"
+    }
+  }
+}

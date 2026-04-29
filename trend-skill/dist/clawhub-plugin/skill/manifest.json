@@ -1,0 +1,76 @@
+{
+  "name": "trend",
+  "version": "0.1.0",
+  "description": "Aggregates trending topics from social media platforms with semantic search and daily digest.",
+  "author": "uniscrm",
+  "commands": [
+    {
+      "name": "trend",
+      "description": "Query trending topics across platforms",
+      "parameters": [
+        {
+          "name": "query",
+          "type": "string",
+          "description": "Semantic search query",
+          "required": false
+        },
+        {
+          "name": "platform",
+          "type": "string",
+          "description": "Filter by platform",
+          "required": false
+        },
+        {
+          "name": "location",
+          "type": "string",
+          "description": "Filter by location (global, china)",
+          "required": false,
+          "default": "global"
+        },
+        {
+          "name": "language",
+          "type": "string",
+          "description": "Filter by language (en, zh)",
+          "required": false,
+          "default": "en"
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Max results",
+          "required": false,
+          "default": 20
+        }
+      ]
+    }
+  ],
+  "pricing": {
+    "tiers": [
+      {
+        "name": "free",
+        "rate_limit": "30 requests/hour",
+        "features": [
+          "Current trends",
+          "Semantic search"
+        ]
+      },
+      {
+        "name": "premium",
+        "rate_limit": "300 requests/hour",
+        "features": [
+          "Current trends",
+          "Semantic search",
+          "Historical queries",
+          "All filters"
+        ]
+      }
+    ]
+  },
+  "integration": {
+    "type": "mcp",
+    "auth": {
+      "type": "api_key",
+      "header": "X-API-Key"
+    }
+  }
+}

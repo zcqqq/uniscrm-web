@@ -1,7 +1,7 @@
 ---
 name: trend-skill
 description: Query real-time social media trends from X/Twitter. Supports listing trends, semantic search, and historical queries via MCP.
-version: 1.0.0
+version: 0.1.0
 author: uniscrm
 metadata:
   hermes:

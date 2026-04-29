@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "command": "bash -c 'if echo \"$CLAUDE_TOOL_INPUT\" | grep -qE \"skill/SKILL\\.md|skill/manifest\\.json\"; then bash scripts/build-plugins.sh; fi'"
+      }
+    ]
+  }
+}

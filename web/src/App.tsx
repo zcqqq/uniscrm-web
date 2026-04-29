@@ -6,7 +6,7 @@ import { Contents } from "./pages/Contents";
 import { Home } from "./pages/Home";
 
 function Nav() {
-  const { user, logout } = useAuth();
+  const { user, logout, updateLocation } = useAuth();
   if (!user) return null;
   return (
     <nav className="bg-white border-b px-8 py-3 flex items-center justify-between">
@@ -15,6 +15,14 @@ function Nav() {
         <Link to="/contents" className="text-gray-600 hover:text-black">Content Library</Link>
       </div>
       <div className="flex items-center gap-4">
+        <select
+          value={user.preferred_location}
+          onChange={(e) => updateLocation(e.target.value)}
+          className="text-xs border rounded px-2 py-1"
+        >
+          <option value="global">Global</option>
+          <option value="china">China</option>
+        </select>
         <span className="text-sm text-gray-500">{user.email}</span>
         <button onClick={logout} className="text-sm text-gray-400 hover:text-black">Logout</button>
       </div>

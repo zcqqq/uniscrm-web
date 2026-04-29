@@ -21,10 +21,10 @@ export const api = {
         body: JSON.stringify({ email }),
       }),
     verify: (token: string) =>
-      request<{ user: { id: string; email: string } }>(
+      request<{ user: { id: string; email: string; preferred_location: string } }>(
         `/auth/verify?token=${token}`,
       ),
-    me: () => request<{ user: { id: string; email: string } }>("/auth/me"),
+    me: () => request<{ user: { id: string; email: string; preferred_location: string } }>("/auth/me"),
     logout: () => request("/auth/logout", { method: "POST" }),
   },
   contents: {
@@ -43,5 +43,13 @@ export const api = {
   },
   recommendations: {
     get: () => request<{ recommendations: any[] }>("/recommendations"),
+  },
+  settings: {
+    get: () => request<{ preferred_location: string }>("/settings"),
+    update: (preferred_location: string) =>
+      request<{ ok: boolean; preferred_location: string }>("/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ preferred_location }),
+      }),
   },
 };

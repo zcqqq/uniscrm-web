@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
+import { useAuth } from "./useAuth";
 
 interface TrendMatch {
   trend_id: string;
@@ -16,6 +17,7 @@ interface Recommendation {
 }
 
 export function useRecommendations() {
+  const { user } = useAuth();
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -29,7 +31,7 @@ export function useRecommendations() {
     }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { refresh(); }, [refresh, user?.preferred_location]);
 
   return { recommendations, loading, refresh };
 }

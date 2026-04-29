@@ -3,16 +3,17 @@ import type { ReactNode } from "react";
 import { api } from "../lib/api";
 
 interface AuthState {
-  user: { id: string; email: string } | null;
+  user: { id: string; email: string; preferred_location: string } | null;
   loading: boolean;
   login: (email: string) => Promise<void>;
   logout: () => Promise<void>;
+  updateLocation: (location: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
+  const [user, setUser] = useState<{ id: string; email: string; preferred_location: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,8 +33,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const updateLocation = async (location: string) => {
+    await api.settings.update(location);
+    setUser((prev) => prev ? { ...prev, preferred_location: location } : prev);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, updateLocation }}>
       {children}
     </AuthContext.Provider>
   );

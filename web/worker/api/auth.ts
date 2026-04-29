@@ -21,7 +21,13 @@ export function createAuthRouter() {
       .run();
 
     const emailService = new EmailService(c.env.RESEND_API_KEY, c.env.APP_URL);
-    await emailService.sendMagicLink(body.email, token);
+    try {
+      await emailService.sendMagicLink(body.email, token);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("Email send failed:", msg);
+      return c.json({ error: "Failed to send email", detail: msg }, 500);
+    }
 
     return c.json({ ok: true });
   });

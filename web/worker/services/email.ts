@@ -13,14 +13,15 @@ export class EmailService {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        from: "UniSCRM <noreply@uniscrm.com>",
+        from: "UniSCRM <onboarding@resend.dev>",
         to: [email],
         subject: "Sign in to UniSCRM",
         html: `<p>Click <a href="${link}">here</a> to sign in. This link expires in 15 minutes.</p>`,
       }),
     });
     if (!response.ok) {
-      throw new Error(`Resend API error: ${response.status}`);
+      const body = await response.text();
+      throw new Error(`Resend API error: ${response.status} ${body}`);
     }
   }
 }

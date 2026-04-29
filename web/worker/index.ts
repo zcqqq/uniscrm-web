@@ -23,6 +23,7 @@ app.route("/api/recommendations", createRecommendationsRouter());
 
 app.route("/api/webhook", createWebhookRouter());
 
+
 app.all("/*", async (c) => {
   return c.env.ASSETS.fetch(c.req.raw);
 });

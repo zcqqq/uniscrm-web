@@ -15,8 +15,14 @@ export class RecommendService {
 
     if (contents.length === 0) return;
 
-    const vectors = await this.vectorize.getByIds(contents.map((c) => c.id));
-    const vectorMap = new Map(vectors.map((v) => [v.id, v.values]));
+    const ids = contents.map((c) => c.id);
+    const allVectors: VectorizeVector[] = [];
+    for (let i = 0; i < ids.length; i += 20) {
+      const batch = ids.slice(i, i + 20);
+      const result = await this.vectorize.getByIds(batch);
+      allVectors.push(...result);
+    }
+    const vectorMap = new Map(allVectors.map((v) => [v.id, v.values]));
 
     const recommendations: ContentMatch[] = [];
 

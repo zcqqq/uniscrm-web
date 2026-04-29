@@ -50,16 +50,16 @@ export function createAuthRouter() {
       .bind(token)
       .run();
 
-    let user = await c.env.DB.prepare("SELECT * FROM users WHERE email = ?")
+    let user = await c.env.DB.prepare("SELECT id, email, preferred_location FROM users WHERE email = ?")
       .bind(link.email)
-      .first<{ id: string; email: string }>();
+      .first<{ id: string; email: string; preferred_location: string }>();
 
     if (!user) {
       const userId = crypto.randomUUID();
-      await c.env.DB.prepare("INSERT INTO users (id, email, created_at) VALUES (?, ?, ?)")
-        .bind(userId, link.email, new Date().toISOString())
+      await c.env.DB.prepare("INSERT INTO users (id, email, preferred_location, created_at) VALUES (?, ?, ?, ?)")
+        .bind(userId, link.email, "global", new Date().toISOString())
         .run();
-      user = { id: userId, email: link.email };
+      user = { id: userId, email: link.email, preferred_location: "global" };
     }
 
     const sessions = new SessionService(c.env.KV);
@@ -73,7 +73,7 @@ export function createAuthRouter() {
       path: "/",
     });
 
-    return c.json({ ok: true, user: { id: user.id, email: user.email } });
+    return c.json({ ok: true, user: { id: user.id, email: user.email, preferred_location: user.preferred_location ?? "global" } });
   });
 
   router.post("/logout", async (c) => {
@@ -94,7 +94,12 @@ export function createAuthRouter() {
     const session = await sessions.get(sessionId);
     if (!session) return c.json({ error: "Unauthorized" }, 401);
 
-    return c.json({ user: { id: session.user_id, email: session.email } });
+    const user = await c.env.DB.prepare("SELECT id, email, preferred_location FROM users WHERE id = ?")
+      .bind(session.user_id)
+      .first<{ id: string; email: string; preferred_location: string }>();
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    return c.json({ user });
   });
 
   return router;

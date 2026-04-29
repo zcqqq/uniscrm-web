@@ -24,9 +24,15 @@ export function createContentsRouter() {
     const service = new ContentService(c.env.DB, c.env.VECTORIZE, c.env.AI);
     const results = await service.importBatch(userId, items);
 
+    // Read user's preferred location
+    const user = await c.env.DB.prepare("SELECT preferred_location FROM users WHERE id = ?")
+      .bind(userId)
+      .first<{ preferred_location: string }>();
+    const location = user?.preferred_location ?? "global";
+
     try {
       const recommend = new RecommendService(c.env.DB, c.env.VECTORIZE, c.env.KV);
-      await recommend.computeForUser(userId);
+      await recommend.computeForUser(userId, location);
     } catch (e) {
       console.error("Recommendation computation failed:", e instanceof Error ? e.message : e);
     }

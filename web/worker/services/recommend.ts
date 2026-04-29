@@ -7,7 +7,7 @@ export class RecommendService {
     private kv: KVNamespace
   ) {}
 
-  async computeForUser(userId: string): Promise<void> {
+  async computeForUser(userId: string, location: string = "global"): Promise<void> {
     const { results: contents } = await this.db
       .prepare("SELECT * FROM contents WHERE user_id = ?")
       .bind(userId)
@@ -31,7 +31,7 @@ export class RecommendService {
       if (!values) continue;
 
       const result = await this.vectorize.query(values, {
-        filter: { type: "trend" },
+        filter: { type: "trend", location },
         topK: 5,
         returnMetadata: "all",
       });

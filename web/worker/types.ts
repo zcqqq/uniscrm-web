@@ -12,6 +12,7 @@ export interface Env {
 export interface User {
   id: string;
   email: string;
+  preferred_location: string;
   created_at: string;
 }
 

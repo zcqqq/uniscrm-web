@@ -106,12 +106,18 @@ describe("auth routes", () => {
       kv.get.mockResolvedValue(
         JSON.stringify({ user_id: "user-1", email: "u@e.com", expires_at: new Date(Date.now() + 86400000).toISOString() })
       );
+      db.prepare.mockReturnValue({
+        bind: vi.fn().mockReturnValue({
+          first: vi.fn().mockResolvedValue({ id: "user-1", email: "u@e.com", preferred_location: "global" }),
+          run: vi.fn().mockResolvedValue({}),
+        }),
+      });
       const res = await app.request("/auth/me", {
         headers: { Cookie: "session=valid-session-id" },
       });
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.user).toEqual({ id: "user-1", email: "u@e.com" });
+      expect(body.user).toEqual({ id: "user-1", email: "u@e.com", preferred_location: "global" });
     });
   });
 });

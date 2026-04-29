@@ -49,7 +49,7 @@ describe("RecommendService", () => {
       expect(vectorize.query).toHaveBeenCalledWith(
         [0.1, 0.2, 0.3],
         expect.objectContaining({
-          filter: { type: "trend" },
+          filter: { type: "trend", location: "global" },
           topK: 5,
           returnMetadata: "all",
         })

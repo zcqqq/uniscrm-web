@@ -3,6 +3,7 @@ export interface Env {
   KV: KVNamespace;
   VECTORIZE: VectorizeIndex;
   AI: Ai;
+  ASSETS: Fetcher;
   RESEND_API_KEY: string;
   WEBHOOK_SECRET: string;
   APP_URL: string;

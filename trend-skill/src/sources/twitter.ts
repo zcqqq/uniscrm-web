@@ -1,11 +1,7 @@
 import type { Platform, TrendItem } from "../types";
 import { PLATFORM_SHORT, LOCATION_SHORT } from "../types";
+import { LOCATIONS } from "../config/locations";
 import type { TrendSource } from "./interface";
-
-const WOEID_CONFIGS = [
-  { woeid: 1, location: "global", language: "en" },
-  { woeid: 23424781, location: "china", language: "zh" },
-] as const;
 
 export function generateTrendId(
   date: string,
@@ -35,10 +31,10 @@ export class TwitterTrendSource implements TrendSource {
     const today = new Date().toISOString().slice(0, 10);
     const allItems: TrendItem[] = [];
 
-    for (const config of WOEID_CONFIGS) {
+    for (const loc of LOCATIONS.filter(l => l.twitter)) {
       try {
         const response = await fetch(
-          `https://api.x.com/2/trends/by/woeid/${config.woeid}`,
+          `https://api.x.com/2/trends/by/woeid/${loc.twitter!.woeid}`,
           { headers: { Authorization: `Bearer ${this.bearerToken}` } }
         );
 
@@ -51,12 +47,12 @@ export class TwitterTrendSource implements TrendSource {
 
         for (let idx = 0; idx < trends.length; idx++) {
           const trend = trends[idx];
-          const id = generateTrendId(today, "twitter", config.location, trend.trend_name);
+          const id = generateTrendId(today, "twitter", loc.id, trend.trend_name);
           allItems.push({
             id,
             platform: "twitter",
-            location: config.location,
-            language: config.language,
+            location: loc.id,
+            language: loc.language,
             title: trend.trend_name,
             url: trend.trend_url,
             score: trend.tweet_count ?? (trends.length - idx),

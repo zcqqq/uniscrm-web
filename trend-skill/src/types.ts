@@ -87,10 +87,7 @@ export const PLATFORM_SHORT: Record<Platform, string> = {
   baidu: "bd",
 };
 
-export const LOCATION_SHORT: Record<string, string> = {
-  global: "gl",
-  china: "cn",
-};
+export { LOCATION_SHORT } from "./config/locations";
 
 export const TIER_RATE_LIMITS: Record<Tier, number> = {
   anonymous: 10,

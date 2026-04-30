@@ -71,7 +71,7 @@ export function createAuthRouter() {
       sameSite: "Lax",
       maxAge: 7 * 24 * 60 * 60,
       path: "/",
-      domain: ".uni-scrm.com",
+      domain: "uni-scrm.com",
     });
 
     return c.json({ ok: true, user: { id: user.id, email: user.email, preferred_location: user.preferred_location ?? "global" } });
@@ -83,7 +83,7 @@ export function createAuthRouter() {
       const sessions = new SessionService(c.env.KV);
       await sessions.destroy(sessionId);
     }
-    deleteCookie(c, "session", { path: "/", domain: ".uni-scrm.com" });
+    deleteCookie(c, "session", { path: "/", domain: "uni-scrm.com" });
     return c.json({ ok: true });
   });
 

@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   root: "./frontend",
+  envDir: "..",
   build: {
     outDir: "../dist",
     emptyOutDir: true,

@@ -14,6 +14,21 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 app.route("/api/channels", createNotionCallbackRouter());
 
 app.use("/api/*", authMiddleware);
+
+app.get("/api/auth/me", (c) => {
+  return c.json({ email: c.get("email" as never) });
+});
+
+app.post("/api/auth/logout", async (c) => {
+  const { getCookie, deleteCookie } = await import("hono/cookie");
+  const sessionId = getCookie(c, "session");
+  if (sessionId) {
+    await c.env.KV.delete(`session:${sessionId}`);
+    deleteCookie(c, "session");
+  }
+  return c.json({ ok: true });
+});
+
 app.route("/api/contents", createContentsRouter());
 app.route("/api/channels", createChannelsRouter());
 

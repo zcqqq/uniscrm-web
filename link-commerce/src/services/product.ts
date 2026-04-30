@@ -128,34 +128,42 @@ export class ProductService {
       .prepare("DELETE FROM products WHERE id = ? AND user_id = ?")
       .bind(id, userId)
       .run();
-    await this.vectorize.deleteByIds([id]);
+    try {
+      await this.vectorize.deleteByIds([id]);
+    } catch {
+      // Vectorize unavailable in local dev
+    }
   }
 
   private async embedProducts(userId: string, items: ProductRow[]): Promise<void> {
     if (items.length === 0) return;
 
-    const texts = items.map((item) => {
-      const parts = [item.title];
-      if (item.description) parts.push(item.description);
-      return parts.join(" | ");
-    });
+    try {
+      const texts = items.map((item) => {
+        const parts = [item.title];
+        if (item.description) parts.push(item.description);
+        return parts.join(" | ");
+      });
 
-    const embedResult = (await this.ai.run(EMBEDDING_MODEL, { text: texts })) as {
-      data: number[][];
-    };
+      const embedResult = (await this.ai.run(EMBEDDING_MODEL, { text: texts })) as {
+        data: number[][];
+      };
 
-    const records = items.map((item, i) => ({
-      id: item.id,
-      values: embedResult.data[i],
-      metadata: {
-        type: "product",
-        user_id: userId,
-        product_id: item.id,
-        title: item.title,
+      const records = items.map((item, i) => ({
+        id: item.id,
+        values: embedResult.data[i],
+        metadata: {
+          type: "product",
+          user_id: userId,
+          product_id: item.id,
+          title: item.title,
         timestamp_ms: Date.now(),
       },
     }));
 
-    await this.vectorize.upsert(records);
+      await this.vectorize.upsert(records);
+    } catch {
+      // AI/Vectorize unavailable in local dev — skip embedding
+    }
   }
 }

@@ -11,8 +11,8 @@ function Nav() {
     <nav className="bg-white border-b px-8 py-3 flex items-center justify-between">
       <div className="flex gap-6">
         <a href="/" className="font-semibold text-black">Recommendation</a>
-        <a href="https://link-content-dev.zhengchao-qqqqq.workers.dev" className="text-gray-500 hover:text-black">Content</a>
-        <a href="https://link-commerce-dev.zhengchao-qqqqq.workers.dev" className="text-gray-500 hover:text-black">Commerce</a>
+        <a href={import.meta.env.VITE_CONTENT_URL} className="text-gray-500 hover:text-black">Content</a>
+        <a href={import.meta.env.VITE_COMMERCE_URL} className="text-gray-500 hover:text-black">Commerce</a>
       </div>
       <div className="flex items-center gap-4">
         <select

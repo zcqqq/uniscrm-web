@@ -9,7 +9,7 @@ export function createRecommendationsRouter() {
     const userId = c.get("userId" as never) as string;
     const service = new RecommendService(c.env.DB, c.env.VECTORIZE, c.env.KV);
     const recommendations = await service.getForUser(userId);
-    return c.json({ recommendations: recommendations.slice(0, 5) });
+    return c.json({ recommendations });
   });
 
   return router;

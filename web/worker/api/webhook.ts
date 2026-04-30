@@ -36,11 +36,15 @@ export function createWebhookRouter() {
     const service = new RecommendService(c.env.DB, c.env.VECTORIZE, c.env.KV);
 
     const { results: users } = await c.env.DB
-      .prepare("SELECT id FROM users")
-      .all<{ id: string }>();
+      .prepare("SELECT id, preferred_location FROM users")
+      .all<{ id: string; preferred_location: string }>();
 
     for (const user of users) {
-      await service.computeForUser(user.id);
+      try {
+        await service.computeForUser(user.id, user.preferred_location ?? "global");
+      } catch (e) {
+        console.error(`Recommend failed for user ${user.id}:`, e instanceof Error ? e.message : e);
+      }
     }
 
     return c.json({ ok: true, users_updated: users.length });

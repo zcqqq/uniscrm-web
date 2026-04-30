@@ -27,20 +27,6 @@ export const api = {
     me: () => request<{ user: { id: string; email: string; preferred_location: string } }>("/auth/me"),
     logout: () => request("/auth/logout", { method: "POST" }),
   },
-  contents: {
-    list: () => request<{ items: any[] }>("/contents"),
-    import: (items: any[]) =>
-      request<{ items: any[] }>("/contents/import", {
-        method: "POST",
-        body: JSON.stringify({ items }),
-      }),
-    update: (id: string, fields: any) =>
-      request(`/contents/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(fields),
-      }),
-    delete: (id: string) => request(`/contents/${id}`, { method: "DELETE" }),
-  },
   recommendations: {
     get: () => request<{ recommendations: any[] }>("/recommendations"),
   },

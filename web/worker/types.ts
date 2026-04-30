@@ -16,18 +16,6 @@ export interface User {
   created_at: string;
 }
 
-export interface ContentItem {
-  id: string;
-  user_id: string;
-  filename: string;
-  title: string;
-  summary: string | null;
-  status: "new" | "pending" | "published" | "ignored";
-  file_modified_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface ContentMatch {
   content_id: string;
   title: string;

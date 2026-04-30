@@ -1,8 +1,5 @@
 import { useState } from "react";
 import { useRecommendations } from "../hooks/useRecommendations";
-import { api } from "../lib/api";
-
-const STATUS_OPTIONS = ["new", "pending", "published", "ignored"] as const;
 
 export function Home() {
   const { recommendations, loading } = useRecommendations();
@@ -38,12 +35,9 @@ export function Home() {
                   <h3 className="font-semibold">{rec.title}</h3>
                   <span className="text-sm text-gray-500">{rec.matches.length} matching trends</span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-mono bg-blue-50 text-blue-700 px-2 py-1 rounded">
-                    {(bestScore * 100).toFixed(0)}% match
-                  </span>
-                  <StatusDropdown contentId={rec.content_id} />
-                </div>
+                <span className="text-sm font-mono bg-blue-50 text-blue-700 px-2 py-1 rounded">
+                  {(bestScore * 100).toFixed(0)}% match
+                </span>
               </div>
               {isExpanded && (
                 <div className="mt-3 pt-3 border-t">
@@ -60,21 +54,5 @@ export function Home() {
         })}
       </div>
     </div>
-  );
-}
-
-function StatusDropdown({ contentId }: { contentId: string }) {
-  const [status, setStatus] = useState("new");
-
-  const handleChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newStatus = e.target.value;
-    setStatus(newStatus);
-    await api.contents.update(contentId, { status: newStatus });
-  };
-
-  return (
-    <select value={status} onChange={handleChange} onClick={(e) => e.stopPropagation()} className="text-xs border rounded px-2 py-1">
-      {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-    </select>
   );
 }

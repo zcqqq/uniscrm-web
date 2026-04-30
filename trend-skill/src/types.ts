@@ -1,4 +1,4 @@
-export type Platform = "twitter" | "weibo" | "douyin" | "baidu";
+export type Platform = "twitter" | "tiktok" | "douyin" | "weibo" | "baidu";
 
 export type Tier = "anonymous" | "free" | "premium";
 
@@ -73,17 +73,14 @@ export interface Env {
   TREND_DB: D1Database;
   TREND_VECTORIZE: VectorizeIndex;
   AI: Ai;
-  TWITTER_BEARER_TOKEN: string;
   ADMIN_SECRET: string;
-  WEBHOOK_URL: string;
-  WEBHOOK_SECRET: string;
-  TREND_RETENTION_DAYS: string;
 }
 
 export const PLATFORM_SHORT: Record<Platform, string> = {
   twitter: "tw",
-  weibo: "wb",
+  tiktok: "tk",
   douyin: "dy",
+  weibo: "wb",
   baidu: "bd",
 };
 

@@ -1,0 +1,12 @@
+[
+    {"TWITTER":{
+        "locations": ["global", "china"]
+    }},
+    {"TIKTOK":{
+        "locations": ["All regions", "United States"],
+        "categories": ["Culture, Education & Technology"]
+    }},
+    {"DOUYIN":{
+        "categories": ["旅行", "科技"]
+    }}
+]

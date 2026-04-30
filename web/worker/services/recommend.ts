@@ -1,4 +1,9 @@
-import type { ContentItem, ContentMatch, TrendMatch } from "../types";
+import type { ContentMatch, TrendMatch } from "../types";
+
+interface ContentRef {
+  id: string;
+  title: string;
+}
 
 export class RecommendService {
   constructor(
@@ -9,9 +14,9 @@ export class RecommendService {
 
   async computeForUser(userId: string, location: string = "global"): Promise<void> {
     const { results: contents } = await this.db
-      .prepare("SELECT * FROM contents WHERE user_id = ?")
+      .prepare("SELECT id, title FROM content_items WHERE user_id = ?")
       .bind(userId)
-      .all<ContentItem>();
+      .all<ContentRef>();
 
     if (contents.length === 0) return;
 

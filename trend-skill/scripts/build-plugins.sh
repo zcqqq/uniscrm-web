@@ -17,8 +17,8 @@ echo "  Skill: $SKILL_NAME"
 echo "  MCP URL: $MCP_URL"
 
 # ── Claude Code Plugin ──────────────────────────────────
-CC_DIR="$ROOT/dist/uniscrm-plugin"
-rm -rf "$CC_DIR"
+CC_DIR="${CC_DIR:-/Users/zc/Documents/Code/uniscrm-plugin}"
+find "$CC_DIR" -mindepth 1 -not -path "$CC_DIR/.git" -not -path "$CC_DIR/.git/*" -delete 2>/dev/null || true
 mkdir -p "$CC_DIR/.claude-plugin" "$CC_DIR/skills/$SKILL_NAME"
 
 cat > "$CC_DIR/.claude-plugin/plugin.json" <<EOJSON
@@ -35,6 +35,10 @@ EOJSON
 cat > "$CC_DIR/.claude-plugin/marketplace.json" <<EOJSON
 {
   "name": "uniscrm-plugin",
+  "description": "UnisCRM plugins for social media trend aggregation",
+  "owner": {
+    "name": "$AUTHOR"
+  },
   "plugins": [
     {
       "name": "$PACKAGE_NAME",

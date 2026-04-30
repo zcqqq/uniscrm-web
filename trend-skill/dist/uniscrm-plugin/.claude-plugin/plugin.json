@@ -1,8 +1,0 @@
-{
-  "name": "trend-skill",
-  "version": "0.1.0",
-  "description": "Aggregates trending topics from social media platforms with semantic search and daily digest.",
-  "author": {
-    "name": "uniscrm"
-  }
-}

@@ -1,0 +1,48 @@
+name = "link-social"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[vars]
+TREND_RETENTION_DAYS = "30"
+
+[env.dev]
+name = "link-social-dev"
+
+[env.dev.vars]
+TREND_RETENTION_DAYS = "30"
+
+[[env.dev.kv_namespaces]]
+binding = "TREND_KV"
+id = "ac8b64b59ac540e0ab482f25bb78d41e"
+
+[[env.dev.vectorize]]
+binding = "TREND_VECTORIZE"
+index_name = "trend-embeddings-dev"
+
+[env.dev.ai]
+binding = "AI"
+
+[env.dev.triggers]
+crons = ["0 0 * * *"]
+
+[env.production]
+name = "link-social"
+
+[[env.production.kv_namespaces]]
+binding = "TREND_KV"
+id = "<prod-kv-id>"
+
+[[env.production.vectorize]]
+binding = "TREND_VECTORIZE"
+index_name = "trend-embeddings"
+
+[env.production.ai]
+binding = "AI"
+
+[env.production.triggers]
+crons = ["0 0 * * *"]

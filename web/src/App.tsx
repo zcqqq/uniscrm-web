@@ -1,8 +1,7 @@
-import { BrowserRouter, Routes, Route, Navigate, Link } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { Login } from "./pages/Login";
 import { Verify } from "./pages/Verify";
-import { Contents } from "./pages/Contents";
 import { Home } from "./pages/Home";
 
 function Nav() {
@@ -11,8 +10,7 @@ function Nav() {
   return (
     <nav className="bg-white border-b px-8 py-3 flex items-center justify-between">
       <div className="flex gap-6">
-        <Link to="/" className="font-semibold">Recommendations</Link>
-        <Link to="/contents" className="text-gray-600 hover:text-black">Content Library</Link>
+        <span className="font-semibold">Recommendations</span>
       </div>
       <div className="flex items-center gap-4">
         <select
@@ -55,14 +53,6 @@ export function App() {
             element={
               <ProtectedRoute>
                 <Home />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/contents"
-            element={
-              <ProtectedRoute>
-                <Contents />
               </ProtectedRoute>
             }
           />

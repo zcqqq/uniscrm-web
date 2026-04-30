@@ -16,7 +16,7 @@ export function createMcpServer(env: Env, tier: Tier): McpServer {
   });
 
   server.tool("list_platforms", "List active trend platforms", {}, async () => ({
-    content: [{ type: "text", text: JSON.stringify({ platforms: ["twitter"] }) }],
+    content: [{ type: "text", text: JSON.stringify({ platforms: ["twitter", "tiktok", "douyin"] }) }],
   }));
 
   server.tool(

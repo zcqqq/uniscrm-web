@@ -10,7 +10,9 @@ function Nav() {
   return (
     <nav className="bg-white border-b px-8 py-3 flex items-center justify-between">
       <div className="flex gap-6">
-        <span className="font-semibold">Recommendations</span>
+        <a href="/" className="font-semibold text-black">Recommendation</a>
+        <a href="/content" className="text-gray-500 hover:text-black">Content</a>
+        <a href="/commerce" className="text-gray-500 hover:text-black">Commerce</a>
       </div>
       <div className="flex items-center gap-4">
         <select

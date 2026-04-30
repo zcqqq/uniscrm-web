@@ -77,19 +77,19 @@ export class RecommendService {
 
       const [contentResult, productResult] = await Promise.all([
         this.vectorize.query(trendVec, {
-          filter: { type: "content", user_id: userId },
-          topK: 1,
+          filter: { type: "content" },
+          topK: 10,
           returnMetadata: "all",
         }),
         this.vectorize.query(trendVec, {
-          filter: { type: "product", user_id: userId },
-          topK: 1,
+          filter: { type: "product" },
+          topK: 10,
           returnMetadata: "all",
         }),
       ]);
 
-      const contentMatch = contentResult.matches[0];
-      const productMatch = productResult.matches[0];
+      const contentMatch = contentResult.matches.find((m) => (m.metadata?.user_id as string) === userId);
+      const productMatch = productResult.matches.find((m) => (m.metadata?.user_id as string) === userId);
 
       if (!contentMatch && !productMatch) continue;
 

@@ -60,9 +60,9 @@ describe("RecommendService", () => {
       vectorize.query.mockImplementation(() => {
         queryCount++;
         if (queryCount === 1) {
-          return { matches: [{ id: "c1", score: 0.9, metadata: { title: "Content A" } }] };
+          return { matches: [{ id: "c1", score: 0.9, metadata: { title: "Content A", user_id: "u1" } }] };
         }
-        return { matches: [{ id: "p1", score: 0.8, metadata: { title: "Product A" } }] };
+        return { matches: [{ id: "p1", score: 0.8, metadata: { title: "Product A", user_id: "u1" } }] };
       });
 
       // For the content↔product cosine calc — use orthogonal vectors so s_cp is low
@@ -96,7 +96,7 @@ describe("RecommendService", () => {
       });
       vectorize.getByIds.mockResolvedValue([{ id: "t1", values: [1, 0] }]);
       vectorize.query
-        .mockResolvedValueOnce({ matches: [{ id: "c1", score: 0.7, metadata: { title: "C" } }] })
+        .mockResolvedValueOnce({ matches: [{ id: "c1", score: 0.7, metadata: { title: "C", user_id: "u1" } }] })
         .mockResolvedValueOnce({ matches: [] });
 
       await service.computeForUser("u1", "global");

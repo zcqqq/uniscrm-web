@@ -27,7 +27,6 @@ export function createSettingsRouter() {
       .bind(preferred_location, userId)
       .run();
 
-    // Recompute recommendations with new location
     try {
       const recommend = new RecommendService(c.env.DB, c.env.VECTORIZE, c.env.KV);
       await recommend.computeForUser(userId, preferred_location);

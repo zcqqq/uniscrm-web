@@ -14,6 +14,7 @@ head_sampling_rate = 1
 
 [env.dev]
 name = "link-commerce-dev"
+routes = [{ pattern = "commerce-dev.uni-scrm.com", custom_domain = true }]
 
 [[env.dev.kv_namespaces]]
 binding = "KV"

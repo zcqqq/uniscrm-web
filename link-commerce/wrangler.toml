@@ -1,0 +1,53 @@
+name = "link-commerce"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[env.dev]
+name = "link-commerce-dev"
+
+[[env.dev.kv_namespaces]]
+binding = "KV"
+id = "ac8b64b59ac540e0ab482f25bb78d41e"
+
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "trend-skill-db-dev"
+database_id = "b322777d-6617-4dbf-a4d2-f734166b7737"
+migrations_dir = "migrations"
+
+[[env.dev.vectorize]]
+binding = "VECTORIZE"
+index_name = "trend-embeddings-dev"
+
+[env.dev.ai]
+binding = "AI"
+
+[env.production]
+name = "link-commerce"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "<prod-kv-id>"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "trend-skill-db"
+database_id = "<prod-d1-id>"
+migrations_dir = "migrations"
+
+[[env.production.vectorize]]
+binding = "VECTORIZE"
+index_name = "trend-embeddings"
+
+[env.production.ai]
+binding = "AI"

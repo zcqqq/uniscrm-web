@@ -2,23 +2,16 @@ import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
 import { useAuth } from "./useAuth";
 
-interface TrendMatch {
-  trend_id: string;
-  title: string;
-  platform: string;
-  location: string;
-  similarity: number;
-}
-
-interface Recommendation {
-  content_id: string;
-  title: string;
-  matches: TrendMatch[];
+interface RecommendationGroup {
+  trend?: { id: string; title: string; platform: string; score: number; similarity: number };
+  content?: { id: string; title: string; similarity: number };
+  product?: { id: string; title: string; similarity: number };
+  sort_score: number;
 }
 
 export function useRecommendations() {
   const { user } = useAuth();
-  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [recommendations, setRecommendations] = useState<RecommendationGroup[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {

@@ -1,5 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { RecommendService } from "../../worker/services/recommend";
+import { RecommendService, cosineSimilarity } from "../../worker/services/recommend";
+
+describe("cosineSimilarity", () => {
+  it("returns 1 for identical vectors", () => {
+    expect(cosineSimilarity([1, 0, 0], [1, 0, 0])).toBeCloseTo(1);
+  });
+
+  it("returns 0 for orthogonal vectors", () => {
+    expect(cosineSimilarity([1, 0], [0, 1])).toBeCloseTo(0);
+  });
+
+  it("returns value between 0 and 1 for partially similar vectors", () => {
+    const s = cosineSimilarity([1, 1, 0], [1, 0, 0]);
+    expect(s).toBeGreaterThan(0.5);
+    expect(s).toBeLessThan(1);
+  });
+});
 
 describe("RecommendService", () => {
   let db: any;
@@ -27,56 +43,82 @@ describe("RecommendService", () => {
   });
 
   describe("computeForUser", () => {
-    it("fetches content vectors, queries trends, and caches results", async () => {
-      db.prepare.mockReturnValue({
-        bind: vi.fn().mockReturnValue({
-          all: vi.fn().mockResolvedValue({
-            results: [{ id: "c1", user_id: "u1", title: "My Post" }],
-          }),
-        }),
-      });
-      vectorize.getByIds.mockResolvedValue([
-        { id: "c1", values: [0.1, 0.2, 0.3] },
+    it("queries content and product for each trend, caches results", async () => {
+      const trendsJson = JSON.stringify([
+        { id: "t1", title: "AI Trend", platform: "twitter", location: "global", score: 100 },
       ]);
-      vectorize.query.mockResolvedValue({
-        matches: [
-          { id: "t1", score: 0.92, metadata: { type: "trend", title: "AI Trend", platform: "twitter", location: "global" } },
-        ],
+      kv.get.mockImplementation((key: string) => {
+        if (key === "trends:latest") return trendsJson;
+        return null;
       });
 
-      await service.computeForUser("u1");
+      vectorize.getByIds.mockResolvedValue([
+        { id: "t1", values: [1, 0, 0] },
+      ]);
 
-      expect(vectorize.query).toHaveBeenCalledWith(
-        [0.1, 0.2, 0.3],
-        expect.objectContaining({
-          filter: { type: "trend", location: "global" },
-          topK: 5,
-          returnMetadata: "all",
-        })
-      );
+      let queryCount = 0;
+      vectorize.query.mockImplementation(() => {
+        queryCount++;
+        if (queryCount === 1) {
+          return { matches: [{ id: "c1", score: 0.9, metadata: { title: "Content A" } }] };
+        }
+        return { matches: [{ id: "p1", score: 0.8, metadata: { title: "Product A" } }] };
+      });
+
+      // For the content↔product cosine calc — use orthogonal vectors so s_cp is low
+      vectorize.getByIds
+        .mockResolvedValueOnce([{ id: "t1", values: [1, 0, 0] }])
+        .mockResolvedValueOnce([{ id: "c1", values: [1, 0, 0] }, { id: "p1", values: [0, 1, 0] }]);
+
+      await service.computeForUser("u1", "global");
+
       expect(kv.put).toHaveBeenCalledWith(
         "recommendations:u1",
-        expect.stringContaining('"content_id":"c1"')
+        expect.any(String)
       );
+      const cached = JSON.parse(kv.put.mock.calls[0][1]);
+      expect(cached.length).toBe(1);
+      expect(cached[0]).toHaveProperty("sort_score");
+      expect(cached[0]).toHaveProperty("trend");
     });
 
-    it("skips users with no content", async () => {
-      await service.computeForUser("u1");
+    it("skips when no trends in KV", async () => {
+      await service.computeForUser("u1", "global");
       expect(vectorize.query).not.toHaveBeenCalled();
+    });
+
+    it("handles trend with only content match", async () => {
+      kv.get.mockImplementation((key: string) => {
+        if (key === "trends:latest") return JSON.stringify([
+          { id: "t1", title: "T", platform: "twitter", location: "global", score: 50 },
+        ]);
+        return null;
+      });
+      vectorize.getByIds.mockResolvedValue([{ id: "t1", values: [1, 0] }]);
+      vectorize.query
+        .mockResolvedValueOnce({ matches: [{ id: "c1", score: 0.7, metadata: { title: "C" } }] })
+        .mockResolvedValueOnce({ matches: [] });
+
+      await service.computeForUser("u1", "global");
+
+      const cached = JSON.parse(kv.put.mock.calls[0][1]);
+      expect(cached[0].trend).toBeDefined();
+      expect(cached[0].content).toBeDefined();
+      expect(cached[0].product).toBeUndefined();
     });
   });
 
   describe("getForUser", () => {
-    it("returns cached recommendations sorted by best match", async () => {
+    it("returns cached recommendations", async () => {
       kv.get.mockResolvedValue(
         JSON.stringify([
-          { content_id: "c1", title: "Post A", matches: [{ trend_id: "t1", title: "T", platform: "twitter", location: "global", similarity: 0.85 }] },
-          { content_id: "c2", title: "Post B", matches: [{ trend_id: "t2", title: "T2", platform: "twitter", location: "global", similarity: 0.95 }] },
+          { trend: { id: "t1", title: "T", platform: "tw", score: 100, similarity: 0.9 }, sort_score: 0.85 },
         ])
       );
 
       const results = await service.getForUser("u1");
-      expect(results[0].content_id).toBe("c2");
+      expect(results).toHaveLength(1);
+      expect(results[0].sort_score).toBe(0.85);
     });
   });
 });

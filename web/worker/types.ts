@@ -16,18 +16,11 @@ export interface User {
   created_at: string;
 }
 
-export interface ContentMatch {
-  content_id: string;
-  title: string;
-  matches: TrendMatch[];
-}
-
-export interface TrendMatch {
-  trend_id: string;
-  title: string;
-  platform: string;
-  location: string;
-  similarity: number;
+export interface RecommendationGroup {
+  trend?: { id: string; title: string; platform: string; score: number; similarity: number };
+  content?: { id: string; title: string; similarity: number };
+  product?: { id: string; title: string; similarity: number };
+  sort_score: number;
 }
 
 export interface Session {

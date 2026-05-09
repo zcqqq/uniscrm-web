@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
-import type { ShopifyProduct, SyncResult } from "../lib/api";
+import type { ShopifyProduct, SyncResult, OverflowInfo } from "../lib/api";
 
 export function useShopify() {
   const [connected, setConnected] = useState(false);
@@ -9,6 +9,7 @@ export function useShopify() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
+  const [overflowInfo, setOverflowInfo] = useState<OverflowInfo | null>(null);
 
   const checkStatus = useCallback(async () => {
     try {
@@ -60,12 +61,35 @@ export function useShopify() {
     if (selectedIds.length === 0) return;
     setSyncing(true);
     setSyncResult(null);
+    setOverflowInfo(null);
     try {
       const result = await api.shopify.sync(selectedIds);
-      setSyncResult(result);
+      if ("needsConfirmation" in result) {
+        setOverflowInfo(result);
+      } else {
+        setSyncResult(result);
+      }
     } finally {
       setSyncing(false);
     }
+  };
+
+  const confirmSync = async () => {
+    if (selectedIds.length === 0) return;
+    setSyncing(true);
+    setOverflowInfo(null);
+    try {
+      const result = await api.shopify.sync(selectedIds, true);
+      if (!("needsConfirmation" in result)) {
+        setSyncResult(result);
+      }
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const cancelOverflow = () => {
+    setOverflowInfo(null);
   };
 
   return {
@@ -75,10 +99,13 @@ export function useShopify() {
     selectedIds,
     syncing,
     syncResult,
+    overflowInfo,
     startAuth,
     loadProducts,
     toggleProduct,
     toggleAll,
     triggerSync,
+    confirmSync,
+    cancelOverflow,
   };
 }

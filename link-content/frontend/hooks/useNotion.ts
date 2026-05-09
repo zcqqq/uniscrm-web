@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
-import type { SyncResult } from "../lib/api";
+import type { SyncResult, OverflowInfo } from "../lib/api";
 
 export function useNotion() {
   const [connected, setConnected] = useState(false);
@@ -9,6 +9,7 @@ export function useNotion() {
   const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
+  const [overflowInfo, setOverflowInfo] = useState<OverflowInfo | null>(null);
 
   const checkStatus = useCallback(async () => {
     try {
@@ -50,8 +51,15 @@ export function useNotion() {
   const saveSelection = async (folderIds: string[]) => {
     setSelectedFolderIds(folderIds);
     const res = await api.channels.saveConfig("NOTION", { folder_ids: folderIds });
-    if ((res as { sync?: SyncResult }).sync) {
-      setSyncResult((res as { sync: SyncResult }).sync);
+    const typed = res as { sync?: SyncResult; needsConfirmation?: boolean; overflow?: number; wouldDelete?: { id: string; title: string; created_at: string }[] };
+    if (typed.needsConfirmation) {
+      setOverflowInfo({
+        needsConfirmation: true,
+        overflow: typed.overflow!,
+        wouldDelete: typed.wouldDelete!,
+      });
+    } else if (typed.sync) {
+      setSyncResult(typed.sync);
     }
   };
 
@@ -60,10 +68,31 @@ export function useNotion() {
     setSyncResult(null);
     try {
       const result = await api.notion.sync();
-      setSyncResult(result);
+      if ("needsConfirmation" in result && result.needsConfirmation) {
+        setOverflowInfo(result);
+        return;
+      }
+      setSyncResult(result as SyncResult);
     } finally {
       setSyncing(false);
     }
+  };
+
+  const confirmSync = async () => {
+    setSyncing(true);
+    setOverflowInfo(null);
+    try {
+      const result = await api.notion.sync(true);
+      if (!("needsConfirmation" in result)) {
+        setSyncResult(result);
+      }
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const cancelSync = () => {
+    setOverflowInfo(null);
   };
 
   return {
@@ -73,10 +102,13 @@ export function useNotion() {
     selectedFolderIds,
     syncing,
     syncResult,
+    overflowInfo,
     startAuth,
     loadFolders,
     saveSelection,
     triggerSync,
+    confirmSync,
+    cancelSync,
     checkStatus,
   };
 }

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env, ChannelType } from "../types";
 import { ContentService } from "../services/content";
+import { LimitService } from "../services/limit";
 
 const VALID_CHANNELS: ChannelType[] = ["LOCAL", "NOTION"];
 
@@ -9,7 +10,7 @@ export function createContentsRouter() {
 
   router.post("/sync", async (c) => {
     const userId = c.get("userId" as never) as string;
-    const { channel_type, items } = await c.req.json<{
+    const { channel_type, items, confirmed } = await c.req.json<{
       channel_type: string;
       items: {
         channel_source_id: string;
@@ -18,6 +19,7 @@ export function createContentsRouter() {
         source_url: string | null;
         source_modified_at: string | null;
       }[];
+      confirmed?: boolean;
     }>();
 
     if (!VALID_CHANNELS.includes(channel_type as ChannelType)) {
@@ -30,6 +32,21 @@ export function createContentsRouter() {
       if (!item.channel_source_id || !item.title) {
         return c.json({ error: "Each item must have channel_source_id and title" }, 400);
       }
+    }
+
+    const limitService = new LimitService(c.env.DB, c.env.VECTORIZE);
+    const check = await limitService.checkLimit(userId, items.length);
+
+    if (!check.allowed && !confirmed) {
+      return c.json({
+        needsConfirmation: true,
+        overflow: check.overflow,
+        wouldDelete: check.wouldDelete,
+      });
+    }
+
+    if (!check.allowed && confirmed) {
+      await limitService.enforceLimit(userId, check.overflow);
     }
 
     const service = new ContentService(c.env.DB, c.env.VECTORIZE, c.env.AI);

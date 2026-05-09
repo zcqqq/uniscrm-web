@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNotion } from "../hooks/useNotion";
+import { ConfirmOverflow } from "./ConfirmOverflow";
 
 interface Props {
   onSyncComplete: () => void;
@@ -13,10 +14,13 @@ export function NotionConnect({ onSyncComplete }: Props) {
     selectedFolderIds,
     syncing,
     syncResult,
+    overflowInfo,
     startAuth,
     loadFolders,
     saveSelection,
     triggerSync,
+    confirmSync,
+    cancelSync,
   } = useNotion();
 
   const [showFolders, setShowFolders] = useState(false);
@@ -130,6 +134,18 @@ export function NotionConnect({ onSyncComplete }: Props) {
             </button>
           </div>
         </div>
+      )}
+
+      {overflowInfo && (
+        <ConfirmOverflow
+          overflow={overflowInfo.overflow}
+          wouldDelete={overflowInfo.wouldDelete}
+          onConfirm={async () => {
+            await confirmSync();
+            onSyncComplete();
+          }}
+          onCancel={cancelSync}
+        />
       )}
     </div>
   );

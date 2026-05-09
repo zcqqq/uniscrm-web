@@ -32,6 +32,12 @@ export interface SyncResult {
   skipped: number;
 }
 
+export interface OverflowInfo {
+  needsConfirmation: true;
+  overflow: number;
+  wouldDelete: { id: string; title: string; created_at: string }[];
+}
+
 export interface ShopifyProduct {
   channel_source_id: string;
   title: string;
@@ -52,17 +58,17 @@ export const api = {
       request<{ connected: boolean; channel_name?: string }>("/channels/shopify/status"),
     getProducts: () =>
       request<{ products: ShopifyProduct[] }>("/channels/shopify/products"),
-    sync: (productIds: string[]) =>
-      request<SyncResult>("/channels/shopify/sync", {
+    sync: (productIds: string[], confirmed?: boolean) =>
+      request<SyncResult | OverflowInfo>("/channels/shopify/sync", {
         method: "POST",
-        body: JSON.stringify({ product_ids: productIds }),
+        body: JSON.stringify({ product_ids: productIds, confirmed }),
       }),
   },
   link: {
-    add: (title: string, url: string) =>
-      request<{ product: ProductItem }>("/channels/link/add", {
+    add: (title: string, url: string, confirmed?: boolean) =>
+      request<{ product: ProductItem } | OverflowInfo>("/channels/link/add", {
         method: "POST",
-        body: JSON.stringify({ title, url }),
+        body: JSON.stringify({ title, url, confirmed }),
       }),
   },
 };

@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
-import type { ContentItem } from "../lib/api";
+import type { ContentItem, OverflowInfo } from "../lib/api";
 import type { ParsedMd } from "../lib/markdown";
 
 export function useContents() {
   const [items, setItems] = useState<ContentItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [overflowInfo, setOverflowInfo] = useState<OverflowInfo | null>(null);
+  const [pendingImport, setPendingImport] = useState<ParsedMd[] | null>(null);
 
   const refresh = useCallback(async (channelType?: string) => {
     setLoading(true);
@@ -29,8 +31,33 @@ export function useContents() {
       source_url: null,
       source_modified_at: p.fileModifiedAt,
     }));
-    await api.contents.sync("LOCAL", mapped);
+    const res = await api.contents.sync("LOCAL", mapped);
+    if ("needsConfirmation" in res && res.needsConfirmation) {
+      setOverflowInfo(res);
+      setPendingImport(parsed);
+      return;
+    }
     await refresh();
+  };
+
+  const confirmImport = async () => {
+    if (!pendingImport) return;
+    const mapped = pendingImport.map((p) => ({
+      channel_source_id: p.filename,
+      title: p.title,
+      summary: p.summary,
+      source_url: null,
+      source_modified_at: p.fileModifiedAt,
+    }));
+    await api.contents.sync("LOCAL", mapped, true);
+    setOverflowInfo(null);
+    setPendingImport(null);
+    await refresh();
+  };
+
+  const cancelImport = () => {
+    setOverflowInfo(null);
+    setPendingImport(null);
   };
 
   const updateItem = async (
@@ -46,5 +73,5 @@ export function useContents() {
     await refresh();
   };
 
-  return { items, loading, refresh, importFiles, updateItem, deleteItem };
+  return { items, loading, refresh, importFiles, updateItem, deleteItem, overflowInfo, confirmImport, cancelImport };
 }

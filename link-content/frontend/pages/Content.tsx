@@ -3,9 +3,10 @@ import { useContents } from "../hooks/useContents";
 import { LocalImport } from "../components/LocalImport";
 import { NotionConnect } from "../components/NotionConnect";
 import { ContentTable } from "../components/ContentTable";
+import { ConfirmOverflow } from "../components/ConfirmOverflow";
 
 export function Content() {
-  const { items, loading, refresh, importFiles, updateItem, deleteItem } = useContents();
+  const { items, loading, refresh, importFiles, updateItem, deleteItem, overflowInfo, confirmImport, cancelImport } = useContents();
 
   const handleSyncComplete = useCallback(() => {
     refresh();
@@ -29,6 +30,15 @@ export function Content() {
       </div>
 
       <ContentTable items={items} onUpdate={updateItem} onDelete={deleteItem} />
+
+      {overflowInfo && (
+        <ConfirmOverflow
+          overflow={overflowInfo.overflow}
+          wouldDelete={overflowInfo.wouldDelete}
+          onConfirm={confirmImport}
+          onCancel={cancelImport}
+        />
+      )}
     </div>
   );
 }

@@ -33,6 +33,12 @@ export interface SyncResult {
   skipped: number;
 }
 
+export interface OverflowInfo {
+  needsConfirmation: true;
+  overflow: number;
+  wouldDelete: { id: string; title: string; created_at: string }[];
+}
+
 export interface ChannelItem {
   channel_source_id: string;
   title: string;
@@ -47,10 +53,10 @@ export const api = {
       request<{ items: ContentItem[] }>(
         `/contents${channelType ? `?channel_type=${channelType}` : ""}`
       ),
-    sync: (channelType: string, items: ChannelItem[]) =>
-      request<SyncResult>("/contents/sync", {
+    sync: (channelType: string, items: ChannelItem[], confirmed?: boolean) =>
+      request<SyncResult | OverflowInfo>("/contents/sync", {
         method: "POST",
-        body: JSON.stringify({ channel_type: channelType, items }),
+        body: JSON.stringify({ channel_type: channelType, items, confirmed }),
       }),
     update: (id: string, fields: Record<string, unknown>) =>
       request(`/contents/${id}`, {
@@ -67,8 +73,11 @@ export const api = {
       request<{ connected: boolean; channel_name?: string }>("/channels/notion/status"),
     getFolders: () =>
       request<{ folders: { id: string; title: string }[] }>("/channels/notion/folders"),
-    sync: () =>
-      request<SyncResult>("/channels/notion/sync", { method: "POST" }),
+    sync: (confirmed?: boolean) =>
+      request<SyncResult | OverflowInfo>("/channels/notion/sync", {
+        method: "POST",
+        body: JSON.stringify({ confirmed }),
+      }),
   },
   channels: {
     getConfig: (type: string) =>

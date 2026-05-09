@@ -3,6 +3,7 @@ import { getCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { OAuthService } from "../services/oauth";
 import { ContentService } from "../services/content";
+import { LimitService } from "../services/limit";
 import { NotionChannel } from "../channels/notion";
 
 export function createChannelsRouter() {
@@ -46,6 +47,7 @@ export function createChannelsRouter() {
 
   router.post("/notion/sync", async (c) => {
     const userId = c.get("userId" as never) as string;
+    const { confirmed } = await c.req.json<{ confirmed?: boolean }>().catch(() => ({ confirmed: undefined }));
     const oauth = new OAuthService(c.env.DB);
     const token = await oauth.getToken(userId, "notion");
 
@@ -65,6 +67,21 @@ export function createChannelsRouter() {
     const config = JSON.parse(configRow.config) as { folder_ids: string[] };
     const channel = new NotionChannel(token.access_token);
     const items = await channel.fetchItems(config);
+
+    const limitService = new LimitService(c.env.DB, c.env.VECTORIZE);
+    const check = await limitService.checkLimit(userId, items.length);
+
+    if (!check.allowed && !confirmed) {
+      return c.json({
+        needsConfirmation: true,
+        overflow: check.overflow,
+        wouldDelete: check.wouldDelete,
+      });
+    }
+
+    if (!check.allowed && confirmed) {
+      await limitService.enforceLimit(userId, check.overflow);
+    }
 
     const service = new ContentService(c.env.DB, c.env.VECTORIZE, c.env.AI);
     const result = await service.syncBatch(userId, "NOTION", items);
@@ -107,6 +124,19 @@ export function createChannelsRouter() {
       if (token && (config as { folder_ids?: string[] }).folder_ids) {
         const channel = new NotionChannel(token.access_token);
         const items = await channel.fetchItems(config);
+
+        const limitService = new LimitService(c.env.DB, c.env.VECTORIZE);
+        const check = await limitService.checkLimit(userId, items.length);
+
+        if (!check.allowed) {
+          return c.json({
+            ok: true,
+            needsConfirmation: true,
+            overflow: check.overflow,
+            wouldDelete: check.wouldDelete,
+          });
+        }
+
         const service = new ContentService(c.env.DB, c.env.VECTORIZE, c.env.AI);
         const result = await service.syncBatch(userId, "NOTION", items);
         return c.json({ ok: true, sync: result });

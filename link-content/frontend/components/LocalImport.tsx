@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { readMdFiles, type ParsedMd } from "../lib/markdown";
 
 interface Props {
-  onImport: (files: ParsedMd[]) => Promise<void>;
+  onImport: (files: ParsedMd[]) => Promise<boolean>;
 }
 
 export function LocalImport({ onImport }: Props) {
@@ -41,8 +41,8 @@ export function LocalImport({ onImport }: Props) {
   const handleConfirm = async () => {
     setImporting(true);
     try {
-      await onImport(previewing);
-      setPreviewing([]);
+      const hadOverflow = await onImport(previewing);
+      if (!hadOverflow) setPreviewing([]);
     } finally {
       setImporting(false);
     }

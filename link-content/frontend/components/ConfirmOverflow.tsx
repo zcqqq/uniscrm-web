@@ -1,7 +1,7 @@
 interface ConfirmOverflowProps {
   overflow: number;
   wouldDelete: { id: string; title: string; created_at: string }[];
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   onCancel: () => void;
 }
 

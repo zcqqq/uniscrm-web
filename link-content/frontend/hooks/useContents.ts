@@ -23,7 +23,7 @@ export function useContents() {
     refresh();
   }, [refresh]);
 
-  const importFiles = async (parsed: ParsedMd[]) => {
+  const importFiles = async (parsed: ParsedMd[]): Promise<boolean> => {
     const mapped = parsed.map((p) => ({
       channel_source_id: p.filename,
       title: p.title,
@@ -35,9 +35,10 @@ export function useContents() {
     if ("needsConfirmation" in res && res.needsConfirmation) {
       setOverflowInfo(res);
       setPendingImport(parsed);
-      return;
+      return true;
     }
     await refresh();
+    return false;
   };
 
   const confirmImport = async () => {

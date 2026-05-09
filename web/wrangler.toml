@@ -17,8 +17,8 @@ name = "uniscrm-web-dev"
 routes = [{ pattern = "web-dev.uni-scrm.com", custom_domain = true }]
 
 [env.dev.vars]
-GOOGLE_CLIENT_ID = ""
-X_CLIENT_ID = ""
+GOOGLE_CLIENT_ID = "1038882920781-unbsoa2prpnvqufeicaqqe1mlgso5ac9.apps.googleusercontent.com"
+X_CLIENT_ID = "cS1kY2RlNnc1VldHSWw0LVJQSFM6MTpjaQ"
 
 [[env.dev.kv_namespaces]]
 binding = "KV"

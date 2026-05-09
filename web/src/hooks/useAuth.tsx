@@ -30,8 +30,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    await api.auth.logout();
+    try {
+      await api.auth.logout();
+    } catch {
+      // Clear local state even if server call fails
+    }
     setUser(null);
+    window.location.href = "/login";
   };
 
   const refresh = async () => {

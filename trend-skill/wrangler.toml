@@ -35,6 +35,9 @@ binding = "AI"
 [env.production]
 name = "trend-skill"
 
+[env.production.vars]
+TREND_RETENTION_DAYS = "30"
+
 [[env.production.kv_namespaces]]
 binding = "TREND_KV"
 id = "88bc8c114dfb4ec3a77589c64f991a2e"

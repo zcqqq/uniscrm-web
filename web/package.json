@@ -6,6 +6,8 @@
     "dev": "vite",
     "dev:worker": "wrangler dev --env dev",
     "build": "vite build",
+    "deploy:dev": "vite build --mode development && wrangler deploy --env dev",
+    "deploy:prod": "vite build && wrangler deploy --env production",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

@@ -39,15 +39,16 @@ binding = "AI"
 
 [env.production]
 name = "uniscrm-web"
+routes = [{ pattern = "web.uni-scrm.com", custom_domain = true }]
 
 [[env.production.kv_namespaces]]
 binding = "KV"
-id = "<prod-kv-id>"
+id = "88bc8c114dfb4ec3a77589c64f991a2e"
 
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "trend-skill-db"
-database_id = "<prod-d1-id>"
+database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
 
 [[env.production.vectorize]]
 binding = "VECTORIZE"

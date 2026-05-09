@@ -57,9 +57,9 @@ export function Settings() {
                   Disconnect
                 </button>
               ) : (
-                <a href="/api/auth/google?link=true" className="text-sm text-blue-600 hover:text-blue-800">
+                <button onClick={() => { window.location.href = "/api/auth/google?link=true"; }} className="text-sm text-blue-600 hover:text-blue-800">
                   Connect
-                </a>
+                </button>
               )}
             </div>
 
@@ -75,9 +75,9 @@ export function Settings() {
                   Disconnect
                 </button>
               ) : (
-                <a href="/api/auth/x?link=true" className="text-sm text-blue-600 hover:text-blue-800">
+                <button onClick={() => { window.location.href = "/api/auth/x?link=true"; }} className="text-sm text-blue-600 hover:text-blue-800">
                   Connect
-                </a>
+                </button>
               )}
             </div>
           </div>

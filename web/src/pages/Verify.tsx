@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import { useAuth } from "../hooks/useAuth";
 
 export function Verify() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { refresh } = useAuth();
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -15,11 +17,12 @@ export function Verify() {
     }
     api.auth
       .verify(token)
+      .then(() => refresh())
       .then(() => navigate("/", { replace: true }))
       .catch((err) =>
         setError(err instanceof Error ? err.message : "Verification failed"),
       );
-  }, [searchParams, navigate]);
+  }, [searchParams, navigate, refresh]);
 
   if (error) {
     return (

@@ -16,6 +16,10 @@ head_sampling_rate = 1
 name = "uniscrm-web-dev"
 routes = [{ pattern = "web-dev.uni-scrm.com", custom_domain = true }]
 
+[env.dev.vars]
+GOOGLE_CLIENT_ID = ""
+X_CLIENT_ID = ""
+
 [[env.dev.kv_namespaces]]
 binding = "KV"
 id = "ac8b64b59ac540e0ab482f25bb78d41e"

@@ -3,6 +3,8 @@ import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { Login } from "./pages/Login";
 import { Verify } from "./pages/Verify";
 import { Home } from "./pages/Home";
+import { CompleteProfile } from "./pages/CompleteProfile";
+import { Settings } from "./pages/Settings";
 
 function Nav() {
   const { user, logout, updateLocation } = useAuth();
@@ -13,6 +15,7 @@ function Nav() {
         <a href="/" className="font-semibold text-black">Recommendation</a>
         <a href={import.meta.env.VITE_CONTENT_URL} className="text-gray-500 hover:text-black">Content</a>
         <a href={import.meta.env.VITE_COMMERCE_URL} className="text-gray-500 hover:text-black">Commerce</a>
+        <a href="/settings" className="text-gray-500 hover:text-black">Settings</a>
       </div>
       <div className="flex items-center gap-4">
         <select
@@ -50,11 +53,20 @@ export function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/auth/verify" element={<Verify />} />
+          <Route path="/auth/complete-profile" element={<CompleteProfile />} />
           <Route
             path="/"
             element={
               <ProtectedRoute>
                 <Home />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <Settings />
               </ProtectedRoute>
             }
           />

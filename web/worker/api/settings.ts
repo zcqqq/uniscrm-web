@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../types";
 import { RecommendService } from "../services/recommend";
+import { OAuthService } from "../services/oauth";
 
 const VALID_LOCATIONS = ["global", "china"];
 
@@ -35,6 +36,24 @@ export function createSettingsRouter() {
     }
 
     return c.json({ ok: true, preferred_location });
+  });
+
+  router.get("/linked-accounts", async (c) => {
+    const userId = c.get("userId" as never) as string;
+    const oauthService = new OAuthService(c.env.DB, c.env.KV);
+    const accounts = await oauthService.getLinkedAccounts(userId);
+    return c.json({ accounts });
+  });
+
+  router.delete("/linked-accounts/:provider", async (c) => {
+    const userId = c.get("userId" as never) as string;
+    const provider = c.req.param("provider");
+    if (provider !== "google" && provider !== "x") {
+      return c.json({ error: "Invalid provider" }, 400);
+    }
+    const oauthService = new OAuthService(c.env.DB, c.env.KV);
+    await oauthService.unlinkAccount(userId, provider);
+    return c.json({ ok: true });
   });
 
   return router;

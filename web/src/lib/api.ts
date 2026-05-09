@@ -26,6 +26,16 @@ export const api = {
       ),
     me: () => request<{ user: { id: string; email: string; preferred_location: string } }>("/auth/me"),
     logout: () => request("/auth/logout", { method: "POST" }),
+    completeProfile: (email: string) =>
+      request("/auth/complete-profile", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      }),
+    verifyCode: (email: string, code: string) =>
+      request<{ ok: boolean; user: { id: string; email: string } }>("/auth/verify-code", {
+        method: "POST",
+        body: JSON.stringify({ email, code }),
+      }),
   },
   recommendations: {
     get: () => request<{ recommendations: any[] }>("/recommendations"),
@@ -37,5 +47,9 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({ preferred_location }),
       }),
+    getLinkedAccounts: () =>
+      request<{ accounts: { provider: string; created_at: string }[] }>("/settings/linked-accounts"),
+    unlinkAccount: (provider: string) =>
+      request("/settings/linked-accounts/" + provider, { method: "DELETE" }),
   },
 };

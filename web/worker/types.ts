@@ -7,6 +7,10 @@ export interface Env {
   RESEND_API_KEY: string;
   WEBHOOK_SECRET: string;
   APP_URL: string;
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
+  X_CLIENT_ID: string;
+  X_CLIENT_SECRET: string;
 }
 
 export interface User {

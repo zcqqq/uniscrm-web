@@ -7,6 +7,7 @@ interface AuthState {
   loading: boolean;
   login: (email: string) => Promise<void>;
   logout: () => Promise<void>;
+  refresh: () => Promise<void>;
   updateLocation: (location: string) => Promise<void>;
 }
 
@@ -33,13 +34,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const refresh = async () => {
+    const res = await api.auth.me();
+    setUser(res.user);
+  };
+
   const updateLocation = async (location: string) => {
     await api.settings.update(location);
     setUser((prev) => prev ? { ...prev, preferred_location: location } : prev);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, updateLocation }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, refresh, updateLocation }}>
       {children}
     </AuthContext.Provider>
   );

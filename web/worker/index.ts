@@ -30,7 +30,11 @@ app.route("/api/webhook", createWebhookRouter());
 
 
 app.all("/*", async (c) => {
-  return c.env.ASSETS.fetch(c.req.raw);
+  const res = await c.env.ASSETS.fetch(c.req.raw);
+  if (res.status === 404) {
+    return c.env.ASSETS.fetch(new Request(new URL("/index.html", c.req.url)));
+  }
+  return res;
 });
 
 export default {

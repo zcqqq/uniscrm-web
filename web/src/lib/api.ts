@@ -21,10 +21,10 @@ export const api = {
         body: JSON.stringify({ email }),
       }),
     verify: (token: string) =>
-      request<{ user: { id: string; email: string; preferred_location: string } }>(
+      request<{ member: { id: string; email: string; preferred_location: string }; tenant: { id: string; email: string } }>(
         `/auth/verify?token=${token}`,
       ),
-    me: () => request<{ user: { id: string; email: string; preferred_location: string } }>("/auth/me"),
+    me: () => request<{ member: { id: string; email: string; preferred_location: string }; tenant: { id: string; email: string } }>("/auth/me"),
     logout: () => request("/auth/logout", { method: "POST" }),
     completeProfile: (email: string) =>
       request("/auth/complete-profile", {
@@ -32,7 +32,7 @@ export const api = {
         body: JSON.stringify({ email }),
       }),
     verifyCode: (email: string, code: string) =>
-      request<{ ok: boolean; user: { id: string; email: string } }>("/auth/verify-code", {
+      request<{ ok: boolean; member: { id: string; email: string }; tenant: { id: string; email: string } }>("/auth/verify-code", {
         method: "POST",
         body: JSON.stringify({ email, code }),
       }),

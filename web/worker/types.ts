@@ -11,10 +11,19 @@ export interface Env {
   GOOGLE_CLIENT_SECRET: string;
   X_CLIENT_ID: string;
   X_CLIENT_SECRET: string;
+  LINK_SOCIAL_URL: string;
+  INTERNAL_SECRET: string;
 }
 
-export interface User {
+export interface Tenant {
   id: string;
+  email: string;
+  created_at: string;
+}
+
+export interface Member {
+  id: string;
+  tenant_id: string;
   email: string;
   preferred_location: string;
   created_at: string;
@@ -28,7 +37,8 @@ export interface RecommendationGroup {
 }
 
 export interface Session {
-  user_id: string;
+  member_id: string;
+  tenant_id: string;
   email: string;
   expires_at: string;
 }

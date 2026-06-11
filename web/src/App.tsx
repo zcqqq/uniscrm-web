@@ -7,8 +7,8 @@ import { CompleteProfile } from "./pages/CompleteProfile";
 import { Settings } from "./pages/Settings";
 
 function Nav() {
-  const { user, logout, updateLocation } = useAuth();
-  if (!user) return null;
+  const { member, logout, updateLocation } = useAuth();
+  if (!member) return null;
   return (
     <nav className="bg-white border-b px-8 py-3 flex items-center justify-between">
       <div className="flex gap-6">
@@ -19,14 +19,14 @@ function Nav() {
       </div>
       <div className="flex items-center gap-4">
         <select
-          value={user.preferred_location}
+          value={member.preferred_location}
           onChange={(e) => updateLocation(e.target.value)}
           className="text-xs border rounded px-2 py-1"
         >
           <option value="global">Global</option>
           <option value="china">China</option>
         </select>
-        <span className="text-sm text-gray-500">{user.email}</span>
+        <span className="text-sm text-gray-500">{member.email}</span>
         <button onClick={logout} className="text-sm text-gray-400 hover:text-black">Logout</button>
       </div>
     </nav>
@@ -34,14 +34,14 @@ function Nav() {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { member, loading } = useAuth();
   if (loading)
     return (
       <div className="min-h-screen flex items-center justify-center">
         Loading...
       </div>
     );
-  if (!user) return <Navigate to="/login" replace />;
+  if (!member) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
 

@@ -50,20 +50,32 @@ export function createAuthRouter() {
       .bind(token)
       .run();
 
-    let user = await c.env.DB.prepare("SELECT id, email, preferred_location FROM users WHERE email = ?")
+    let member = await c.env.DB.prepare(
+      "SELECT id, tenant_id, email, preferred_location FROM members WHERE email = ?"
+    )
       .bind(link.email)
-      .first<{ id: string; email: string; preferred_location: string }>();
+      .first<{ id: string; tenant_id: string; email: string; preferred_location: string }>();
 
-    if (!user) {
-      const userId = crypto.randomUUID();
-      await c.env.DB.prepare("INSERT INTO users (id, email, preferred_location, created_at) VALUES (?, ?, ?, ?)")
-        .bind(userId, link.email, "global", new Date().toISOString())
+    if (!member) {
+      const tenantId = crypto.randomUUID();
+      const memberId = crypto.randomUUID();
+      const now = new Date().toISOString();
+
+      await c.env.DB.prepare("INSERT INTO tenants (id, email, created_at) VALUES (?, ?, ?)")
+        .bind(tenantId, link.email, now)
         .run();
-      user = { id: userId, email: link.email, preferred_location: "global" };
+
+      await c.env.DB.prepare(
+        "INSERT INTO members (id, tenant_id, email, preferred_location, created_at) VALUES (?, ?, ?, ?, ?)"
+      )
+        .bind(memberId, tenantId, link.email, "global", now)
+        .run();
+
+      member = { id: memberId, tenant_id: tenantId, email: link.email, preferred_location: "global" };
     }
 
     const sessions = new SessionService(c.env.KV);
-    const sessionId = await sessions.create(user.id, user.email);
+    const sessionId = await sessions.create(member.id, member.tenant_id, member.email);
 
     setCookie(c, "session", sessionId, {
       httpOnly: true,
@@ -74,7 +86,11 @@ export function createAuthRouter() {
       domain: "uni-scrm.com",
     });
 
-    return c.json({ ok: true, user: { id: user.id, email: user.email, preferred_location: user.preferred_location ?? "global" } });
+    return c.json({
+      ok: true,
+      member: { id: member.id, email: member.email, preferred_location: member.preferred_location },
+      tenant: { id: member.tenant_id, email: member.email },
+    });
   });
 
   router.post("/logout", async (c) => {
@@ -95,12 +111,17 @@ export function createAuthRouter() {
     const session = await sessions.get(sessionId);
     if (!session) return c.json({ error: "Unauthorized" }, 401);
 
-    const user = await c.env.DB.prepare("SELECT id, email, preferred_location FROM users WHERE id = ?")
-      .bind(session.user_id)
-      .first<{ id: string; email: string; preferred_location: string }>();
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const member = await c.env.DB.prepare(
+      "SELECT id, tenant_id, email, preferred_location FROM members WHERE id = ?"
+    )
+      .bind(session.member_id)
+      .first<{ id: string; tenant_id: string; email: string; preferred_location: string }>();
+    if (!member) return c.json({ error: "Unauthorized" }, 401);
 
-    return c.json({ user });
+    return c.json({
+      member: { id: member.id, email: member.email, preferred_location: member.preferred_location },
+      tenant: { id: member.tenant_id, email: member.email },
+    });
   });
 
   return router;

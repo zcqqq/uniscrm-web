@@ -10,7 +10,7 @@ interface RecommendationGroup {
 }
 
 export function useRecommendations() {
-  const { user } = useAuth();
+  const { member } = useAuth();
   const [recommendations, setRecommendations] = useState<RecommendationGroup[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -24,7 +24,7 @@ export function useRecommendations() {
     }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh, user?.preferred_location]);
+  useEffect(() => { refresh(); }, [refresh, member?.preferred_location]);
 
   return { recommendations, loading, refresh };
 }

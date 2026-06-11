@@ -2,8 +2,20 @@ import { useState, useEffect, createContext, useContext } from "react";
 import type { ReactNode } from "react";
 import { api } from "../lib/api";
 
+interface MemberData {
+  id: string;
+  email: string;
+  preferred_location: string;
+}
+
+interface TenantData {
+  id: string;
+  email: string;
+}
+
 interface AuthState {
-  user: { id: string; email: string; preferred_location: string } | null;
+  member: MemberData | null;
+  tenant: TenantData | null;
   loading: boolean;
   login: (email: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -14,14 +26,21 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<{ id: string; email: string; preferred_location: string } | null>(null);
+  const [member, setMember] = useState<MemberData | null>(null);
+  const [tenant, setTenant] = useState<TenantData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api.auth
       .me()
-      .then((res) => setUser(res.user))
-      .catch(() => setUser(null))
+      .then((res) => {
+        setMember(res.member);
+        setTenant(res.tenant);
+      })
+      .catch(() => {
+        setMember(null);
+        setTenant(null);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -35,22 +54,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Clear local state even if server call fails
     }
-    setUser(null);
+    setMember(null);
+    setTenant(null);
     window.location.href = "/login";
   };
 
   const refresh = async () => {
     const res = await api.auth.me();
-    setUser(res.user);
+    setMember(res.member);
+    setTenant(res.tenant);
   };
 
   const updateLocation = async (location: string) => {
     await api.settings.update(location);
-    setUser((prev) => prev ? { ...prev, preferred_location: location } : prev);
+    setMember((prev) => prev ? { ...prev, preferred_location: location } : prev);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refresh, updateLocation }}>
+    <AuthContext.Provider value={{ member, tenant, loading, login, logout, refresh, updateLocation }}>
       {children}
     </AuthContext.Provider>
   );

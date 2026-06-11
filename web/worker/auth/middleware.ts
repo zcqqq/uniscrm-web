@@ -15,7 +15,8 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
     return c.json({ error: "Unauthorized" }, 401);
   }
 
-  c.set("userId" as never, session.user_id);
+  c.set("memberId" as never, session.member_id);
+  c.set("tenantId" as never, session.tenant_id);
   c.set("email" as never, session.email);
   await next();
 }

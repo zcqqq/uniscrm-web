@@ -24,7 +24,7 @@ export function createOAuthRouter() {
     await oauthService.storeState(state, {
       codeVerifier,
       mode,
-      userId: session?.user_id,
+      userId: session?.member_id,
     });
 
     return c.redirect(url.toString());
@@ -46,15 +46,18 @@ export function createOAuthRouter() {
     const sub = claims.sub;
 
     if (stored.mode === "link" && stored.userId) {
-      await oauthService.linkAccount(stored.userId, "google", sub);
+      const member = await c.env.DB.prepare("SELECT tenant_id FROM members WHERE id = ?")
+        .bind(stored.userId)
+        .first<{ tenant_id: string }>();
+      await oauthService.linkAccount(stored.userId, member!.tenant_id, "google", sub);
       return c.redirect("/settings");
     }
 
-    const { userId } = await oauthService.resolveUser("google", sub, email);
+    const { memberId, tenantId } = await oauthService.resolveUser("google", sub, email);
     const sessions = new SessionService(c.env.KV);
-    const sessionId = await sessions.create(userId, email);
+    const newSessionId = await sessions.create(memberId, tenantId, email);
 
-    setCookie(c, "session", sessionId, {
+    setCookie(c, "session", newSessionId, {
       httpOnly: true,
       secure: true,
       sameSite: "Lax",
@@ -81,7 +84,7 @@ export function createOAuthRouter() {
     await oauthService.storeState(state, {
       codeVerifier,
       mode,
-      userId: session?.user_id,
+      userId: session?.member_id,
     });
 
     return c.redirect(url.toString());
@@ -106,7 +109,10 @@ export function createOAuthRouter() {
     const xUserId = userData.data.id;
 
     if (stored.mode === "link" && stored.userId) {
-      await oauthService.linkAccount(stored.userId, "x", xUserId);
+      const member = await c.env.DB.prepare("SELECT tenant_id FROM members WHERE id = ?")
+        .bind(stored.userId)
+        .first<{ tenant_id: string }>();
+      await oauthService.linkAccount(stored.userId, member!.tenant_id, "x", xUserId);
       return c.redirect("/settings");
     }
 
@@ -118,10 +124,10 @@ export function createOAuthRouter() {
     const email = emailData.data?.email;
 
     if (email) {
-      const { userId } = await oauthService.resolveUser("x", xUserId, email);
+      const { memberId, tenantId } = await oauthService.resolveUser("x", xUserId, email);
       const sessions = new SessionService(c.env.KV);
-      const sessionId = await sessions.create(userId, email);
-      setCookie(c, "session", sessionId, {
+      const newSessionId = await sessions.create(memberId, tenantId, email);
+      setCookie(c, "session", newSessionId, {
         httpOnly: true,
         secure: true,
         sameSite: "Lax",
@@ -167,6 +173,92 @@ export function createOAuthRouter() {
     return c.json({ ok: true });
   });
 
+  router.get("/x/channel", async (c) => {
+    const sessionId = getCookie(c, "session");
+    const sessions = new SessionService(c.env.KV);
+    const session = sessionId ? await sessions.get(sessionId) : null;
+    if (!session) return c.json({ error: "Not authenticated" }, 401);
+
+    const twitter = new Twitter(c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET, `${c.env.APP_URL}/api/auth/x/channel/callback`);
+    const state = generateState();
+    const codeVerifier = generateCodeVerifier();
+    const arcticUrl = twitter.createAuthorizationURL(state, codeVerifier, [
+      "tweet.read", "users.read", "follows.read", "offline.access",
+    ]);
+    // Replace twitter.com with x.com (arctic hardcodes twitter.com but cookies live on x.com)
+    const url = new URL(arcticUrl.toString().replace("https://twitter.com/", "https://x.com/"));
+
+    const oauthService = new OAuthService(c.env.DB, c.env.KV);
+    await oauthService.storeState(state, {
+      codeVerifier,
+      mode: "channel" as const,
+      userId: session.member_id,
+    });
+
+    return c.redirect(url.toString());
+  });
+
+  router.get("/x/channel/callback", async (c) => {
+    const code = c.req.query("code");
+    const state = c.req.query("state");
+    if (!code || !state) return c.json({ error: "Missing code or state" }, 400);
+
+    const oauthService = new OAuthService(c.env.DB, c.env.KV);
+    const stored = await oauthService.getState(state);
+    if (!stored || stored.mode !== "channel" || !stored.userId) {
+      return c.json({ error: "Invalid state" }, 400);
+    }
+
+    const twitter = new Twitter(c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET, `${c.env.APP_URL}/api/auth/x/channel/callback`);
+    const tokens = await twitter.validateAuthorizationCode(code, stored.codeVerifier);
+
+    const userRes = await fetch("https://api.x.com/2/users/me?user.fields=id,name,username,profile_image_url", {
+      headers: { Authorization: `Bearer ${tokens.accessToken()}` },
+    });
+    const userData = await userRes.json() as { data: { id: string; name: string; username: string; profile_image_url?: string } };
+    const xUser = userData.data;
+
+    const channelId = crypto.randomUUID();
+    const config = JSON.stringify({
+      x_user_id: xUser.id,
+      x_username: xUser.username,
+      x_name: xUser.name,
+      access_token: tokens.accessToken(),
+      refresh_token: tokens.hasRefreshToken() ? tokens.refreshToken() : null,
+    });
+
+    await c.env.DB
+      .prepare(
+        `INSERT INTO channel_configs (id, user_id, channel_type, config, created_at, updated_at)
+         VALUES (?, ?, 'TWITTER', ?, datetime('now'), datetime('now'))
+         ON CONFLICT(user_id, channel_type) DO UPDATE SET
+           config = excluded.config, updated_at = datetime('now')`
+      )
+      .bind(channelId, stored.userId, config)
+      .run();
+
+    const row = await c.env.DB
+      .prepare(`SELECT id FROM channel_configs WHERE user_id = ? AND channel_type = 'TWITTER'`)
+      .bind(stored.userId)
+      .first<{ id: string }>();
+    const actualChannelId = row?.id || channelId;
+
+    // Trigger link-social to fetch followers and register webhook
+    c.executionCtx.waitUntil(
+      fetch(`${c.env.LINK_SOCIAL_URL}/x/sync-followers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": c.env.INTERNAL_SECRET },
+        body: JSON.stringify({
+          channel_id: actualChannelId,
+          x_user_id: xUser.id,
+          access_token: tokens.accessToken(),
+        }),
+      }).catch(() => {})
+    );
+
+    return c.redirect("/settings");
+  });
+
   router.post("/verify-code", async (c) => {
     const pendingId = getCookie(c, "pending_oauth");
     if (!pendingId) return c.json({ error: "No pending OAuth session" }, 400);
@@ -193,12 +285,12 @@ export function createOAuthRouter() {
     }
 
     await c.env.KV.delete(`email_code:${email}`);
-    const { userId } = await oauthService.resolveUser(pending.provider, pending.providerUserId, email);
+    const { memberId, tenantId } = await oauthService.resolveUser(pending.provider, pending.providerUserId, email);
     await oauthService.deletePendingOAuth(pendingId);
 
     const sessions = new SessionService(c.env.KV);
-    const sessionId = await sessions.create(userId, email);
-    setCookie(c, "session", sessionId, {
+    const newSessionId = await sessions.create(memberId, tenantId, email);
+    setCookie(c, "session", newSessionId, {
       httpOnly: true,
       secure: true,
       sameSite: "Lax",
@@ -207,7 +299,11 @@ export function createOAuthRouter() {
       domain: "uni-scrm.com",
     });
 
-    return c.json({ ok: true, user: { id: userId, email } });
+    return c.json({
+      ok: true,
+      member: { id: memberId, email },
+      tenant: { id: tenantId, email },
+    });
   });
 
   return router;

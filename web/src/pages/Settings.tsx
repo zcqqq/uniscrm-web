@@ -3,7 +3,7 @@ import { api } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 
 export function Settings() {
-  const { user, updateLocation } = useAuth();
+  const { member, updateLocation } = useAuth();
   const [accounts, setAccounts] = useState<{ provider: string; created_at: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -27,7 +27,7 @@ export function Settings() {
       <section className="mb-8">
         <h2 className="text-lg font-semibold mb-4">Region</h2>
         <select
-          value={user?.preferred_location}
+          value={member?.preferred_location}
           onChange={(e) => updateLocation(e.target.value)}
           className="border rounded px-3 py-2"
         >

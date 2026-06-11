@@ -1,6 +1,6 @@
 export interface OAuthState {
   codeVerifier: string;
-  mode: "login" | "link";
+  mode: "login" | "link" | "channel";
   userId?: string;
 }
 
@@ -10,7 +10,8 @@ export interface PendingOAuthData {
 }
 
 export interface ResolveUserResult {
-  userId: string;
+  memberId: string;
+  tenantId: string;
   isNew: boolean;
 }
 
@@ -43,7 +44,6 @@ export class OAuthService {
     providerUserId: string,
     email: string | null
   ): Promise<ResolveUserResult> {
-    // Check if oauth_account already exists
     const existing = await this.db
       .prepare(
         "SELECT user_id FROM oauth_accounts WHERE provider = ? AND provider_user_id = ?"
@@ -52,54 +52,61 @@ export class OAuthService {
       .first<{ user_id: string }>();
 
     if (existing) {
-      return { userId: existing.user_id, isNew: false };
+      const member = await this.db
+        .prepare("SELECT tenant_id FROM members WHERE id = ?")
+        .bind(existing.user_id)
+        .first<{ tenant_id: string }>();
+      return { memberId: existing.user_id, tenantId: member!.tenant_id, isNew: false };
     }
 
-    // Check if email matches an existing user
     if (email) {
-      const userByEmail = await this.db
-        .prepare("SELECT id FROM users WHERE email = ?")
+      const memberByEmail = await this.db
+        .prepare("SELECT id, tenant_id FROM members WHERE email = ?")
         .bind(email)
-        .first<{ id: string }>();
+        .first<{ id: string; tenant_id: string }>();
 
-      if (userByEmail) {
-        // Auto-merge: link oauth_account to existing user
+      if (memberByEmail) {
         await this.db
           .prepare(
-            "INSERT INTO oauth_accounts (provider, provider_user_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+            "INSERT INTO oauth_accounts (provider, provider_user_id, user_id, tenant_id, created_at) VALUES (?, ?, ?, ?, ?)"
           )
-          .bind(provider, providerUserId, userByEmail.id, new Date().toISOString())
+          .bind(provider, providerUserId, memberByEmail.id, memberByEmail.tenant_id, new Date().toISOString())
           .run();
 
-        return { userId: userByEmail.id, isNew: false };
+        return { memberId: memberByEmail.id, tenantId: memberByEmail.tenant_id, isNew: false };
       }
     }
 
-    // Create new user + oauth_account
-    const userId = crypto.randomUUID();
+    const tenantId = crypto.randomUUID();
+    const memberId = crypto.randomUUID();
     const now = new Date().toISOString();
 
     await this.db
-      .prepare("INSERT INTO users (id, email, preferred_location, created_at) VALUES (?, ?, ?, ?)")
-      .bind(userId, email, "global", now)
+      .prepare("INSERT INTO tenants (id, email, created_at) VALUES (?, ?, ?)")
+      .bind(tenantId, email, now)
+      .run();
+
+    await this.db
+      .prepare("INSERT INTO members (id, tenant_id, email, preferred_location, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(memberId, tenantId, email, "global", now)
       .run();
 
     await this.db
       .prepare(
-        "INSERT INTO oauth_accounts (provider, provider_user_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+        "INSERT INTO oauth_accounts (provider, provider_user_id, user_id, tenant_id, created_at) VALUES (?, ?, ?, ?, ?)"
       )
-      .bind(provider, providerUserId, userId, now)
+      .bind(provider, providerUserId, memberId, tenantId, now)
       .run();
 
-    return { userId, isNew: true };
+    return { memberId, tenantId, isNew: true };
   }
 
   async linkAccount(
-    userId: string,
+    memberId: string,
+    tenantId: string,
     provider: string,
     providerUserId: string
   ): Promise<void> {
-    // Check if already linked to a different user
     const existing = await this.db
       .prepare(
         "SELECT user_id FROM oauth_accounts WHERE provider = ? AND provider_user_id = ?"
@@ -107,33 +114,33 @@ export class OAuthService {
       .bind(provider, providerUserId)
       .first<{ user_id: string }>();
 
-    if (existing && existing.user_id !== userId) {
+    if (existing && existing.user_id !== memberId) {
       throw new Error("This account is already linked to a different user");
     }
 
     await this.db
       .prepare(
-        "INSERT INTO oauth_accounts (provider, provider_user_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+        "INSERT INTO oauth_accounts (provider, provider_user_id, user_id, tenant_id, created_at) VALUES (?, ?, ?, ?, ?)"
       )
-      .bind(provider, providerUserId, userId, new Date().toISOString())
+      .bind(provider, providerUserId, memberId, tenantId, new Date().toISOString())
       .run();
   }
 
-  async unlinkAccount(userId: string, provider: string): Promise<void> {
+  async unlinkAccount(memberId: string, provider: string): Promise<void> {
     await this.db
       .prepare(
         "DELETE FROM oauth_accounts WHERE user_id = ? AND provider = ?"
       )
-      .bind(userId, provider)
+      .bind(memberId, provider)
       .run();
   }
 
-  async getLinkedAccounts(userId: string): Promise<LinkedAccount[]> {
+  async getLinkedAccounts(memberId: string): Promise<LinkedAccount[]> {
     const result = await this.db
       .prepare(
         "SELECT provider, created_at FROM oauth_accounts WHERE user_id = ?"
       )
-      .bind(userId)
+      .bind(memberId)
       .all<LinkedAccount>();
 
     return result.results;

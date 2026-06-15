@@ -22,7 +22,17 @@ export class SessionService {
   async get(sessionId: string): Promise<Session | null> {
     const data = await this.kv.get(`session:${sessionId}`);
     if (!data) return null;
-    return JSON.parse(data) as Session;
+    const parsed = JSON.parse(data);
+    // Handle old session format { user_id, email, expires_at }
+    if (parsed.user_id && !parsed.member_id) {
+      return {
+        member_id: parsed.user_id,
+        tenant_id: parsed.user_id,
+        email: parsed.email,
+        expires_at: parsed.expires_at,
+      };
+    }
+    return parsed as Session;
   }
 
   async destroy(sessionId: string): Promise<void> {

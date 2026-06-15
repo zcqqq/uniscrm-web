@@ -13,6 +13,7 @@ export interface Env {
   X_CLIENT_SECRET: string;
   LINK_SOCIAL_URL: string;
   INTERNAL_SECRET: string;
+  ADMIN_URL: string;
 }
 
 export interface Tenant {

@@ -40,6 +40,13 @@ export const api = {
   recommendations: {
     get: () => request<{ recommendations: any[] }>("/recommendations"),
   },
+  billing: {
+    getPlans: () => request<{ plans: Array<{ tier: string; name: string; price_monthly: number; currency: string }> }>("/billing/plans"),
+    getSubscription: () => request<{ tier: string; status: string; subscription: { id: string; current_period_end: string | null; cancel_at_period_end: number } | null }>("/billing/subscription"),
+    subscribe: (tier: string) => request<{ approval_url: string }>("/billing/subscribe", { method: "POST", body: JSON.stringify({ tier }) }),
+    cancel: () => request<{ ok: boolean }>("/billing/cancel", { method: "POST" }),
+    portal: () => request<{ portal_url: string }>("/billing/portal", { method: "POST" }),
+  },
   settings: {
     get: () => request<{ preferred_location: string }>("/settings"),
     update: (preferred_location: string) =>

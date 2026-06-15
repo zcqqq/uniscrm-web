@@ -1,0 +1,51 @@
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...options,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((err as any).error || res.statusText);
+  }
+  return res.json();
+}
+
+export interface FlowSummary {
+  id: string;
+  name: string;
+  description: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FlowDetail extends FlowSummary {
+  graph_json: string;
+  tenant_id: string;
+}
+
+export const api = {
+  flows: {
+    list: (page = 1) =>
+      request<{ flows: FlowSummary[]; total: number; page: number; totalPages: number }>(
+        `/api/flows?page=${page}`
+      ),
+    create: (name?: string) =>
+      request<{ flow: { id: string; name: string } }>("/api/flows", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      }),
+    get: (id: string) => request<{ flow: FlowDetail }>(`/api/flows/${id}`),
+    update: (id: string, data: { name?: string; description?: string; graph_json?: string; enabled?: boolean }) =>
+      request<{ ok: boolean }>(`/api/flows/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/api/flows/${id}`, { method: "DELETE" }),
+  },
+};

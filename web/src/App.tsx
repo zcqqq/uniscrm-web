@@ -5,6 +5,7 @@ import { Verify } from "./pages/Verify";
 import { Home } from "./pages/Home";
 import { CompleteProfile } from "./pages/CompleteProfile";
 import { Settings } from "./pages/Settings";
+import { Billing } from "./pages/Billing";
 
 function Nav() {
   const { member, logout, updateLocation } = useAuth();
@@ -15,6 +16,7 @@ function Nav() {
         <a href="/" className="font-semibold text-black">Recommendation</a>
         <a href={import.meta.env.VITE_CONTENT_URL} className="text-gray-500 hover:text-black">Content</a>
         <a href={import.meta.env.VITE_COMMERCE_URL} className="text-gray-500 hover:text-black">Commerce</a>
+        <a href="/billing" className="text-gray-500 hover:text-black">Billing</a>
         <a href="/settings" className="text-gray-500 hover:text-black">Settings</a>
       </div>
       <div className="flex items-center gap-4">
@@ -59,6 +61,14 @@ export function App() {
             element={
               <ProtectedRoute>
                 <Home />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/billing"
+            element={
+              <ProtectedRoute>
+                <Billing />
               </ProtectedRoute>
             }
           />

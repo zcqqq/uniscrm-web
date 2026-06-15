@@ -28,11 +28,19 @@ export interface Env {
   TREND_KV: KVNamespace;
   TREND_VECTORIZE: VectorizeIndex;
   AI: Ai;
+  DB: D1Database;
+  ASSETS: Fetcher;
   TWITTER_BEARER_TOKEN: string;
   FIRECRAWL_API_KEY: string;
   TIKTOK_COOKIE: string;
   DOUYIN_COOKIE: string;
   TREND_RETENTION_DAYS: string;
+  MAIGRET_QUEUE: Queue;
+  X_CLIENT_ID: string;
+  X_CLIENT_SECRET: string;
+  X_CONSUMER_SECRET: string;
+  INTERNAL_SECRET: string;
+  WEB_URL: string;
 }
 
 export const PLATFORM_SHORT: Record<Platform, string> = {

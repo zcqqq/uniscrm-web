@@ -20,6 +20,10 @@ routes = [{ pattern = "web-dev.uni-scrm.com", custom_domain = true }]
 [env.dev.vars]
 GOOGLE_CLIENT_ID = "1038882920781-unbsoa2prpnvqufeicaqqe1mlgso5ac9.apps.googleusercontent.com"
 X_CLIENT_ID = "cS1kY2RlNnc1VldHSWw0LVJQSFM6MTpjaQ"
+APP_URL = "https://web-dev.uni-scrm.com"
+LINK_SOCIAL_URL = "https://link-social-dev.uni-scrm.com"
+INTERNAL_SECRET = "dev-internal-secret"
+ADMIN_URL = "https://admin-dev.uni-scrm.com"
 
 [[env.dev.kv_namespaces]]
 binding = "KV"
@@ -40,6 +44,13 @@ binding = "AI"
 [env.production]
 name = "uniscrm-web"
 routes = [{ pattern = "web.uni-scrm.com", custom_domain = true }]
+
+[env.production.vars]
+GOOGLE_CLIENT_ID = "1038882920781-qado86f0g0hcf7t3l74b8acgu1a8teg4.apps.googleusercontent.com"
+X_CLIENT_ID = "cXVhYUNyWVJWSlFtdFdjekt3V1U6MTpjaQ"
+APP_URL = "https://web.uni-scrm.com"
+LINK_SOCIAL_URL = "https://link-social.uni-scrm.com"
+ADMIN_URL = "https://admin.uni-scrm.com"
 
 [[env.production.kv_namespaces]]
 binding = "KV"

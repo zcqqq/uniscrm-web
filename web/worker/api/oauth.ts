@@ -183,7 +183,7 @@ export function createOAuthRouter() {
     const state = generateState();
     const codeVerifier = generateCodeVerifier();
     const arcticUrl = twitter.createAuthorizationURL(state, codeVerifier, [
-      "tweet.read", "users.read", "follows.read", "offline.access",
+      "tweet.read", "users.read", "follows.read", "tweet.write", "offline.access",
     ]);
     // Replace twitter.com with x.com (arctic hardcodes twitter.com but cookies live on x.com)
     const url = new URL(arcticUrl.toString().replace("https://twitter.com/", "https://x.com/"));
@@ -219,17 +219,25 @@ export function createOAuthRouter() {
     const xUser = userData.data;
 
     const channelId = crypto.randomUUID();
+    let expiresAt: string | null = null;
+    try {
+      const expiresIn = tokens.accessTokenExpiresInSeconds();
+      expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+    } catch {
+      expiresAt = new Date(Date.now() + 7200 * 1000).toISOString();
+    }
     const config = JSON.stringify({
       x_user_id: xUser.id,
       x_username: xUser.username,
       x_name: xUser.name,
       access_token: tokens.accessToken(),
       refresh_token: tokens.hasRefreshToken() ? tokens.refreshToken() : null,
+      expires_at: expiresAt,
     });
 
     await c.env.DB
       .prepare(
-        `INSERT INTO channel_configs (id, user_id, channel_type, config, created_at, updated_at)
+        `INSERT INTO channels (id, user_id, channel_type, config, created_at, updated_at)
          VALUES (?, ?, 'TWITTER', ?, datetime('now'), datetime('now'))
          ON CONFLICT(user_id, channel_type) DO UPDATE SET
            config = excluded.config, updated_at = datetime('now')`
@@ -238,7 +246,7 @@ export function createOAuthRouter() {
       .run();
 
     const row = await c.env.DB
-      .prepare(`SELECT id FROM channel_configs WHERE user_id = ? AND channel_type = 'TWITTER'`)
+      .prepare(`SELECT id FROM channels WHERE user_id = ? AND channel_type = 'TWITTER'`)
       .bind(stored.userId)
       .first<{ id: string }>();
     const actualChannelId = row?.id || channelId;

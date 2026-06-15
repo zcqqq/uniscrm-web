@@ -56,7 +56,7 @@ export function createChannelsRouter() {
     }
 
     const configRow = await c.env.DB
-      .prepare("SELECT config FROM channel_configs WHERE user_id = ? AND channel_type = 'NOTION'")
+      .prepare("SELECT config FROM channels WHERE user_id = ? AND channel_type = 'NOTION'")
       .bind(userId)
       .first<{ config: string }>();
 
@@ -93,7 +93,7 @@ export function createChannelsRouter() {
     const channelType = c.req.param("type").toUpperCase();
 
     const row = await c.env.DB
-      .prepare("SELECT config FROM channel_configs WHERE user_id = ? AND channel_type = ?")
+      .prepare("SELECT config FROM channels WHERE user_id = ? AND channel_type = ?")
       .bind(userId, channelType)
       .first<{ config: string }>();
 
@@ -109,7 +109,7 @@ export function createChannelsRouter() {
 
     await c.env.DB
       .prepare(
-        `INSERT INTO channel_configs (id, user_id, channel_type, config, created_at, updated_at)
+        `INSERT INTO channels (id, user_id, channel_type, config, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id, channel_type) DO UPDATE SET
            config = excluded.config,

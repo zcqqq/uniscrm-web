@@ -37,7 +37,11 @@ app.use("/api/*", async (c, next) => {
 app.route("/api", createTrendsRouter());
 app.route("/admin", createAdminRouter());
 
-app.all("/mcp", async (c) => {
+app.get("/mcp", (c) =>
+  c.json({ error: "Method not allowed. Use POST for MCP requests." }, 405)
+);
+
+app.post("/mcp", async (c) => {
   const startMs = Date.now();
   const apiKey = c.req.header("X-API-Key");
   const authResult = await resolveAuth(apiKey, c.env.TREND_DB);
@@ -57,19 +61,14 @@ app.all("/mcp", async (c) => {
     headers.set("Accept", "application/json, text/event-stream");
   }
 
-  let parsedBody: unknown;
-  let rpcMethod = "";
+  const parsedBody = await c.req.json();
+  const msg = parsedBody as { method?: string; params?: { name?: string; arguments?: Record<string, unknown> } };
+  const rpcMethod = msg.method ?? "";
   let toolName = "";
   let toolArgs: Record<string, unknown> = {};
-
-  if (c.req.method === "POST") {
-    parsedBody = await c.req.json();
-    const msg = parsedBody as { method?: string; params?: { name?: string; arguments?: Record<string, unknown> } };
-    rpcMethod = msg.method ?? "";
-    if (rpcMethod === "tools/call") {
-      toolName = msg.params?.name ?? "";
-      toolArgs = msg.params?.arguments ?? {};
-    }
+  if (rpcMethod === "tools/call") {
+    toolName = msg.params?.name ?? "";
+    toolArgs = msg.params?.arguments ?? {};
   }
 
   const req = new Request(c.req.url, { method: c.req.method, headers });

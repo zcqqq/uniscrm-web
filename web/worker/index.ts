@@ -7,6 +7,7 @@ import { createOAuthRouter } from "./api/oauth";
 import { createRecommendationsRouter } from "./api/recommendations";
 import { createWebhookRouter } from "./api/webhook";
 import { createSettingsRouter } from "./api/settings";
+import { createBillingRouter } from "./api/billing";
 import { authMiddleware } from "./auth/middleware";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -26,6 +27,10 @@ app.use("/api/settings", authMiddleware);
 app.route("/api/settings", createSettingsRouter());
 
 app.route("/api/webhook", createWebhookRouter());
+
+app.use("/api/billing/*", authMiddleware);
+app.use("/api/billing", authMiddleware);
+app.route("/api/billing", createBillingRouter());
 
 
 

@@ -3,18 +3,36 @@ main = "src/index.ts"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "none"
+run_worker_first = true
+
 [observability]
 enabled = true
 head_sampling_rate = 1
+
+[observability.logs]
+invocation_logs = true
 
 [vars]
 TREND_RETENTION_DAYS = "30"
 
 [env.dev]
 name = "link-social-dev"
+routes = [{ pattern = "link-social-dev.uni-scrm.com", custom_domain = true }]
 
 [env.dev.vars]
 TREND_RETENTION_DAYS = "30"
+WEB_URL = "https://web-dev.uni-scrm.com"
+INTERNAL_SECRET = "dev-internal-secret"
+X_CLIENT_ID = "cS1kY2RlNnc1VldHSWw0LVJQSFM6MTpjaQ"
+
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "trend-skill-db-dev"
+database_id = "b322777d-6617-4dbf-a4d2-f734166b7737"
 
 [[env.dev.kv_namespaces]]
 binding = "TREND_KV"
@@ -27,15 +45,30 @@ index_name = "trend-embeddings-dev"
 [env.dev.ai]
 binding = "AI"
 
+[[env.dev.queues.producers]]
+binding = "MAIGRET_QUEUE"
+queue = "maigret-jobs-dev"
+
 [env.dev.triggers]
-crons = ["0 0 * * *"]
+crons = ["0 * * * *"]
 
 [env.production]
 name = "link-social"
+routes = [{ pattern = "link-social.uni-scrm.com", custom_domain = true }]
+
+[env.production.vars]
+TREND_RETENTION_DAYS = "30"
+WEB_URL = "https://web.uni-scrm.com"
+X_CLIENT_ID = "cXVhYUNyWVJWSlFtdFdjekt3V1U6MTpjaQ"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "trend-skill-db"
+database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
 
 [[env.production.kv_namespaces]]
 binding = "TREND_KV"
-id = "<prod-kv-id>"
+id = "88bc8c114dfb4ec3a77589c64f991a2e"
 
 [[env.production.vectorize]]
 binding = "TREND_VECTORIZE"
@@ -44,5 +77,9 @@ index_name = "trend-embeddings"
 [env.production.ai]
 binding = "AI"
 
+[[env.production.queues.producers]]
+binding = "MAIGRET_QUEUE"
+queue = "maigret-jobs"
+
 [env.production.triggers]
-crons = ["0 0 * * *"]
+crons = ["0 * * * *"]

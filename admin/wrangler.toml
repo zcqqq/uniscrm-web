@@ -1,0 +1,29 @@
+name = "admin"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[env.dev]
+name = "admin-dev"
+routes = [{ pattern = "admin-dev.uni-scrm.com", custom_domain = true }]
+
+[env.dev.vars]
+INTERNAL_SECRET = "dev-internal-secret"
+
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "trend-skill-db-dev"
+database_id = "b322777d-6617-4dbf-a4d2-f734166b7737"
+
+[env.production]
+name = "admin"
+routes = [{ pattern = "admin.uni-scrm.com", custom_domain = true }]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "trend-skill-db"
+database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"

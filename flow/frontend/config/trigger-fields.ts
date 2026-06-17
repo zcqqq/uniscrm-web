@@ -1,48 +1,79 @@
+import { METADATA_X, PROPS_X, t } from "../../../metadata";
+import type { Locale } from "../../../metadata";
+
 export interface TriggerFieldDefinition {
   id: string;
   label: string;
-  dataType: "number" | "string" | "boolean";
+  dataType: "number" | "string" | "enum";
   operators: string[];
+  enums?: { value: string; label: string }[];
 }
 
-export interface TriggerTypeDefinition {
-  type: string;
+export interface EventDefinition {
+  eventType: string;
   label: string;
   description: string;
   contextFields: TriggerFieldDefinition[];
 }
 
+export interface ChannelTypeDefinition {
+  channelType: string;
+  label: string;
+  icon: string;
+  events: EventDefinition[];
+}
+
 const NUMBER_OPS = [">", "<", ">=", "<=", "=="];
 const STRING_OPS = ["==", "!=", "contains"];
-const BOOLEAN_OPS = ["=="];
+const ENUM_OPS = ["==", "!="];
 
-export const TRIGGER_TYPES: TriggerTypeDefinition[] = [
-  {
-    type: "xFollow",
-    label: "X Follow",
-    description: "Triggered when the channel follows someone on X",
-    contextFields: [
-      { id: "target.username", label: "Target Username", dataType: "string", operators: STRING_OPS },
-      { id: "target.followers_count", label: "Target Follower Count", dataType: "number", operators: NUMBER_OPS },
-      { id: "target.following_count", label: "Target Following Count", dataType: "number", operators: NUMBER_OPS },
-      { id: "target.verified", label: "Target Verified", dataType: "boolean", operators: BOOLEAN_OPS },
-      { id: "target.bio", label: "Target Bio", dataType: "string", operators: STRING_OPS },
-    ],
-  },
-  {
-    type: "xFollowed",
-    label: "X Followed",
-    description: "Triggered when someone follows the channel on X",
-    contextFields: [
-      { id: "source.username", label: "Source Username", dataType: "string", operators: STRING_OPS },
-      { id: "source.followers_count", label: "Source Follower Count", dataType: "number", operators: NUMBER_OPS },
-      { id: "source.following_count", label: "Source Following Count", dataType: "number", operators: NUMBER_OPS },
-      { id: "source.verified", label: "Source Verified", dataType: "boolean", operators: BOOLEAN_OPS },
-      { id: "source.bio", label: "Source Bio", dataType: "string", operators: STRING_OPS },
-    ],
-  },
-];
+function propToField(propId: string, locale: Locale): TriggerFieldDefinition | null {
+  const prop = PROPS_X.find((p) => p.propId === propId);
+  if (!prop) return null;
 
-export function getTriggerType(type: string): TriggerTypeDefinition | undefined {
-  return TRIGGER_TYPES.find((t) => t.type === type);
+  if (prop.dataType === "ENUM") {
+    return {
+      id: propId,
+      label: t(prop.label, locale),
+      dataType: "enum",
+      operators: ENUM_OPS,
+      enums: prop.enums?.map((e) => ({ value: String(e.value), label: t(e.label, locale) })),
+    };
+  }
+
+  const dataType = prop.dataType === "INT" ? "number" : "string";
+  const operators = dataType === "number" ? NUMBER_OPS : STRING_OPS;
+  return { id: propId, label: t(prop.label, locale), dataType, operators };
+}
+
+export function getChannelTypes(locale: Locale = "en"): ChannelTypeDefinition[] {
+  const xEvents = METADATA_X
+    .filter((m) => m.flowType === "trigger")
+    .map((m) => ({
+      eventType: m.eventType,
+      label: t(m.label, locale),
+      description: m.description ? t(m.description, locale) : "",
+      contextFields: m.eventProps
+        .map((ep) => propToField(ep.propId, locale))
+        .filter(Boolean) as TriggerFieldDefinition[],
+    }));
+
+  return [
+    {
+      channelType: "X",
+      label: "X",
+      icon: "𝕏",
+      events: xEvents,
+    },
+  ];
+}
+
+export const CHANNEL_TYPES: ChannelTypeDefinition[] = getChannelTypes("en");
+
+export function getEventDefinition(eventType: string, locale: Locale = "en"): EventDefinition | undefined {
+  for (const ct of getChannelTypes(locale)) {
+    const ev = ct.events.find((e) => e.eventType === eventType);
+    if (ev) return ev;
+  }
+  return undefined;
 }

@@ -1,4 +1,4 @@
-import type { FieldDefinition, ParsedConditions } from "../metadata";
+import type { InsightField, ParsedConditions } from "../fields";
 
 export interface SqlResult {
   sql: string;
@@ -7,24 +7,19 @@ export interface SqlResult {
 
 export function buildSegmentQuery(
   conditions: ParsedConditions,
-  tenantId: string,
-  fields: FieldDefinition[]
+  fields: InsightField[]
 ): SqlResult {
   const needsEvent = conditions.conditions.some((c) => {
     const field = fields.find((f) => f.propId === c.field);
-    return field?.source === "event_x";
+    return field?.source === "event";
   });
 
-  let sql = "SELECT DISTINCT user_x.id FROM user_x";
+  let sql = "SELECT DISTINCT user.id FROM user";
   const params: unknown[] = [];
 
   if (needsEvent) {
-    sql += " INNER JOIN event_x ON event_x.user_id = user_x.id AND event_x.tenant_id = ?";
-    params.push(tenantId);
+    sql += " INNER JOIN event ON event.user_id = user.id";
   }
-
-  sql += " WHERE user_x.tenant_id = ?";
-  params.push(tenantId);
 
   const clauses: string[] = [];
 
@@ -65,7 +60,7 @@ export function buildSegmentQuery(
 
   const joiner = conditions.logic === "OR" ? " OR " : " AND ";
   if (clauses.length > 0) {
-    sql += ` AND (${clauses.join(joiner)})`;
+    sql += ` WHERE ${clauses.join(joiner)}`;
   }
 
   return { sql, params };

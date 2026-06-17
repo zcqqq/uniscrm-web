@@ -3,6 +3,8 @@ export interface Env {
   STRIPE_SECRET_KEY: string;
   STRIPE_WEBHOOK_SECRET: string;
   INTERNAL_SECRET: string;
+  CF_ACCOUNT_ID: string;
+  CF_D1_API_TOKEN: string;
 }
 
 export interface SubscriptionRow {

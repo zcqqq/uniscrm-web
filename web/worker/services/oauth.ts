@@ -11,7 +11,7 @@ export interface PendingOAuthData {
 
 export interface ResolveUserResult {
   memberId: string;
-  tenantId: string;
+  tenantId: number;
   isNew: boolean;
 }
 
@@ -55,7 +55,7 @@ export class OAuthService {
       const member = await this.db
         .prepare("SELECT tenant_id FROM members WHERE id = ?")
         .bind(existing.user_id)
-        .first<{ tenant_id: string }>();
+        .first<{ tenant_id: number }>();
       return { memberId: existing.user_id, tenantId: member!.tenant_id, isNew: false };
     }
 
@@ -63,7 +63,7 @@ export class OAuthService {
       const memberByEmail = await this.db
         .prepare("SELECT id, tenant_id FROM members WHERE email = ?")
         .bind(email)
-        .first<{ id: string; tenant_id: string }>();
+        .first<{ id: string; tenant_id: number }>();
 
       if (memberByEmail) {
         await this.db
@@ -77,14 +77,18 @@ export class OAuthService {
       }
     }
 
-    const tenantId = crypto.randomUUID();
     const memberId = crypto.randomUUID();
     const now = new Date().toISOString();
 
     await this.db
-      .prepare("INSERT INTO tenants (id, email, created_at) VALUES (?, ?, ?)")
-      .bind(tenantId, email, now)
+      .prepare("INSERT INTO tenants (email, created_at) VALUES (?, ?)")
+      .bind(email, now)
       .run();
+    const tenant = await this.db
+      .prepare("SELECT tenant_id FROM tenants WHERE email = ?")
+      .bind(email)
+      .first<{ tenant_id: number }>();
+    const tenantId = tenant!.tenant_id;
 
     await this.db
       .prepare("INSERT INTO members (id, tenant_id, email, preferred_location, created_at) VALUES (?, ?, ?, ?, ?)")

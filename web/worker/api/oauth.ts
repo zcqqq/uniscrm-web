@@ -53,7 +53,16 @@ export function createOAuthRouter() {
       return c.redirect("/settings");
     }
 
-    const { memberId, tenantId } = await oauthService.resolveUser("google", sub, email);
+    const { memberId, tenantId, isNew } = await oauthService.resolveUser("google", sub, email);
+    if (isNew) {
+      c.executionCtx.waitUntil(
+        fetch(`${c.env.ADMIN_URL}/internal/tenants/${tenantId}/provision-db`, {
+          method: "POST",
+          headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET },
+        }).then((r) => r.json()).then((d) => console.log("Tenant DB provisioned:", JSON.stringify(d)))
+         .catch((e) => console.error("Tenant DB provisioning failed:", e))
+      );
+    }
     const sessions = new SessionService(c.env.KV);
     const newSessionId = await sessions.create(memberId, tenantId, email);
 
@@ -124,7 +133,16 @@ export function createOAuthRouter() {
     const email = emailData.data?.email;
 
     if (email) {
-      const { memberId, tenantId } = await oauthService.resolveUser("x", xUserId, email);
+      const { memberId, tenantId, isNew } = await oauthService.resolveUser("x", xUserId, email);
+      if (isNew) {
+        c.executionCtx.waitUntil(
+          fetch(`${c.env.ADMIN_URL}/internal/tenants/${tenantId}/provision-db`, {
+            method: "POST",
+            headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET },
+          }).then((r) => r.json()).then((d) => console.log("Tenant DB provisioned:", JSON.stringify(d)))
+           .catch((e) => console.error("Tenant DB provisioning failed:", e))
+        );
+      }
       const sessions = new SessionService(c.env.KV);
       const newSessionId = await sessions.create(memberId, tenantId, email);
       setCookie(c, "session", newSessionId, {
@@ -293,8 +311,17 @@ export function createOAuthRouter() {
     }
 
     await c.env.KV.delete(`email_code:${email}`);
-    const { memberId, tenantId } = await oauthService.resolveUser(pending.provider, pending.providerUserId, email);
+    const { memberId, tenantId, isNew } = await oauthService.resolveUser(pending.provider, pending.providerUserId, email);
     await oauthService.deletePendingOAuth(pendingId);
+    if (isNew) {
+      c.executionCtx.waitUntil(
+        fetch(`${c.env.ADMIN_URL}/internal/tenants/${tenantId}/provision-db`, {
+          method: "POST",
+          headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET },
+        }).then((r) => r.json()).then((d) => console.log("Tenant DB provisioned:", JSON.stringify(d)))
+         .catch((e) => console.error("Tenant DB provisioning failed:", e))
+      );
+    }
 
     const sessions = new SessionService(c.env.KV);
     const newSessionId = await sessions.create(memberId, tenantId, email);

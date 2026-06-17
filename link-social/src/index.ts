@@ -9,9 +9,22 @@ import { TrendCache } from "./storage/cache";
 import { TrendVectorStore } from "./storage/vectorize";
 import { XUsersService } from "./services/x-users";
 import type { XUserData } from "./services/x-users";
+import { TenantDataDB } from "../../shared/tenant-data-db";
 import { XWebhookService, XActivityService } from "./services/x-webhook";
 import { XTokenService } from "./services/x-token";
 import { Twitter, generateState, generateCodeVerifier } from "arctic";
+
+function flattenUserPayload(userData?: Record<string, unknown>): Record<string, unknown> {
+  if (!userData) return {};
+  const pm = userData.public_metrics as Record<string, unknown> | undefined;
+  return {
+    name: String(userData.name || ""),
+    username: String(userData.username || ""),
+    followers_count: Number(userData.followers_count || pm?.followers_count || 0),
+    following_count: Number(userData.following_count || pm?.following_count || 0),
+    verified_type: String(userData.verified_type || (userData.verified ? "blue" : "none")),
+  };
+}
 
 interface CronResult {
   totalItems: number;
@@ -102,7 +115,6 @@ async function handleCron(env: Env): Promise<CronResult> {
 
 async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Promise<void> {
   console.log(JSON.stringify({ event: "xaa_webhook_received", body }));
-  const usersService = new XUsersService(env.DB, env.MAIGRET_QUEUE);
 
   // XAA webhook payload — try both { data: {...} } and top-level format
   const data = (body["data"] || body) as {
@@ -121,11 +133,20 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
     return;
   }
 
-  const channelId = await findChannelIdByXUserId(env.DB, filterUserId);
-  if (!channelId) {
+  const channelInfo = await findChannelByXUserId(env.DB, filterUserId);
+  if (!channelInfo) {
     console.log(JSON.stringify({ event: "xaa_webhook_no_channel", filterUserId }));
     return;
   }
+  const { channelId, tenantId, d1DatabaseId } = channelInfo;
+
+  if (!d1DatabaseId) {
+    console.log(JSON.stringify({ event: "xaa_webhook_no_tenant_db", filterUserId, tenantId }));
+    return;
+  }
+
+  const tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, d1DatabaseId);
+  const usersService = new XUsersService(tenantDb, env.MAIGRET_QUEUE);
 
   // Follow events: payload has { source: { data: {...} }, target: { data: {...} } }
   if (eventType === "follow.follow" || eventType === "follow.unfollow") {
@@ -143,14 +164,25 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
         username: userData.username as string | undefined,
         profile_image_url: userData.profile_image_url as string | undefined,
       });
+      const resolvedEventType = eventType === "follow.follow" ? "follow.follow" : "follow.unfollow";
       await usersService.insertEvents([{
         userId: userData.id as string,
         channelId,
-        eventType: eventType === "follow.follow" ? "follow.follow" : "follow.unfollow",
+        eventType: resolvedEventType,
         eventTime: new Date().toISOString(),
         rawData: userData,
       }]);
-      console.log(JSON.stringify({ event: "xaa_event_processed", eventType: "follow.follow", userId: userData.id }));
+
+      if (tenantId) {
+        await env.FLOW_QUEUE.send({
+          tenantId,
+          eventType: resolvedEventType,
+          userId: userData.id as string,
+          channelId,
+          payload: flattenUserPayload(userData),
+        });
+      }
+      console.log(JSON.stringify({ event: "xaa_event_processed", eventType: resolvedEventType, userId: userData.id }));
     } else if (targetId === filterUserId && source?.data) {
       // Someone followed/unfollowed the channel → record the source user
       const userData = source.data;
@@ -160,14 +192,25 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
         username: userData.username as string | undefined,
         profile_image_url: userData.profile_image_url as string | undefined,
       });
+      const resolvedEventType = eventType === "follow.follow" ? "follow.followed" : "follow.unfollowed";
       await usersService.insertEvents([{
         userId: userData.id as string,
         channelId,
-        eventType: eventType === "follow.follow" ? "follow.followed" : "follow.unfollowed",
+        eventType: resolvedEventType,
         eventTime: new Date().toISOString(),
         rawData: userData,
       }]);
-      console.log(JSON.stringify({ event: "xaa_event_processed", eventType: "follow.followed", userId: userData.id }));
+
+      if (tenantId) {
+        await env.FLOW_QUEUE.send({
+          tenantId,
+          eventType: resolvedEventType,
+          userId: userData.id as string,
+          channelId,
+          payload: flattenUserPayload(userData),
+        });
+      }
+      console.log(JSON.stringify({ event: "xaa_event_processed", eventType: resolvedEventType, userId: userData.id }));
     }
     return;
   }
@@ -209,12 +252,38 @@ function getCookieValue(request: Request, name: string): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-async function findChannelIdByXUserId(db: D1Database, xUserId: string): Promise<string | null> {
+async function resolveTenantDataDb(request: Request, env: Env): Promise<TenantDataDB | null> {
+  const sessionId = getCookieValue(request, "session");
+  if (!sessionId) return null;
+  const sessionData = await env.TREND_KV.get(`session:${sessionId}`);
+  if (!sessionData) return null;
+  const session = JSON.parse(sessionData) as { tenant_id?: string; member_id?: string; user_id?: string };
+  const tenantId = session.tenant_id || session.user_id;
+  if (!tenantId) return null;
+  const row = await env.DB.prepare("SELECT d1_database_id FROM tenants WHERE id = ?")
+    .bind(tenantId).first<{ d1_database_id: string | null }>();
+  if (!row?.d1_database_id) return null;
+  return new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, row.d1_database_id);
+}
+
+interface ChannelInfo {
+  channelId: string;
+  tenantId: string | null;
+  d1DatabaseId: string | null;
+}
+
+async function findChannelByXUserId(db: D1Database, xUserId: string): Promise<ChannelInfo | null> {
   const row = await db
-    .prepare(`SELECT id FROM channels WHERE channel_type IN ('TWITTER', 'X') AND external_channel_id = ?`)
+    .prepare(
+      `SELECT c.id, m.tenant_id, t.d1_database_id FROM channels c
+       LEFT JOIN members m ON m.id = c.user_id
+       LEFT JOIN tenants t ON t.id = m.tenant_id
+       WHERE c.channel_type IN ('TWITTER', 'X') AND c.original_channel_id = ?`
+    )
     .bind(xUserId)
-    .first<{ id: string }>();
-  return row?.id || null;
+    .first<{ id: string; tenant_id: string | null; d1_database_id: string | null }>();
+  if (!row) return null;
+  return { channelId: row.id, tenantId: row.tenant_id, d1DatabaseId: row.d1_database_id };
 }
 
 async function handleTokenRefresh(env: Env): Promise<void> {
@@ -255,6 +324,52 @@ async function handleTokenRefresh(env: Env): Promise<void> {
       }
     } catch (e) {
       console.error(`Token refresh failed for channel ${channel.id}:`, e);
+    }
+  }
+
+  // TikTok token refresh
+  const tiktokChannels = await env.DB
+    .prepare(`SELECT id, config FROM channels WHERE channel_type = 'TIKTOK'`)
+    .all<{ id: string; config: string }>();
+
+  for (const row of tiktokChannels.results) {
+    const config = JSON.parse(row.config) as { refresh_token?: string; expires_at?: string; open_id?: string; display_name?: string; avatar_url?: string; access_token?: string };
+    if (!config.refresh_token) continue;
+
+    const shouldRefresh = !config.expires_at ||
+      Date.now() > new Date(config.expires_at).getTime() - 30 * 60 * 1000;
+    if (!shouldRefresh) continue;
+
+    try {
+      const res = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_key: env.TIKTOK_CLIENT_KEY,
+          client_secret: env.TIKTOK_CLIENT_SECRET,
+          grant_type: "refresh_token",
+          refresh_token: config.refresh_token,
+        }),
+      });
+
+      if (!res.ok) {
+        console.error(`TikTok token refresh failed for ${row.id}: ${await res.text()}`);
+        continue;
+      }
+
+      const data = (await res.json()) as { access_token: string; refresh_token?: string; expires_in?: number };
+      config.access_token = data.access_token;
+      if (data.refresh_token) config.refresh_token = data.refresh_token;
+      if (data.expires_in) config.expires_at = new Date(Date.now() + data.expires_in * 1000).toISOString();
+
+      await env.DB
+        .prepare(`UPDATE channels SET config = ?, updated_at = datetime('now') WHERE id = ?`)
+        .bind(JSON.stringify(config), row.id)
+        .run();
+
+      console.log(JSON.stringify({ event: "tiktok_token_refreshed", channel_id: row.id }));
+    } catch (e) {
+      console.error(`TikTok token refresh error for ${row.id}:`, e);
     }
   }
 }
@@ -307,8 +422,8 @@ export default {
       });
     }
 
-    // Channel API: Twitter status (no auth needed)
-    if (url.pathname === "/api/channels/twitter/status" && request.method === "GET") {
+    // Channel API: X status (no auth needed)
+    if (url.pathname === "/api/channels/x/status" && request.method === "GET") {
       const row = await env.DB
         .prepare(`SELECT id, config FROM channels WHERE channel_type IN ('TWITTER', 'X') LIMIT 1`)
         .first<{ id: string; config: string }>();
@@ -319,8 +434,8 @@ export default {
       return Response.json({ connected: true, username: config.x_username, channel_id: row.id });
     }
 
-    // Channel API: Disconnect Twitter
-    if (url.pathname === "/api/channels/twitter" && request.method === "DELETE") {
+    // Channel API: Disconnect X
+    if (url.pathname === "/api/channels/x" && request.method === "DELETE") {
       await env.DB
         .prepare(`DELETE FROM channels WHERE channel_type IN ('TWITTER', 'X')`)
         .run();
@@ -328,9 +443,20 @@ export default {
       return Response.json({ ok: true });
     }
 
-    // Channel: Connect Twitter — OAuth 2.0 PKCE flow
-    if (url.pathname === "/channel/twitter/connect" && request.method === "GET") {
-      const twitter = new Twitter(env.X_CLIENT_ID, env.X_CLIENT_SECRET, `${url.origin}/channel/twitter/callback`);
+    // Channel: Connect X — OAuth 2.0 PKCE flow
+    if (url.pathname === "/channel/x/connect" && request.method === "GET") {
+      // Read tenant_id from session
+      const sessionId = getCookieValue(request, "session");
+      let tenantId: string | null = null;
+      if (sessionId) {
+        const sessionData = await env.TREND_KV.get(`session:${sessionId}`);
+        if (sessionData) {
+          const session = JSON.parse(sessionData) as { tenant_id?: string };
+          tenantId = session.tenant_id || null;
+        }
+      }
+
+      const twitter = new Twitter(env.X_CLIENT_ID, env.X_CLIENT_SECRET, `${url.origin}/channel/x/callback`);
       const state = generateState();
       const codeVerifier = generateCodeVerifier();
       const arcticUrl = twitter.createAuthorizationURL(state, codeVerifier, [
@@ -338,14 +464,14 @@ export default {
       ]);
       const oauthUrl = new URL(arcticUrl.toString().replace("https://twitter.com/", "https://x.com/"));
 
-      // Store state + verifier in KV (5 min TTL)
-      await env.TREND_KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier }), { expirationTtl: 300 });
+      // Store state + verifier + tenant_id in KV (5 min TTL)
+      await env.TREND_KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier, tenantId }), { expirationTtl: 300 });
 
       return Response.redirect(oauthUrl.toString(), 302);
     }
 
-    // Channel: Twitter OAuth callback
-    if (url.pathname === "/channel/twitter/callback" && request.method === "GET") {
+    // Channel: X OAuth callback
+    if (url.pathname === "/channel/x/callback" && request.method === "GET") {
       const code = url.searchParams.get("code");
       const state = url.searchParams.get("state");
       if (!code || !state) return Response.json({ error: "Missing code or state" }, { status: 400 });
@@ -353,9 +479,9 @@ export default {
       const stored = await env.TREND_KV.get(`oauth_state:${state}`);
       if (!stored) return Response.json({ error: "Invalid or expired state" }, { status: 400 });
       await env.TREND_KV.delete(`oauth_state:${state}`);
-      const { codeVerifier } = JSON.parse(stored) as { codeVerifier: string };
+      const { codeVerifier, tenantId } = JSON.parse(stored) as { codeVerifier: string; tenantId?: string };
 
-      const twitter = new Twitter(env.X_CLIENT_ID, env.X_CLIENT_SECRET, `${url.origin}/channel/twitter/callback`);
+      const twitter = new Twitter(env.X_CLIENT_ID, env.X_CLIENT_SECRET, `${url.origin}/channel/x/callback`);
       const tokens = await twitter.validateAuthorizationCode(code, codeVerifier);
 
       // Get user info
@@ -384,15 +510,15 @@ export default {
 
       const channelId = crypto.randomUUID();
       await env.DB
-        .prepare(`INSERT INTO channels (id, user_id, channel_type, config, external_channel_id, created_at, updated_at)
-           VALUES (?, 'system', 'X', ?, ?, datetime('now'), datetime('now'))
-           ON CONFLICT(user_id, channel_type) DO UPDATE SET config = excluded.config, external_channel_id = excluded.external_channel_id, updated_at = datetime('now')`)
-        .bind(channelId, config, xUser.id)
+        .prepare(`INSERT INTO channels (id, user_id, channel_type, config, original_channel_id, tenant_id, created_at, updated_at)
+           VALUES (?, 'system', 'X', ?, ?, ?, datetime('now'), datetime('now'))
+           ON CONFLICT(user_id, channel_type) DO UPDATE SET config = excluded.config, original_channel_id = excluded.original_channel_id, tenant_id = excluded.tenant_id, updated_at = datetime('now')`)
+        .bind(channelId, config, xUser.id, tenantId || null)
         .run();
 
       // Get actual channel ID after upsert
       const row = await env.DB
-        .prepare(`SELECT id FROM channels WHERE channel_type IN ('X', 'TWITTER') AND external_channel_id = ?`)
+        .prepare(`SELECT id FROM channels WHERE channel_type IN ('X', 'TWITTER') AND original_channel_id = ?`)
         .bind(xUser.id)
         .first<{ id: string }>();
       const actualChannelId = row?.id || channelId;
@@ -423,53 +549,177 @@ export default {
       return Response.redirect(url.origin, 302);
     }
 
+    // TikTok Channel: status
+    if (url.pathname === "/api/channels/tiktok/status" && request.method === "GET") {
+      const row = await env.DB
+        .prepare(`SELECT id, config FROM channels WHERE channel_type = 'TIKTOK' LIMIT 1`)
+        .first<{ id: string; config: string }>();
+
+      if (!row) return Response.json({ connected: false });
+      const config = JSON.parse(row.config) as { display_name?: string };
+      return Response.json({ connected: true, displayName: config.display_name, channel_id: row.id });
+    }
+
+    // TikTok Channel: disconnect
+    if (url.pathname === "/api/channels/tiktok" && request.method === "DELETE") {
+      await env.DB.prepare(`DELETE FROM channels WHERE channel_type = 'TIKTOK'`).run();
+      return Response.json({ ok: true });
+    }
+
+    // TikTok Channel: OAuth connect
+    if (url.pathname === "/channel/tiktok/connect" && request.method === "GET") {
+      const sessionId = getCookieValue(request, "session");
+      let tenantId: string | null = null;
+      if (sessionId) {
+        const sessionData = await env.TREND_KV.get(`session:${sessionId}`);
+        if (sessionData) {
+          const session = JSON.parse(sessionData) as { tenant_id?: string };
+          tenantId = session.tenant_id || null;
+        }
+      }
+
+      const state = crypto.randomUUID();
+      await env.TREND_KV.put(`oauth_state:${state}`, JSON.stringify({ tenantId, provider: "tiktok" }), { expirationTtl: 300 });
+
+      const redirectUri = encodeURIComponent(`${url.origin}/channel/tiktok/callback`);
+      const tiktokUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${env.TIKTOK_CLIENT_KEY}&scope=user.info.basic,video.list&response_type=code&redirect_uri=${redirectUri}&state=${state}`;
+
+      return Response.redirect(tiktokUrl, 302);
+    }
+
+    // TikTok Channel: OAuth callback
+    if (url.pathname === "/channel/tiktok/callback" && request.method === "GET") {
+      const code = url.searchParams.get("code");
+      const state = url.searchParams.get("state");
+      if (!code || !state) return Response.json({ error: "Missing code or state" }, { status: 400 });
+
+      const stored = await env.TREND_KV.get(`oauth_state:${state}`);
+      if (!stored) return Response.json({ error: "Invalid or expired state" }, { status: 400 });
+      await env.TREND_KV.delete(`oauth_state:${state}`);
+      const { tenantId } = JSON.parse(stored) as { tenantId?: string };
+
+      // Exchange code for token
+      const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_key: env.TIKTOK_CLIENT_KEY,
+          client_secret: env.TIKTOK_CLIENT_SECRET,
+          code,
+          grant_type: "authorization_code",
+          redirect_uri: `${url.origin}/channel/tiktok/callback`,
+        }),
+      });
+
+      if (!tokenRes.ok) {
+        const err = await tokenRes.text();
+        return Response.json({ error: `Token exchange failed: ${err}` }, { status: 400 });
+      }
+
+      const tokenData = (await tokenRes.json()) as {
+        open_id: string;
+        access_token: string;
+        refresh_token?: string;
+        expires_in?: number;
+      };
+
+      // Fetch user info
+      const userRes = await fetch("https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url", {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      const userData = (await userRes.json()) as { data?: { user?: { open_id: string; display_name: string; avatar_url?: string } } };
+      const tiktokUser = userData.data?.user;
+
+      const openId = tiktokUser?.open_id || tokenData.open_id;
+      const displayName = tiktokUser?.display_name || "";
+      const avatarUrl = tiktokUser?.avatar_url || "";
+
+      const expiresAt = tokenData.expires_in
+        ? new Date(Date.now() + tokenData.expires_in * 1000).toISOString()
+        : new Date(Date.now() + 86400 * 1000).toISOString();
+
+      const config = JSON.stringify({
+        open_id: openId,
+        display_name: displayName,
+        avatar_url: avatarUrl,
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token || null,
+        expires_at: expiresAt,
+      });
+
+      const channelId = crypto.randomUUID();
+      await env.DB
+        .prepare(`INSERT INTO channels (id, user_id, channel_type, config, original_channel_id, tenant_id, created_at, updated_at)
+           VALUES (?, 'system', 'TIKTOK', ?, ?, ?, datetime('now'), datetime('now'))
+           ON CONFLICT(user_id, channel_type) DO UPDATE SET config = excluded.config, original_channel_id = excluded.original_channel_id, tenant_id = excluded.tenant_id, updated_at = datetime('now')`)
+        .bind(channelId, config, openId, tenantId ? parseInt(tenantId) : null)
+        .run();
+
+      // Trigger link-content to sync TikTok videos
+      try {
+        const contentUrl = env.WEB_URL.replace("web-dev", "content-dev").replace("web.", "content.");
+        await fetch(`${contentUrl}/api/internal/tiktok/sync`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch (e) {
+        console.error("TikTok content sync trigger failed:", e);
+      }
+
+      return Response.redirect(url.origin, 302);
+    }
+
     // Users API: paginated list
     if (url.pathname === "/api/users" && request.method === "GET") {
+      const tdb = await resolveTenantDataDb(request, env);
+      if (!tdb) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
       const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
       const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get("limit") || "20", 10)));
       const offset = (page - 1) * limit;
 
-      const countRow = await env.DB.prepare(`SELECT COUNT(*) as total FROM user_x`).first<{ total: number }>();
-      const total = countRow?.total || 0;
+      const countRows = await tdb.query<{ total: number }>(`SELECT COUNT(*) as total FROM user`);
+      const total = countRows[0]?.total || 0;
 
-      const rows = await env.DB
-        .prepare(`SELECT id, name, username, profile_image_url, updated_at FROM user_x ORDER BY updated_at DESC LIMIT ? OFFSET ?`)
-        .bind(limit, offset)
-        .all<{ id: string; name: string; username: string; profile_image_url: string; updated_at: string }>();
+      const rows = await tdb.query<{ id: string; name: string; username: string; profile_image_url: string; updated_at: string }>(
+        `SELECT id, name, username, profile_image_url, updated_at FROM user ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
+        [limit, offset]
+      );
 
-      return Response.json({
-        users: rows.results,
-        total,
-        page,
-        totalPages: Math.ceil(total / limit),
-      });
+      return Response.json({ users: rows, total, page, totalPages: Math.ceil(total / limit) });
     }
 
     // Users API: single user detail
     if (url.pathname.match(/^\/api\/users\/[^/]+$/) && request.method === "GET") {
-      const userId = url.pathname.split("/").pop()!;
-      const user = await env.DB
-        .prepare(`SELECT id, name, username, profile_image_url, socials, maigret_status, raw_data, created_at, updated_at FROM user_x WHERE id = ?`)
-        .bind(userId)
-        .first();
+      const tdb = await resolveTenantDataDb(request, env);
+      if (!tdb) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-      if (!user) return Response.json({ error: "Not found" }, { status: 404 });
-      return Response.json({ user });
+      const userId = url.pathname.split("/").pop()!;
+      const rows = await tdb.query(
+        `SELECT id, name, username, profile_image_url, socials, maigret_status, raw_data, created_at, updated_at FROM user WHERE id = ?`,
+        [userId]
+      );
+
+      if (rows.length === 0) return Response.json({ error: "Not found" }, { status: 404 });
+      return Response.json({ user: rows[0] });
     }
 
     // Users API: user events with offset pagination
     if (url.pathname.match(/^\/api\/users\/[^/]+\/events$/) && request.method === "GET") {
+      const tdb = await resolveTenantDataDb(request, env);
+      if (!tdb) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
       const userId = url.pathname.split("/")[3];
       const offset = Math.max(0, parseInt(url.searchParams.get("offset") || "0", 10));
       const limit = Math.min(200, Math.max(1, parseInt(url.searchParams.get("limit") || "100", 10)));
 
-      const rows = await env.DB
-        .prepare(`SELECT id, event_type, event_time, raw_data, created_at FROM event_x WHERE user_id = ? ORDER BY event_time DESC LIMIT ? OFFSET ?`)
-        .bind(userId, limit + 1, offset)
-        .all<{ id: string; event_type: string; event_time: string; raw_data: string; created_at: string }>();
+      const rows = await tdb.query<{ id: string; event_type: string; event_time: string; raw_data: string; created_at: string }>(
+        `SELECT id, event_type, event_time, raw_data, created_at FROM event WHERE user_id = ? ORDER BY event_time DESC LIMIT ? OFFSET ?`,
+        [userId, limit + 1, offset]
+      );
 
-      const hasMore = rows.results.length > limit;
-      const events = hasMore ? rows.results.slice(0, limit) : rows.results;
+      const hasMore = rows.length > limit;
+      const events = hasMore ? rows.slice(0, limit) : rows;
 
       return Response.json({ events, hasMore });
     }
@@ -480,25 +730,29 @@ export default {
       if (secret !== env.INTERNAL_SECRET) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
-      const limit = Math.min(100, parseInt(url.searchParams.get("limit") || "50", 10));
-      const rows = await env.DB
-        .prepare(`SELECT id, username FROM user_x WHERE maigret_status IN ('pending', 'failed') AND username IS NOT NULL LIMIT ?`)
-        .bind(limit)
-        .all<{ id: string; username: string }>();
+      const tenantDbId = url.searchParams.get("db_id");
+      if (!tenantDbId) return Response.json({ error: "db_id required" }, { status: 400 });
 
-      if (rows.results.length > 0) {
-        const messages = rows.results.map((r) => ({ body: { user_id: r.id, username: r.username } }));
+      const tdb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenantDbId);
+      const limit = Math.min(100, parseInt(url.searchParams.get("limit") || "50", 10));
+      const rows = await tdb.query<{ id: string; username: string }>(
+        `SELECT id, username FROM user WHERE maigret_status IN ('pending', 'failed') AND username IS NOT NULL LIMIT ?`,
+        [limit]
+      );
+
+      if (rows.length > 0) {
+        const messages = rows.map((r) => ({ body: { user_id: r.id, username: r.username, db_id: tenantDbId } }));
         await env.MAIGRET_QUEUE.sendBatch(messages);
 
-        const ids = rows.results.map((r) => r.id);
+        const ids = rows.map((r) => r.id);
         const placeholders = ids.map(() => "?").join(",");
-        await env.DB
-          .prepare(`UPDATE user_x SET maigret_status = 'running' WHERE id IN (${placeholders})`)
-          .bind(...ids)
-          .run();
+        await tdb.run(
+          `UPDATE user SET maigret_status = 'running' WHERE id IN (${placeholders})`,
+          ids
+        );
       }
 
-      return Response.json({ queued: rows.results.length });
+      return Response.json({ queued: rows.length });
     }
 
     // Users API: write maigret socials results (internal)
@@ -508,14 +762,59 @@ export default {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
       const userId = url.pathname.split("/")[3];
-      const { socials, status } = await request.json() as { socials: Record<string, string>; status: string };
+      const { socials, status, db_id } = await request.json() as { socials: Record<string, string>; status: string; db_id: string };
+      if (!db_id) return Response.json({ error: "db_id required" }, { status: 400 });
 
-      await env.DB
-        .prepare(`UPDATE user_x SET socials = ?, maigret_status = ?, updated_at = datetime('now') WHERE id = ?`)
-        .bind(JSON.stringify(socials), status, userId)
-        .run();
+      const tdb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, db_id);
+      await tdb.run(
+        `UPDATE user SET socials = ?, maigret_status = ?, updated_at = datetime('now') WHERE id = ?`,
+        [JSON.stringify(socials), status, userId]
+      );
 
       return Response.json({ ok: true });
+    }
+
+    // Internal: X follow/unfollow action
+    if (url.pathname === "/internal/x/action" && request.method === "POST") {
+      const secret = request.headers.get("X-Internal-Secret");
+      if (secret !== env.INTERNAL_SECRET) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      const { channelId, targetUserId, action } = await request.json() as {
+        channelId: string; targetUserId: string; action: "follow" | "unfollow";
+      };
+      if (!channelId || !targetUserId || !action) {
+        return Response.json({ error: "channelId, targetUserId, action required" }, { status: 400 });
+      }
+
+      const channel = await env.DB.prepare(`SELECT config FROM channels WHERE id = ?`)
+        .bind(channelId).first<{ config: string }>();
+      if (!channel) return Response.json({ error: "Channel not found" }, { status: 404 });
+
+      const config = JSON.parse(channel.config);
+      const sourceUserId = config.x_user_id;
+      if (!sourceUserId) return Response.json({ error: "Channel has no X user ID" }, { status: 400 });
+
+      const tokenService = new XTokenService(env.DB, env.X_CLIENT_ID, env.X_CLIENT_SECRET);
+      const accessToken = await tokenService.getValidToken(channelId);
+
+      let xRes: Response;
+      if (action === "follow") {
+        xRes = await fetch(`https://api.x.com/2/users/${sourceUserId}/following`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ target_user_id: targetUserId }),
+        });
+      } else {
+        xRes = await fetch(`https://api.x.com/2/users/${sourceUserId}/following/${targetUserId}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+      }
+
+      const xBody = await xRes.json();
+      console.log(JSON.stringify({ event: "x_action_executed", action, sourceUserId, targetUserId, status: xRes.status }));
+      return Response.json({ ok: xRes.ok, status: xRes.status, data: xBody });
     }
 
     // Auth check for page requests — redirect to login if no session

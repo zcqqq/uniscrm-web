@@ -6,9 +6,9 @@ export function createRecommendationsRouter() {
   const router = new Hono<{ Bindings: Env }>();
 
   router.get("/", async (c) => {
-    const memberId = c.get("memberId" as never) as string;
+    const tenantId = c.get("tenantId" as never) as number;
     const service = new RecommendService(c.env.DB, c.env.VECTORIZE, c.env.KV);
-    const recommendations = await service.getForUser(memberId);
+    const recommendations = await service.getForTenant(tenantId);
     return c.json({ recommendations });
   });
 

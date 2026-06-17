@@ -1,4 +1,4 @@
-import type { FieldDefinition, ParsedConditions, Condition, Operator } from "../metadata";
+import type { InsightField, ParsedConditions, Condition, Operator } from "../fields";
 
 const MAX_CONDITIONS = 10;
 
@@ -21,7 +21,7 @@ export interface ValidationError {
 
 export function validateConditions(
   parsed: ParsedConditions,
-  fields: FieldDefinition[]
+  fields: InsightField[]
 ): ValidationResult | ValidationError {
   const errors: string[] = [];
 
@@ -47,7 +47,7 @@ export function validateConditions(
   return { valid: true, conditions: parsed };
 }
 
-function validateCondition(cond: Condition, fields: FieldDefinition[], errors: string[]): void {
+function validateCondition(cond: Condition, fields: InsightField[], errors: string[]): void {
   const field = fields.find((f) => f.propId === cond.field);
   if (!field) {
     errors.push(`Unknown field: "${cond.field}"`);

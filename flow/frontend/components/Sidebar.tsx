@@ -1,4 +1,4 @@
-import { TRIGGER_TYPES } from "../config/trigger-fields";
+import { CHANNEL_TYPES } from "../config/trigger-fields";
 
 interface DraggableItemProps {
   type: string;
@@ -34,26 +34,65 @@ export default function Sidebar() {
     <aside className="w-60 border-r border-gray-200 bg-white p-4 overflow-y-auto">
       <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Triggers</h3>
       <div className="space-y-2 mb-6">
-        {TRIGGER_TYPES.map((t) => (
+        {CHANNEL_TYPES.map((ct) => (
           <DraggableItem
-            key={t.type}
-            type={t.type}
-            label={t.label}
-            description={t.description}
+            key={ct.channelType}
+            type={`trigger:${ct.channelType}`}
+            label={ct.label}
+            description={`${ct.events.length} events`}
             color="border-purple-200 bg-purple-50/50"
-            icon="⚡"
+            icon={ct.icon}
           />
         ))}
       </div>
 
-      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Logic</h3>
-      <div className="space-y-2">
+      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Conditions</h3>
+      <div className="space-y-2 mb-6">
         <DraggableItem
           type="condition"
-          label="Condition"
+          label="Event Props"
           description="Filter based on event fields"
           color="border-amber-200 bg-amber-50/50"
           icon="🔀"
+        />
+        <DraggableItem
+          type="eventHistory"
+          label="Event Occurrence"
+          description="Check if event has occurred"
+          color="border-indigo-200 bg-indigo-50/50"
+          icon="🔍"
+        />
+        <DraggableItem
+          type="wait"
+          label="Wait"
+          description="Delay for a specified duration"
+          color="border-sky-200 bg-sky-50/50"
+          icon="⏳"
+        />
+      </div>
+
+      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Actions</h3>
+      <div className="space-y-2">
+        <DraggableItem
+          type="addPoint"
+          label="Add Point"
+          description="Increment user point by 1"
+          color="border-green-200 bg-green-50/50"
+          icon="🎯"
+        />
+        <DraggableItem
+          type="addToList"
+          label="Add to List"
+          description="Add user to a profile list"
+          color="border-green-200 bg-green-50/50"
+          icon="📋"
+        />
+        <DraggableItem
+          type="xAction"
+          label="X Action"
+          description="Follow or unfollow user on X"
+          color="border-green-200 bg-green-50/50"
+          icon="𝕏"
         />
       </div>
     </aside>

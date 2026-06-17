@@ -1,5 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import "./lib/i18n";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
+import { Nav as SharedNav } from "../../shared/frontend/Nav";
 import { Login } from "./pages/Login";
 import { Verify } from "./pages/Verify";
 import { Home } from "./pages/Home";
@@ -7,32 +9,27 @@ import { CompleteProfile } from "./pages/CompleteProfile";
 import { Settings } from "./pages/Settings";
 import { Billing } from "./pages/Billing";
 
+const urls = {
+  web: "",
+  linkSocial: import.meta.env.VITE_LINK_SOCIAL_URL || "https://link-social-dev.uni-scrm.com",
+  profile: import.meta.env.VITE_PROFILE_URL || "https://profile-dev.uni-scrm.com",
+  insightSegment: import.meta.env.VITE_INSIGHT_SEGMENT_URL || "https://insight-segment-dev.uni-scrm.com",
+  flow: import.meta.env.VITE_FLOW_URL || "https://flow-dev.uni-scrm.com",
+  content: import.meta.env.VITE_CONTENT_URL || "https://content-dev.uni-scrm.com",
+  commerce: import.meta.env.VITE_COMMERCE_URL || "https://commerce-dev.uni-scrm.com",
+};
+
 function Nav() {
-  const { member, logout, updateLocation } = useAuth();
+  const { member } = useAuth();
   if (!member) return null;
-  return (
-    <nav className="bg-white border-b px-8 py-3 flex items-center justify-between">
-      <div className="flex gap-6">
-        <a href="/" className="font-semibold text-black">Recommendation</a>
-        <a href={import.meta.env.VITE_CONTENT_URL} className="text-gray-500 hover:text-black">Content</a>
-        <a href={import.meta.env.VITE_COMMERCE_URL} className="text-gray-500 hover:text-black">Commerce</a>
-        <a href="/billing" className="text-gray-500 hover:text-black">Billing</a>
-        <a href="/settings" className="text-gray-500 hover:text-black">Settings</a>
-      </div>
-      <div className="flex items-center gap-4">
-        <select
-          value={member.preferred_location}
-          onChange={(e) => updateLocation(e.target.value)}
-          className="text-xs border rounded px-2 py-1"
-        >
-          <option value="global">Global</option>
-          <option value="china">China</option>
-        </select>
-        <span className="text-sm text-gray-500">{member.email}</span>
-        <button onClick={logout} className="text-sm text-gray-400 hover:text-black">Logout</button>
-      </div>
-    </nav>
-  );
+  const path = window.location.pathname;
+  const currentModule = path.startsWith("/recommendations") ? "content" as const : "settings" as const;
+  return <SharedNav urls={urls} currentModule={currentModule} />;
+}
+
+function Redirect({ url }: { url: string }) {
+  window.location.href = url;
+  return null;
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -58,6 +55,14 @@ export function App() {
           <Route path="/auth/complete-profile" element={<CompleteProfile />} />
           <Route
             path="/"
+            element={
+              <ProtectedRoute>
+                <Redirect url={urls.linkSocial} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/recommendations"
             element={
               <ProtectedRoute>
                 <Home />

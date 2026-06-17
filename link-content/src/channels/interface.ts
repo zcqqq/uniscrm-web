@@ -1,11 +1,12 @@
 import type { ChannelType } from "../types";
 
 export interface ChannelItem {
-  channel_source_id: string;
+  source_content_id: string;
   title: string;
   summary: string | null;
   source_url: string | null;
-  source_modified_at: string | null;
+  source_updated_at: string | null;
+  raw_data?: Record<string, unknown>;
 }
 
 export interface ContentChannel {

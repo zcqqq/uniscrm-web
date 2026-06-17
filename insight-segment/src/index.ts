@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Env } from "./types";
-import { getAllFields } from "./metadata";
+import { getAllFields } from "./fields";
 import { parseNaturalLanguage } from "./services/nl-parser";
 import { validateConditions } from "./services/validator";
 import { buildSegmentQuery } from "./services/sql-builder";
+import { TenantDataDB } from "../../shared/tenant-data-db";
 
-type HonoEnv = { Bindings: Env; Variables: { tenantId: string; memberId: string } };
+type HonoEnv = { Bindings: Env; Variables: { tenantId: string; memberId: string; tenantDataDb: TenantDataDB } };
 
 const app = new Hono<HonoEnv>();
 app.use("*", cors());
@@ -18,7 +19,7 @@ function getCookieValue(request: Request, name: string): string | null {
 }
 
 // Auth middleware for /api/segments routes
-app.use("/api/segments", async (c, next) => {
+async function segmentAuth(c: any, next: any) {
   const cookie = c.req.raw.headers.get("Cookie") || "";
   const webUrl = c.env.WEB_URL || "https://web-dev.uni-scrm.com";
   const res = await fetch(`${webUrl}/api/auth/me`, {
@@ -29,21 +30,16 @@ app.use("/api/segments", async (c, next) => {
   if (!data.member?.id || !data.tenant?.id) return c.json({ error: "Unauthorized" }, 401);
   c.set("tenantId", data.tenant.id);
   c.set("memberId", data.member.id);
+
+  const row = await (c.env.DB as D1Database).prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+    .bind(Number(data.tenant.id))
+    .first<{ d1_database_id: string | null }>();
+  if (!row?.d1_database_id) return c.json({ error: "Tenant DB not provisioned" }, 503);
+  c.set("tenantDataDb", new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, row.d1_database_id));
   await next();
-});
-app.use("/api/segments/*", async (c, next) => {
-  const cookie = c.req.raw.headers.get("Cookie") || "";
-  const webUrl = c.env.WEB_URL || "https://web-dev.uni-scrm.com";
-  const res = await fetch(`${webUrl}/api/auth/me`, {
-    headers: { Cookie: cookie },
-  });
-  if (!res.ok) return c.json({ error: "Unauthorized" }, 401);
-  const data = (await res.json()) as { member?: { id?: string }; tenant?: { id?: string } };
-  if (!data.member?.id || !data.tenant?.id) return c.json({ error: "Unauthorized" }, 401);
-  c.set("tenantId", data.tenant.id);
-  c.set("memberId", data.member.id);
-  await next();
-});
+}
+app.use("/api/segments", segmentAuth);
+app.use("/api/segments/*", segmentAuth);
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
@@ -103,7 +99,7 @@ app.post("/api/segments", async (c) => {
     return c.json({ errors: validation.errors, stage: "validate" }, 422);
   }
 
-  const { sql, params } = buildSegmentQuery(validation.conditions, tenantId, fields);
+  const { sql, params } = buildSegmentQuery(validation.conditions, fields);
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
@@ -147,20 +143,16 @@ app.post("/api/segments/preview", async (c) => {
     return c.json({ errors: validation.errors, stage: "validate" }, 422);
   }
 
-  const { sql, params } = buildSegmentQuery(validation.conditions, tenantId, fields);
+  const { sql, params } = buildSegmentQuery(validation.conditions, fields);
 
-  const countSql = `SELECT COUNT(DISTINCT user_x.id) as cnt FROM (${sql.replace("SELECT DISTINCT user_x.id FROM", "SELECT user_x.id FROM")}) sub`;
-  // Simpler approach: wrap with count
-  const countResult = await c.env.DB.prepare(
-    sql.replace("SELECT DISTINCT user_x.id", "SELECT COUNT(DISTINCT user_x.id) as cnt")
-  )
-    .bind(...params)
-    .first<{ cnt: number }>();
+  const tenantDataDb = c.get("tenantDataDb");
+  const countSql = sql.replace("SELECT DISTINCT user.id", "SELECT COUNT(DISTINCT user.id) as cnt");
+  const countRows = await tenantDataDb.query<{ cnt: number }>(countSql, params);
 
   return c.json({
     conditions: validation.conditions,
     sql_query: sql,
-    estimated_count: countResult?.cnt || 0,
+    estimated_count: countRows[0]?.cnt || 0,
   });
 });
 
@@ -197,29 +189,25 @@ app.post("/api/segments/:id/compute", async (c) => {
     .run();
 
   try {
+    const tenantDataDb = c.get("tenantDataDb");
     const conditions = JSON.parse(segment.conditions_json);
     const fields = getAllFields();
-    const { sql, params } = buildSegmentQuery(conditions, tenantId, fields);
+    const { sql, params } = buildSegmentQuery(conditions, fields);
 
-    const rows = await c.env.DB.prepare(sql)
-      .bind(...params)
-      .all<{ id: string }>();
+    const rows = await tenantDataDb.query<{ id: string }>(sql, params);
+    const userIds = rows.map((r) => r.id).slice(0, 10000);
 
-    const userIds = rows.results.map((r) => r.id).slice(0, 10000);
+    await tenantDataDb.run(`DELETE FROM segment_users WHERE segment_id = ?`, [segmentId]);
 
-    // Clear old results
-    await c.env.DB.prepare(`DELETE FROM segment_users WHERE segment_id = ?`).bind(segmentId).run();
-
-    // Batch insert using db.batch() — each statement has only 3 bind params
     const now = new Date().toISOString();
     const BATCH_SIZE = 50;
     for (let i = 0; i < userIds.length; i += BATCH_SIZE) {
       const batch = userIds.slice(i, i + BATCH_SIZE);
-      const stmts = batch.map((uid) =>
-        c.env.DB.prepare(`INSERT OR IGNORE INTO segment_users (segment_id, user_id, created_at) VALUES (?, ?, ?)`)
-          .bind(segmentId, uid, now)
-      );
-      await c.env.DB.batch(stmts);
+      const stmts = batch.map((uid) => ({
+        sql: `INSERT OR IGNORE INTO segment_users (segment_id, user_id, created_at) VALUES (?, ?, ?)`,
+        params: [segmentId, uid, now],
+      }));
+      await tenantDataDb.batch(stmts);
     }
 
     await c.env.DB.prepare(
@@ -248,7 +236,7 @@ app.get("/api/segments/:id/users", async (c) => {
   const limit = Math.min(100, Math.max(1, parseInt(c.req.query("limit") || "20", 10)));
   const offset = (page - 1) * limit;
 
-  // Verify segment belongs to tenant
+  // Verify segment belongs to tenant (main DB)
   const segment = await c.env.DB.prepare(
     `SELECT id FROM segments WHERE id = ? AND tenant_id = ?`
   )
@@ -256,27 +244,27 @@ app.get("/api/segments/:id/users", async (c) => {
     .first();
   if (!segment) return c.json({ error: "Not found" }, 404);
 
-  const rows = await c.env.DB.prepare(
+  const tenantDataDb = c.get("tenantDataDb");
+  const rows = await tenantDataDb.query(
     `SELECT u.id, u.name, u.username, u.profile_image_url
      FROM segment_users su
-     INNER JOIN user_x u ON u.id = su.user_id
+     INNER JOIN user u ON u.id = su.user_id
      WHERE su.segment_id = ?
-     ORDER BY su.created_at DESC LIMIT ? OFFSET ?`
-  )
-    .bind(segmentId, limit, offset)
-    .all();
+     ORDER BY su.created_at DESC LIMIT ? OFFSET ?`,
+    [segmentId, limit, offset]
+  );
 
-  const countRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) as total FROM segment_users WHERE segment_id = ?`
-  )
-    .bind(segmentId)
-    .first<{ total: number }>();
+  const countRows = await tenantDataDb.query<{ total: number }>(
+    `SELECT COUNT(*) as total FROM segment_users WHERE segment_id = ?`,
+    [segmentId]
+  );
+  const total = countRows[0]?.total || 0;
 
   return c.json({
-    users: rows.results,
-    total: countRow?.total || 0,
+    users: rows,
+    total,
     page,
-    totalPages: Math.ceil((countRow?.total || 0) / limit),
+    totalPages: Math.ceil(total / limit),
   });
 });
 

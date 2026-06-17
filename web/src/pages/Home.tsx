@@ -1,4 +1,5 @@
 import { useRecommendations } from "../hooks/useRecommendations";
+import { useAuth } from "../hooks/useAuth";
 
 function ScoreBadge({ score }: { score: number }) {
   return (
@@ -9,6 +10,7 @@ function ScoreBadge({ score }: { score: number }) {
 }
 
 export function Home() {
+  const { member, updateLocation } = useAuth();
   const { recommendations, loading } = useRecommendations();
 
   if (loading) {
@@ -26,7 +28,17 @@ export function Home() {
 
   return (
     <div className="max-w-5xl mx-auto p-8">
-      <h1 className="text-2xl font-bold mb-6">Top Recommendations</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">Top Recommendations</h1>
+        <select
+          value={member?.preferred_location}
+          onChange={(e) => updateLocation(e.target.value)}
+          className="text-sm border rounded px-3 py-1.5"
+        >
+          <option value="global">Global</option>
+          <option value="china">China</option>
+        </select>
+      </div>
       <table className="w-full text-sm border-collapse">
         <thead>
           <tr className="border-b text-left">

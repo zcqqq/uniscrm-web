@@ -39,7 +39,8 @@ export interface RecommendationGroup {
 
 export interface Session {
   member_id: string;
-  tenant_id: string;
+  tenant_id: number;
   email: string;
+  language: string;
   expires_at: string;
 }

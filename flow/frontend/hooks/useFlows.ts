@@ -24,8 +24,8 @@ export function useFlows() {
     fetchFlows(page);
   }, [page, fetchFlows]);
 
-  const createFlow = async (name?: string) => {
-    const data = await api.flows.create(name);
+  const createFlow = async (name?: string, graphJson?: string) => {
+    const data = await api.flows.create(name, graphJson);
     return data.flow;
   };
 

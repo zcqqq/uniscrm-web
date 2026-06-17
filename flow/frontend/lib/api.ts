@@ -28,16 +28,21 @@ export interface FlowDetail extends FlowSummary {
   tenant_id: string;
 }
 
+export interface ChannelOption {
+  id: string;
+  username: string;
+}
+
 export const api = {
   flows: {
     list: (page = 1) =>
       request<{ flows: FlowSummary[]; total: number; page: number; totalPages: number }>(
         `/api/flows?page=${page}`
       ),
-    create: (name?: string) =>
+    create: (name?: string, graph_json?: string) =>
       request<{ flow: { id: string; name: string } }>("/api/flows", {
         method: "POST",
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, graph_json }),
       }),
     get: (id: string) => request<{ flow: FlowDetail }>(`/api/flows/${id}`),
     update: (id: string, data: { name?: string; description?: string; graph_json?: string; enabled?: boolean }) =>
@@ -47,5 +52,13 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/api/flows/${id}`, { method: "DELETE" }),
+  },
+  channels: {
+    list: (channelType: string) =>
+      request<ChannelOption[]>(`/api/channels?type=${channelType}`),
+  },
+  lists: {
+    list: () =>
+      request<{ lists: { id: string; name: string; user_count: number }[] }>(`/api/lists`),
   },
 };

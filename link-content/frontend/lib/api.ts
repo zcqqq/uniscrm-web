@@ -15,14 +15,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export interface ContentItem {
   id: string;
-  user_id: string;
   channel_type: string;
-  channel_source_id: string;
+  source_content_id: string;
   title: string;
   summary: string | null;
   status: string;
   source_url: string | null;
-  source_modified_at: string | null;
+  source_updated_at: string | null;
+  raw_data: string;
   created_at: string;
   updated_at: string;
 }
@@ -40,11 +40,12 @@ export interface OverflowInfo {
 }
 
 export interface ChannelItem {
-  channel_source_id: string;
+  source_content_id: string;
   title: string;
   summary: string | null;
   source_url: string | null;
-  source_modified_at: string | null;
+  source_updated_at: string | null;
+  raw_data?: Record<string, unknown>;
 }
 
 export const api = {

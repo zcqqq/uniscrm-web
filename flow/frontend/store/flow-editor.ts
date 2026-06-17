@@ -9,7 +9,7 @@ import {
   applyEdgeChanges,
   addEdge,
 } from "@xyflow/react";
-import { TRIGGER_TYPES, type TriggerFieldDefinition } from "../config/trigger-fields";
+import { CHANNEL_TYPES, getEventDefinition, type TriggerFieldDefinition } from "../config/trigger-fields";
 
 export interface FlowEditorState {
   flowId: string | null;
@@ -35,13 +35,16 @@ export interface FlowEditorState {
   toGraphJson: () => string;
 }
 
+const ACTION_TYPES = ["addPoint", "addToList", "xAction"];
+
 function isValidConnection(source: Node | undefined, target: Node | undefined): boolean {
   if (!source || !target) return false;
-  const sourceType = source.type;
   const targetType = target.type;
+  const sourceType = source.type;
   if (targetType === "trigger") return false;
-  if (sourceType === "trigger" && targetType === "condition") return true;
-  if (sourceType === "condition" && targetType === "condition") return true;
+  const validTargets = ["condition", "action", "wait", "eventHistory"];
+  const validSources = ["trigger", "condition", "wait", "eventHistory"];
+  if (validSources.includes(sourceType!) && validTargets.includes(targetType!)) return true;
   return false;
 }
 
@@ -75,13 +78,32 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
   },
 
   addNode: (type, position) => {
-    const triggerDef = TRIGGER_TYPES.find((t) => t.type === type);
-    const nodeType = triggerDef ? "trigger" : "condition";
-    const label = triggerDef?.label || "Condition";
+    let nodeType: string;
+    let data: Record<string, unknown>;
 
-    const data: Record<string, unknown> = nodeType === "trigger"
-      ? { triggerType: type, label }
-      : { field: "", operator: "==", value: "" };
+    if (type.startsWith("trigger:")) {
+      const channelType = type.replace("trigger:", "");
+      nodeType = "trigger";
+      data = { channelType, eventType: "", channelId: "" };
+    } else if (type === "wait") {
+      nodeType = "wait";
+      data = { duration: 0, unit: "minutes" };
+    } else if (type === "eventHistory") {
+      nodeType = "eventHistory";
+      data = { eventType: "", channelId: "" };
+    } else if (ACTION_TYPES.includes(type)) {
+      nodeType = "action";
+      if (type === "addToList") {
+        data = { actionType: type, listId: "", listName: "" };
+      } else if (type === "xAction") {
+        data = { actionType: type, xEvent: "", channelId: "" };
+      } else {
+        data = { actionType: type, label: "Add Point (+1)" };
+      }
+    } else {
+      nodeType = "condition";
+      data = { field: "", operator: "==", value: "" };
+    }
 
     const node: Node = {
       id: crypto.randomUUID(),
@@ -129,9 +151,10 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
 
       const node = nodes.find((n) => n.id === current);
       if (node?.type === "trigger") {
-        const triggerType = node.data.triggerType as string;
-        const def = TRIGGER_TYPES.find((t) => t.type === triggerType);
-        return def?.contextFields || [];
+        const eventType = node.data.eventType as string;
+        if (!eventType) return [];
+        const evDef = getEventDefinition(eventType);
+        return evDef?.contextFields || [];
       }
 
       const incomingEdges = edges.filter((e) => e.target === current);

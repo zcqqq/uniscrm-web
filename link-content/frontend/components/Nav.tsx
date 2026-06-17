@@ -1,33 +1,15 @@
-import { useState, useEffect } from "react";
+import { Nav as SharedNav } from "../../../shared/frontend/Nav";
+
+const urls = {
+  web: import.meta.env.VITE_WEB_URL || "https://web-dev.uni-scrm.com",
+  linkSocial: import.meta.env.VITE_LINK_SOCIAL_URL || "https://link-social-dev.uni-scrm.com",
+  profile: import.meta.env.VITE_PROFILE_URL || "https://profile-dev.uni-scrm.com",
+  insightSegment: import.meta.env.VITE_INSIGHT_SEGMENT_URL || "https://insight-segment-dev.uni-scrm.com",
+  flow: import.meta.env.VITE_FLOW_URL || "https://flow-dev.uni-scrm.com",
+  content: import.meta.env.VITE_CONTENT_URL || "",
+  commerce: import.meta.env.VITE_COMMERCE_URL || "https://commerce-dev.uni-scrm.com",
+};
 
 export function Nav() {
-  const [email, setEmail] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("/api/auth/me", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setEmail(data?.email ?? null))
-      .catch(() => {});
-  }, []);
-
-  const handleLogout = async () => {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
-    window.location.href = import.meta.env.VITE_RECOMMENDATION_URL || "/";
-  };
-
-  if (!email) return null;
-
-  return (
-    <nav className="bg-white border-b px-8 py-3 flex items-center justify-between">
-      <div className="flex gap-6">
-        <a href={import.meta.env.VITE_RECOMMENDATION_URL || "/"} className="text-gray-500 hover:text-black">Recommendation</a>
-        <span className="font-semibold text-black">Content</span>
-        <a href={import.meta.env.VITE_COMMERCE_URL || "/"} className="text-gray-500 hover:text-black">Commerce</a>
-      </div>
-      <div className="flex items-center gap-4">
-        <span className="text-sm text-gray-500">{email}</span>
-        <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-black">Logout</button>
-      </div>
-    </nav>
-  );
+  return <SharedNav urls={urls} currentModule="content" />;
 }

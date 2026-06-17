@@ -53,7 +53,9 @@ export class RecommendService {
     private kv: KVNamespace
   ) {}
 
-  async computeForUser(userId: string, location: string = "global"): Promise<void> {
+  async computeForUser(tenantId: number, location: string = "global"): Promise<void> {
+    const namespace = `tenant-${tenantId}`;
+
     const raw = await this.kv.get("trends:latest");
     if (!raw) return;
 
@@ -77,19 +79,21 @@ export class RecommendService {
 
       const [contentResult, productResult] = await Promise.all([
         this.vectorize.query(trendVec, {
+          namespace,
           filter: { type: "content" },
-          topK: 10,
+          topK: 3,
           returnMetadata: "all",
         }),
         this.vectorize.query(trendVec, {
+          namespace,
           filter: { type: "product" },
-          topK: 10,
+          topK: 3,
           returnMetadata: "all",
         }),
       ]);
 
-      const contentMatch = contentResult.matches.find((m) => (m.metadata?.user_id as string) === userId);
-      const productMatch = productResult.matches.find((m) => (m.metadata?.user_id as string) === userId);
+      const contentMatch = contentResult.matches[0];
+      const productMatch = productResult.matches[0];
 
       if (!contentMatch && !productMatch) continue;
 
@@ -131,11 +135,11 @@ export class RecommendService {
 
     groups.sort((a, b) => b.sort_score - a.sort_score);
     const top10 = groups.slice(0, 10);
-    await this.kv.put(`recommendations:${userId}`, JSON.stringify(top10));
+    await this.kv.put(`recommendations:tenant-${tenantId}`, JSON.stringify(top10));
   }
 
-  async getForUser(userId: string): Promise<RecommendationGroup[]> {
-    const cached = await this.kv.get(`recommendations:${userId}`);
+  async getForTenant(tenantId: number): Promise<RecommendationGroup[]> {
+    const cached = await this.kv.get(`recommendations:tenant-${tenantId}`);
     if (!cached) return [];
     return JSON.parse(cached) as RecommendationGroup[];
   }

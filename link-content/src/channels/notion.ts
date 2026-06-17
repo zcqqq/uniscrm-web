@@ -60,11 +60,11 @@ export class NotionChannel implements ContentChannel {
         if (!title) continue;
 
         items.push({
-          channel_source_id: page.id,
+          source_content_id: page.id,
           title,
           summary: null,
           source_url: page.url,
-          source_modified_at: page.last_edited_time,
+          source_updated_at: page.last_edited_time,
         });
       }
 

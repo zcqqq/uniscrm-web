@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 
 export function Settings() {
-  const { member, updateLocation } = useAuth();
+  const { member, updateLocation, updateLanguage } = useAuth();
+  const { t } = useTranslation();
   const [accounts, setAccounts] = useState<{ provider: string; created_at: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -22,22 +24,34 @@ export function Settings() {
 
   return (
     <div className="max-w-2xl mx-auto p-8">
-      <h1 className="text-2xl font-bold mb-8">Settings</h1>
+      <h1 className="text-2xl font-bold mb-8">{t("settings.title")}</h1>
 
       <section className="mb-8">
-        <h2 className="text-lg font-semibold mb-4">Region</h2>
+        <h2 className="text-lg font-semibold mb-4">{t("settings.language")}</h2>
+        <select
+          value={member?.language || "en"}
+          onChange={(e) => updateLanguage(e.target.value)}
+          className="border rounded px-3 py-2"
+        >
+          <option value="en">English</option>
+          <option value="zh">简体中文</option>
+        </select>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold mb-4">{t("settings.region")}</h2>
         <select
           value={member?.preferred_location}
           onChange={(e) => updateLocation(e.target.value)}
           className="border rounded px-3 py-2"
         >
-          <option value="global">Global</option>
-          <option value="china">China</option>
+          <option value="global">{t("region.global")}</option>
+          <option value="china">{t("region.china")}</option>
         </select>
       </section>
 
       <section>
-        <h2 className="text-lg font-semibold mb-4">Connected Accounts</h2>
+        <h2 className="text-lg font-semibold mb-4">{t("settings.connectedAccounts")}</h2>
         {loading ? (
           <p className="text-gray-500">Loading...</p>
         ) : (
@@ -54,11 +68,11 @@ export function Settings() {
               </div>
               {isLinked("google") ? (
                 <button onClick={() => handleUnlink("google")} className="text-sm text-red-600 hover:text-red-800">
-                  Disconnect
+                  {t("settings.disconnect")}
                 </button>
               ) : (
                 <button onClick={() => { window.location.href = "/api/auth/google?link=true"; }} className="text-sm text-blue-600 hover:text-blue-800">
-                  Connect
+                  {t("settings.connect")}
                 </button>
               )}
             </div>
@@ -72,11 +86,11 @@ export function Settings() {
               </div>
               {isLinked("x") ? (
                 <button onClick={() => handleUnlink("x")} className="text-sm text-red-600 hover:text-red-800">
-                  Disconnect
+                  {t("settings.disconnect")}
                 </button>
               ) : (
                 <button onClick={() => { window.location.href = "/api/auth/x?link=true"; }} className="text-sm text-blue-600 hover:text-blue-800">
-                  Connect
+                  {t("settings.connect")}
                 </button>
               )}
             </div>

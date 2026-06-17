@@ -135,7 +135,7 @@ export class ProductService {
     }
   }
 
-  private async embedProducts(userId: string, items: ProductRow[]): Promise<void> {
+  private async embedProducts(userId: string, items: ProductRow[], tenantId?: number): Promise<void> {
     if (items.length === 0) return;
 
     try {
@@ -152,14 +152,14 @@ export class ProductService {
       const records = items.map((item, i) => ({
         id: item.id,
         values: embedResult.data[i],
+        namespace: tenantId ? `tenant-${tenantId}` : undefined,
         metadata: {
           type: "product",
-          user_id: userId,
           product_id: item.id,
           title: item.title,
-        timestamp_ms: Date.now(),
-      },
-    }));
+          timestamp_ms: Date.now(),
+        },
+      }));
 
       await this.vectorize.upsert(records);
     } catch {

@@ -51,19 +51,22 @@ export function createAuthRouter() {
       .run();
 
     let member = await c.env.DB.prepare(
-      "SELECT id, tenant_id, email, preferred_location FROM members WHERE email = ?"
+      "SELECT id, tenant_id, email, preferred_location, language FROM members WHERE email = ?"
     )
       .bind(link.email)
-      .first<{ id: string; tenant_id: string; email: string; preferred_location: string }>();
+      .first<{ id: string; tenant_id: number; email: string; preferred_location: string; language: string }>();
 
     if (!member) {
-      const tenantId = crypto.randomUUID();
       const memberId = crypto.randomUUID();
       const now = new Date().toISOString();
 
-      await c.env.DB.prepare("INSERT INTO tenants (id, email, created_at) VALUES (?, ?, ?)")
-        .bind(tenantId, link.email, now)
+      await c.env.DB.prepare("INSERT INTO tenants (email, created_at) VALUES (?, ?)")
+        .bind(link.email, now)
         .run();
+      const tenant = await c.env.DB.prepare("SELECT tenant_id FROM tenants WHERE email = ?")
+        .bind(link.email)
+        .first<{ tenant_id: number }>();
+      const tenantId = tenant!.tenant_id;
 
       await c.env.DB.prepare(
         "INSERT INTO members (id, tenant_id, email, preferred_location, created_at) VALUES (?, ?, ?, ?, ?)"
@@ -71,11 +74,19 @@ export function createAuthRouter() {
         .bind(memberId, tenantId, link.email, "global", now)
         .run();
 
-      member = { id: memberId, tenant_id: tenantId, email: link.email, preferred_location: "global" };
+      c.executionCtx.waitUntil(
+        fetch(`${c.env.ADMIN_URL}/internal/tenants/${tenantId}/provision-db`, {
+          method: "POST",
+          headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET },
+        }).then((r) => r.json()).then((d) => console.log("Tenant DB provisioned:", JSON.stringify(d)))
+         .catch((e) => console.error("Tenant DB provisioning failed:", e))
+      );
+
+      member = { id: memberId, tenant_id: tenantId, email: link.email, preferred_location: "global", language: "en" };
     }
 
     const sessions = new SessionService(c.env.KV);
-    const sessionId = await sessions.create(member.id, member.tenant_id, member.email);
+    const sessionId = await sessions.create(member.id, member.tenant_id, member.email, member.language || "en");
 
     setCookie(c, "session", sessionId, {
       httpOnly: true,
@@ -88,7 +99,7 @@ export function createAuthRouter() {
 
     return c.json({
       ok: true,
-      member: { id: member.id, email: member.email, preferred_location: member.preferred_location },
+      member: { id: member.id, email: member.email, preferred_location: member.preferred_location, language: member.language || "en" },
       tenant: { id: member.tenant_id, email: member.email },
     });
   });
@@ -112,14 +123,14 @@ export function createAuthRouter() {
     if (!session) return c.json({ error: "Unauthorized" }, 401);
 
     const member = await c.env.DB.prepare(
-      "SELECT id, tenant_id, email, preferred_location FROM members WHERE id = ?"
+      "SELECT id, tenant_id, email, preferred_location, language FROM members WHERE id = ?"
     )
       .bind(session.member_id)
-      .first<{ id: string; tenant_id: string; email: string; preferred_location: string }>();
+      .first<{ id: string; tenant_id: number; email: string; preferred_location: string; language: string }>();
     if (!member) return c.json({ error: "Unauthorized" }, 401);
 
     return c.json({
-      member: { id: member.id, email: member.email, preferred_location: member.preferred_location },
+      member: { id: member.id, email: member.email, preferred_location: member.preferred_location, language: member.language || "en" },
       tenant: { id: member.tenant_id, email: member.email },
     });
   });

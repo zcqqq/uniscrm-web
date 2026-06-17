@@ -16,19 +16,22 @@ head_sampling_rate = 1
 name = "link-content-dev"
 routes = [{ pattern = "content-dev.uni-scrm.com", custom_domain = true }]
 
+[env.dev.vars]
+CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
+
 [[env.dev.kv_namespaces]]
 binding = "KV"
 id = "ac8b64b59ac540e0ab482f25bb78d41e"
 
 [[env.dev.d1_databases]]
 binding = "DB"
-database_name = "trend-skill-db-dev"
+database_name = "uniscrm-db-dev"
 database_id = "b322777d-6617-4dbf-a4d2-f734166b7737"
 migrations_dir = "migrations"
 
 [[env.dev.vectorize]]
 binding = "VECTORIZE"
-index_name = "trend-embeddings-dev"
+index_name = "uniscrm-embeddings-dev"
 
 [env.dev.ai]
 binding = "AI"
@@ -43,13 +46,13 @@ id = "88bc8c114dfb4ec3a77589c64f991a2e"
 
 [[env.production.d1_databases]]
 binding = "DB"
-database_name = "trend-skill-db"
+database_name = "uniscrm-db"
 database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
 migrations_dir = "migrations"
 
 [[env.production.vectorize]]
 binding = "VECTORIZE"
-index_name = "trend-embeddings"
+index_name = "uniscrm-embeddings"
 
 [env.production.ai]
 binding = "AI"

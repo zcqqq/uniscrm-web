@@ -25,7 +25,7 @@ WEB_URL = "https://web-dev.uni-scrm.com"
 
 [[env.dev.d1_databases]]
 binding = "DB"
-database_name = "trend-skill-db-dev"
+database_name = "uniscrm-db-dev"
 database_id = "b322777d-6617-4dbf-a4d2-f734166b7737"
 
 [env.dev.ai]
@@ -40,7 +40,7 @@ WEB_URL = "https://web.uni-scrm.com"
 
 [[env.production.d1_databases]]
 binding = "DB"
-database_name = "trend-skill-db"
+database_name = "uniscrm-db"
 database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
 
 [env.production.ai]

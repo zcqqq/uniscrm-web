@@ -22,12 +22,23 @@ routes = [{ pattern = "flow-dev.uni-scrm.com", custom_domain = true }]
 
 [env.dev.vars]
 WEB_URL = "https://web-dev.uni-scrm.com"
+PROFILE_URL = "https://profile-dev.uni-scrm.com"
+LINK_SOCIAL_URL = "https://link-social-dev.uni-scrm.com"
+INTERNAL_SECRET = "dev-internal-secret"
 
 [[env.dev.d1_databases]]
 binding = "DB"
-database_name = "trend-skill-db-dev"
+database_name = "uniscrm-db-dev"
 database_id = "b322777d-6617-4dbf-a4d2-f734166b7737"
 migrations_dir = "migrations"
+
+[[env.dev.queues.consumers]]
+queue = "flow-events-dev"
+max_batch_size = 10
+max_batch_timeout = 5
+
+[env.dev.triggers]
+crons = ["* * * * *"]
 
 [env.production]
 name = "flow"
@@ -35,9 +46,19 @@ routes = [{ pattern = "flow.uni-scrm.com", custom_domain = true }]
 
 [env.production.vars]
 WEB_URL = "https://web.uni-scrm.com"
+PROFILE_URL = "https://profile.uni-scrm.com"
+LINK_SOCIAL_URL = "https://link-social.uni-scrm.com"
 
 [[env.production.d1_databases]]
 binding = "DB"
-database_name = "trend-skill-db"
+database_name = "uniscrm-db"
 database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
 migrations_dir = "migrations"
+
+[[env.production.queues.consumers]]
+queue = "flow-events"
+max_batch_size = 10
+max_batch_timeout = 5
+
+[env.production.triggers]
+crons = ["* * * * *"]

@@ -21,10 +21,10 @@ export const api = {
         body: JSON.stringify({ email }),
       }),
     verify: (token: string) =>
-      request<{ member: { id: string; email: string; preferred_location: string }; tenant: { id: string; email: string } }>(
+      request<{ member: { id: string; email: string; preferred_location: string; language: string }; tenant: { id: string; email: string } }>(
         `/auth/verify?token=${token}`,
       ),
-    me: () => request<{ member: { id: string; email: string; preferred_location: string }; tenant: { id: string; email: string } }>("/auth/me"),
+    me: () => request<{ member: { id: string; email: string; preferred_location: string; language: string }; tenant: { id: string; email: string } }>("/auth/me"),
     logout: () => request("/auth/logout", { method: "POST" }),
     completeProfile: (email: string) =>
       request("/auth/complete-profile", {
@@ -53,6 +53,11 @@ export const api = {
       request<{ ok: boolean; preferred_location: string }>("/settings", {
         method: "PATCH",
         body: JSON.stringify({ preferred_location }),
+      }),
+    updateLanguage: (language: string) =>
+      request<{ ok: boolean; language: string }>("/settings/language", {
+        method: "PATCH",
+        body: JSON.stringify({ language }),
       }),
     getLinkedAccounts: () =>
       request<{ accounts: { provider: string; created_at: string }[] }>("/settings/linked-accounts"),

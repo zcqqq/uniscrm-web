@@ -25,11 +25,11 @@ export function useContents() {
 
   const importFiles = async (parsed: ParsedMd[]): Promise<boolean> => {
     const mapped = parsed.map((p) => ({
-      channel_source_id: p.filename,
+      source_content_id: p.filename,
       title: p.title,
       summary: p.summary,
       source_url: null,
-      source_modified_at: p.fileModifiedAt,
+      source_updated_at: p.fileModifiedAt,
     }));
     const res = await api.contents.sync("LOCAL", mapped);
     if ("needsConfirmation" in res && res.needsConfirmation) {
@@ -44,11 +44,11 @@ export function useContents() {
   const confirmImport = async () => {
     if (!pendingImport) return;
     const mapped = pendingImport.map((p) => ({
-      channel_source_id: p.filename,
+      source_content_id: p.filename,
       title: p.title,
       summary: p.summary,
       source_url: null,
-      source_modified_at: p.fileModifiedAt,
+      source_updated_at: p.fileModifiedAt,
     }));
     await api.contents.sync("LOCAL", mapped, true);
     setOverflowInfo(null);

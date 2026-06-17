@@ -15,6 +15,29 @@ function EditorToolbar() {
 
   const handleSave = async () => {
     if (!flowId) return;
+
+    const { nodes } = useFlowEditor.getState();
+    for (const node of nodes) {
+      if (node.type === "action") {
+        const { actionType, listId, xEvent, channelId } = node.data as Record<string, string>;
+        if (actionType === "addToList" && !listId) {
+          alert("Please select a list for the 'Add to List' action.");
+          return;
+        }
+        if (actionType === "xAction" && (!xEvent || !channelId)) {
+          alert("Please select action and account for the 'X Action' node.");
+          return;
+        }
+      }
+      if (node.type === "trigger") {
+        const { eventType } = node.data as Record<string, string>;
+        if (!eventType) {
+          alert("Please select an event for the trigger node.");
+          return;
+        }
+      }
+    }
+
     setSaving(true);
     try {
       await api.flows.update(flowId, {
@@ -23,6 +46,7 @@ function EditorToolbar() {
         graph_json: toGraphJson(),
       });
       markClean();
+      navigate("/");
     } finally {
       setSaving(false);
     }

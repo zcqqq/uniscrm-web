@@ -98,10 +98,12 @@ export function ContentTable({ items, onUpdate, onDelete }: Props) {
                 className={`text-xs px-2 py-0.5 rounded-full ${
                   item.channel_type === "LOCAL"
                     ? "bg-gray-100 text-gray-600"
+                    : item.channel_type === "TIKTOK"
+                    ? "bg-pink-100 text-pink-700"
                     : "bg-purple-100 text-purple-700"
                 }`}
               >
-                {item.channel_type === "LOCAL" ? "Local" : "Notion"}
+                {item.channel_type === "LOCAL" ? "Local" : item.channel_type === "TIKTOK" ? "TikTok" : "Notion"}
               </span>
             </td>
             <td className="py-2">
@@ -118,8 +120,8 @@ export function ContentTable({ items, onUpdate, onDelete }: Props) {
               </select>
             </td>
             <td className="py-2 text-gray-400">
-              {item.source_modified_at
-                ? new Date(item.source_modified_at).toLocaleDateString()
+              {item.source_updated_at
+                ? new Date(item.source_updated_at).toLocaleDateString()
                 : "—"}
             </td>
             <td className="py-2">

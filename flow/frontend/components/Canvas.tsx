@@ -53,8 +53,9 @@ export default function Canvas() {
       const target = nodes.find((n) => n.id === connection.target);
       if (!source || !target) return false;
       if (target.type === "trigger") return false;
-      if (source.type === "trigger" && target.type === "condition") return true;
-      if (source.type === "condition" && target.type === "condition") return true;
+      const validTargets = ["condition", "action", "wait", "eventHistory"];
+      const validSources = ["trigger", "condition", "wait", "eventHistory"];
+      if (validSources.includes(source.type!) && validTargets.includes(target.type!)) return true;
       return false;
     },
     [nodes]

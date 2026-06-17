@@ -1,11 +1,13 @@
 import { useState, useEffect, createContext, useContext } from "react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 
 interface MemberData {
   id: string;
   email: string;
   preferred_location: string;
+  language: string;
 }
 
 interface TenantData {
@@ -21,6 +23,7 @@ interface AuthState {
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   updateLocation: (location: string) => Promise<void>;
+  updateLanguage: (language: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -29,6 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [member, setMember] = useState<MemberData | null>(null);
   const [tenant, setTenant] = useState<TenantData | null>(null);
   const [loading, setLoading] = useState(true);
+  const { i18n } = useTranslation();
 
   useEffect(() => {
     api.auth
@@ -36,6 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((res) => {
         setMember(res.member);
         setTenant(res.tenant);
+        i18n.changeLanguage(res.member.language || "en");
       })
       .catch(() => {
         setMember(null);
@@ -70,8 +75,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMember((prev) => prev ? { ...prev, preferred_location: location } : prev);
   };
 
+  const updateLanguage = async (language: string) => {
+    await api.settings.updateLanguage(language);
+    setMember((prev) => prev ? { ...prev, language } : prev);
+    i18n.changeLanguage(language);
+  };
+
   return (
-    <AuthContext.Provider value={{ member, tenant, loading, login, logout, refresh, updateLocation }}>
+    <AuthContext.Provider value={{ member, tenant, loading, login, logout, refresh, updateLocation, updateLanguage }}>
       {children}
     </AuthContext.Provider>
   );

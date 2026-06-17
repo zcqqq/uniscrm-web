@@ -35,19 +35,19 @@ export function createWebhookRouter() {
 
     const service = new RecommendService(c.env.DB, c.env.VECTORIZE, c.env.KV);
 
-    const { results: members } = await c.env.DB
-      .prepare("SELECT id, preferred_location FROM members")
-      .all<{ id: string; preferred_location: string }>();
+    const { results: tenants } = await c.env.DB
+      .prepare("SELECT tenant_id FROM tenants WHERE d1_database_id IS NOT NULL")
+      .all<{ tenant_id: number }>();
 
-    for (const member of members) {
+    for (const tenant of tenants) {
       try {
-        await service.computeForUser(member.id, member.preferred_location ?? "global");
+        await service.computeForUser(tenant.tenant_id, "global");
       } catch (e) {
-        console.error(`Recommend failed for member ${member.id}:`, e instanceof Error ? e.message : e);
+        console.error(`Recommend failed for tenant ${tenant.tenant_id}:`, e instanceof Error ? e.message : e);
       }
     }
 
-    return c.json({ ok: true, members_updated: members.length });
+    return c.json({ ok: true, tenants_updated: tenants.length });
   });
 
   return router;

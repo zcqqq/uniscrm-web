@@ -36,11 +36,16 @@ export interface Env {
   DOUYIN_COOKIE: string;
   TREND_RETENTION_DAYS: string;
   MAIGRET_QUEUE: Queue;
+  FLOW_QUEUE: Queue;
   X_CLIENT_ID: string;
   X_CLIENT_SECRET: string;
   X_CONSUMER_SECRET: string;
   INTERNAL_SECRET: string;
   WEB_URL: string;
+  CF_ACCOUNT_ID: string;
+  CF_D1_API_TOKEN: string;
+  TIKTOK_CLIENT_KEY: string;
+  TIKTOK_CLIENT_SECRET: string;
 }
 
 export const PLATFORM_SHORT: Record<Platform, string> = {

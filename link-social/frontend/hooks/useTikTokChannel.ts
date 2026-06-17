@@ -1,22 +1,22 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
 
-interface TwitterChannelState {
+interface TikTokChannelState {
   connected: boolean;
-  username?: string;
+  displayName?: string;
   loading: boolean;
 }
 
-export function useTwitterChannel() {
-  const [state, setState] = useState<TwitterChannelState>({
+export function useTikTokChannel() {
+  const [state, setState] = useState<TikTokChannelState>({
     connected: false,
     loading: true,
   });
 
   const load = useCallback(async () => {
     try {
-      const data = await api.channels.twitterStatus();
-      setState({ connected: data.connected, username: data.username, loading: false });
+      const data = await api.channels.tiktokStatus();
+      setState({ connected: data.connected, displayName: data.displayName, loading: false });
     } catch {
       setState({ connected: false, loading: false });
     }
@@ -25,11 +25,11 @@ export function useTwitterChannel() {
   useEffect(() => { load(); }, [load]);
 
   const connect = () => {
-    window.location.href = "/channel/twitter/connect";
+    window.location.href = "/channel/tiktok/connect";
   };
 
   const disconnect = async () => {
-    await api.channels.disconnectTwitter();
+    await api.channels.disconnectTiktok();
     setState({ connected: false, loading: false });
   };
 

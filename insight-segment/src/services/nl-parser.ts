@@ -1,7 +1,7 @@
-import type { FieldDefinition, ParsedConditions } from "../metadata";
-import { generateFieldsPrompt } from "../metadata";
+import type { InsightField, ParsedConditions } from "../fields";
+import { generateFieldsPrompt } from "../fields";
 
-function buildSystemPrompt(fields: FieldDefinition[]): string {
+function buildSystemPrompt(fields: InsightField[]): string {
   return `你是一个用户分群条件解析器。将自然语言描述转换为结构化JSON筛选条件。
 
 可用字段（仅能使用以下字段）：
@@ -42,7 +42,7 @@ export interface ParseError {
 export async function parseNaturalLanguage(
   ai: Ai,
   nlQuery: string,
-  fields: FieldDefinition[]
+  fields: InsightField[]
 ): Promise<ParseResult | ParseError> {
   const systemPrompt = buildSystemPrompt(fields);
 

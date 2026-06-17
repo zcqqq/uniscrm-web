@@ -31,10 +31,14 @@ export interface XEvent {
 
 export const api = {
   channels: {
-    twitterStatus: () =>
-      request<{ connected: boolean; username?: string; channel_id?: string }>("/channels/twitter/status"),
-    disconnectTwitter: () =>
-      request<{ ok: boolean }>("/channels/twitter", { method: "DELETE" }),
+    xStatus: () =>
+      request<{ connected: boolean; username?: string; channel_id?: string }>("/channels/x/status"),
+    disconnectX: () =>
+      request<{ ok: boolean }>("/channels/x", { method: "DELETE" }),
+    tiktokStatus: () =>
+      request<{ connected: boolean; displayName?: string; channel_id?: string }>("/channels/tiktok/status"),
+    disconnectTiktok: () =>
+      request<{ ok: boolean }>("/channels/tiktok", { method: "DELETE" }),
   },
   users: {
     list: (page = 1, limit = 20) =>

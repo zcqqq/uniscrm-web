@@ -1,3 +1,0 @@
-channel_type,prop_id,data_type,enums
-TWITTER,followers_count,INT,
-TWITTER,verified_type,ENUM,"blue:蓝V,none:无"

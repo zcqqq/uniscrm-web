@@ -1,13 +1,18 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFlows } from "../hooks/useFlows";
+import { FLOW_TEMPLATES, type FlowTemplate } from "../config/templates";
 import Nav from "../components/Nav";
 
 export default function FlowsPage() {
   const { flows, loading, createFlow, deleteFlow } = useFlows();
   const navigate = useNavigate();
+  const [showTemplates, setShowTemplates] = useState(false);
 
-  const handleCreate = async () => {
-    const flow = await createFlow();
+  const handleCreate = async (template?: FlowTemplate) => {
+    const name = template?.name || undefined;
+    const graphJson = template ? JSON.stringify(template.graph) : undefined;
+    const flow = await createFlow(name, graphJson);
     navigate(`/flows/${flow.id}`);
   };
 
@@ -17,12 +22,35 @@ export default function FlowsPage() {
       <div className="max-w-4xl mx-auto p-6">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Workflows</h1>
-          <button
-            onClick={handleCreate}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
-          >
-            Create Flow
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowTemplates(!showTemplates)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+            >
+              Create Flow
+            </button>
+            {showTemplates && (
+              <div className="absolute right-0 mt-2 w-72 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
+                <button
+                  onClick={() => { setShowTemplates(false); handleCreate(); }}
+                  className="w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100"
+                >
+                  <span className="text-sm font-medium text-gray-900">Blank Flow</span>
+                  <p className="text-xs text-gray-500">Start from scratch</p>
+                </button>
+                {FLOW_TEMPLATES.map((tpl) => (
+                  <button
+                    key={tpl.id}
+                    onClick={() => { setShowTemplates(false); handleCreate(tpl); }}
+                    className="w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-0"
+                  >
+                    <span className="text-sm font-medium text-gray-900">{tpl.name}</span>
+                    <p className="text-xs text-gray-500">{tpl.description}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {loading ? (

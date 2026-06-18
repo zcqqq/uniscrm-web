@@ -90,7 +90,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
       data = { duration: 0, unit: "minutes" };
     } else if (type === "eventHistory") {
       nodeType = "eventHistory";
-      data = { eventType: "", channelId: "" };
+      data = { eventType: "", channelId: "", duration: 1, unit: "days" };
     } else if (ACTION_TYPES.includes(type)) {
       nodeType = "action";
       if (type === "addToList") {

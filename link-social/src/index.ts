@@ -230,6 +230,31 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
     }
   }
 
+  // Post events → write to content table
+  if (eventType === "post.create") {
+    const tweetId = payload.id as string;
+    const text = payload.text as string || "";
+    if (tweetId) {
+      const shareUrl = `https://x.com/i/web/status/${tweetId}`;
+      await tenantDb.run(
+        `INSERT INTO content (id, channel_type, channel_id, source_content_id, title, summary, status, source_url, raw_data, created_at, updated_at)
+         VALUES (?, 'X', ?, ?, ?, NULL, 'new', ?, ?, datetime('now'), datetime('now'))
+         ON CONFLICT(channel_id, source_content_id) DO UPDATE SET title = excluded.title, raw_data = excluded.raw_data, updated_at = datetime('now')`,
+        [crypto.randomUUID(), channelId, tweetId, text.slice(0, 200), shareUrl, JSON.stringify(payload)]
+      );
+    }
+  }
+
+  if (eventType === "post.delete") {
+    const tweetId = payload.id as string || payload.tweet_id as string;
+    if (tweetId) {
+      await tenantDb.run(
+        `UPDATE content SET status = 'deleted', updated_at = datetime('now') WHERE channel_id = ? AND source_content_id = ?`,
+        [channelId, tweetId]
+      );
+    }
+  }
+
   // Record non-follow events uniformly
   const eventUserId = (eventType.startsWith("chat.") || eventType.startsWith("dm."))
     ? (payload.sender_id as string || payload.user_id as string || payload.id as string || filterUserId)
@@ -268,20 +293,19 @@ async function resolveTenantDataDb(request: Request, env: Env): Promise<TenantDa
 
 interface ChannelInfo {
   channelId: string;
-  tenantId: string | null;
+  tenantId: number | null;
   d1DatabaseId: string | null;
 }
 
 async function findChannelByXUserId(db: D1Database, xUserId: string): Promise<ChannelInfo | null> {
   const row = await db
     .prepare(
-      `SELECT c.id, m.tenant_id, t.d1_database_id FROM channels c
-       LEFT JOIN members m ON m.id = c.user_id
-       LEFT JOIN tenants t ON t.id = m.tenant_id
-       WHERE c.channel_type IN ('TWITTER', 'X') AND c.original_channel_id = ?`
+      `SELECT c.id, c.tenant_id, t.d1_database_id FROM channels c
+       LEFT JOIN tenants t ON t.tenant_id = c.tenant_id
+       WHERE c.channel_type IN ('TWITTER', 'X') AND c.source_channel_id = ? AND c.is_active = 1`
     )
     .bind(xUserId)
-    .first<{ id: string; tenant_id: string | null; d1_database_id: string | null }>();
+    .first<{ id: string; tenant_id: number | null; d1_database_id: string | null }>();
   if (!row) return null;
   return { channelId: row.id, tenantId: row.tenant_id, d1DatabaseId: row.d1_database_id };
 }
@@ -329,7 +353,7 @@ async function handleTokenRefresh(env: Env): Promise<void> {
 
   // TikTok token refresh
   const tiktokChannels = await env.DB
-    .prepare(`SELECT id, config FROM channels WHERE channel_type = 'TIKTOK'`)
+    .prepare(`SELECT id, config FROM channels WHERE channel_type = 'TIKTOK' AND is_active = 1`)
     .all<{ id: string; config: string }>();
 
   for (const row of tiktokChannels.results) {
@@ -425,7 +449,7 @@ export default {
     // Channel API: X status (no auth needed)
     if (url.pathname === "/api/channels/x/status" && request.method === "GET") {
       const row = await env.DB
-        .prepare(`SELECT id, config FROM channels WHERE channel_type IN ('TWITTER', 'X') LIMIT 1`)
+        .prepare(`SELECT id, config FROM channels WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1 LIMIT 1`)
         .first<{ id: string; config: string }>();
 
       if (!row) return Response.json({ connected: false });
@@ -437,7 +461,7 @@ export default {
     // Channel API: Disconnect X
     if (url.pathname === "/api/channels/x" && request.method === "DELETE") {
       await env.DB
-        .prepare(`DELETE FROM channels WHERE channel_type IN ('TWITTER', 'X')`)
+        .prepare(`UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1`)
         .run();
 
       return Response.json({ ok: true });
@@ -445,14 +469,16 @@ export default {
 
     // Channel: Connect X — OAuth 2.0 PKCE flow
     if (url.pathname === "/channel/x/connect" && request.method === "GET") {
-      // Read tenant_id from session
+      // Read tenant_id + member_id from session
       const sessionId = getCookieValue(request, "session");
       let tenantId: string | null = null;
+      let memberId: string | null = null;
       if (sessionId) {
         const sessionData = await env.TREND_KV.get(`session:${sessionId}`);
         if (sessionData) {
-          const session = JSON.parse(sessionData) as { tenant_id?: string };
+          const session = JSON.parse(sessionData) as { tenant_id?: string; member_id?: string };
           tenantId = session.tenant_id || null;
+          memberId = session.member_id || null;
         }
       }
 
@@ -464,8 +490,8 @@ export default {
       ]);
       const oauthUrl = new URL(arcticUrl.toString().replace("https://twitter.com/", "https://x.com/"));
 
-      // Store state + verifier + tenant_id in KV (5 min TTL)
-      await env.TREND_KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier, tenantId }), { expirationTtl: 300 });
+      // Store state + verifier + tenant_id + member_id in KV (5 min TTL)
+      await env.TREND_KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier, tenantId, memberId }), { expirationTtl: 300 });
 
       return Response.redirect(oauthUrl.toString(), 302);
     }
@@ -479,7 +505,7 @@ export default {
       const stored = await env.TREND_KV.get(`oauth_state:${state}`);
       if (!stored) return Response.json({ error: "Invalid or expired state" }, { status: 400 });
       await env.TREND_KV.delete(`oauth_state:${state}`);
-      const { codeVerifier, tenantId } = JSON.parse(stored) as { codeVerifier: string; tenantId?: string };
+      const { codeVerifier, tenantId, memberId } = JSON.parse(stored) as { codeVerifier: string; tenantId?: string; memberId?: string };
 
       const twitter = new Twitter(env.X_CLIENT_ID, env.X_CLIENT_SECRET, `${url.origin}/channel/x/callback`);
       const tokens = await twitter.validateAuthorizationCode(code, codeVerifier);
@@ -510,15 +536,15 @@ export default {
 
       const channelId = crypto.randomUUID();
       await env.DB
-        .prepare(`INSERT INTO channels (id, user_id, channel_type, config, original_channel_id, tenant_id, created_at, updated_at)
-           VALUES (?, 'system', 'X', ?, ?, ?, datetime('now'), datetime('now'))
-           ON CONFLICT(user_id, channel_type) DO UPDATE SET config = excluded.config, original_channel_id = excluded.original_channel_id, tenant_id = excluded.tenant_id, updated_at = datetime('now')`)
-        .bind(channelId, config, xUser.id, tenantId || null)
+        .prepare(`INSERT INTO channels (id, channel_type, config, source_channel_id, access_token, tenant_id, member_id, created_at, updated_at)
+           VALUES (?, 'X', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+           ON CONFLICT(channel_type, source_channel_id) DO UPDATE SET config = excluded.config, access_token = excluded.access_token, tenant_id = excluded.tenant_id, member_id = excluded.member_id, is_active = 1, updated_at = datetime('now')`)
+        .bind(channelId, config, xUser.id, tokens.accessToken(), tenantId || null, memberId || null)
         .run();
 
       // Get actual channel ID after upsert
       const row = await env.DB
-        .prepare(`SELECT id FROM channels WHERE channel_type IN ('X', 'TWITTER') AND original_channel_id = ?`)
+        .prepare(`SELECT id FROM channels WHERE channel_type IN ('X', 'TWITTER') AND source_channel_id = ? AND is_active = 1`)
         .bind(xUser.id)
         .first<{ id: string }>();
       const actualChannelId = row?.id || channelId;
@@ -552,7 +578,7 @@ export default {
     // TikTok Channel: status
     if (url.pathname === "/api/channels/tiktok/status" && request.method === "GET") {
       const row = await env.DB
-        .prepare(`SELECT id, config FROM channels WHERE channel_type = 'TIKTOK' LIMIT 1`)
+        .prepare(`SELECT id, config FROM channels WHERE channel_type = 'TIKTOK' AND is_active = 1 LIMIT 1`)
         .first<{ id: string; config: string }>();
 
       if (!row) return Response.json({ connected: false });
@@ -562,7 +588,7 @@ export default {
 
     // TikTok Channel: disconnect
     if (url.pathname === "/api/channels/tiktok" && request.method === "DELETE") {
-      await env.DB.prepare(`DELETE FROM channels WHERE channel_type = 'TIKTOK'`).run();
+      await env.DB.prepare(`UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE channel_type = 'TIKTOK' AND is_active = 1`).run();
       return Response.json({ ok: true });
     }
 
@@ -570,16 +596,18 @@ export default {
     if (url.pathname === "/channel/tiktok/connect" && request.method === "GET") {
       const sessionId = getCookieValue(request, "session");
       let tenantId: string | null = null;
+      let memberId: string | null = null;
       if (sessionId) {
         const sessionData = await env.TREND_KV.get(`session:${sessionId}`);
         if (sessionData) {
-          const session = JSON.parse(sessionData) as { tenant_id?: string };
+          const session = JSON.parse(sessionData) as { tenant_id?: string; member_id?: string };
           tenantId = session.tenant_id || null;
+          memberId = session.member_id || null;
         }
       }
 
       const state = crypto.randomUUID();
-      await env.TREND_KV.put(`oauth_state:${state}`, JSON.stringify({ tenantId, provider: "tiktok" }), { expirationTtl: 300 });
+      await env.TREND_KV.put(`oauth_state:${state}`, JSON.stringify({ tenantId, memberId, provider: "tiktok" }), { expirationTtl: 300 });
 
       const redirectUri = encodeURIComponent(`${url.origin}/channel/tiktok/callback`);
       const tiktokUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${env.TIKTOK_CLIENT_KEY}&scope=user.info.basic,video.list&response_type=code&redirect_uri=${redirectUri}&state=${state}`;
@@ -596,7 +624,7 @@ export default {
       const stored = await env.TREND_KV.get(`oauth_state:${state}`);
       if (!stored) return Response.json({ error: "Invalid or expired state" }, { status: 400 });
       await env.TREND_KV.delete(`oauth_state:${state}`);
-      const { tenantId } = JSON.parse(stored) as { tenantId?: string };
+      const { tenantId, memberId } = JSON.parse(stored) as { tenantId?: string; memberId?: string };
 
       // Exchange code for token
       const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
@@ -649,10 +677,10 @@ export default {
 
       const channelId = crypto.randomUUID();
       await env.DB
-        .prepare(`INSERT INTO channels (id, user_id, channel_type, config, original_channel_id, tenant_id, created_at, updated_at)
-           VALUES (?, 'system', 'TIKTOK', ?, ?, ?, datetime('now'), datetime('now'))
-           ON CONFLICT(user_id, channel_type) DO UPDATE SET config = excluded.config, original_channel_id = excluded.original_channel_id, tenant_id = excluded.tenant_id, updated_at = datetime('now')`)
-        .bind(channelId, config, openId, tenantId ? parseInt(tenantId) : null)
+        .prepare(`INSERT INTO channels (id, channel_type, config, source_channel_id, access_token, tenant_id, member_id, created_at, updated_at)
+           VALUES (?, 'TIKTOK', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+           ON CONFLICT(channel_type, source_channel_id) DO UPDATE SET config = excluded.config, access_token = excluded.access_token, tenant_id = excluded.tenant_id, member_id = excluded.member_id, is_active = 1, updated_at = datetime('now')`)
+        .bind(channelId, config, openId, tokenData.access_token, tenantId ? parseInt(tenantId) : null, memberId || null)
         .run();
 
       // Trigger link-content to sync TikTok videos
@@ -813,8 +841,20 @@ export default {
       }
 
       const xBody = await xRes.json();
-      console.log(JSON.stringify({ event: "x_action_executed", action, sourceUserId, targetUserId, status: xRes.status }));
-      return Response.json({ ok: xRes.ok, status: xRes.status, data: xBody });
+      const rateLimitRemaining = parseInt(xRes.headers.get("x-rate-limit-remaining") || "-1", 10);
+      const rateLimitResetUnix = parseInt(xRes.headers.get("x-rate-limit-reset") || "0", 10);
+      const rateLimitReset = rateLimitResetUnix ? new Date(rateLimitResetUnix * 1000).toISOString() : "";
+
+      console.log(JSON.stringify({ event: "x_action_executed", action, sourceUserId, targetUserId, status: xRes.status, rateLimitRemaining, rateLimitReset }));
+
+      return Response.json({
+        ok: xRes.ok,
+        status: xRes.status,
+        rateLimited: xRes.status === 429,
+        rateLimitRemaining,
+        rateLimitReset,
+        data: xBody,
+      });
     }
 
     // Auth check for page requests — redirect to login if no session

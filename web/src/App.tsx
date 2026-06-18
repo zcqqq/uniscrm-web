@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import "./lib/i18n";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
-import { Nav as SharedNav } from "../../shared/frontend/Nav";
+import { Sidebar } from "../../shared/frontend/Sidebar";
 import { Login } from "./pages/Login";
 import { Verify } from "./pages/Verify";
 import { Home } from "./pages/Home";
@@ -19,12 +19,17 @@ const urls = {
   commerce: import.meta.env.VITE_COMMERCE_URL || "https://commerce-dev.uni-scrm.com",
 };
 
-function Nav() {
+function AppLayout({ children }: { children: React.ReactNode }) {
   const { member } = useAuth();
-  if (!member) return null;
+  if (!member) return <>{children}</>;
   const path = window.location.pathname;
   const currentModule = path.startsWith("/recommendations") ? "content" as const : "settings" as const;
-  return <SharedNav urls={urls} currentModule={currentModule} />;
+  return (
+    <div className="flex min-h-screen">
+      <Sidebar urls={urls} currentModule={currentModule} currentPath={path} />
+      <main className="flex-1 overflow-auto">{children}</main>
+    </div>
+  );
 }
 
 function Redirect({ url }: { url: string }) {
@@ -48,44 +53,45 @@ export function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Nav />
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/auth/verify" element={<Verify />} />
-          <Route path="/auth/complete-profile" element={<CompleteProfile />} />
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <Redirect url={urls.linkSocial} />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/recommendations"
-            element={
-              <ProtectedRoute>
-                <Home />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/billing"
-            element={
-              <ProtectedRoute>
-                <Billing />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute>
-                <Settings />
-              </ProtectedRoute>
-            }
-          />
-        </Routes>
+        <AppLayout>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/auth/verify" element={<Verify />} />
+            <Route path="/auth/complete-profile" element={<CompleteProfile />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Redirect url={urls.linkSocial} />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/recommendations"
+              element={
+                <ProtectedRoute>
+                  <Home />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/billing"
+              element={
+                <ProtectedRoute>
+                  <Billing />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <Settings />
+                </ProtectedRoute>
+              }
+            />
+          </Routes>
+        </AppLayout>
       </AuthProvider>
     </BrowserRouter>
   );

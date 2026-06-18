@@ -3,9 +3,11 @@ import { Commerce } from "./pages/Commerce";
 
 export function App() {
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="flex min-h-screen">
       <Nav />
-      <Commerce />
+      <main className="flex-1 overflow-auto bg-gray-50">
+        <Commerce />
+      </main>
     </div>
   );
 }

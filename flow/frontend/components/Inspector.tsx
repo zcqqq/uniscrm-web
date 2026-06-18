@@ -285,10 +285,10 @@ function EventHistoryInspector({ nodeId, data }: { nodeId: string; data: Record<
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-indigo-700 mb-3">Event Occurrence</h4>
+      <h4 className="text-sm font-semibold text-indigo-700 mb-3">Wait for Event</h4>
       <div className="space-y-3">
         <div>
-          <label className="text-xs font-medium text-gray-600 block mb-1">Event</label>
+          <label className="text-xs font-medium text-gray-600 block mb-1">Wait for event</label>
           <select
             value={data.eventType || ""}
             onChange={(e) => updateNodeData(nodeId, { eventType: e.target.value })}
@@ -300,8 +300,30 @@ function EventHistoryInspector({ nodeId, data }: { nodeId: string; data: Record<
             ))}
           </select>
         </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 block mb-1">Timeout</label>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              min="1"
+              value={data.duration || ""}
+              onChange={(e) => updateNodeData(nodeId, { duration: parseInt(e.target.value) || 0 })}
+              placeholder="1"
+              className="w-20 text-sm border border-gray-300 rounded px-2 py-1.5"
+            />
+            <select
+              value={data.unit || "days"}
+              onChange={(e) => updateNodeData(nodeId, { unit: e.target.value })}
+              className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5"
+            >
+              <option value="minutes">Minutes</option>
+              <option value="hours">Hours</option>
+              <option value="days">Days</option>
+            </select>
+          </div>
+        </div>
       </div>
-      <p className="text-xs text-gray-400 mt-3 italic">Yes = occurred since trigger. No = not occurred.</p>
+      <p className="text-xs text-gray-400 mt-3 italic">Yes = event received within timeout. No = timed out.</p>
     </div>
   );
 }

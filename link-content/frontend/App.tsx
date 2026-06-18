@@ -3,9 +3,11 @@ import { Content } from "./pages/Content";
 
 export function App() {
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="flex min-h-screen">
       <Nav />
-      <Content />
+      <main className="flex-1 overflow-auto bg-gray-50">
+        <Content />
+      </main>
     </div>
   );
 }

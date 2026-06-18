@@ -1,5 +1,5 @@
 import { Routes, Route } from "react-router-dom";
-import { Nav as SharedNav } from "../../shared/frontend/Nav";
+import { Sidebar } from "../../shared/frontend/Sidebar";
 import { Users } from "./pages/Users";
 import { Lists } from "./pages/Lists";
 
@@ -14,14 +14,17 @@ const urls = {
 };
 
 export default function App() {
+  const path = window.location.pathname;
   return (
-    <div>
-      <SharedNav urls={urls} currentModule="social" />
-      <Routes>
-        <Route path="/" element={<Users />} />
-        <Route path="/users" element={<Users />} />
-        <Route path="/lists" element={<Lists />} />
-      </Routes>
+    <div className="flex min-h-screen">
+      <Sidebar urls={urls} currentModule="social" currentPath={path} />
+      <main className="flex-1 overflow-auto">
+        <Routes>
+          <Route path="/" element={<Users />} />
+          <Route path="/users" element={<Users />} />
+          <Route path="/lists" element={<Lists />} />
+        </Routes>
+      </main>
     </div>
   );
 }

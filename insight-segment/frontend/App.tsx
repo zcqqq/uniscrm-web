@@ -7,13 +7,15 @@ import { SegmentCreate } from "./pages/SegmentCreate";
 export function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-gray-50">
+      <div className="flex min-h-screen">
         <Nav />
-        <Routes>
-          <Route path="/" element={<Segments />} />
-          <Route path="/create" element={<SegmentCreate />} />
-          <Route path="/segments/:id" element={<SegmentDetail />} />
-        </Routes>
+        <main className="flex-1 overflow-auto bg-gray-50">
+          <Routes>
+            <Route path="/" element={<Segments />} />
+            <Route path="/create" element={<SegmentCreate />} />
+            <Route path="/segments/:id" element={<SegmentDetail />} />
+          </Routes>
+        </main>
       </div>
     </BrowserRouter>
   );

@@ -61,8 +61,8 @@ export function createChannelsRouter() {
     }
 
     const configRow = await c.env.DB
-      .prepare("SELECT config FROM channels WHERE user_id = ? AND channel_type = 'NOTION'")
-      .bind(memberId)
+      .prepare("SELECT config FROM channels WHERE tenant_id = ? AND channel_type = 'NOTION'")
+      .bind(tenantId)
       .first<{ config: string }>();
 
     if (!configRow) {
@@ -94,12 +94,12 @@ export function createChannelsRouter() {
   });
 
   router.get("/:type/config", async (c) => {
-    const memberId = c.get("memberId" as never) as string;
+    const tenantId = c.get("tenantId" as never) as number;
     const channelType = c.req.param("type").toUpperCase();
 
     const row = await c.env.DB
-      .prepare("SELECT config FROM channels WHERE user_id = ? AND channel_type = ?")
-      .bind(memberId, channelType)
+      .prepare("SELECT config FROM channels WHERE tenant_id = ? AND channel_type = ?")
+      .bind(tenantId, channelType)
       .first<{ config: string }>();
 
     return c.json({ config: row ? JSON.parse(row.config) : null });
@@ -116,13 +116,13 @@ export function createChannelsRouter() {
 
     await c.env.DB
       .prepare(
-        `INSERT INTO channels (id, user_id, channel_type, config, created_at, updated_at)
+        `INSERT INTO channels (id, channel_type, config, tenant_id, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(user_id, channel_type) DO UPDATE SET
+         ON CONFLICT(tenant_id, channel_type) DO UPDATE SET
            config = excluded.config,
            updated_at = excluded.updated_at`
       )
-      .bind(id, memberId, channelType, JSON.stringify(config), now, now)
+      .bind(id, channelType, JSON.stringify(config), tenantId, now, now)
       .run();
 
     if (channelType === "NOTION") {
@@ -212,8 +212,8 @@ export function createNotionCallbackRouter() {
     const tenantId = c.get("tenantId" as never) as number;
 
     const channel = await c.env.DB
-      .prepare(`SELECT config FROM channels WHERE user_id = ? AND channel_type = 'TIKTOK'`)
-      .bind(memberId)
+      .prepare(`SELECT config FROM channels WHERE tenant_id = ? AND channel_type = 'TIKTOK'`)
+      .bind(tenantId)
       .first<{ config: string }>();
 
     if (!channel) {
@@ -237,10 +237,10 @@ export function createNotionCallbackRouter() {
   });
 
   router.get("/tiktok/status", async (c) => {
-    const memberId = c.get("memberId" as never) as string;
+    const tenantId = c.get("tenantId" as never) as number;
     const channel = await c.env.DB
-      .prepare(`SELECT config FROM channels WHERE user_id = ? AND channel_type = 'TIKTOK'`)
-      .bind(memberId)
+      .prepare(`SELECT config FROM channels WHERE tenant_id = ? AND channel_type = 'TIKTOK'`)
+      .bind(tenantId)
       .first<{ config: string }>();
 
     if (!channel) return c.json({ connected: false });

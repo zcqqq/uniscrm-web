@@ -20,9 +20,9 @@ export function Login() {
 
   if (sent) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="max-w-md w-full p-8 bg-white rounded-lg shadow">
-          <h2 className="text-xl font-semibold mb-4">Check your email</h2>
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="max-w-md w-full p-8 bg-white rounded-xl shadow-lg">
+          <h2 className="text-xl font-semibold mb-4 text-foreground">Check your email</h2>
           <p className="text-gray-600">
             We sent a sign-in link to <strong>{email}</strong>. Click it to sign in.
           </p>
@@ -32,16 +32,16 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full p-8 bg-white rounded-lg shadow">
-        <h1 className="text-2xl font-bold mb-6">Sign in to UniSCRM</h1>
-        {error && <p className="text-red-600 mb-4">{error}</p>}
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="max-w-md w-full p-8 bg-white rounded-xl shadow-lg">
+        <h1 className="text-2xl font-bold mb-6 text-foreground">Sign in to UniSCRM</h1>
+        {error && <p className="text-destructive mb-4 text-sm">{error}</p>}
 
         <div className="space-y-3 mb-6">
           <button
             type="button"
             onClick={() => { window.location.href = "/api/auth/google"; }}
-            className="flex items-center justify-center gap-3 w-full py-2.5 border border-gray-300 rounded-md hover:bg-gray-50 text-sm font-medium cursor-pointer"
+            className="flex items-center justify-center gap-3 w-full py-2.5 border border-border rounded-lg hover:bg-primary/5 text-sm font-medium cursor-pointer transition-colors duration-150"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -54,7 +54,7 @@ export function Login() {
           <button
             type="button"
             onClick={() => { window.location.href = "/api/auth/x"; }}
-            className="flex items-center justify-center gap-3 w-full py-2.5 border border-gray-300 rounded-md hover:bg-gray-50 text-sm font-medium cursor-pointer"
+            className="flex items-center justify-center gap-3 w-full py-2.5 border border-border rounded-lg hover:bg-primary/5 text-sm font-medium cursor-pointer transition-colors duration-150"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
@@ -65,7 +65,7 @@ export function Login() {
 
         <div className="relative mb-6">
           <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-200"></div>
+            <div className="w-full border-t border-border"></div>
           </div>
           <div className="relative flex justify-center text-sm">
             <span className="px-4 bg-white text-gray-400">or sign in with email</span>
@@ -79,11 +79,11 @@ export function Login() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="your@email.com"
             required
-            className="w-full px-4 py-2 border rounded-md mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-4 py-2.5 border border-border rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors"
           />
           <button
             type="submit"
-            className="w-full py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            className="w-full py-2.5 bg-primary text-white rounded-lg hover:bg-primary/90 font-medium transition-colors duration-150 cursor-pointer"
           >
             Sign in with Email
           </button>

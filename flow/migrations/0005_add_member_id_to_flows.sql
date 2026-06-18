@@ -1,0 +1,1 @@
+ALTER TABLE flows ADD COLUMN member_id TEXT NOT NULL DEFAULT '';

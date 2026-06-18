@@ -111,13 +111,14 @@ app.get("/api/lists", async (c) => {
 
 app.post("/api/lists", async (c) => {
   const tenantId = c.get("tenantId");
+  const memberId = c.get("memberId");
   const body = await c.req.json<{ name: string }>();
   if (!body.name?.trim()) return c.json({ error: "Name is required" }, 400);
 
   const id = crypto.randomUUID();
   await c.env.DB.prepare(
-    "INSERT INTO lists (id, name, tenant_id) VALUES (?, ?, ?)"
-  ).bind(id, body.name.trim(), Number(tenantId)).run();
+    "INSERT INTO lists (id, name, tenant_id, member_id) VALUES (?, ?, ?, ?)"
+  ).bind(id, body.name.trim(), Number(tenantId), memberId).run();
 
   return c.json({ id, name: body.name.trim() }, 201);
 });

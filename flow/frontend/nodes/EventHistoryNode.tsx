@@ -10,7 +10,10 @@ export default function EventHistoryNode({ data, selected }: NodeProps) {
     if (ev) { eventLabel = ev.label; break; }
   }
 
-  const summary = eventType ? eventLabel : "Configure...";
+  const duration = data.duration as number;
+  const unit = data.unit as string;
+  const timeStr = duration ? ` within ${duration} ${unit}` : "";
+  const summary = eventType ? `${eventLabel}${timeStr}` : "Configure...";
 
   return (
     <div
@@ -21,7 +24,7 @@ export default function EventHistoryNode({ data, selected }: NodeProps) {
       <Handle type="target" position={Position.Top} className="!bg-indigo-500 !w-3 !h-3" />
       <div className="flex items-center gap-2 mb-1">
         <span className="text-lg">🔍</span>
-        <span className="font-semibold text-sm text-indigo-700">Event Occurrence</span>
+        <span className="font-semibold text-sm text-indigo-700">Wait for Event</span>
       </div>
       <p className={`text-xs ${eventType ? "text-gray-700" : "text-gray-400 italic"}`}>
         {summary}

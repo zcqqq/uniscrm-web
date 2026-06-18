@@ -7,13 +7,15 @@ import { UserDetail } from "./pages/UserDetail";
 export function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-gray-50">
+      <div className="flex min-h-screen">
         <Nav />
-        <Routes>
-          <Route path="/" element={<Social />} />
-          <Route path="/users" element={<Users />} />
-          <Route path="/users/:id" element={<UserDetail />} />
-        </Routes>
+        <main className="flex-1 overflow-auto bg-gray-50">
+          <Routes>
+            <Route path="/" element={<Social />} />
+            <Route path="/users" element={<Users />} />
+            <Route path="/users/:id" element={<UserDetail />} />
+          </Routes>
+        </main>
       </div>
     </BrowserRouter>
   );

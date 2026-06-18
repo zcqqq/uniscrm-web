@@ -3,7 +3,7 @@ import { useAuth } from "../hooks/useAuth";
 
 function ScoreBadge({ score }: { score: number }) {
   return (
-    <span className="text-xs font-mono bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+    <span className="text-xs font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded">
       {(score * 100).toFixed(0)}%
     </span>
   );

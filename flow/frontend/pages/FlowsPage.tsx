@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFlows } from "../hooks/useFlows";
 import { FLOW_TEMPLATES, type FlowTemplate } from "../config/templates";
-import Nav from "../components/Nav";
+import { Nav } from "\.\./components/Nav";
 
 export default function FlowsPage() {
   const { flows, loading, createFlow, deleteFlow } = useFlows();

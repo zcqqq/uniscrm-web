@@ -20,6 +20,7 @@ export interface FlowGraph {
 export interface PendingWait {
   nodeId: string;
   durationMs: number;
+  awaitingEvent?: string;
 }
 
 export interface ActionResult {
@@ -31,12 +32,6 @@ export interface ExecutionResult {
   matched: boolean;
   actions: ActionResult[];
   pendingWaits: PendingWait[];
-}
-
-export interface EngineContext {
-  db?: D1Database;
-  userId?: string;
-  triggerTime?: string;
 }
 
 function resolveValue(value: string, payload: Record<string, unknown>): number | null {
@@ -143,28 +138,6 @@ export function evaluateCondition(
   }
 }
 
-async function checkEventHistory(
-  db: D1Database,
-  userId: string,
-  eventType: string,
-  channelId: string,
-  sinceTime: string
-): Promise<boolean> {
-  let sql: string;
-  let params: string[];
-
-  if (channelId) {
-    sql = `SELECT 1 FROM event WHERE user_id = ? AND event_type = ? AND channel_id = ? AND created_at > ? LIMIT 1`;
-    params = [userId, eventType, channelId, sinceTime];
-  } else {
-    sql = `SELECT 1 FROM event WHERE user_id = ? AND event_type = ? AND created_at > ? LIMIT 1`;
-    params = [userId, eventType, sinceTime];
-  }
-
-  const row = await db.prepare(sql).bind(...params).first();
-  return row !== null;
-}
-
 export function executeFlow(
   graph: FlowGraph,
   eventType: string,
@@ -180,21 +153,40 @@ export function executeFlow(
   const pendingWaits: PendingWait[] = [];
 
   for (const trigger of triggerNodes) {
-    collectActionsSync(graph, trigger.id, payload, actions, pendingWaits);
+    collectActions(graph, trigger.id, payload, actions, pendingWaits);
   }
 
   return { matched: actions.length > 0 || pendingWaits.length > 0, actions, pendingWaits };
 }
 
-export async function resumeFromNode(
+export function resumeFromNode(
   graph: FlowGraph,
   nodeId: string,
   payload: Record<string, unknown>,
-  ctx: EngineContext
-): Promise<ExecutionResult> {
+  branch?: string
+): ExecutionResult {
   const actions: ActionResult[] = [];
   const pendingWaits: PendingWait[] = [];
-  await collectActionsAsync(graph, nodeId, payload, actions, pendingWaits, ctx);
+
+  if (branch) {
+    const branchEdges = graph.edges.filter((e) => e.source === nodeId && e.sourceHandle === branch);
+    for (const edge of branchEdges) {
+      const target = graph.nodes.find((n) => n.id === edge.target);
+      if (!target) continue;
+      if (target.type === "action") {
+        const actionType = target.data.actionType as string;
+        const actionData: ActionResult = { type: actionType };
+        if (actionType === "addToList") actionData.listId = target.data.listId as string;
+        if (actionType === "xAction") { actionData.xEvent = target.data.xEvent as string; actionData.channelId = target.data.channelId as string; }
+        actions.push(actionData);
+      } else {
+        collectActions(graph, target.id, payload, actions, pendingWaits);
+      }
+    }
+  } else {
+    collectActions(graph, nodeId, payload, actions, pendingWaits);
+  }
+
   return { matched: actions.length > 0 || pendingWaits.length > 0, actions, pendingWaits };
 }
 
@@ -207,7 +199,7 @@ function durationToMs(duration: number, unit: string): number {
   }
 }
 
-function collectActionsSync(
+function collectActions(
   graph: FlowGraph,
   nodeId: string,
   payload: Record<string, unknown>,
@@ -238,83 +230,12 @@ function collectActionsSync(
       continue;
     }
 
-    if (targetNode.type === "condition" || targetNode.type === "eventHistory") {
-      if (targetNode.type === "eventHistory") {
-        // Event history conditions are skipped in sync mode (only evaluated after Wait)
-        continue;
-      }
-
-      const { field, operator, value } = targetNode.data as {
-        field?: string; operator?: string; value?: string;
-      };
-
-      if (!field || !operator || value === undefined || value === "") {
-        collectActionsSync(graph, targetNode.id, payload, actions, pendingWaits);
-        continue;
-      }
-
-      if (evaluateCondition(field, operator, String(value), payload)) {
-        collectActionsSync(graph, targetNode.id, payload, actions, pendingWaits);
-      }
-    }
-  }
-}
-
-async function collectActionsAsync(
-  graph: FlowGraph,
-  nodeId: string,
-  payload: Record<string, unknown>,
-  actions: ActionResult[],
-  pendingWaits: PendingWait[],
-  ctx: EngineContext
-): Promise<void> {
-  const outEdges = graph.edges.filter((e) => e.source === nodeId);
-
-  for (const edge of outEdges) {
-    const targetNode = graph.nodes.find((n) => n.id === edge.target);
-    if (!targetNode) continue;
-
-    if (targetNode.type === "action") {
-      const actionType = targetNode.data.actionType as string;
-      const actionData: ActionResult = { type: actionType };
-      if (actionType === "addToList") actionData.listId = targetNode.data.listId as string;
-      if (actionType === "xAction") { actionData.xEvent = targetNode.data.xEvent as string; actionData.channelId = targetNode.data.channelId as string; }
-      actions.push(actionData);
-      continue;
-    }
-
-    if (targetNode.type === "wait") {
-      const duration = Number(targetNode.data.duration || 0);
-      const unit = String(targetNode.data.unit || "minutes");
-      if (duration > 0) {
-        pendingWaits.push({ nodeId: targetNode.id, durationMs: durationToMs(duration, unit) });
-      }
-      continue;
-    }
-
     if (targetNode.type === "eventHistory") {
-      const checkEventType = targetNode.data.eventType as string;
-      const channelId = targetNode.data.channelId as string || "";
-
-      if (!checkEventType || !ctx.db || !ctx.userId || !ctx.triggerTime) continue;
-
-      const hasEvent = await checkEventHistory(ctx.db, ctx.userId, checkEventType, channelId, ctx.triggerTime);
-      const branch = hasEvent ? "yes" : "no";
-
-      const branchEdges = graph.edges.filter((e) => e.source === targetNode.id && e.sourceHandle === branch);
-      for (const branchEdge of branchEdges) {
-        const nextNode = graph.nodes.find((n) => n.id === branchEdge.target);
-        if (!nextNode) continue;
-
-        if (nextNode.type === "action") {
-          const actionType = nextNode.data.actionType as string;
-          const actionData: ActionResult = { type: actionType };
-          if (actionType === "addToList") actionData.listId = nextNode.data.listId as string;
-          if (actionType === "xAction") { actionData.xEvent = nextNode.data.xEvent as string; actionData.channelId = nextNode.data.channelId as string; }
-          actions.push(actionData);
-        } else {
-          await collectActionsAsync(graph, nextNode.id, payload, actions, pendingWaits, ctx);
-        }
+      const awaitingEvent = targetNode.data.eventType as string;
+      const duration = Number(targetNode.data.duration || 1);
+      const unit = String(targetNode.data.unit || "days");
+      if (awaitingEvent) {
+        pendingWaits.push({ nodeId: targetNode.id, durationMs: durationToMs(duration, unit), awaitingEvent });
       }
       continue;
     }
@@ -325,12 +246,12 @@ async function collectActionsAsync(
       };
 
       if (!field || !operator || value === undefined || value === "") {
-        await collectActionsAsync(graph, targetNode.id, payload, actions, pendingWaits, ctx);
+        collectActions(graph, targetNode.id, payload, actions, pendingWaits);
         continue;
       }
 
       if (evaluateCondition(field, operator, String(value), payload)) {
-        await collectActionsAsync(graph, targetNode.id, payload, actions, pendingWaits, ctx);
+        collectActions(graph, targetNode.id, payload, actions, pendingWaits);
       }
     }
   }

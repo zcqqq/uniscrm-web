@@ -57,7 +57,7 @@ export default function Sidebar() {
         />
         <DraggableItem
           type="eventHistory"
-          label="Event Occurrence"
+          label="Wait for Event"
           description="Check if event has occurred"
           color="border-indigo-200 bg-indigo-50/50"
           icon="🔍"

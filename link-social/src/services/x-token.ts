@@ -107,7 +107,7 @@ export class XTokenService {
 
   async getAllTwitterChannels(): Promise<Array<{ id: string; config: ChannelConfig }>> {
     const rows = await this.db
-      .prepare(`SELECT id, config FROM channels WHERE channel_type IN ('TWITTER', 'X')`)
+      .prepare(`SELECT id, config FROM channels WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1`)
       .all<{ id: string; config: string }>();
 
     return rows.results.map((r) => ({ id: r.id, config: JSON.parse(r.config) as ChannelConfig }));

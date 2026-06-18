@@ -1,4 +1,4 @@
-import { Nav as SharedNav } from "../../../shared/frontend/Nav";
+import { Sidebar } from "../../../shared/frontend/Sidebar";
 
 const urls = {
   web: import.meta.env.VITE_WEB_URL || "https://web-dev.uni-scrm.com",
@@ -7,9 +7,9 @@ const urls = {
   insightSegment: import.meta.env.VITE_INSIGHT_SEGMENT_URL || "https://insight-segment-dev.uni-scrm.com",
   flow: import.meta.env.VITE_FLOW_URL || "https://flow-dev.uni-scrm.com",
   content: import.meta.env.VITE_CONTENT_URL || "https://content-dev.uni-scrm.com",
-  commerce: import.meta.env.VITE_COMMERCE_URL || "",
+  commerce: import.meta.env.VITE_COMMERCE_URL || "https://commerce-dev.uni-scrm.com",
 };
 
 export function Nav() {
-  return <SharedNav urls={urls} currentModule="commerce" />;
+  return <Sidebar urls={urls} currentModule="commerce" currentPath="/" />;
 }

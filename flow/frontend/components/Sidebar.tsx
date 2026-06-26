@@ -37,8 +37,8 @@ export default function Sidebar() {
         {CHANNEL_TYPES.map((ct) => (
           <DraggableItem
             key={ct.channelType}
-            type={`trigger:${ct.channelType}`}
-            label={ct.label}
+            type="xTrigger"
+            label={`${ct.label} Trigger`}
             description={`${ct.events.length} events`}
             color="border-purple-200 bg-purple-50/50"
             icon={ct.icon}
@@ -46,17 +46,10 @@ export default function Sidebar() {
         ))}
       </div>
 
-      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Conditions</h3>
+      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Flow Control</h3>
       <div className="space-y-2 mb-6">
         <DraggableItem
-          type="condition"
-          label="Event Props"
-          description="Filter based on event fields"
-          color="border-amber-200 bg-amber-50/50"
-          icon="🔀"
-        />
-        <DraggableItem
-          type="eventHistory"
+          type="waitForEvent"
           label="Wait for Event"
           description="Check if event has occurred"
           color="border-indigo-200 bg-indigo-50/50"
@@ -73,13 +66,6 @@ export default function Sidebar() {
 
       <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Actions</h3>
       <div className="space-y-2">
-        <DraggableItem
-          type="addPoint"
-          label="Add Point"
-          description="Increment user point by 1"
-          color="border-green-200 bg-green-50/50"
-          icon="🎯"
-        />
         <DraggableItem
           type="addToList"
           label="Add to List"

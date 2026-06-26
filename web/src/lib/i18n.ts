@@ -5,14 +5,14 @@ const resources = {
   en: {
     translation: {
       nav: { recommendation: "Recommendation", content: "Content", commerce: "Commerce", settings: "Settings", logout: "Logout" },
-      settings: { title: "Settings", region: "Region", language: "Language", connectedAccounts: "Connected Accounts", disconnect: "Disconnect", connect: "Connect" },
+      settings: { title: "Settings", region: "Region", language: "Language", timezone: "Timezone", connectedAccounts: "Connected Accounts", disconnect: "Disconnect", connect: "Connect" },
       region: { global: "Global", china: "China" },
     },
   },
   zh: {
     translation: {
       nav: { recommendation: "推荐", content: "内容", commerce: "商品", settings: "设置", logout: "退出" },
-      settings: { title: "设置", region: "地区", language: "语言", connectedAccounts: "已连接账号", disconnect: "断开", connect: "连接" },
+      settings: { title: "设置", region: "地区", language: "语言", timezone: "时区", connectedAccounts: "已连接账号", disconnect: "断开", connect: "连接" },
       region: { global: "全球", china: "中国" },
     },
   },

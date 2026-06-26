@@ -7,6 +7,7 @@ export interface TriggerFieldDefinition {
   dataType: "number" | "string" | "enum";
   operators: string[];
   enums?: { value: string; label: string }[];
+  group: "event" | "user";
 }
 
 export interface EventDefinition {
@@ -27,7 +28,7 @@ const NUMBER_OPS = [">", "<", ">=", "<=", "=="];
 const STRING_OPS = ["==", "!=", "contains"];
 const ENUM_OPS = ["==", "!="];
 
-function propToField(propId: string, locale: Locale): TriggerFieldDefinition | null {
+function propToField(propId: string, locale: Locale, group: "event" | "user"): TriggerFieldDefinition | null {
   const prop = PROPS_X.find((p) => p.propId === propId);
   if (!prop) return null;
 
@@ -38,24 +39,35 @@ function propToField(propId: string, locale: Locale): TriggerFieldDefinition | n
       dataType: "enum",
       operators: ENUM_OPS,
       enums: prop.enums?.map((e) => ({ value: String(e.value), label: t(e.label, locale) })),
+      group,
     };
   }
 
   const dataType = prop.dataType === "INT" ? "number" : "string";
   const operators = dataType === "number" ? NUMBER_OPS : STRING_OPS;
-  return { id: propId, label: t(prop.label, locale), dataType, operators };
+  return { id: propId, label: t(prop.label, locale), dataType, operators, group };
 }
 
 export function getChannelTypes(locale: Locale = "en"): ChannelTypeDefinition[] {
+  const eventTimeField: TriggerFieldDefinition = {
+    id: "event_time",
+    label: t({ en: "Event Time", zh: "事件时间" }, locale),
+    dataType: "string",
+    operators: STRING_OPS,
+    group: "event",
+  };
+
   const xEvents = METADATA_X
     .filter((m) => m.flowType === "trigger")
     .map((m) => ({
       eventType: m.eventType,
       label: t(m.label, locale),
       description: m.description ? t(m.description, locale) : "",
-      contextFields: m.eventProps
-        .map((ep) => propToField(ep.propId, locale))
-        .filter(Boolean) as TriggerFieldDefinition[],
+      contextFields: [
+        eventTimeField,
+        ...m.eventProps.map((p) => propToField(p.propId, locale, "event")),
+        ...m.userProps.map((p) => propToField(p.propId, locale, "user")),
+      ].filter(Boolean) as TriggerFieldDefinition[],
     }));
 
   return [

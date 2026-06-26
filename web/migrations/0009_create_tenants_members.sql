@@ -1,19 +1,19 @@
 -- Create tenants table
-CREATE TABLE tenants (
+CREATE TABLE IF NOT EXISTS tenants (
   id TEXT PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   created_at TEXT NOT NULL
 );
 
 -- Create members table
-CREATE TABLE members (
+CREATE TABLE IF NOT EXISTS members (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id),
   email TEXT UNIQUE NOT NULL,
   preferred_location TEXT DEFAULT 'global',
   created_at TEXT NOT NULL
 );
-CREATE INDEX idx_members_tenant ON members(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_members_tenant ON members(tenant_id);
 
 -- Backfill: create a tenant per existing user (1:1, tenant.id = user.id)
 INSERT INTO tenants (id, email, created_at)

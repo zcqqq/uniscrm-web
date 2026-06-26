@@ -27,7 +27,7 @@ export async function webhookRoute(c: Context<{ Bindings: Env }>) {
 
   console.log(JSON.stringify({ webhook_event: event.type, event_id: event.id }));
 
-  const db = new SubscriptionDB(c.env.DB);
+  const db = new SubscriptionDB(c.env.ADMIN_DB);
 
   switch (event.type) {
     case "checkout.session.completed":

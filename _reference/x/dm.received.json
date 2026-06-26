@@ -1,0 +1,120 @@
+{
+    "direct_message_events": [
+        {
+            "type": "message_create",
+            "id": "2068646425802744237",
+            "created_timestamp": "1782038716278",
+            "message_create": {
+                "target": {
+                    "recipient_id": "3245609912"
+                },
+                "sender_id": "2066117282829385728",
+                "message_data": {
+                    "text": "别总想着一夜暴富。真正能长期做下去的，往往是稳定、简单、能持续的事，全程交易所内操作，容易理解。 #偏门 @teamkapo",
+                    "entities": {
+                        "hashtags": [
+                            {
+                                "text": "偏门",
+                                "indices": [
+                                    49,
+                                    52
+                                ]
+                            }
+                        ],
+                        "symbols": [],
+                        "user_mentions": [
+                            {
+                                "screen_name": "teamkapo",
+                                "name": "网赚日进2000U+/赚钱/挣钱/搞钱/非灰产/偏门/快钱/洗钱/非跑分/黑产/兼职/野路子/灰产",
+                                "id": 179094002,
+                                "id_str": "179094002",
+                                "indices": [
+                                    53,
+                                    62
+                                ]
+                            }
+                        ],
+                        "urls": []
+                    }
+                }
+            }
+        }
+    ],
+    "users": {
+        "3245609912": {
+            "data": {
+                "name": "UniSCRM",
+                "profile_banner_url": "",
+                "verified_type": "blue",
+                "profile_image_url": "https://pbs.twimg.com/profile_images/1947561624359079937/5OtpBMaZ_normal.jpg",
+                "protected": false,
+                "is_identity_verified": false,
+                "url": "https://t.co/LFIZGk9X0h",
+                "description": "AI Builder\nskill, plugin, agent, SaaS...",
+                "verified": true,
+                "id": "3245609912",
+                "username": "uniscrm",
+                "entities": {
+                    "url": {
+                        "urls": [
+                            {
+                                "start": 0,
+                                "start_str": "0",
+                                "end": 23,
+                                "end_str": "23",
+                                "url": "https://t.co/LFIZGk9X0h",
+                                "expanded_url": "https://uni-scrm.com",
+                                "display_url": "uni-scrm.com"
+                            }
+                        ]
+                    }
+                },
+                "public_metrics": {
+                    "followers_count": 353,
+                    "followers_count_str": "353",
+                    "following_count": 341,
+                    "following_count_str": "341",
+                    "tweet_count": 111,
+                    "tweet_count_str": "111",
+                    "listed_count": 0,
+                    "listed_count_str": "0",
+                    "like_count": 1,
+                    "like_count_str": "1",
+                    "media_count": 9,
+                    "media_count_str": "9"
+                },
+                "created_at": "2015-06-15T02:39:15.000Z"
+            }
+        },
+        "2066117282829385728": {
+            "data": {
+                "name": "xmlut ojvsgb",
+                "profile_banner_url": "",
+                "verified_type": "none",
+                "profile_image_url": "https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png",
+                "protected": false,
+                "is_identity_verified": false,
+                "url": "",
+                "description": "",
+                "verified": false,
+                "id": "2066117282829385728",
+                "username": "aaxayno749",
+                "public_metrics": {
+                    "followers_count": 0,
+                    "followers_count_str": "0",
+                    "following_count": 0,
+                    "following_count_str": "0",
+                    "tweet_count": 0,
+                    "tweet_count_str": "0",
+                    "listed_count": 0,
+                    "listed_count_str": "0",
+                    "like_count": 0,
+                    "like_count_str": "0",
+                    "media_count": 0,
+                    "media_count_str": "0"
+                },
+                "created_at": "2026-06-14T11:16:12.000Z"
+            }
+        }
+    }
+}

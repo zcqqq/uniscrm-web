@@ -9,7 +9,7 @@ export async function portalRoute(c: Context<{ Bindings: Env }>) {
     return_url: string;
   }>();
 
-  const db = new SubscriptionDB(c.env.DB);
+  const db = new SubscriptionDB(c.env.ADMIN_DB);
   const row = await db.getByTenantId(tenant_id);
 
   if (!row?.stripe_customer_id) {

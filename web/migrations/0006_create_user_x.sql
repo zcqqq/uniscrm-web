@@ -1,4 +1,4 @@
-CREATE TABLE user_x (
+CREATE TABLE IF NOT EXISTS user_x (
   id TEXT PRIMARY KEY,
   name TEXT,
   username TEXT,

@@ -1,5 +1,6 @@
 export interface Env {
-  DB: D1Database;
+  ADMIN_DB: D1Database;
+  WEB_DB: D1Database;
   STRIPE_SECRET_KEY: string;
   STRIPE_WEBHOOK_SECRET: string;
   INTERNAL_SECRET: string;

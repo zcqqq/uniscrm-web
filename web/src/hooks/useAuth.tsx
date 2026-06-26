@@ -8,6 +8,7 @@ interface MemberData {
   email: string;
   preferred_location: string;
   language: string;
+  timezone: string;
 }
 
 interface TenantData {
@@ -19,11 +20,12 @@ interface AuthState {
   member: MemberData | null;
   tenant: TenantData | null;
   loading: boolean;
-  login: (email: string) => Promise<void>;
+  login: (email: string, trial?: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   updateLocation: (location: string) => Promise<void>;
   updateLanguage: (language: string) => Promise<void>;
+  updateTimezone: (timezone: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -49,8 +51,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = async (email: string) => {
-    await api.auth.login(email);
+  const login = async (email: string, trial?: string) => {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    await api.auth.login(email, trial, timezone);
   };
 
   const logout = async () => {
@@ -81,8 +84,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     i18n.changeLanguage(language);
   };
 
+  const updateTimezone = async (timezone: string) => {
+    await api.settings.updateTimezone(timezone);
+    setMember((prev) => prev ? { ...prev, timezone } : prev);
+  };
+
   return (
-    <AuthContext.Provider value={{ member, tenant, loading, login, logout, refresh, updateLocation, updateLanguage }}>
+    <AuthContext.Provider value={{ member, tenant, loading, login, logout, refresh, updateLocation, updateLanguage, updateTimezone }}>
       {children}
     </AuthContext.Provider>
   );

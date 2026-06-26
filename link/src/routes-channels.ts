@@ -1,0 +1,303 @@
+import { Hono } from "hono";
+import type { Env } from "./types";
+import type { TenantDataDB } from "../../shared/tenant-data-db";
+import { ContentService } from "./services/content";
+import { LimitService } from "./services/limit";
+import { NotionChannel } from "./channels/notion";
+import { TikTokChannel } from "./channels/tiktok";
+import {
+  buildShopifyAuthUrl,
+  exchangeShopifyCode,
+  fetchShopifyProducts,
+} from "./channels/shopify";
+
+export function channelsRoutes() {
+  const router = new Hono<{ Bindings: Env }>();
+
+  // List channels by type
+  router.get("/", async (c) => {
+    const tenantId = c.get("tenantId" as never) as number;
+    const type = (c.req.query("type") || "").toUpperCase();
+    const rows = await c.env.LINK_DB.prepare(
+      "SELECT id, config FROM channels WHERE tenant_id = ? AND channel_type IN (?, 'TWITTER') AND is_active = 1"
+    ).bind(tenantId, type).all<{ id: string; config: string }>();
+    const channels = rows.results.map((r) => {
+      const config = JSON.parse(r.config || "{}");
+      return { id: r.id, username: config.x_username || config.display_name || config.channel_name || "" };
+    });
+    return c.json(channels);
+  });
+
+  // --- X ---
+  router.get("/x/status", async (c) => {
+    const row = await c.env.LINK_DB
+      .prepare("SELECT id, config FROM channels WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1 LIMIT 1")
+      .first<{ id: string; config: string }>();
+    if (!row) return c.json({ connected: false });
+    const config = JSON.parse(row.config) as { x_username?: string };
+    return c.json({ connected: true, username: config.x_username, channel_id: row.id });
+  });
+
+  router.delete("/x", async (c) => {
+    await c.env.LINK_DB
+      .prepare("UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1")
+      .run();
+    return c.json({ ok: true });
+  });
+
+  // --- TikTok ---
+  router.get("/tiktok/status", async (c) => {
+    const row = await c.env.LINK_DB
+      .prepare("SELECT id, config FROM channels WHERE channel_type = 'TIKTOK' AND is_active = 1 LIMIT 1")
+      .first<{ id: string; config: string }>();
+    if (!row) return c.json({ connected: false });
+    const config = JSON.parse(row.config) as { display_name?: string };
+    return c.json({ connected: true, displayName: config.display_name, channel_id: row.id });
+  });
+
+  router.delete("/tiktok", async (c) => {
+    await c.env.LINK_DB
+      .prepare("UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE channel_type = 'TIKTOK' AND is_active = 1")
+      .run();
+    return c.json({ ok: true });
+  });
+
+  router.post("/tiktok/sync", async (c) => {
+    const tenantDataDb = c.get("tenantDataDb" as never) as TenantDataDB;
+    const tenantId = c.get("tenantId" as never) as number;
+
+    const channel = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE tenant_id = ? AND channel_type = 'TIKTOK' AND is_active = 1")
+      .bind(tenantId)
+      .first<{ config: string }>();
+    if (!channel) return c.json({ error: "TikTok channel not connected" }, 400);
+
+    const config = JSON.parse(channel.config) as { access_token?: string };
+    if (!config.access_token) return c.json({ error: "TikTok token missing" }, 400);
+
+    const tiktok = new TikTokChannel(config.access_token);
+    const items = await tiktok.fetchItems({});
+
+    const limitService = new LimitService(tenantDataDb, c.env.VECTORIZE);
+    const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);
+    await limitService.enforceContentLimit(items.length);
+    const result = await contentService.syncBatch("TIKTOK", items);
+    return c.json({ status: "ok", ...result });
+  });
+
+  // --- Notion ---
+  router.get("/notion/auth", async (c) => {
+    const params = new URLSearchParams({
+      client_id: c.env.NOTION_CLIENT_ID,
+      redirect_uri: c.env.NOTION_REDIRECT_URI,
+      response_type: "code",
+      owner: "user",
+      state: c.req.header("Cookie")?.match(/session=([^;]*)/)?.[1] ?? "",
+    });
+    return c.json({ url: `https://api.notion.com/v1/oauth/authorize?${params}` });
+  });
+
+  router.get("/notion/status", async (c) => {
+    const memberId = c.get("memberId" as never) as string;
+    const ch = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND member_id = ? AND is_active = 1")
+      .bind(memberId).first<{ config: string }>();
+    if (!ch) return c.json({ connected: false });
+    const config = JSON.parse(ch.config) as { channel_name?: string };
+    return c.json({ connected: true, channel_name: config.channel_name });
+  });
+
+  router.get("/notion/folders", async (c) => {
+    const memberId = c.get("memberId" as never) as string;
+    const ch = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND member_id = ? AND is_active = 1")
+      .bind(memberId).first<{ config: string }>();
+    if (!ch) return c.json({ error: "Notion not connected" }, 401);
+    const config = JSON.parse(ch.config) as { access_token: string };
+    const folders = await NotionChannel.listFolders(config.access_token);
+    return c.json({ folders });
+  });
+
+  router.get("/notion/callback", async (c) => {
+    const code = c.req.query("code");
+    const state = c.req.query("state");
+    if (!code || !state) return c.json({ error: "Missing code or state" }, 400);
+
+    const data = await c.env.KV.get(`session:${state}`);
+    if (!data) return c.json({ error: "Invalid session" }, 401);
+    const session = JSON.parse(data) as { member_id: string; tenant_id: number };
+
+    const credentials = btoa(`${c.env.NOTION_CLIENT_ID}:${c.env.NOTION_CLIENT_SECRET}`);
+    const tokenRes = await fetch("https://api.notion.com/v1/oauth/token", {
+      method: "POST",
+      headers: { Authorization: `Basic ${credentials}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ grant_type: "authorization_code", code, redirect_uri: c.env.NOTION_REDIRECT_URI }),
+    });
+
+    if (!tokenRes.ok) {
+      const err = await tokenRes.text();
+      return c.json({ error: `Notion token exchange failed: ${err}` }, 500);
+    }
+
+    const tokenData = (await tokenRes.json()) as { access_token: string; workspace_id?: string; workspace_name?: string };
+
+    const configJson = JSON.stringify({
+      access_token: tokenData.access_token,
+      channel_name: tokenData.workspace_name ?? null,
+    });
+    const sourceId = tokenData.workspace_id || crypto.randomUUID();
+
+    await c.env.LINK_DB.prepare(
+      `INSERT INTO channels (id, channel_type, config, source_channel_id, member_id, tenant_id, created_at, updated_at)
+       VALUES (?, 'NOTION', ?, ?, ?, ?, datetime('now'), datetime('now'))
+       ON CONFLICT(channel_type, source_channel_id) DO UPDATE SET config = excluded.config, member_id = excluded.member_id, is_active = 1, updated_at = datetime('now')`
+    ).bind(crypto.randomUUID(), configJson, sourceId, session.member_id, session.tenant_id).run();
+
+    return c.redirect("/content?notion=connected");
+  });
+
+  router.post("/notion/sync", async (c) => {
+    const memberId = c.get("memberId" as never) as string;
+    const tenantDataDb = c.get("tenantDataDb" as never) as TenantDataDB;
+    const tenantId = c.get("tenantId" as never) as number;
+    const { confirmed } = await c.req.json<{ confirmed?: boolean }>().catch(() => ({ confirmed: undefined }));
+
+    const ch = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND member_id = ? AND is_active = 1")
+      .bind(memberId).first<{ config: string }>();
+    if (!ch) return c.json({ error: "Notion not connected" }, 401);
+    const notionConfig = JSON.parse(ch.config) as { access_token: string };
+
+    const configRow = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE tenant_id = ? AND channel_type = 'NOTION' AND is_active = 1")
+      .bind(tenantId)
+      .first<{ config: string }>();
+    if (!configRow) return c.json({ error: "No folders selected" }, 400);
+
+    const folderConfig = JSON.parse(configRow.config) as { folder_ids?: string[]; access_token?: string };
+    const channel = new NotionChannel(notionConfig.access_token);
+    const items = await channel.fetchItems(folderConfig);
+
+    const limitService = new LimitService(tenantDataDb, c.env.VECTORIZE);
+    const check = await limitService.checkContentLimit(items.length);
+    if (!check.allowed && !confirmed) {
+      return c.json({ needsConfirmation: true, overflow: check.overflow, wouldDelete: check.wouldDelete });
+    }
+    if (!check.allowed && confirmed) {
+      await limitService.enforceContentLimit(check.overflow);
+    }
+
+    const service = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);
+    const result = await service.syncBatch("NOTION", items);
+    return c.json(result);
+  });
+
+  router.get("/:type/config", async (c) => {
+    const tenantId = c.get("tenantId" as never) as number;
+    const channelType = c.req.param("type").toUpperCase();
+    const row = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE tenant_id = ? AND channel_type = ? AND is_active = 1")
+      .bind(tenantId, channelType)
+      .first<{ config: string }>();
+    return c.json({ config: row ? JSON.parse(row.config) : null });
+  });
+
+  router.put("/:type/config", async (c) => {
+    const memberId = c.get("memberId" as never) as string;
+    const tenantDataDb = c.get("tenantDataDb" as never) as TenantDataDB;
+    const tenantId = c.get("tenantId" as never) as number;
+    const channelType = c.req.param("type").toUpperCase();
+    const { config } = await c.req.json<{ config: Record<string, unknown> }>();
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
+
+    await c.env.LINK_DB
+      .prepare(
+        `INSERT INTO channels (id, channel_type, config, source_channel_id, tenant_id, member_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(channel_type, source_channel_id) DO UPDATE SET config = excluded.config, updated_at = excluded.updated_at`
+      )
+      .bind(id, channelType, JSON.stringify(config), `${channelType}-${tenantId}`, tenantId, memberId, now, now)
+      .run();
+
+    if (channelType === "NOTION") {
+      const ch = await c.env.LINK_DB
+        .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND member_id = ? AND is_active = 1")
+        .bind(memberId).first<{ config: string }>();
+      if (ch && (config as { folder_ids?: string[] }).folder_ids) {
+        const notionConfig = JSON.parse(ch.config) as { access_token: string };
+        const channel = new NotionChannel(notionConfig.access_token);
+        const items = await channel.fetchItems(config);
+        const limitService = new LimitService(tenantDataDb, c.env.VECTORIZE);
+        const check = await limitService.checkContentLimit(items.length);
+        if (!check.allowed) {
+          return c.json({ ok: true, needsConfirmation: true, overflow: check.overflow, wouldDelete: check.wouldDelete });
+        }
+        const service = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);
+        const result = await service.syncBatch("NOTION", items);
+        return c.json({ ok: true, sync: result });
+      }
+    }
+
+    return c.json({ ok: true });
+  });
+
+  // --- Shopify ---
+  router.get("/shopify/auth", async (c) => {
+    const shop = c.req.query("shop");
+    if (!shop) return c.json({ error: "Missing shop parameter" }, 400);
+    const sessionId = c.req.header("Cookie")?.match(/session=([^;]*)/)?.[1] ?? "";
+    const url = buildShopifyAuthUrl(shop, c.env.SHOPIFY_CLIENT_ID, c.env.SHOPIFY_REDIRECT_URI, sessionId);
+    return c.json({ url });
+  });
+
+  router.get("/shopify/status", async (c) => {
+    const memberId = c.get("memberId" as never) as string;
+    const ch = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE channel_type = 'SHOPIFY' AND member_id = ? AND is_active = 1")
+      .bind(memberId).first<{ config: string }>();
+    if (!ch) return c.json({ connected: false });
+    const config = JSON.parse(ch.config) as { channel_name?: string };
+    return c.json({ connected: true, channel_name: config.channel_name });
+  });
+
+  router.get("/shopify/products", async (c) => {
+    const memberId = c.get("memberId" as never) as string;
+    const ch = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE channel_type = 'SHOPIFY' AND member_id = ? AND is_active = 1")
+      .bind(memberId).first<{ config: string }>();
+    if (!ch) return c.json({ error: "Shopify not connected" }, 401);
+    const config = JSON.parse(ch.config) as { access_token: string; channel_name: string };
+    if (!config.channel_name) return c.json({ error: "Shopify not connected" }, 401);
+    const products = await fetchShopifyProducts(config.channel_name, config.access_token);
+    return c.json({ products });
+  });
+
+  router.get("/shopify/callback", async (c) => {
+    const code = c.req.query("code");
+    const shop = c.req.query("shop");
+    const state = c.req.query("state");
+    if (!code || !shop || !state) return c.json({ error: "Missing code, shop, or state" }, 400);
+
+    const data = await c.env.KV.get(`session:${state}`);
+    if (!data) return c.json({ error: "Invalid session" }, 401);
+    const session = JSON.parse(data) as { member_id: string; tenant_id: number };
+
+    const tokenData = await exchangeShopifyCode(shop, c.env.SHOPIFY_CLIENT_ID, c.env.SHOPIFY_CLIENT_SECRET, code);
+
+    const configJson = JSON.stringify({
+      access_token: tokenData.access_token,
+      channel_name: shop,
+    });
+
+    await c.env.LINK_DB.prepare(
+      `INSERT INTO channels (id, channel_type, config, source_channel_id, member_id, tenant_id, created_at, updated_at)
+       VALUES (?, 'SHOPIFY', ?, ?, ?, ?, datetime('now'), datetime('now'))
+       ON CONFLICT(channel_type, source_channel_id) DO UPDATE SET config = excluded.config, member_id = excluded.member_id, is_active = 1, updated_at = datetime('now')`
+    ).bind(crypto.randomUUID(), configJson, shop, session.member_id, session.tenant_id).run();
+
+    return c.redirect("/commerce?shopify=connected");
+  });
+
+  return router;
+}

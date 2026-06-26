@@ -42,11 +42,11 @@ export function CompleteProfile() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full p-8 bg-white rounded-lg shadow">
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="max-w-md w-full p-8 bg-card rounded-lg shadow">
         <h1 className="text-2xl font-bold mb-2">Complete your profile</h1>
-        <p className="text-gray-500 mb-6">We need your email to finish setting up your account.</p>
-        {error && <p className="text-red-600 mb-4">{error}</p>}
+        <p className="text-muted-foreground mb-6">We need your email to finish setting up your account.</p>
+        {error && <p className="text-destructive mb-4">{error}</p>}
 
         {step === "email" ? (
           <form onSubmit={handleSendCode}>
@@ -61,14 +61,14 @@ export function CompleteProfile() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+              className="w-full py-2 bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50"
             >
               {loading ? "Sending..." : "Send Verification Code"}
             </button>
           </form>
         ) : (
           <form onSubmit={handleVerifyCode}>
-            <p className="text-sm text-gray-600 mb-4">
+            <p className="text-sm text-muted-foreground mb-4">
               We sent a 6-digit code to <strong>{email}</strong>
             </p>
             <input
@@ -83,7 +83,7 @@ export function CompleteProfile() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+              className="w-full py-2 bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50"
             >
               {loading ? "Verifying..." : "Verify"}
             </button>

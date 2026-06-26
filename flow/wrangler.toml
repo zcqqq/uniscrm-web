@@ -22,20 +22,39 @@ routes = [{ pattern = "flow-dev.uni-scrm.com", custom_domain = true }]
 
 [env.dev.vars]
 WEB_URL = "https://web-dev.uni-scrm.com"
-PROFILE_URL = "https://profile-dev.uni-scrm.com"
-LINK_SOCIAL_URL = "https://link-social-dev.uni-scrm.com"
+PROFILE_URL = "https://link-dev.uni-scrm.com"
+LINK_SOCIAL_URL = "https://link-dev.uni-scrm.com"
 INTERNAL_SECRET = "dev-internal-secret"
+CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 
 [[env.dev.d1_databases]]
 binding = "DB"
 database_name = "uniscrm-db-dev"
-database_id = "b322777d-6617-4dbf-a4d2-f734166b7737"
+database_id = "95ad8842-5b0d-4ff4-854d-9c42f4b0685f"
+
+[[env.dev.d1_databases]]
+binding = "FLOW_DB"
+database_name = "uniscrm-flow-dev"
+database_id = "729ef209-fd66-474f-8e8a-611026bf328c"
 migrations_dir = "migrations"
 
 [[env.dev.queues.consumers]]
 queue = "flow-events-dev"
 max_batch_size = 10
 max_batch_timeout = 5
+
+[[env.dev.queues.consumers]]
+queue = "flow-log-dev"
+max_batch_size = 50
+max_batch_timeout = 10
+
+[[env.dev.queues.producers]]
+binding = "FLOW_LOG_QUEUE"
+queue = "flow-log-dev"
+
+[[env.dev.analytics_engine_datasets]]
+binding = "FLOW_ANALYTICS"
+dataset = "flow_node_analytics_dev"
 
 [env.dev.triggers]
 crons = ["* * * * *"]
@@ -53,12 +72,30 @@ LINK_SOCIAL_URL = "https://link-social.uni-scrm.com"
 binding = "DB"
 database_name = "uniscrm-db"
 database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
+
+[[env.production.d1_databases]]
+binding = "FLOW_DB"
+database_name = "uniscrm-flow"
+database_id = "TODO-create-prod-db"
 migrations_dir = "migrations"
 
 [[env.production.queues.consumers]]
 queue = "flow-events"
 max_batch_size = 10
 max_batch_timeout = 5
+
+[[env.production.queues.consumers]]
+queue = "flow-log"
+max_batch_size = 50
+max_batch_timeout = 10
+
+[[env.production.queues.producers]]
+binding = "FLOW_LOG_QUEUE"
+queue = "flow-log"
+
+[[env.production.analytics_engine_datasets]]
+binding = "FLOW_ANALYTICS"
+dataset = "flow_node_analytics"
 
 [env.production.triggers]
 crons = ["* * * * *"]

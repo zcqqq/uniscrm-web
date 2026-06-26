@@ -3,7 +3,7 @@ import { useAuth } from "../hooks/useAuth";
 
 function ScoreBadge({ score }: { score: number }) {
   return (
-    <span className="text-xs font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+    <span className="text-xs font-mono bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded">
       {(score * 100).toFixed(0)}%
     </span>
   );
@@ -14,14 +14,14 @@ export function Home() {
   const { recommendations, loading } = useRecommendations();
 
   if (loading) {
-    return <div className="max-w-5xl mx-auto p-8"><p className="text-gray-500">Loading recommendations...</p></div>;
+    return <div className="max-w-5xl mx-auto p-8"><p className="text-muted-foreground">Loading recommendations...</p></div>;
   }
 
   if (recommendations.length === 0) {
     return (
       <div className="max-w-5xl mx-auto p-8">
         <h1 className="text-2xl font-bold mb-4">Recommendations</h1>
-        <p className="text-gray-500">No recommendations yet. Import content and products, then wait for trend matching.</p>
+        <p className="text-muted-foreground">No recommendations yet. Import content and products, then wait for trend matching.</p>
       </div>
     );
   }
@@ -49,18 +49,18 @@ export function Home() {
         </thead>
         <tbody>
           {recommendations.map((group, i) => (
-            <tr key={i} className="border-b hover:bg-gray-50">
+            <tr key={i} className="border-b hover:bg-background">
               <td className="py-3 px-3">
                 {group.trend ? (
                   <div>
                     <div className="font-medium">{group.trend.title}</div>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs text-gray-400">{group.trend.platform}</span>
+                      <span className="text-xs text-muted-foreground/60">{group.trend.platform}</span>
                       {group.trend.similarity < 1 && <ScoreBadge score={group.trend.similarity} />}
                     </div>
                   </div>
                 ) : (
-                  <span className="text-gray-300">{"—"}</span>
+                  <span className="text-muted-foreground/40">{"—"}</span>
                 )}
               </td>
               <td className="py-3 px-3">
@@ -70,7 +70,7 @@ export function Home() {
                     <ScoreBadge score={group.content.similarity} />
                   </div>
                 ) : (
-                  <span className="text-gray-300">{"—"}</span>
+                  <span className="text-muted-foreground/40">{"—"}</span>
                 )}
               </td>
               <td className="py-3 px-3">
@@ -80,7 +80,7 @@ export function Home() {
                     <ScoreBadge score={group.product.similarity} />
                   </div>
                 ) : (
-                  <span className="text-gray-300">{"—"}</span>
+                  <span className="text-muted-foreground/40">{"—"}</span>
                 )}
               </td>
             </tr>

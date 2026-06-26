@@ -29,7 +29,7 @@ UPDATE user_x SET tenant_id = (
 ) WHERE EXISTS (SELECT 1 FROM event_x e WHERE e.user_id = user_x.id);
 
 -- Indexes for tenant isolation queries
-CREATE INDEX idx_oauth_accounts_tenant ON oauth_accounts(tenant_id);
-CREATE INDEX idx_contents_tenant ON contents(tenant_id);
-CREATE INDEX idx_event_x_tenant ON event_x(tenant_id);
-CREATE INDEX idx_user_x_tenant ON user_x(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_accounts_tenant ON oauth_accounts(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_contents_tenant ON contents(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_event_x_tenant ON event_x(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_user_x_tenant ON user_x(tenant_id);

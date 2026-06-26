@@ -18,7 +18,7 @@ export interface FlowSummary {
   id: string;
   name: string;
   description: string;
-  enabled: number;
+  status: string;
   created_at: string;
   updated_at: string;
 }
@@ -52,6 +52,16 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/api/flows/${id}`, { method: "DELETE" }),
+    publish: (id: string) =>
+      request<{ ok: boolean }>(`/api/flows/${id}/publish`, { method: "POST" }),
+    unpublish: (id: string) =>
+      request<{ ok: boolean }>(`/api/flows/${id}/unpublish`, { method: "POST" }),
+    analytics: (id: string) =>
+      request<{ nodes: Record<string, { enter: number; exit: number }> }>(`/api/flows/${id}/analytics`),
+    nodeLogs: (flowId: string, nodeId: string) =>
+      request<{ logs: { user_id: string; name: string | null; created_at: string }[] }>(
+        `/api/flows/${flowId}/nodes/${nodeId}/logs`
+      ),
   },
   channels: {
     list: (channelType: string) =>

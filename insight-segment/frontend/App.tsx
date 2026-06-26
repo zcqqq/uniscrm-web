@@ -9,7 +9,7 @@ export function App() {
     <BrowserRouter>
       <div className="flex min-h-screen">
         <Nav />
-        <main className="flex-1 overflow-auto bg-gray-50">
+        <main className="flex-1 overflow-auto bg-background text-foreground">
           <Routes>
             <Route path="/" element={<Segments />} />
             <Route path="/create" element={<SegmentCreate />} />

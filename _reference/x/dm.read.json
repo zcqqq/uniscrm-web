@@ -1,0 +1,86 @@
+{
+    "direct_message_events": [
+        {
+            "type": "last_message_read_update",
+            "id": "2067995792443588608",
+            "created_timestamp": "1781883593079",
+            "last_read_event_id": "2064726055450206617",
+            "initiating_user_id": "1736807461594836995"
+        }
+    ],
+    "users": {
+        "3245609912": {
+            "data": {
+                "name": "UniSCRM",
+                "url": "https://t.co/LFIZGk9X0h",
+                "protected": false,
+                "username": "uniscrm",
+                "verified": true,
+                "is_identity_verified": false,
+                "verified_type": "blue",
+                "description": "AI Builder\nskill, plugin, agent, SaaS...",
+                "id": "3245609912",
+                "entities": {
+                    "url": {
+                        "urls": [
+                            {
+                                "start": 0,
+                                "start_str": "0",
+                                "end": 23,
+                                "end_str": "23",
+                                "url": "https://t.co/LFIZGk9X0h",
+                                "expanded_url": "https://uni-scrm.com",
+                                "display_url": "uni-scrm.com"
+                            }
+                        ]
+                    }
+                },
+                "profile_image_url": "https://pbs.twimg.com/profile_images/1947561624359079937/5OtpBMaZ_normal.jpg",
+                "created_at": "2015-06-15T02:39:15.000Z",
+                "public_metrics": {
+                    "followers_count": 356,
+                    "followers_count_str": "356",
+                    "following_count": 341,
+                    "following_count_str": "341",
+                    "tweet_count": 111,
+                    "tweet_count_str": "111",
+                    "listed_count": 0,
+                    "listed_count_str": "0",
+                    "like_count": 1,
+                    "like_count_str": "1",
+                    "media_count": 9,
+                    "media_count_str": "9"
+                }
+            }
+        },
+        "1736807461594836995": {
+            "data": {
+                "name": "亦南歌",
+                "profile_banner_url": "https://pbs.twimg.com/profile_banners/1736807461594836995/1779185222",
+                "protected": false,
+                "username": "TopGeeky7",
+                "verified": true,
+                "is_identity_verified": false,
+                "verified_type": "blue",
+                "description": "AI时代的独立造物者 🚀\n把复杂问题拆成代码和提示词💡 \n记录真实 Build in Public、产品冷启动📈\n个人杠杆放大术⚒️\n已在AI+工具领域验证多条路径\n欢迎一起成为超级个体⭐️",
+                "id": "1736807461594836995",
+                "profile_image_url": "https://pbs.twimg.com/profile_images/1981719467781496832/C22kqRst_normal.jpg",
+                "created_at": "2023-12-18T17:55:56.000Z",
+                "public_metrics": {
+                    "followers_count": 457,
+                    "followers_count_str": "457",
+                    "following_count": 358,
+                    "following_count_str": "358",
+                    "tweet_count": 156,
+                    "tweet_count_str": "156",
+                    "listed_count": 0,
+                    "listed_count_str": "0",
+                    "like_count": 6,
+                    "like_count_str": "6",
+                    "media_count": 27,
+                    "media_count_str": "27"
+                }
+            }
+        }
+    }
+}

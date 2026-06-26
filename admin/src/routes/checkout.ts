@@ -11,8 +11,8 @@ export async function checkoutRoute(c: Context<{ Bindings: Env }>) {
     cancel_url: string;
   }>();
 
-  const tenant = await c.env.DB
-    .prepare("SELECT email FROM tenants WHERE id = ?")
+  const tenant = await c.env.WEB_DB
+    .prepare("SELECT email FROM tenants WHERE tenant_id = ?")
     .bind(tenant_id)
     .first<{ email: string }>();
 
@@ -24,7 +24,7 @@ export async function checkoutRoute(c: Context<{ Bindings: Env }>) {
     const stripe = createStripeClient(c.env.STRIPE_SECRET_KEY);
     const customerId = await findOrCreateCustomer(stripe, tenant.email, tenant_id);
 
-    const db = new SubscriptionDB(c.env.DB);
+    const db = new SubscriptionDB(c.env.ADMIN_DB);
     await db.upsert(tenant_id, { stripe_customer_id: customerId });
 
     const approvalUrl = await createCheckoutSession(stripe, {

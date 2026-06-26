@@ -2,6 +2,8 @@ export interface OAuthState {
   codeVerifier: string;
   mode: "login" | "link" | "channel";
   userId?: string;
+  trial?: string;
+  timezone?: string;
 }
 
 export interface PendingOAuthData {
@@ -42,7 +44,8 @@ export class OAuthService {
   async resolveUser(
     provider: string,
     providerUserId: string,
-    email: string | null
+    email: string | null,
+    timezone = "UTC"
   ): Promise<ResolveUserResult> {
     const existing = await this.db
       .prepare(
@@ -91,8 +94,8 @@ export class OAuthService {
     const tenantId = tenant!.tenant_id;
 
     await this.db
-      .prepare("INSERT INTO members (id, tenant_id, email, preferred_location, created_at) VALUES (?, ?, ?, ?, ?)")
-      .bind(memberId, tenantId, email, "global", now)
+      .prepare("INSERT INTO members (id, tenant_id, email, preferred_location, timezone, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(memberId, tenantId, email, "global", timezone, now)
       .run();
 
     await this.db

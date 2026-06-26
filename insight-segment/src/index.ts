@@ -146,7 +146,7 @@ app.post("/api/segments/preview", async (c) => {
   const { sql, params } = buildSegmentQuery(validation.conditions, fields);
 
   const tenantDataDb = c.get("tenantDataDb");
-  const countSql = sql.replace("SELECT DISTINCT user.id", "SELECT COUNT(DISTINCT user.id) as cnt");
+  const countSql = sql.replace("SELECT DISTINCT profile.id", "SELECT COUNT(DISTINCT profile.id) as cnt");
   const countRows = await tenantDataDb.query<{ cnt: number }>(countSql, params);
 
   return c.json({
@@ -195,17 +195,17 @@ app.post("/api/segments/:id/compute", async (c) => {
     const { sql, params } = buildSegmentQuery(conditions, fields);
 
     const rows = await tenantDataDb.query<{ id: string }>(sql, params);
-    const userIds = rows.map((r) => r.id).slice(0, 10000);
+    const profileIds = rows.map((r) => r.id).slice(0, 10000);
 
-    await tenantDataDb.run(`DELETE FROM segment_users WHERE segment_id = ?`, [segmentId]);
+    await tenantDataDb.run(`DELETE FROM segment_profiles WHERE segment_id = ?`, [segmentId]);
 
     const now = new Date().toISOString();
     const BATCH_SIZE = 50;
-    for (let i = 0; i < userIds.length; i += BATCH_SIZE) {
-      const batch = userIds.slice(i, i + BATCH_SIZE);
-      const stmts = batch.map((uid) => ({
-        sql: `INSERT OR IGNORE INTO segment_users (segment_id, user_id, created_at) VALUES (?, ?, ?)`,
-        params: [segmentId, uid, now],
+    for (let i = 0; i < profileIds.length; i += BATCH_SIZE) {
+      const batch = profileIds.slice(i, i + BATCH_SIZE);
+      const stmts = batch.map((pid) => ({
+        sql: `INSERT OR IGNORE INTO segment_profiles (segment_id, profile_id, created_at) VALUES (?, ?, ?)`,
+        params: [segmentId, pid, now],
       }));
       await tenantDataDb.batch(stmts);
     }
@@ -213,10 +213,10 @@ app.post("/api/segments/:id/compute", async (c) => {
     await c.env.DB.prepare(
       `UPDATE segments SET status = 'ready', user_count = ?, updated_at = datetime('now') WHERE id = ?`
     )
-      .bind(userIds.length, segmentId)
+      .bind(profileIds.length, segmentId)
       .run();
 
-    return c.json({ segment: { id: segmentId, status: "ready", user_count: userIds.length } });
+    return c.json({ segment: { id: segmentId, status: "ready", user_count: profileIds.length } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await c.env.DB.prepare(
@@ -246,16 +246,16 @@ app.get("/api/segments/:id/users", async (c) => {
 
   const tenantDataDb = c.get("tenantDataDb");
   const rows = await tenantDataDb.query(
-    `SELECT u.id, u.name, u.username, u.profile_image_url
-     FROM segment_users su
-     INNER JOIN user u ON u.id = su.user_id
-     WHERE su.segment_id = ?
-     ORDER BY su.created_at DESC LIMIT ? OFFSET ?`,
+    `SELECT sp.profile_id, u.id as user_id, u.name, u.username, u.profile_image_url
+     FROM segment_profiles sp
+     INNER JOIN user u ON u.profile_id = sp.profile_id
+     WHERE sp.segment_id = ?
+     ORDER BY sp.created_at DESC LIMIT ? OFFSET ?`,
     [segmentId, limit, offset]
   );
 
   const countRows = await tenantDataDb.query<{ total: number }>(
-    `SELECT COUNT(*) as total FROM segment_users WHERE segment_id = ?`,
+    `SELECT COUNT(*) as total FROM segment_profiles WHERE segment_id = ?`,
     [segmentId]
   );
   const total = countRows[0]?.total || 0;

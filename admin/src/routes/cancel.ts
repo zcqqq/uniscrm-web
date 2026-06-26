@@ -6,7 +6,7 @@ import { createStripeClient, cancelSubscription } from "../services/stripe";
 export async function cancelRoute(c: Context<{ Bindings: Env }>) {
   const { tenant_id } = await c.req.json<{ tenant_id: string }>();
 
-  const db = new SubscriptionDB(c.env.DB);
+  const db = new SubscriptionDB(c.env.ADMIN_DB);
   const row = await db.getByTenantId(tenant_id);
 
   if (!row?.stripe_subscription_id) {

@@ -28,8 +28,27 @@ CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 [[env.dev.d1_databases]]
 binding = "DB"
 database_name = "uniscrm-db-dev"
-database_id = "b322777d-6617-4dbf-a4d2-f734166b7737"
+database_id = "95ad8842-5b0d-4ff4-854d-9c42f4b0685f"
 migrations_dir = "migrations"
+
+[[env.dev.containers]]
+class_name = "MaigretContainer"
+image = "./Dockerfile"
+instance_type = "basic"
+max_instances = 1
+
+[[env.dev.durable_objects.bindings]]
+name = "MAIGRET_CONTAINER"
+class_name = "MaigretContainer"
+
+[[env.dev.migrations]]
+tag = "v1"
+new_sqlite_classes = ["MaigretContainer"]
+
+[[env.dev.queues.consumers]]
+queue = "maigret-jobs-dev"
+max_batch_size = 1
+max_batch_timeout = 30
 
 [env.production]
 name = "profile"
@@ -43,3 +62,22 @@ binding = "DB"
 database_name = "uniscrm-db"
 database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
 migrations_dir = "migrations"
+
+[[env.production.containers]]
+class_name = "MaigretContainer"
+image = "./Dockerfile"
+instance_type = "basic"
+max_instances = 3
+
+[[env.production.durable_objects.bindings]]
+name = "MAIGRET_CONTAINER"
+class_name = "MaigretContainer"
+
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["MaigretContainer"]
+
+[[env.production.queues.consumers]]
+queue = "maigret-jobs"
+max_batch_size = 1
+max_batch_timeout = 30

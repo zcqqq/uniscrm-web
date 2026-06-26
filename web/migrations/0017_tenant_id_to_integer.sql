@@ -2,7 +2,7 @@
 
 -- channels
 DROP TABLE IF EXISTS channels;
-CREATE TABLE channels (
+CREATE TABLE IF NOT EXISTS channels (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   channel_type TEXT NOT NULL,
@@ -17,7 +17,7 @@ CREATE TABLE channels (
 -- segments
 DROP TABLE IF EXISTS segment_users;
 DROP TABLE IF EXISTS segments;
-CREATE TABLE segments (
+CREATE TABLE IF NOT EXISTS segments (
   id TEXT PRIMARY KEY,
   tenant_id INTEGER NOT NULL,
   name TEXT NOT NULL,
@@ -34,7 +34,7 @@ CREATE TABLE segments (
 DROP TABLE IF EXISTS flow_pending;
 DROP TABLE IF EXISTS flow_executions;
 DROP TABLE IF EXISTS flows;
-CREATE TABLE flows (
+CREATE TABLE IF NOT EXISTS flows (
   id TEXT PRIMARY KEY,
   tenant_id INTEGER NOT NULL,
   name TEXT NOT NULL DEFAULT 'Untitled Flow',
@@ -44,7 +44,7 @@ CREATE TABLE flows (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
-CREATE TABLE flow_executions (
+CREATE TABLE IF NOT EXISTS flow_executions (
   id TEXT PRIMARY KEY,
   flow_id TEXT NOT NULL,
   event_id TEXT,
@@ -53,8 +53,8 @@ CREATE TABLE flow_executions (
   matched INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL
 );
-CREATE INDEX idx_flow_exec_tenant ON flow_executions(tenant_id);
-CREATE TABLE flow_pending (
+CREATE INDEX IF NOT EXISTS idx_flow_exec_tenant ON flow_executions(tenant_id);
+CREATE TABLE IF NOT EXISTS flow_pending (
   id TEXT PRIMARY KEY,
   flow_id TEXT NOT NULL,
   node_id TEXT NOT NULL,
@@ -64,11 +64,11 @@ CREATE TABLE flow_pending (
   execute_at TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
-CREATE INDEX idx_flow_pending_exec ON flow_pending(execute_at);
+CREATE INDEX IF NOT EXISTS idx_flow_pending_exec ON flow_pending(execute_at);
 
 -- contents
 DROP TABLE IF EXISTS contents;
-CREATE TABLE contents (
+CREATE TABLE IF NOT EXISTS contents (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   filename TEXT NOT NULL,
@@ -80,19 +80,19 @@ CREATE TABLE contents (
   updated_at TEXT NOT NULL,
   tenant_id INTEGER NOT NULL
 );
-CREATE INDEX idx_contents_tenant ON contents(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_contents_tenant ON contents(tenant_id);
 
 -- lists
 DROP TABLE IF EXISTS list_users;
 DROP TABLE IF EXISTS lists;
-CREATE TABLE lists (
+CREATE TABLE IF NOT EXISTS lists (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   tenant_id INTEGER NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE list_users (
+CREATE TABLE IF NOT EXISTS list_users (
   list_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   tenant_id INTEGER NOT NULL,

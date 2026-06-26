@@ -1,14 +1,21 @@
 export const TENANT_DB_INIT_SQL = [
+  `CREATE TABLE IF NOT EXISTS profile (
+    id TEXT PRIMARY KEY,
+    socials TEXT NOT NULL DEFAULT '{}',
+    maigret_status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS user (
     id TEXT PRIMARY KEY,
     name TEXT,
     username TEXT,
     profile_image_url TEXT,
     raw_data TEXT NOT NULL DEFAULT '{}',
+    is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    socials TEXT DEFAULT '{}',
-    maigret_status TEXT DEFAULT 'pending'
+    profile_id TEXT REFERENCES profile(id)
   )`,
   `CREATE TABLE IF NOT EXISTS event (
     id TEXT PRIMARY KEY,
@@ -22,11 +29,12 @@ export const TENANT_DB_INIT_SQL = [
   `CREATE INDEX IF NOT EXISTS idx_event_user ON event(user_id)`,
   `CREATE INDEX IF NOT EXISTS idx_event_channel ON event(channel_id)`,
   `CREATE INDEX IF NOT EXISTS idx_event_type ON event(event_type)`,
-  `CREATE TABLE IF NOT EXISTS segment_users (
+  `CREATE INDEX IF NOT EXISTS idx_event_user_type_time ON event(user_id, event_type, event_time)`,
+  `CREATE TABLE IF NOT EXISTS segment_profiles (
     segment_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    PRIMARY KEY (segment_id, user_id)
+    PRIMARY KEY (segment_id, profile_id)
   )`,
   `CREATE TABLE IF NOT EXISTS content (
     id TEXT PRIMARY KEY,

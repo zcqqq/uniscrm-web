@@ -26,7 +26,7 @@ WEB_URL = "https://web-dev.uni-scrm.com"
 [[env.dev.d1_databases]]
 binding = "DB"
 database_name = "uniscrm-db-dev"
-database_id = "b322777d-6617-4dbf-a4d2-f734166b7737"
+database_id = "95ad8842-5b0d-4ff4-854d-9c42f4b0685f"
 
 [env.dev.ai]
 binding = "AI"

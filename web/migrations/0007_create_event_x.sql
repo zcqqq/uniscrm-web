@@ -1,4 +1,4 @@
-CREATE TABLE event_x (
+CREATE TABLE IF NOT EXISTS event_x (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   channel_id TEXT NOT NULL,
@@ -8,5 +8,5 @@ CREATE TABLE event_x (
   created_at TEXT NOT NULL
 );
 
-CREATE INDEX idx_event_x_user ON event_x(user_id);
-CREATE INDEX idx_event_x_channel ON event_x(channel_id);
+CREATE INDEX IF NOT EXISTS idx_event_x_user ON event_x(user_id);
+CREATE INDEX IF NOT EXISTS idx_event_x_channel ON event_x(channel_id);

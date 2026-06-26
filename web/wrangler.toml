@@ -30,9 +30,9 @@ binding = "KV"
 id = "ac8b64b59ac540e0ab482f25bb78d41e"
 
 [[env.dev.d1_databases]]
-binding = "DB"
+binding = "DB_WEB"
 database_name = "uniscrm-db-dev"
-database_id = "b322777d-6617-4dbf-a4d2-f734166b7737"
+database_id = "95ad8842-5b0d-4ff4-854d-9c42f4b0685f"
 
 [[env.dev.vectorize]]
 binding = "VECTORIZE"
@@ -57,7 +57,7 @@ binding = "KV"
 id = "88bc8c114dfb4ec3a77589c64f991a2e"
 
 [[env.production.d1_databases]]
-binding = "DB"
+binding = "DB_WEB"
 database_name = "uniscrm-db"
 database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
 

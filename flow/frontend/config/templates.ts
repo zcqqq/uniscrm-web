@@ -15,7 +15,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
     description: "When someone follows you, wait 1 day, then follow them back",
     graph: {
       nodes: [
-        { id: "t1", type: "trigger", position: { x: 300, y: 50 }, data: { channelType: "X", eventType: "follow.followed", channelId: "" } },
+        { id: "t1", type: "xTrigger", position: { x: 300, y: 50 }, data: { channelType: "X", eventType: "follow.followed", channelId: "" } },
         { id: "w1", type: "wait", position: { x: 300, y: 180 }, data: { duration: 1, unit: "days" } },
         { id: "a1", type: "action", position: { x: 300, y: 310 }, data: { actionType: "xAction", xEvent: "follow-user", channelId: "" } },
       ],
@@ -31,8 +31,8 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
     description: "After following someone, if they don't follow back within 1 day, add them to a list",
     graph: {
       nodes: [
-        { id: "t1", type: "trigger", position: { x: 300, y: 50 }, data: { channelType: "X", eventType: "follow.follow", channelId: "" } },
-        { id: "eh1", type: "eventHistory", position: { x: 300, y: 200 }, data: { eventType: "follow.followed", channelId: "", duration: 1, unit: "days" } },
+        { id: "t1", type: "xTrigger", position: { x: 300, y: 50 }, data: { channelType: "X", eventType: "follow.follow", channelId: "" } },
+        { id: "eh1", type: "waitForEvent", position: { x: 300, y: 200 }, data: { eventType: "follow.followed", channelId: "", duration: 1, unit: "days" } },
         { id: "a1", type: "action", position: { x: 400, y: 370 }, data: { actionType: "addToList", listId: "", listName: "" } },
       ],
       edges: [

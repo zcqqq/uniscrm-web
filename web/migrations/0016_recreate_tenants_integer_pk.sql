@@ -4,14 +4,14 @@ DROP TABLE IF EXISTS oauth_accounts;
 DROP TABLE IF EXISTS members;
 DROP TABLE IF EXISTS tenants;
 
-CREATE TABLE tenants (
+CREATE TABLE IF NOT EXISTS tenants (
   tenant_id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT UNIQUE NOT NULL,
   d1_database_id TEXT,
   created_at TEXT NOT NULL
 );
 
-CREATE TABLE members (
+CREATE TABLE IF NOT EXISTS members (
   id TEXT PRIMARY KEY,
   tenant_id INTEGER NOT NULL REFERENCES tenants(tenant_id),
   email TEXT UNIQUE NOT NULL,
@@ -19,9 +19,9 @@ CREATE TABLE members (
   language TEXT NOT NULL DEFAULT 'en',
   created_at TEXT NOT NULL
 );
-CREATE INDEX idx_members_tenant ON members(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_members_tenant ON members(tenant_id);
 
-CREATE TABLE oauth_accounts (
+CREATE TABLE IF NOT EXISTS oauth_accounts (
   provider TEXT NOT NULL,
   provider_user_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
@@ -29,9 +29,9 @@ CREATE TABLE oauth_accounts (
   created_at TEXT NOT NULL,
   PRIMARY KEY (provider, provider_user_id)
 );
-CREATE INDEX idx_oauth_accounts_tenant ON oauth_accounts(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_accounts_tenant ON oauth_accounts(tenant_id);
 
-CREATE TABLE subscriptions (
+CREATE TABLE IF NOT EXISTS subscriptions (
   id TEXT PRIMARY KEY,
   tenant_id INTEGER NOT NULL UNIQUE REFERENCES tenants(tenant_id),
   stripe_customer_id TEXT,

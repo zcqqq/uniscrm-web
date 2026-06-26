@@ -1,4 +1,4 @@
-CREATE TABLE segments (
+CREATE TABLE IF NOT EXISTS segments (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
@@ -11,13 +11,13 @@ CREATE TABLE segments (
   updated_at TEXT NOT NULL
 );
 
-CREATE INDEX idx_segments_tenant ON segments(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_segments_tenant ON segments(tenant_id);
 
-CREATE TABLE segment_users (
+CREATE TABLE IF NOT EXISTS segment_users (
   segment_id TEXT NOT NULL REFERENCES segments(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
   created_at TEXT NOT NULL,
   PRIMARY KEY (segment_id, user_id)
 );
 
-CREATE INDEX idx_segment_users_segment ON segment_users(segment_id);
+CREATE INDEX IF NOT EXISTS idx_segment_users_segment ON segment_users(segment_id);

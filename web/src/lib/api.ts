@@ -15,16 +15,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   auth: {
-    login: (email: string) =>
+    login: (email: string, trial?: string, timezone?: string) =>
       request("/auth/login", {
         method: "POST",
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, trial, timezone }),
       }),
     verify: (token: string) =>
-      request<{ member: { id: string; email: string; preferred_location: string; language: string }; tenant: { id: string; email: string } }>(
+      request<{ member: { id: string; email: string; preferred_location: string; language: string; timezone: string }; tenant: { id: string; email: string } }>(
         `/auth/verify?token=${token}`,
       ),
-    me: () => request<{ member: { id: string; email: string; preferred_location: string; language: string }; tenant: { id: string; email: string } }>("/auth/me"),
+    me: () => request<{ member: { id: string; email: string; preferred_location: string; language: string; timezone: string }; tenant: { id: string; email: string } }>("/auth/me"),
     logout: () => request("/auth/logout", { method: "POST" }),
     completeProfile: (email: string) =>
       request("/auth/complete-profile", {
@@ -58,6 +58,11 @@ export const api = {
       request<{ ok: boolean; language: string }>("/settings/language", {
         method: "PATCH",
         body: JSON.stringify({ language }),
+      }),
+    updateTimezone: (timezone: string) =>
+      request<{ ok: boolean; timezone: string }>("/settings/timezone", {
+        method: "PATCH",
+        body: JSON.stringify({ timezone }),
       }),
     getLinkedAccounts: () =>
       request<{ accounts: { provider: string; created_at: string }[] }>("/settings/linked-accounts"),

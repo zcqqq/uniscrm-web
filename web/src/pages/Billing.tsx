@@ -1,6 +1,9 @@
 import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useBilling } from "../hooks/useBilling";
+import { Button } from "../../../shared/frontend/ui/button";
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "../../../shared/frontend/ui/card";
+import { Badge } from "../../../shared/frontend/ui/badge";
 
 const TIER_FEATURES: Record<string, string[]> = {
   free: ["Basic recommendations", "1 linked account", "Community support"],
@@ -21,35 +24,24 @@ export function Billing() {
   }, [success, cancelled]);
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">Loading...</div>
-    );
+    return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading...</div>;
   }
 
   const currentTier = subscription?.tier ?? "free";
 
   return (
     <div className="max-w-4xl mx-auto p-8">
-      <h1 className="text-2xl font-bold mb-2">Billing</h1>
-      <p className="text-gray-500 mb-8">Manage your subscription plan</p>
+      <h1 className="text-2xl font-bold text-foreground mb-2">Billing</h1>
+      <p className="text-muted-foreground mb-8">Manage your subscription plan</p>
 
       {success && (
-        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-md text-green-800">
+        <div className="mb-6 p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-md text-green-800 dark:text-green-200 text-sm">
           Subscription activated successfully!
         </div>
       )}
       {cancelled && (
-        <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-md text-yellow-800">
+        <div className="mb-6 p-4 bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-md text-yellow-800 dark:text-yellow-200 text-sm">
           Subscription was not completed.
-        </div>
-      )}
-
-      {subscription?.status === "cancelled" && (
-        <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-md text-gray-700">
-          Your subscription has been cancelled.
-          {subscription.subscription?.current_period_end && (
-            <span> Access continues until {new Date(subscription.subscription.current_period_end).toLocaleDateString()}.</span>
-          )}
         </div>
       )}
 
@@ -59,58 +51,60 @@ export function Billing() {
           const features = TIER_FEATURES[plan.tier] ?? [];
 
           return (
-            <div
-              key={plan.tier}
-              className={`border rounded-lg p-6 flex flex-col ${isCurrent ? "border-blue-500 ring-2 ring-blue-100" : "border-gray-200"}`}
-            >
-              <h3 className="text-lg font-semibold">{plan.name}</h3>
-              <div className="mt-2 mb-4">
-                <span className="text-3xl font-bold">
-                  ${(plan.price_monthly / 100).toFixed(0)}
-                </span>
-                <span className="text-gray-500">/mo</span>
-              </div>
-
-              <ul className="flex-1 space-y-2 mb-6">
-                {features.map((f) => (
-                  <li key={f} className="flex items-start gap-2 text-sm text-gray-600">
-                    <span className="text-green-500 mt-0.5">&#10003;</span>
-                    {f}
-                  </li>
-                ))}
-              </ul>
-
-              {isCurrent ? (
-                <div className="text-center">
-                  <span className="inline-block px-4 py-2 bg-blue-50 text-blue-700 rounded-md text-sm font-medium">
-                    Current Plan
+            <Card key={plan.tier} className={isCurrent ? "border-primary ring-1 ring-primary/20" : ""}>
+              <CardHeader>
+                <CardTitle className="text-lg">{plan.name}</CardTitle>
+                <div className="mt-2">
+                  <span className="text-3xl font-bold text-foreground">
+                    ${(plan.price_monthly / 100).toFixed(0)}
                   </span>
-                  {plan.tier !== "free" && subscription?.status === "active" && (
-                    <>
-                      <button
-                        onClick={manageSubscription}
-                        className="mt-3 block w-full text-sm text-blue-600 hover:text-blue-800"
-                      >
-                        Manage subscription
-                      </button>
-                      <button
-                        onClick={cancel}
-                        className="mt-2 block w-full text-sm text-red-600 hover:text-red-800"
-                      >
-                        Cancel subscription
-                      </button>
-                    </>
-                  )}
+                  <span className="text-muted-foreground">/mo</span>
                 </div>
-              ) : plan.tier === "free" ? null : (
-                <button
-                  onClick={() => subscribe(plan.tier)}
-                  className="w-full py-2 px-4 bg-black text-white rounded-md hover:bg-gray-800 text-sm font-medium"
-                >
-                  {currentTier === "free" ? "Subscribe" : "Switch to " + plan.name}
-                </button>
-              )}
-            </div>
+              </CardHeader>
+              <CardContent className="flex-1">
+                <ul className="space-y-2">
+                  {features.map((f) => (
+                    <li key={f} className="flex items-start gap-2 text-sm text-muted-foreground">
+                      <span className="text-green-500 dark:text-green-400 mt-0.5">✓</span>
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+              <CardFooter className="flex-col gap-2">
+                {isCurrent ? (
+                  <>
+                    <Badge variant="secondary" className="bg-primary/10 text-primary border-0">
+                      {subscription?.status === "trialing" ? "Pro Trial" : "Current Plan"}
+                    </Badge>
+                    {subscription?.status === "trialing" && subscription.subscription?.current_period_end && (
+                      <p className="text-xs text-muted-foreground">
+                        Expires: {new Date(subscription.subscription.current_period_end).toLocaleDateString()}
+                      </p>
+                    )}
+                    {plan.tier !== "free" && subscription?.status === "trialing" && (
+                      <Button className="w-full" size="sm" onClick={() => subscribe(plan.tier)}>
+                        Subscribe to keep Pro
+                      </Button>
+                    )}
+                    {plan.tier !== "free" && subscription?.status === "active" && (
+                      <>
+                        <Button variant="ghost" size="sm" onClick={manageSubscription}>
+                          Manage subscription
+                        </Button>
+                        <Button variant="ghost" size="sm" className="text-destructive" onClick={cancel}>
+                          Cancel
+                        </Button>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <Button className="w-full" onClick={() => subscribe(plan.tier)}>
+                    Subscribe
+                  </Button>
+                )}
+              </CardFooter>
+            </Card>
           );
         })}
       </div>

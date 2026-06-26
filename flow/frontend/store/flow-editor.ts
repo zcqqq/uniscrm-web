@@ -9,7 +9,6 @@ import {
   applyEdgeChanges,
   addEdge,
 } from "@xyflow/react";
-import { CHANNEL_TYPES, getEventDefinition, type TriggerFieldDefinition } from "../config/trigger-fields";
 
 export interface FlowEditorState {
   flowId: string | null;
@@ -31,19 +30,18 @@ export interface FlowEditorState {
   setFlowName: (name: string) => void;
   setFlowEnabled: (enabled: boolean) => void;
   markClean: () => void;
-  getAvailableFieldsForNode: (nodeId: string) => TriggerFieldDefinition[];
   toGraphJson: () => string;
 }
 
-const ACTION_TYPES = ["addPoint", "addToList", "xAction"];
+const ACTION_TYPES = ["addToList", "xAction"];
 
 function isValidConnection(source: Node | undefined, target: Node | undefined): boolean {
   if (!source || !target) return false;
   const targetType = target.type;
   const sourceType = source.type;
-  if (targetType === "trigger") return false;
-  const validTargets = ["condition", "action", "wait", "eventHistory"];
-  const validSources = ["trigger", "condition", "wait", "eventHistory"];
+  if (targetType === "xTrigger") return false;
+  const validTargets = ["action", "wait", "waitForEvent"];
+  const validSources = ["xTrigger", "wait", "waitForEvent", "action"];
   if (validSources.includes(sourceType!) && validTargets.includes(targetType!)) return true;
   return false;
 }
@@ -81,28 +79,24 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
     let nodeType: string;
     let data: Record<string, unknown>;
 
-    if (type.startsWith("trigger:")) {
-      const channelType = type.replace("trigger:", "");
-      nodeType = "trigger";
-      data = { channelType, eventType: "", channelId: "" };
+    if (type === "xTrigger") {
+      nodeType = "xTrigger";
+      data = { channelType: "X", eventType: "", channelId: "" };
     } else if (type === "wait") {
       nodeType = "wait";
       data = { duration: 0, unit: "minutes" };
-    } else if (type === "eventHistory") {
-      nodeType = "eventHistory";
-      data = { eventType: "", channelId: "", duration: 1, unit: "days" };
+    } else if (type === "waitForEvent") {
+      nodeType = "waitForEvent";
+      data = { eventType: "", channelId: "", duration: 1, unit: "days", conditions: [] };
     } else if (ACTION_TYPES.includes(type)) {
       nodeType = "action";
       if (type === "addToList") {
         data = { actionType: type, listId: "", listName: "" };
       } else if (type === "xAction") {
         data = { actionType: type, xEvent: "", channelId: "" };
-      } else {
-        data = { actionType: type, label: "Add Point (+1)" };
       }
     } else {
-      nodeType = "condition";
-      data = { field: "", operator: "==", value: "" };
+      return;
     }
 
     const node: Node = {
@@ -138,33 +132,6 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
   setFlowEnabled: (enabled) => set({ flowEnabled: enabled, isDirty: true }),
 
   markClean: () => set({ isDirty: false }),
-
-  getAvailableFieldsForNode: (nodeId) => {
-    const { nodes, edges } = get();
-    const visited = new Set<string>();
-    const queue = [nodeId];
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      if (visited.has(current)) continue;
-      visited.add(current);
-
-      const node = nodes.find((n) => n.id === current);
-      if (node?.type === "trigger") {
-        const eventType = node.data.eventType as string;
-        if (!eventType) return [];
-        const evDef = getEventDefinition(eventType);
-        return evDef?.contextFields || [];
-      }
-
-      const incomingEdges = edges.filter((e) => e.target === current);
-      for (const edge of incomingEdges) {
-        queue.push(edge.source);
-      }
-    }
-
-    return [];
-  },
 
   toGraphJson: () => {
     const { nodes, edges } = get();

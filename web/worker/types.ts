@@ -1,5 +1,5 @@
 export interface Env {
-  DB: D1Database;
+  DB_WEB: D1Database;
   KV: KVNamespace;
   VECTORIZE: VectorizeIndex;
   AI: Ai;

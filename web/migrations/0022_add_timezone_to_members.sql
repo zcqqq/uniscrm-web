@@ -1,0 +1,2 @@
+ALTER TABLE members ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC';
+ALTER TABLE magic_links ADD COLUMN timezone TEXT;

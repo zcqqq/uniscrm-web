@@ -1,3 +1,4 @@
 @import "tailwindcss";
 @source "../../shared/frontend";
+@import "../../shared/frontend/index.css";
 @import "@xyflow/react/dist/style.css";

@@ -1,7 +1,10 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import "./lib/i18n";
+import { initTheme } from "../../shared/frontend/theme";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { Sidebar } from "../../shared/frontend/Sidebar";
+
+initTheme();
 import { Login } from "./pages/Login";
 import { Verify } from "./pages/Verify";
 import { Home } from "./pages/Home";
@@ -11,12 +14,9 @@ import { Billing } from "./pages/Billing";
 
 const urls = {
   web: "",
-  linkSocial: import.meta.env.VITE_LINK_SOCIAL_URL || "https://link-social-dev.uni-scrm.com",
-  profile: import.meta.env.VITE_PROFILE_URL || "https://profile-dev.uni-scrm.com",
+  link: import.meta.env.VITE_LINK_URL || "https://link-dev.uni-scrm.com",
   insightSegment: import.meta.env.VITE_INSIGHT_SEGMENT_URL || "https://insight-segment-dev.uni-scrm.com",
   flow: import.meta.env.VITE_FLOW_URL || "https://flow-dev.uni-scrm.com",
-  content: import.meta.env.VITE_CONTENT_URL || "https://content-dev.uni-scrm.com",
-  commerce: import.meta.env.VITE_COMMERCE_URL || "https://commerce-dev.uni-scrm.com",
 };
 
 function AppLayout({ children }: { children: React.ReactNode }) {
@@ -27,7 +27,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen">
       <Sidebar urls={urls} currentModule={currentModule} currentPath={path} />
-      <main className="flex-1 overflow-auto">{children}</main>
+      <main className="flex-1 overflow-auto bg-background text-foreground">{children}</main>
     </div>
   );
 }
@@ -62,7 +62,7 @@ export function App() {
               path="/"
               element={
                 <ProtectedRoute>
-                  <Redirect url={urls.linkSocial} />
+                  <Redirect url={`${urls.link}/channel`} />
                 </ProtectedRoute>
               }
             />

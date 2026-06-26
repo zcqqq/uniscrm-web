@@ -92,4 +92,19 @@ export class SubscriptionDB {
       .bind(...values)
       .run();
   }
+
+  async expireNonStripeSubscriptions(): Promise<number> {
+    const now = new Date().toISOString();
+    const result = await this.db
+      .prepare(
+        `UPDATE subscriptions
+         SET tier = 'free', status = 'expired', updated_at = ?
+         WHERE current_period_end < ?
+           AND stripe_subscription_id IS NULL
+           AND tier != 'free'`
+      )
+      .bind(now, now)
+      .run();
+    return result.meta.changes ?? 0;
+  }
 }

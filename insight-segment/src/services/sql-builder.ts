@@ -14,7 +14,7 @@ export function buildSegmentQuery(
     return field?.source === "event";
   });
 
-  let sql = "SELECT DISTINCT user.id FROM user";
+  let sql = "SELECT DISTINCT profile.id FROM profile INNER JOIN user ON user.profile_id = profile.id";
   const params: unknown[] = [];
 
   if (needsEvent) {

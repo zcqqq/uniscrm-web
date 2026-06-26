@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ReactFlowProvider } from "@xyflow/react";
+import { toPng } from "html-to-image";
 import { useFlowEditor } from "../store/flow-editor";
 import { api } from "../lib/api";
 import Sidebar from "../components/Sidebar";
 import Canvas from "../components/Canvas";
 import Inspector from "../components/Inspector";
 
+
+
 function EditorToolbar() {
-  const { flowId, flowName, flowEnabled, isDirty, setFlowName, setFlowEnabled, markClean, toGraphJson } =
+  const { flowId, flowName, isDirty, setFlowName, markClean, toGraphJson } =
     useFlowEditor();
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
@@ -29,7 +32,7 @@ function EditorToolbar() {
           return;
         }
       }
-      if (node.type === "trigger") {
+      if (node.type === "xTrigger") {
         const { eventType } = node.data as Record<string, string>;
         if (!eventType) {
           alert("Please select an event for the trigger node.");
@@ -42,21 +45,19 @@ function EditorToolbar() {
     try {
       await api.flows.update(flowId, {
         name: flowName,
-        enabled: flowEnabled,
         graph_json: toGraphJson(),
       });
       markClean();
-      navigate("/");
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="flex items-center h-12 px-4 border-b border-gray-200 bg-white gap-3">
+    <div className="flex items-center h-12 px-4 border-b border-border bg-card gap-3">
       <button
         onClick={() => navigate("/")}
-        className="text-sm text-gray-500 hover:text-gray-700"
+        className="text-sm text-muted-foreground hover:text-foreground"
       >
         ← Back
       </button>
@@ -65,22 +66,39 @@ function EditorToolbar() {
         onChange={(e) => setFlowName(e.target.value)}
         className="text-sm font-medium border-none outline-none bg-transparent flex-1 min-w-0"
       />
-      <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={flowEnabled}
-          onChange={(e) => setFlowEnabled(e.target.checked)}
-          className="rounded"
-        />
-        Enabled
-      </label>
+      <button
+        onClick={() => {
+          const el = document.querySelector(".react-flow") as HTMLElement;
+          if (!el) return;
+          toPng(el, { backgroundColor: "#fff" }).then((dataUrl) => {
+            const a = document.createElement("a");
+            a.href = dataUrl;
+            a.download = `${flowName || "flow"}.png`;
+            a.click();
+          });
+        }}
+        className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded"
+        title="Export as PNG"
+      >📷</button>
       {isDirty && <span className="text-xs text-amber-500">Unsaved</span>}
       <button
         onClick={handleSave}
         disabled={saving}
-        className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+        className="px-3 py-1.5 bg-secondary text-secondary-foreground rounded text-sm font-medium hover:bg-secondary/80 disabled:opacity-50"
       >
-        {saving ? "Saving..." : "Save"}
+        {saving ? "Saving..." : "Save Draft"}
+      </button>
+      <button
+        onClick={async () => {
+          await handleSave();
+          if (flowId) {
+            await api.flows.publish(flowId);
+            navigate(`/flows/${flowId}/analytics`);
+          }
+        }}
+        className="px-3 py-1.5 bg-primary text-primary-foreground rounded text-sm font-medium hover:bg-primary/90"
+      >
+        Publish
       </button>
     </div>
   );
@@ -106,10 +124,10 @@ export default function EditorPage() {
   }, [id, setFlow]);
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen text-gray-500">Loading...</div>;
+    return <div className="flex items-center justify-center h-screen text-muted-foreground">Loading...</div>;
   }
   if (error) {
-    return <div className="flex items-center justify-center h-screen text-red-500">{error}</div>;
+    return <div className="flex items-center justify-center h-screen text-destructive">{error}</div>;
   }
 
   return (

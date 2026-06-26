@@ -26,20 +26,20 @@ export function Verify() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="max-w-md w-full p-8 bg-white rounded-lg shadow">
-          <h2 className="text-xl font-semibold text-red-600 mb-4">
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="max-w-md w-full p-8 bg-card rounded-lg shadow">
+          <h2 className="text-xl font-semibold text-destructive mb-4">
             Verification Failed
           </h2>
-          <p className="text-gray-600">{error}</p>
+          <p className="text-muted-foreground">{error}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <p className="text-gray-600">Verifying...</p>
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <p className="text-muted-foreground">Verifying...</p>
     </div>
   );
 }

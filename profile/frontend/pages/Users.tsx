@@ -49,11 +49,11 @@ export function Users() {
       </div>
 
       {users.length === 0 ? (
-        <p className="text-gray-500 text-sm">No users synced yet.</p>
+        <p className="text-muted-foreground text-sm">No users synced yet.</p>
       ) : (
-        <table className="w-full bg-white rounded-lg border text-sm">
+        <table className="w-full bg-card rounded-lg border text-sm">
           <thead>
-            <tr className="border-b text-left text-gray-500">
+            <tr className="border-b text-left text-muted-foreground">
               <th className="px-4 py-3 font-medium">Name</th>
               <th className="px-4 py-3 font-medium">Username</th>
               <th className="px-4 py-3 font-medium">Updated</th>
@@ -62,27 +62,27 @@ export function Users() {
           </thead>
           <tbody className="divide-y">
             {users.map((user) => (
-              <tr key={user.id} className="hover:bg-gray-50">
-                <td className="px-4 py-3 text-gray-900">{user.name}</td>
-                <td className="px-4 py-3 text-gray-500">@{user.username}</td>
-                <td className="px-4 py-3 text-gray-400">{new Date(user.updated_at).toLocaleDateString()}</td>
+              <tr key={user.id} className="hover:bg-background">
+                <td className="px-4 py-3 text-foreground">{user.name}</td>
+                <td className="px-4 py-3 text-muted-foreground">@{user.username}</td>
+                <td className="px-4 py-3 text-muted-foreground/60">{new Date(user.updated_at).toLocaleDateString()}</td>
                 <td className="px-4 py-3 relative">
                   <button
                     onClick={() => setOpenDropdown(openDropdown === user.id ? null : user.id)}
-                    className="px-3 py-1 text-xs border rounded hover:bg-gray-100"
+                    className="px-3 py-1 text-xs border rounded hover:bg-accent"
                   >
                     Add to List
                   </button>
                   {openDropdown === user.id && (
-                    <div className="absolute right-4 top-10 z-10 bg-white border rounded shadow-lg min-w-[160px]">
+                    <div className="absolute right-4 top-10 z-10 bg-card border rounded shadow-lg min-w-[160px]">
                       {lists.length === 0 ? (
-                        <div className="px-3 py-2 text-xs text-gray-400">No lists yet</div>
+                        <div className="px-3 py-2 text-xs text-muted-foreground/60">No lists yet</div>
                       ) : (
                         lists.map((list) => (
                           <button
                             key={list.id}
                             onClick={() => handleAddToList(list.id, user.id)}
-                            className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                            className="block w-full text-left px-3 py-2 text-sm hover:bg-accent"
                           >
                             {list.name}
                           </button>
@@ -102,15 +102,15 @@ export function Users() {
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1}
-            className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+            className="px-3 py-1 text-sm border rounded hover:bg-background disabled:opacity-30 disabled:cursor-not-allowed"
           >
             Previous
           </button>
-          <span className="text-sm text-gray-500">Page {page} of {totalPages}</span>
+          <span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages}
-            className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+            className="px-3 py-1 text-sm border rounded hover:bg-background disabled:opacity-30 disabled:cursor-not-allowed"
           >
             Next
           </button>

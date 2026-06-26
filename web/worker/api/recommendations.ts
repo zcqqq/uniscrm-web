@@ -7,7 +7,7 @@ export function createRecommendationsRouter() {
 
   router.get("/", async (c) => {
     const tenantId = c.get("tenantId" as never) as number;
-    const service = new RecommendService(c.env.DB, c.env.VECTORIZE, c.env.KV);
+    const service = new RecommendService(c.env.DB_WEB, c.env.VECTORIZE, c.env.KV);
     const recommendations = await service.getForTenant(tenantId);
     return c.json({ recommendations });
   });

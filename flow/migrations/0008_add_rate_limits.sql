@@ -1,8 +1,0 @@
-ALTER TABLE flow_pending ADD COLUMN retry_action TEXT NOT NULL DEFAULT '';
-ALTER TABLE flow_pending ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;
-
-CREATE TABLE rate_limits (
-  key TEXT PRIMARY KEY,
-  remaining INTEGER NOT NULL DEFAULT 5,
-  reset_at TEXT NOT NULL DEFAULT ''
-);

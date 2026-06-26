@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, type List, type ListUser } from "../lib/api";
+import { Button } from "../../../shared/frontend/ui/button";
+import { Input } from "../../../shared/frontend/ui/input";
+import { Card, CardContent } from "../../../shared/frontend/ui/card";
 
 export function Lists() {
   const [lists, setLists] = useState<List[]>([]);
@@ -57,9 +60,9 @@ export function Lists() {
   if (loading) {
     return (
       <main className="max-w-4xl mx-auto px-8 py-8">
-        <h1 className="text-lg font-semibold mb-6">Lists</h1>
+        <h1 className="text-lg font-semibold text-foreground mb-6">Lists</h1>
         <div className="animate-pulse space-y-3">
-          {[...Array(3)].map((_, i) => <div key={i} className="h-12 bg-gray-200 rounded" />)}
+          {[...Array(3)].map((_, i) => <div key={i} className="h-12 bg-muted rounded-md" />)}
         </div>
       </main>
     );
@@ -67,77 +70,67 @@ export function Lists() {
 
   return (
     <main className="max-w-4xl mx-auto px-8 py-8">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-lg font-semibold">Lists</h1>
-      </div>
+      <h1 className="text-lg font-semibold text-foreground mb-6">Lists</h1>
 
       <div className="flex gap-2 mb-6">
-        <input
-          type="text"
+        <Input
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleCreate()}
           placeholder="New list name..."
-          className="border rounded px-3 py-1.5 text-sm flex-1 max-w-xs"
+          className="max-w-xs"
         />
-        <button
+        <Button
           onClick={handleCreate}
           disabled={creating || !newName.trim()}
-          className="px-3 py-1.5 text-sm bg-black text-white rounded hover:bg-gray-800 disabled:opacity-30"
+          size="sm"
         >
           Create
-        </button>
+        </Button>
       </div>
 
       {lists.length === 0 ? (
-        <p className="text-gray-500 text-sm">No lists yet. Create one above.</p>
+        <p className="text-muted-foreground text-sm">No lists yet. Create one above.</p>
       ) : (
         <div className="space-y-2">
           {lists.map((list) => (
-            <div key={list.id} className="bg-white border rounded-lg">
-              <div className="flex items-center justify-between px-4 py-3">
-                <button
-                  onClick={() => handleExpand(list.id)}
-                  className="flex-1 text-left"
-                >
-                  <span className="text-sm font-medium text-gray-900">{list.name}</span>
-                  <span className="ml-2 text-xs text-gray-400">{list.user_count} users</span>
-                </button>
-                <button
-                  onClick={() => handleDelete(list.id)}
-                  className="text-xs text-red-500 hover:text-red-700 px-2 py-1"
-                >
-                  Delete
-                </button>
-              </div>
-
-              {expandedList === list.id && (
-                <div className="border-t px-4 py-3">
-                  {listUsersLoading ? (
-                    <div className="text-xs text-gray-400">Loading...</div>
-                  ) : listUsers.length === 0 ? (
-                    <div className="text-xs text-gray-400">No users in this list.</div>
-                  ) : (
-                    <div className="divide-y">
-                      {listUsers.map((user) => (
-                        <div key={user.id} className="flex items-center justify-between py-2">
-                          <div>
-                            <span className="text-sm text-gray-900">{user.name}</span>
-                            <span className="ml-2 text-xs text-gray-500">@{user.username}</span>
-                          </div>
-                          <button
-                            onClick={() => handleRemoveUser(list.id, user.id)}
-                            className="text-xs text-gray-400 hover:text-red-500 px-2"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+            <Card key={list.id}>
+              <CardContent className="p-0">
+                <div className="flex items-center justify-between px-4 py-3">
+                  <button onClick={() => handleExpand(list.id)} className="flex-1 text-left cursor-pointer">
+                    <span className="text-sm font-medium text-foreground">{list.name}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">{list.user_count} users</span>
+                  </button>
+                  <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDelete(list.id)}>
+                    Delete
+                  </Button>
                 </div>
-              )}
-            </div>
+
+                {expandedList === list.id && (
+                  <div className="border-t border-border px-4 py-3">
+                    {listUsersLoading ? (
+                      <div className="text-xs text-muted-foreground">Loading...</div>
+                    ) : listUsers.length === 0 ? (
+                      <div className="text-xs text-muted-foreground">No users in this list.</div>
+                    ) : (
+                      <div className="divide-y divide-border">
+                        {listUsers.map((user) => (
+                          <div key={user.id} className="flex items-center justify-between py-2">
+                            <div>
+                              <span className="text-sm text-foreground">{user.name}</span>
+                              <span className="ml-2 text-xs text-muted-foreground">@{user.username}</span>
+                            </div>
+                            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => handleRemoveUser(list.id, user.id)}>
+                              Remove
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           ))}
         </div>
       )}

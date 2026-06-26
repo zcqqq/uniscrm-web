@@ -1,33 +1,28 @@
 import type { Session } from "../types";
 
-const SESSION_TTL = 7 * 24 * 60 * 60; // 7 days in seconds
+const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
 
 export class SessionService {
-  constructor(private kv: KVNamespace) {}
+  constructor(private db: D1Database) {}
 
   async create(memberId: string, tenantId: number, email: string, language = "en"): Promise<string> {
-    const sessionId = crypto.randomUUID();
-    const session: Session = {
-      member_id: memberId,
-      tenant_id: tenantId,
-      email,
-      language,
-      expires_at: new Date(Date.now() + SESSION_TTL * 1000).toISOString(),
-    };
-    await this.kv.put(`session:${sessionId}`, JSON.stringify(session), {
-      expirationTtl: SESSION_TTL,
-    });
-    return sessionId;
+    const id = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + SESSION_TTL).toISOString();
+    await this.db.prepare(
+      "INSERT INTO sessions (id, member_id, tenant_id, email, language, expires_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(id, memberId, tenantId, email, language, expiresAt).run();
+    return id;
   }
 
   async get(sessionId: string): Promise<Session | null> {
-    const data = await this.kv.get(`session:${sessionId}`);
-    if (!data) return null;
-    const parsed = JSON.parse(data);
-    return { language: "en", tenant_id: 0, ...parsed } as Session;
+    const row = await this.db.prepare(
+      "SELECT member_id, tenant_id, email, language, expires_at FROM sessions WHERE id = ? AND expires_at > datetime('now')"
+    ).bind(sessionId).first<{ member_id: string; tenant_id: number; email: string; language: string; expires_at: string }>();
+    if (!row) return null;
+    return { member_id: row.member_id, tenant_id: row.tenant_id, email: row.email, language: row.language, expires_at: row.expires_at };
   }
 
   async destroy(sessionId: string): Promise<void> {
-    await this.kv.delete(`session:${sessionId}`);
+    await this.db.prepare("DELETE FROM sessions WHERE id = ?").bind(sessionId).run();
   }
 }

@@ -1,4 +1,5 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import AnalyticsBadges from "./AnalyticsBadges";
 
 export default function WaitNode({ data, selected }: NodeProps) {
   const duration = data.duration as number;
@@ -13,7 +14,7 @@ export default function WaitNode({ data, selected }: NodeProps) {
         selected ? "border-blue-500 shadow-md" : "border-sky-300"
       }`}
     >
-      <Handle type="target" position={Position.Top} className="!bg-sky-500 !w-3 !h-3" />
+      <Handle type="target" position={Position.Left} className="!bg-sky-500 !w-3 !h-3" />
       <div className="flex items-center gap-2 mb-1">
         <span className="text-lg">⏳</span>
         <span className="font-semibold text-sm text-sky-700">Wait</span>
@@ -21,7 +22,8 @@ export default function WaitNode({ data, selected }: NodeProps) {
       <p className={`text-xs ${hasConfig ? "text-gray-700" : "text-gray-400 italic"}`}>
         {summary}
       </p>
-      <Handle type="source" position={Position.Bottom} className="!bg-sky-500 !w-3 !h-3" />
+      <AnalyticsBadges analytics={data._analytics as any} />
+      <Handle type="source" position={Position.Right} className="!bg-sky-500 !w-3 !h-3" />
     </div>
   );
 }

@@ -2,15 +2,13 @@ import { useState, useEffect } from "react";
 
 export interface SidebarUrls {
   web: string;
-  linkSocial: string;
-  profile: string;
+  link: string;
   insightSegment: string;
+  insightAnalytics?: string;
   flow: string;
-  content: string;
-  commerce: string;
 }
 
-export type CurrentModule = "social" | "content" | "commerce" | "settings";
+export type CurrentModule = "social" | "profile" | "content" | "commerce" | "analytics" | "settings";
 
 interface SidebarProps {
   urls: SidebarUrls;
@@ -80,21 +78,27 @@ export function Sidebar({ urls, currentModule, currentPath }: SidebarProps) {
     {
       id: "social", label: "Social", icon: Icons.Users,
       items: [
-        { id: "channels", label: "Channels", href: urls.linkSocial },
-        { id: "users", label: "Users", href: `${urls.profile}/users` },
-        { id: "lists", label: "Lists", href: `${urls.profile}/lists` },
-        { id: "segments", label: "Segments", href: urls.insightSegment },
+        { id: "channels", label: "Channels", href: `${urls.link}/channel` },
         { id: "flow", label: "Flow", href: urls.flow },
+        { id: "users", label: "Users", href: `${urls.link}/user` },
+        { id: "lists", label: "Lists", href: `${urls.link}/list` },
+      ],
+    },
+    {
+      id: "profile", label: "Profile", icon: Icons.FileText,
+      items: [
+        { id: "segments", label: "Segments", href: urls.insightSegment },
       ],
     },
     {
       id: "content", label: "Content", icon: Icons.FileText,
       items: [
         { id: "recommendation", label: "Recommendation", href: `${urls.web}/recommendations` },
-        { id: "content-library", label: "Content Library", href: urls.content },
+        { id: "content-library", label: "Content Library", href: `${urls.link}/content` },
       ],
     },
-    { id: "commerce", label: "Commerce", icon: Icons.ShoppingBag, href: urls.commerce },
+    { id: "commerce", label: "Commerce", icon: Icons.ShoppingBag, href: `${urls.link}/commerce` },
+    { id: "analytics", label: "Analytics", icon: Icons.FileText, href: urls.insightAnalytics || "#" },
     {
       id: "settings", label: "Settings", icon: Icons.Settings,
       items: [
@@ -111,33 +115,33 @@ export function Sidebar({ urls, currentModule, currentPath }: SidebarProps) {
   };
 
   const sidebarContent = (
-    <div className="flex flex-col h-full w-[220px] bg-white border-r border-border">
+    <div className="flex flex-col h-full w-[220px] bg-muted border-r border-border">
       {/* Header */}
       <div className="px-5 py-4 border-b border-border">
-        <span className="font-semibold text-foreground text-sm">UniSCRM</span>
+        <span className="font-semibold text-foreground text-sm tracking-tight">UniSCRM</span>
       </div>
 
       {/* Menu */}
-      <nav className="flex-1 overflow-y-auto py-2">
+      <nav className="flex-1 overflow-y-auto py-3 px-2">
         {groups.map((group) => (
-          <div key={group.id} className="mb-1">
+          <div key={group.id} className="mb-0.5">
             {group.items ? (
               <>
                 <button
                   onClick={() => toggleGroup(group.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-2 text-sm cursor-pointer transition-colors ${isActive(group.id) ? "text-primary font-medium" : "text-gray-600 hover:text-foreground hover:bg-muted"}`}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-md cursor-pointer transition-colors ${isActive(group.id) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
                 >
                   <group.icon />
                   <span className="flex-1 text-left">{group.label}</span>
                   {expandedGroups.has(group.id) ? <Icons.ChevronDown /> : <Icons.ChevronRight />}
                 </button>
                 {expandedGroups.has(group.id) && (
-                  <div className="ml-4 pl-4 border-l border-border">
+                  <div className="ml-5 pl-3 border-l border-border mt-0.5 mb-1">
                     {group.items.map((item) => (
                       <a
                         key={item.id}
                         href={item.href}
-                        className={`block py-1.5 px-3 text-sm rounded transition-colors ${isItemActive(item.href) ? "bg-primary/10 text-primary font-medium border-l-2 border-primary -ml-[1px]" : "text-gray-500 hover:text-foreground hover:bg-muted"}`}
+                        className={`block py-1.5 px-2.5 text-[13px] rounded-md transition-colors ${isItemActive(item.href) ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
                       >
                         {item.label}
                       </a>
@@ -148,7 +152,7 @@ export function Sidebar({ urls, currentModule, currentPath }: SidebarProps) {
             ) : (
               <a
                 href={group.href}
-                className={`flex items-center gap-3 px-4 py-2 text-sm transition-colors ${isActive(group.id) ? "text-primary font-medium" : "text-gray-600 hover:text-foreground hover:bg-muted"}`}
+                className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded-md transition-colors ${isActive(group.id) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
               >
                 <group.icon />
                 <span>{group.label}</span>
@@ -160,8 +164,8 @@ export function Sidebar({ urls, currentModule, currentPath }: SidebarProps) {
 
       {/* Footer */}
       <div className="border-t border-border px-4 py-3">
-        {email && <div className="text-xs text-gray-400 truncate mb-2">{email}</div>}
-        <button onClick={handleLogout} className="flex items-center gap-2 text-sm text-gray-500 hover:text-destructive cursor-pointer transition-colors">
+        {email && <div className="text-xs text-muted-foreground truncate mb-2">{email}</div>}
+        <button onClick={handleLogout} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-destructive cursor-pointer transition-colors">
           <Icons.LogOut />
           <span>Logout</span>
         </button>

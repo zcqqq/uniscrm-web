@@ -69,7 +69,7 @@ export function SegmentCreate() {
           <button
             onClick={handlePreview}
             disabled={loading || !nlQuery.trim()}
-            className="px-4 py-2 border rounded text-sm hover:bg-gray-50 disabled:opacity-30"
+            className="px-4 py-2 border rounded text-sm hover:bg-background disabled:opacity-30"
           >
             Preview
           </button>
@@ -87,14 +87,14 @@ export function SegmentCreate() {
         )}
 
         {preview && (
-          <div className="bg-gray-50 border rounded p-4 space-y-2">
+          <div className="bg-background border rounded p-4 space-y-2">
             <div className="text-sm"><strong>Estimated users:</strong> {preview.estimated_count}</div>
             <div className="text-sm"><strong>Conditions:</strong></div>
-            <pre className="text-xs bg-white border rounded p-2 overflow-x-auto">
+            <pre className="text-xs bg-card border rounded p-2 overflow-x-auto">
               {JSON.stringify(preview.conditions, null, 2)}
             </pre>
             <div className="text-sm"><strong>SQL:</strong></div>
-            <pre className="text-xs bg-white border rounded p-2 overflow-x-auto">{preview.sql_query}</pre>
+            <pre className="text-xs bg-card border rounded p-2 overflow-x-auto">{preview.sql_query}</pre>
           </div>
         )}
       </div>

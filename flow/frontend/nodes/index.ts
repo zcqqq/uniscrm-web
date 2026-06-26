@@ -1,13 +1,11 @@
-import TriggerNode from "./TriggerNode";
-import ConditionNode from "./ConditionNode";
+import XTriggerNode from "./XTriggerNode";
 import ActionNode from "./ActionNode";
 import WaitNode from "./WaitNode";
-import EventHistoryNode from "./EventHistoryNode";
+import WaitForEventNode from "./WaitForEventNode";
 
 export const nodeTypes = {
-  trigger: TriggerNode,
-  condition: ConditionNode,
+  xTrigger: XTriggerNode,
   action: ActionNode,
   wait: WaitNode,
-  eventHistory: EventHistoryNode,
+  waitForEvent: WaitForEventNode,
 };

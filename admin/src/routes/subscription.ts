@@ -4,7 +4,7 @@ import { SubscriptionDB } from "../services/subscription-db";
 
 export async function subscriptionRoute(c: Context<{ Bindings: Env }>) {
   const tenantId = c.req.param("tenantId")!;
-  const db = new SubscriptionDB(c.env.DB);
+  const db = new SubscriptionDB(c.env.ADMIN_DB);
   const row = await db.getByTenantId(tenantId);
 
   if (!row) {

@@ -1,3 +1,7 @@
+export interface Pipeline {
+  send(records: Record<string, unknown>[]): Promise<void>;
+}
+
 export interface Env {
   LINK_DB: D1Database;
   WEB_DB: D1Database;
@@ -7,6 +11,8 @@ export interface Env {
   ASSETS: Fetcher;
   MAIGRET_QUEUE: Queue;
   FLOW_QUEUE: Queue;
+  PIPELINE_EVENT: Pipeline;
+  PIPELINE_USER: Pipeline;
 
   // Config
   TREND_RETENTION_DAYS: string;

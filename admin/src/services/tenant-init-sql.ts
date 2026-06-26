@@ -8,11 +8,14 @@ export const TENANT_DB_INIT_SQL = [
   )`,
   `CREATE TABLE IF NOT EXISTS user (
     id TEXT PRIMARY KEY,
+    channel_type TEXT,
     name TEXT,
     username TEXT,
     profile_image_url TEXT,
     raw_data TEXT NOT NULL DEFAULT '{}',
     is_active INTEGER NOT NULL DEFAULT 1,
+    is_follow INTEGER NOT NULL DEFAULT 0,
+    is_followed INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     profile_id TEXT REFERENCES profile(id)

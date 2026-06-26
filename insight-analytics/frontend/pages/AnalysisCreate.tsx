@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createAnalysis } from "../lib/api";
+import { createReport } from "../lib/api";
 
 const EVENT_TYPES = [
   { value: "follow.follow", label: "X Follow (关注)" },
   { value: "follow.followed", label: "X Followed (被关注)" },
   { value: "follow.unfollow", label: "X Unfollow (取关)" },
   { value: "follow.unfollowed", label: "X Unfollowed (被取关)" },
-  { value: "chat.received", label: "X Chat Received (收到聊天)" },
+  { value: "dm.received", label: "X DM Received (收到私信)" },
 ];
 
 export function AnalysisCreate() {
@@ -19,8 +19,7 @@ export function AnalysisCreate() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async () => {
     if (!eventTypeA || !eventTypeB) {
       setError("Please select both events");
       return;
@@ -33,13 +32,16 @@ export function AnalysisCreate() {
     setLoading(true);
     setError("");
     try {
-      const res = await createAnalysis({
-        event_type_a: eventTypeA,
-        event_type_b: eventTypeB,
-        time_range_start: timeStart || undefined,
-        time_range_end: timeEnd || undefined,
+      const res = await createReport({
+        type: "interval",
+        params: {
+          event_type_a: eventTypeA,
+          event_type_b: eventTypeB,
+          time_range_start: timeStart || undefined,
+          time_range_end: timeEnd || undefined,
+        },
       });
-      navigate(`/analyses/${res.analysis.id}`);
+      navigate(`/intervals/${res.report.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create analysis");
     } finally {
@@ -51,7 +53,7 @@ export function AnalysisCreate() {
     <div className="p-6 max-w-2xl mx-auto">
       <h1 className="text-xl font-semibold text-foreground mb-6">New Interval Analysis</h1>
 
-      <form onSubmit={handleSubmit} className="bg-card rounded-lg border border-border p-6 space-y-5">
+      <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="bg-card rounded-lg border border-border p-6 space-y-5">
         <div>
           <label className="block text-sm font-medium text-foreground mb-1">Initial Event (A)</label>
           <select
@@ -114,13 +116,13 @@ export function AnalysisCreate() {
           disabled={loading}
           className="w-full px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {loading ? "Computing..." : "Compute Interval"}
+          {loading ? "Submitting..." : "Submit Analysis"}
         </button>
       </form>
 
       <p className="mt-4 text-xs text-muted-foreground">
-        Computes the time interval between event A and the next occurrence of event B for each profile.
-        Non-overlapping sequential pairing (A₁→B₁, A₂→B₂, ...).
+        Computes the time interval between event A → B using R2 SQL window functions.
+        Results available in seconds after submission.
       </p>
     </div>
   );

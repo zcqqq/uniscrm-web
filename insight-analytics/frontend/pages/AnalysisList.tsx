@@ -1,27 +1,27 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { listAnalyses, deleteAnalysis, type AnalysisSummary } from "../lib/api";
+import { listReports, deleteReport, type ReportSummary } from "../lib/api";
 
 const EVENT_LABELS: Record<string, string> = {
   "follow.follow": "X Follow",
   "follow.followed": "X Followed",
   "follow.unfollow": "X Unfollow",
   "follow.unfollowed": "X Unfollowed",
-  "chat.received": "X Chat Received",
+  "dm.received": "X DM Received",
 };
 
 export function AnalysisList() {
-  const [analyses, setAnalyses] = useState<AnalysisSummary[]>([]);
+  const [reports, setReports] = useState<ReportSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    listAnalyses().then((d) => setAnalyses(d.analyses)).finally(() => setLoading(false));
+    listReports(1, "interval").then((d) => setReports(d.reports)).finally(() => setLoading(false));
   }, []);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this analysis?")) return;
-    await deleteAnalysis(id);
-    setAnalyses((prev) => prev.filter((a) => a.id !== id));
+    await deleteReport(id);
+    setReports((prev) => prev.filter((r) => r.id !== id));
   };
 
   return (
@@ -29,7 +29,7 @@ export function AnalysisList() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-foreground">Interval Analysis</h1>
         <Link
-          to="/create"
+          to="/intervals/create"
           className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
         >
           New Analysis
@@ -38,10 +38,10 @@ export function AnalysisList() {
 
       {loading ? (
         <div className="text-muted-foreground text-sm">Loading...</div>
-      ) : analyses.length === 0 ? (
+      ) : reports.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <p className="mb-2">No analyses yet</p>
-          <Link to="/create" className="text-primary hover:underline text-sm">
+          <Link to="/intervals/create" className="text-primary hover:underline text-sm">
             Create your first interval analysis
           </Link>
         </div>
@@ -51,29 +51,27 @@ export function AnalysisList() {
             <thead className="bg-background border-b border-border">
               <tr>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Event Pair</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Time Range</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
-                <th className="text-right px-4 py-3 font-medium text-muted-foreground">Pairs</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Created</th>
                 <th className="text-right px-4 py-3 font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {analyses.map((a) => (
-                <tr key={a.id} className="hover:bg-background">
+              {reports.map((r) => (
+                <tr key={r.id} className="hover:bg-background">
                   <td className="px-4 py-3">
-                    <Link to={`/analyses/${a.id}`} className="text-primary hover:underline">
-                      {EVENT_LABELS[a.event_type_a] || a.event_type_a} → {EVENT_LABELS[a.event_type_b] || a.event_type_b}
+                    <Link to={`/intervals/${r.id}`} className="text-primary hover:underline">
+                      {EVENT_LABELS[r.params.event_type_a || ""] || r.params.event_type_a} → {EVENT_LABELS[r.params.event_type_b || ""] || r.params.event_type_b}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {a.time_range_start ? `${a.time_range_start.slice(0, 10)} ~ ${(a.time_range_end || "now").slice(0, 10)}` : "All time"}
-                  </td>
                   <td className="px-4 py-3">
-                    <StatusBadge status={a.status} />
+                    <StatusBadge status={r.status} />
                   </td>
-                  <td className="px-4 py-3 text-right text-foreground">{a.pair_count}</td>
+                  <td className="px-4 py-3 text-muted-foreground text-xs">
+                    {r.created_at.slice(0, 16).replace("T", " ")}
+                  </td>
                   <td className="px-4 py-3 text-right">
-                    <button onClick={() => handleDelete(a.id)} className="text-destructive hover:text-red-700 text-xs">
+                    <button onClick={() => handleDelete(r.id)} className="text-destructive hover:text-red-700 text-xs">
                       Delete
                     </button>
                   </td>

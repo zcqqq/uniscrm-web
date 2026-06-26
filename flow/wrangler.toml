@@ -28,7 +28,7 @@ INTERNAL_SECRET = "dev-internal-secret"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 
 [[env.dev.d1_databases]]
-binding = "DB"
+binding = "WEB_DB"
 database_name = "uniscrm-db-dev"
 database_id = "95ad8842-5b0d-4ff4-854d-9c42f4b0685f"
 
@@ -52,9 +52,9 @@ max_batch_timeout = 10
 binding = "FLOW_LOG_QUEUE"
 queue = "flow-log-dev"
 
-[[env.dev.analytics_engine_datasets]]
-binding = "FLOW_ANALYTICS"
-dataset = "flow_node_analytics_dev"
+[[env.dev.pipelines]]
+binding = "PIPELINE_FLOW_NODE_LOG"
+stream = "e39cbcf14b494c51b3d9ad5f01076e7d"
 
 [env.dev.triggers]
 crons = ["* * * * *"]
@@ -93,9 +93,9 @@ max_batch_timeout = 10
 binding = "FLOW_LOG_QUEUE"
 queue = "flow-log"
 
-[[env.production.analytics_engine_datasets]]
-binding = "FLOW_ANALYTICS"
-dataset = "flow_node_analytics"
+[[env.production.pipelines]]
+binding = "PIPELINE_FLOW_NODE_LOG"
+stream = "TODO_PROD_FLOW_NODE_LOG_STREAM_ID"
 
 [env.production.triggers]
 crons = ["* * * * *"]

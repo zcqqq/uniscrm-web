@@ -1,0 +1,9 @@
+FROM node:20-slim
+
+RUN npm install -g wrangler
+
+WORKDIR /app
+COPY server.js .
+
+EXPOSE 8080
+CMD ["node", "server.js"]

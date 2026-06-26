@@ -1,5 +1,4 @@
 import Stripe from "stripe";
-import { getPlanByTier } from "../config/plans";
 
 export function createStripeClient(secretKey: string): Stripe {
   return new Stripe(secretKey);
@@ -27,19 +26,15 @@ export async function createCheckoutSession(
     customerId: string;
     tenantId: string;
     tier: string;
+    priceId: string;
     returnUrl: string;
     cancelUrl: string;
   }
 ): Promise<string> {
-  const plan = getPlanByTier(params.tier);
-  if (!plan || !plan.stripe_price_id) {
-    throw new Error(`Invalid tier: ${params.tier}`);
-  }
-
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: params.customerId,
-    line_items: [{ price: plan.stripe_price_id, quantity: 1 }],
+    line_items: [{ price: params.priceId, quantity: 1 }],
     success_url: `${params.returnUrl}?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: params.cancelUrl,
     subscription_data: {

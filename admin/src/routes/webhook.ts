@@ -2,7 +2,8 @@ import type { Context } from "hono";
 import Stripe from "stripe";
 import type { Env } from "../types";
 import { SubscriptionDB } from "../services/subscription-db";
-import { getPlanByPriceId } from "../config/plans";
+import { getTierByPriceId } from "../../../shared/plans";
+import type { Tier } from "../../../shared/plans";
 
 export async function webhookRoute(c: Context<{ Bindings: Env }>) {
   const stripe = new Stripe(c.env.STRIPE_SECRET_KEY);
@@ -28,13 +29,17 @@ export async function webhookRoute(c: Context<{ Bindings: Env }>) {
   console.log(JSON.stringify({ webhook_event: event.type, event_id: event.id }));
 
   const db = new SubscriptionDB(c.env.ADMIN_DB);
+  const priceMap: Record<string, Tier> = {
+    [c.env.STRIPE_PRICE_PRO]: "pro",
+    [c.env.STRIPE_PRICE_PREMIUM]: "premium",
+  };
 
   switch (event.type) {
     case "checkout.session.completed":
       await handleCheckoutCompleted(db, event.data.object as Stripe.Checkout.Session, stripe);
       break;
     case "customer.subscription.updated":
-      await handleSubscriptionUpdated(db, event.data.object as Stripe.Subscription);
+      await handleSubscriptionUpdated(db, event.data.object as Stripe.Subscription, priceMap);
       break;
     case "customer.subscription.deleted":
       await handleSubscriptionDeleted(db, event.data.object as Stripe.Subscription);
@@ -72,9 +77,9 @@ async function handleCheckoutCompleted(
   });
 }
 
-async function handleSubscriptionUpdated(db: SubscriptionDB, subscription: Stripe.Subscription) {
+async function handleSubscriptionUpdated(db: SubscriptionDB, subscription: Stripe.Subscription, priceMap: Record<string, Tier>) {
   const priceId = subscription.items.data[0]?.price?.id;
-  const plan = priceId ? getPlanByPriceId(priceId) : null;
+  const plan = priceId ? getTierByPriceId(priceId, priceMap) : null;
 
   await db.updateByStripeSubscriptionId(subscription.id, {
     tier: plan?.tier ?? "pro",

@@ -2,17 +2,23 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Env, FlowQueueMessage, FlowLogMessage } from "./types";
 import { executeFlow, resumeFromNode, evaluateCondition, type FlowGraph, type ActionResult, type NodeLog } from "./engine";
+import { EventMetadata_X } from "../../metadata/x";
+import { TenantDataDB } from "../../shared/tenant-data-db";
 
 function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenantId: number, env: Env) {
   const timestamp = new Date().toISOString();
-  for (const log of nodeLogs) {
-    env.FLOW_ANALYTICS.writeDataPoint({
-      indexes: [flowId],
-      blobs: [log.nodeId, log.direction, userId],
-      doubles: [tenantId],
-    });
-  }
   if (nodeLogs.length > 0) {
+    const records = nodeLogs.map((log) => ({
+      tenant_id: tenantId,
+      id: crypto.randomUUID(),
+      flow_id: flowId,
+      node_id: log.nodeId,
+      user_id: userId,
+      direction: log.direction,
+      created_at: timestamp,
+    }));
+    env.PIPELINE_FLOW_NODE_LOG.send(records).catch(() => {});
+
     env.FLOW_LOG_QUEUE.send({
       flowId,
       userId,
@@ -45,6 +51,24 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
         body: JSON.stringify({ userId }),
       });
     } else if (action.type === "xAction" && action.xEvent && action.channelId) {
+      // Check userPropsFilter before executing action
+      const meta = EventMetadata_X.find(m => m.eventType === action.xEvent);
+      if (meta?.userPropsFilter?.length) {
+        const tenantRow = await env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+          .bind(Number(tenantId)).first<{ d1_database_id: string }>();
+        if (tenantRow?.d1_database_id) {
+          const tdb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
+          const fields = meta.userPropsFilter.map(f => f.propId).join(", ");
+          const rows = await tdb.query<Record<string, unknown>>(`SELECT ${fields} FROM user WHERE id = ?`, [userId]);
+          const row = rows[0];
+          const pass = meta.userPropsFilter.every(f => row?.[f.propId] === f.value);
+          if (!pass) {
+            console.log(JSON.stringify({ event: "flow_action_skipped_filter", xEvent: action.xEvent, userId, filter: meta.userPropsFilter, actual: row }));
+            continue;
+          }
+        }
+      }
+
       const rateLimitKey = `x:${action.xEvent}:${action.channelId}`;
 
       // Check stored rate limit
@@ -313,38 +337,35 @@ app.post("/api/flows/:id/unpublish", async (c) => {
   return c.json({ ok: true });
 });
 
-// Analytics: node counts (from Analytics Engine)
+// Analytics: node counts (from tenant D1 flow_node_log)
 app.get("/api/flows/:id/analytics", async (c) => {
   const flowId = c.req.param("id");
-  const accountId = c.env.CF_ACCOUNT_ID;
-  const apiToken = c.env.CF_D1_API_TOKEN;
+  const tenantId = c.get("tenantId");
+
+  const row = await c.env.WEB_DB.prepare(
+    "SELECT d1_database_id FROM tenants WHERE tenant_id = ?"
+  ).bind(Number(tenantId)).first<{ d1_database_id: string | null }>();
+  if (!row?.d1_database_id) return c.json({ nodes: {} });
+
+  const tdb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, row.d1_database_id);
 
   try {
-    const sql = `SELECT blob1 as node_id, blob2 as direction, COUNT() as count FROM flow_node_analytics_dev WHERE index1 = '${flowId}' GROUP BY blob1, blob2`;
-    const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiToken}` },
-      body: sql,
-    });
-    const body = await res.json() as { data?: { node_id: string; direction: string; count: string }[]; rows?: number };
+    const rows = await tdb.query<{ node_id: string; direction: string; count: number }>(
+      "SELECT node_id, direction, COUNT(*) as count FROM flow_node_log WHERE flow_id = ? GROUP BY node_id, direction",
+      [flowId]
+    );
     const nodes: Record<string, { enter: number; exit: number }> = {};
-
-    if (res.ok && body.data) {
-      for (const row of body.data) {
-        if (!nodes[row.node_id]) nodes[row.node_id] = { enter: 0, exit: 0 };
-        if (row.direction === "enter") nodes[row.node_id].enter = parseInt(row.count) || 0;
-        if (row.direction === "exit") nodes[row.node_id].exit = parseInt(row.count) || 0;
-      }
+    for (const r of rows) {
+      if (!nodes[r.node_id]) nodes[r.node_id] = { enter: 0, exit: 0 };
+      if (r.direction === "enter") nodes[r.node_id].enter = r.count;
+      if (r.direction === "exit") nodes[r.node_id].exit = r.count;
     }
-
     return c.json({ nodes });
   } catch (e) {
-    console.error(JSON.stringify({ event: "ae_query_error", error: String(e) }));
+    console.error(JSON.stringify({ event: "flow_analytics_query_error", error: String(e) }));
     return c.json({ nodes: {} });
   }
 });
-
-import { TenantDataDB } from "../../shared/tenant-data-db";
 
 // Node logs: list users who entered a specific node
 app.get("/api/flows/:id/nodes/:nodeId/logs", async (c) => {
@@ -353,7 +374,7 @@ app.get("/api/flows/:id/nodes/:nodeId/logs", async (c) => {
   const nodeId = c.req.param("nodeId");
 
   try {
-    const row = await c.env.DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+    const row = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
       .bind(tenantId).first<{ d1_database_id: string | null }>();
     if (!row?.d1_database_id) return c.json({ logs: [] });
 
@@ -406,7 +427,7 @@ async function handleLogQueue(batch: MessageBatch<any>, env: Env): Promise<void>
 
   for (const [tenantId, logs] of logsByTenant) {
     try {
-      const row = await env.DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+      const row = await env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
         .bind(tenantId).first<{ d1_database_id: string | null }>();
       if (!row?.d1_database_id) continue;
 
@@ -478,7 +499,7 @@ export default {
         for (const flow of rows.results) {
           const graph: FlowGraph = JSON.parse(flow.graph_json);
           const result = executeFlow(graph, eventType, payload);
-          if (result.nodeLogs.length > 0) emitNodeLogs(result.nodeLogs, flow.id, userId, tenantId as number, env);
+          if (result.nodeLogs.length > 0) emitNodeLogs(result.nodeLogs, flow.id, userId, Number(tenantId), env);
 
           if (result.actions.length > 0) {
             const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, userId, tenantId, env, payload);

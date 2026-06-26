@@ -66,15 +66,13 @@ export function createOAuthRouter() {
         }).then((r) => r.json()).then((d) => console.log("Tenant DB provisioned:", JSON.stringify(d)))
          .catch((e) => console.error("Tenant DB provisioning failed:", e))
       );
-      if (stored.trial) {
-        c.executionCtx.waitUntil(
-          fetch(`${c.env.ADMIN_URL}/internal/subscriptions/activate-trial`, {
-            method: "POST",
-            headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
-            body: JSON.stringify({ tenant_id: tenantId, tier: stored.trial, days: 30 }),
-          }).catch((e) => console.error("Trial activation failed:", e))
-        );
-      }
+      c.executionCtx.waitUntil(
+        fetch(`${c.env.ADMIN_URL}/internal/subscriptions/activate-trial`, {
+          method: "POST",
+          headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
+          body: JSON.stringify({ tenant_id: tenantId, tier: "pro", days: 30 }),
+        }).catch((e) => console.error("Trial activation failed:", e))
+      );
     }
     const sessions = new SessionService(c.env.DB_WEB);
     const newSessionId = await sessions.create(memberId, tenantId, email);
@@ -151,15 +149,13 @@ export function createOAuthRouter() {
           }).then((r) => r.json()).then((d) => console.log("Tenant DB provisioned:", JSON.stringify(d)))
            .catch((e) => console.error("Tenant DB provisioning failed:", e))
         );
-        if (stored.trial) {
-          c.executionCtx.waitUntil(
-            fetch(`${c.env.ADMIN_URL}/internal/subscriptions/activate-trial`, {
-              method: "POST",
-              headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
-              body: JSON.stringify({ tenant_id: tenantId, tier: stored.trial, days: 30 }),
-            }).catch((e) => console.error("Trial activation failed:", e))
-          );
-        }
+        c.executionCtx.waitUntil(
+          fetch(`${c.env.ADMIN_URL}/internal/subscriptions/activate-trial`, {
+            method: "POST",
+            headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
+            body: JSON.stringify({ tenant_id: tenantId, tier: "pro", days: 30 }),
+          }).catch((e) => console.error("Trial activation failed:", e))
+        );
       }
       const sessions = new SessionService(c.env.DB_WEB);
       const newSessionId = await sessions.create(memberId, tenantId, email);

@@ -1,59 +1,74 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
-import { getAnalysis, type AnalysisDetail, type BucketItem, type IntervalStats } from "../lib/api";
+import { getReport, type ReportSummary, type BucketItem, type IntervalStats } from "../lib/api";
 
 const EVENT_LABELS: Record<string, string> = {
   "follow.follow": "X Follow",
   "follow.followed": "X Followed",
   "follow.unfollow": "X Unfollow",
   "follow.unfollowed": "X Unfollowed",
-  "chat.received": "X Chat Received",
+  "dm.received": "X DM Received",
 };
 
 export function AnalysisResult() {
   const { id } = useParams<{ id: string }>();
-  const [analysis, setAnalysis] = useState<AnalysisDetail | null>(null);
+  const [report, setReport] = useState<ReportSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
+  const fetchReport = () => {
     if (!id) return;
-    getAnalysis(id)
-      .then((d) => setAnalysis(d.analysis))
+    getReport(id)
+      .then((d) => setReport(d.report))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchReport();
   }, [id]);
+
+  useEffect(() => {
+    if (!report || (report.status !== "pending" && report.status !== "computing")) return;
+    const timer = setInterval(fetchReport, 3000);
+    return () => clearInterval(timer);
+  }, [report?.status]);
 
   if (loading) return <div className="p-6 text-muted-foreground text-sm">Loading...</div>;
   if (error) return <div className="p-6 text-destructive text-sm">{error}</div>;
-  if (!analysis) return <div className="p-6 text-muted-foreground text-sm">Not found</div>;
+  if (!report) return <div className="p-6 text-muted-foreground text-sm">Not found</div>;
+
+  const eventA = report.params.event_type_a || "";
+  const eventB = report.params.event_type_b || "";
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
-        <Link to="/" className="text-muted-foreground/60 hover:text-muted-foreground">←</Link>
+        <Link to="/intervals" className="text-muted-foreground/60 hover:text-muted-foreground">←</Link>
         <h1 className="text-xl font-semibold text-foreground">
-          {EVENT_LABELS[analysis.event_type_a] || analysis.event_type_a} → {EVENT_LABELS[analysis.event_type_b] || analysis.event_type_b}
+          {EVENT_LABELS[eventA] || eventA} → {EVENT_LABELS[eventB] || eventB}
         </h1>
       </div>
 
-      {analysis.status === "error" && (
+      {report.status === "error" && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 text-sm text-red-700">
-          {analysis.error_message || "Computation failed"}
+          {report.error_message || "Computation failed"}
         </div>
       )}
 
-      {analysis.status === "computing" && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6 text-sm text-yellow-700">
-          Computing... Please refresh in a moment.
+      {(report.status === "pending" || report.status === "computing") && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6 text-sm text-yellow-700 flex items-center gap-2">
+          <span className="animate-spin">⏳</span>
+          {report.status === "pending" ? "Queued..." : "Computing via R2 SQL..."}
         </div>
       )}
 
-      {analysis.results && (
+      {report.status === "ready" && report.results && (
         <>
-          <StatsCard stats={analysis.results.stats} totalProfiles={analysis.results.total_profiles} />
-          <Histogram buckets={analysis.results.buckets} />
-          <BoxPlot stats={analysis.results.stats} />
+          <StatsCard stats={report.results.stats} totalProfiles={report.results.total_profiles} />
+          <Histogram buckets={report.results.buckets} />
+          <BoxPlot stats={report.results.stats} />
+          {report.results.sql && <SqlBlock sql={report.results.sql} />}
         </>
       )}
     </div>
@@ -127,34 +142,20 @@ function BoxPlot({ stats }: { stats: IntervalStats }) {
   const maxPos = scale(stats.max);
 
   return (
-    <div className="bg-card rounded-lg border border-border p-5">
+    <div className="bg-card rounded-lg border border-border p-5 mb-6">
       <h2 className="text-sm font-medium text-foreground mb-4">Box Plot</h2>
       <div className="relative h-12 mx-4">
-        {/* Whisker line */}
         <div
           className="absolute top-1/2 h-px bg-gray-400"
           style={{ left: `${minPos}%`, width: `${maxPos - minPos}%`, transform: "translateY(-50%)" }}
         />
-        {/* Min whisker */}
-        <div
-          className="absolute top-1/2 w-px h-4 bg-gray-400 -translate-y-1/2"
-          style={{ left: `${minPos}%` }}
-        />
-        {/* Max whisker */}
-        <div
-          className="absolute top-1/2 w-px h-4 bg-gray-400 -translate-y-1/2"
-          style={{ left: `${maxPos}%` }}
-        />
-        {/* IQR box */}
+        <div className="absolute top-1/2 w-px h-4 bg-gray-400 -translate-y-1/2" style={{ left: `${minPos}%` }} />
+        <div className="absolute top-1/2 w-px h-4 bg-gray-400 -translate-y-1/2" style={{ left: `${maxPos}%` }} />
         <div
           className="absolute top-1/2 h-8 bg-blue-100 border border-blue-400 rounded -translate-y-1/2"
           style={{ left: `${p25Pos}%`, width: `${p75Pos - p25Pos}%` }}
         />
-        {/* Median line */}
-        <div
-          className="absolute top-1/2 w-0.5 h-8 bg-blue-700 -translate-y-1/2"
-          style={{ left: `${medianPos}%` }}
-        />
+        <div className="absolute top-1/2 w-0.5 h-8 bg-blue-700 -translate-y-1/2" style={{ left: `${medianPos}%` }} />
       </div>
       <div className="flex justify-between mx-4 mt-2 text-xs text-muted-foreground">
         <span>{formatDuration(stats.min)}</span>
@@ -163,6 +164,27 @@ function BoxPlot({ stats }: { stats: IntervalStats }) {
         <span>P75: {formatDuration(stats.p75)}</span>
         <span>{formatDuration(stats.max)}</span>
       </div>
+    </div>
+  );
+}
+
+function SqlBlock({ sql }: { sql: string }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="bg-card rounded-lg border border-border p-5">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 text-sm font-medium text-foreground"
+      >
+        <span className={`transition-transform ${open ? "rotate-90" : ""}`}>▶</span>
+        SQL Query
+      </button>
+      {open && (
+        <pre className="mt-3 p-3 bg-muted rounded text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap font-mono">
+          {sql}
+        </pre>
+      )}
     </div>
   );
 }

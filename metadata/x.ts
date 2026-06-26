@@ -1,5 +1,5 @@
 // https://docs.x.com/x-api/activity/introduction
-import type { PropDefinition, EventMetadata } from "./dataTypes";
+import type { PropDefinition, EventMetadata, ContentMetadata } from "./dataTypes";
 
 export const PROPS_X: PropDefinition[] = [
   {
@@ -13,8 +13,29 @@ export const PROPS_X: PropDefinition[] = [
     label: { en: "Username", zh: "用户名" },
   },
   {
+    propId: "is_follow",
+    isInsight: true,
+    dataType: "ENUM_INT",
+    label: { en: "Is following", zh: "是否关注" },
+    enums: [
+      { value: 0, label: { en: "Not following", zh: "未关注" } },
+      { value: 1, label: { en: "Following", zh: "关注中" } },
+    ],
+  },
+  {
+    propId: "is_followed",
+    isInsight: true,
+    dataType: "ENUM_INT",
+    label: { en: "Is followed", zh: "是否被关注" },
+    enums: [
+      { value: 0, label: { en: "Not followed", zh: "未被关注" } },
+      { value: 1, label: { en: "Followed", zh: "被关注中" } },
+    ],
+  },
+  {
     propId: "verified_type",
-    dataType: "ENUM",
+    isInsight: true,
+    dataType: "ENUM_TEXT",
     label: { en: "Verification Type", zh: "认证类型" },
     enums: [
       { value: "blue", label: { en: "Blue Verified", zh: "蓝V" } },
@@ -23,45 +44,52 @@ export const PROPS_X: PropDefinition[] = [
   },
   {
     propId: "followers_count",
+        isInsight: true,
     dataType: "INT",
     label: { en: "Followers", zh: "粉丝数" },
   },
   {
     propId: "following_count",
+        isInsight: true,
     dataType: "INT",
     label: { en: "Following", zh: "关注数" },
   },
   {
     propId: "tweet_count",
+        isInsight: true,
     dataType: "INT",
     label: { en: "Tweets", zh: "发帖数" },
   },
   {
     propId: "listed_count",
+        isInsight: true,
     dataType: "INT",
     label: { en: "Lists", zh: "收藏数" },
   },
   {
     propId: "like_count",
+        isInsight: true,
     dataType: "INT",
     label: { en: "Likes", zh: "点赞数" },
   },
   {
     propId: "media_count",
+        isInsight: true,
     dataType: "INT",
     label: { en: "Medias", zh: "多媒体数" },
   },
   {
     propId: "message_text",
+        isInsight: true,
     dataType: "TEXT",
     label: { en: "Message text", zh: "消息文本" },
   },
 ];
 
-export const METADATA_X: EventMetadata[] = [
+export const EventMetadata_X: EventMetadata[] = [
   {
     eventType: "follow.follow",
-    originalEventType: "follow.follow",
+    sourceEventType: "follow.follow",
     linkPrefix: "target.data",
     flowType: "trigger",
     label: { en: "Follow", zh: "关注" },
@@ -69,6 +97,7 @@ export const METADATA_X: EventMetadata[] = [
    userProps: [
       { propId: "name", dataId: "{linkPrefix}.name" },
       { propId: "username", dataId: "{linkPrefix}.username" },
+      { propId: "is_follow", value: 1 },
     ],
     eventProps: [
       { propId: "followers_count", dataId: "{linkPrefix}.public_metrics.followers_count" },
@@ -78,7 +107,7 @@ export const METADATA_X: EventMetadata[] = [
   },
   {
     eventType: "follow.followed",
-    originalEventType: "follow.follow",
+    sourceEventType: "follow.follow",
     linkPrefix: "source.data",
     flowType: "trigger",
     label: { en: "Followed", zh: "被关注" },
@@ -86,6 +115,7 @@ export const METADATA_X: EventMetadata[] = [
     userProps: [
       { propId: "name", dataId: "{linkPrefix}.name" },
       { propId: "username", dataId: "{linkPrefix}.username" },
+            { propId: "is_followed", value: 1 },
     ],
     eventProps: [
       { propId: "followers_count", dataId: "{linkPrefix}.public_metrics.followers_count" },
@@ -95,7 +125,7 @@ export const METADATA_X: EventMetadata[] = [
   },
   {
     eventType: "follow.unfollow",
-    originalEventType: "follow.unfollow",
+    sourceEventType: "follow.unfollow",
     linkPrefix: "target.data",
     flowType: "trigger",
     label: { en: "Unfollow", zh: "取关" },
@@ -103,6 +133,7 @@ export const METADATA_X: EventMetadata[] = [
     userProps: [
       { propId: "name", dataId: "{linkPrefix}.name" },
       { propId: "username", dataId: "{linkPrefix}.username" },
+            { propId: "is_follow", value: 0 },
     ],
     eventProps: [
       { propId: "followers_count", dataId: "{linkPrefix}.public_metrics.followers_count" },
@@ -112,7 +143,7 @@ export const METADATA_X: EventMetadata[] = [
   },
   {
     eventType: "follow.unfollowed",
-    originalEventType: "follow.unfollowed",
+    sourceEventType: "follow.unfollow",
     linkPrefix: "source.data",
     flowType: "trigger",
     label: { en: "Unfollowed", zh: "被取关" },
@@ -120,6 +151,7 @@ export const METADATA_X: EventMetadata[] = [
     userProps: [
       { propId: "name", dataId: "{linkPrefix}.name" },
       { propId: "username", dataId: "{linkPrefix}.username" },
+            { propId: "is_followed", value: 0 },
     ],
     eventProps: [
       { propId: "followers_count", dataId: "{linkPrefix}.public_metrics.followers_count" },
@@ -129,7 +161,7 @@ export const METADATA_X: EventMetadata[] = [
   },
   {
     eventType: "dm.read",
-    originalEventType: "dm.read",
+    sourceEventType: "dm.read",
     linkPrefix: "users.{direct_message_events[].initiating_user_id}.data",
     flowType: "trigger",
     label: { en: "Direct Message read", zh: "私信已读" },
@@ -150,7 +182,7 @@ export const METADATA_X: EventMetadata[] = [
   },
   {
     eventType: "dm.received",
-    originalEventType: "dm.received",
+    sourceEventType: "dm.received",
     linkPrefix: "users.{direct_message_events[].message_create.sender_id}.data",
     flowType: "trigger",
     label: { en: "Direct Message received", zh: "收到私信" },
@@ -171,25 +203,44 @@ export const METADATA_X: EventMetadata[] = [
     ],
   },
   {
+    eventType: "post.create",
+    sourceEventType: "post.create",
+    label: { en: "Created a post", zh: "发帖" },
+    userProps: [],
+    eventProps: [],
+  },
+  {
+    eventType: "like.create",
+    sourceEventType: "like.create",
+    label: { en: "Liked a post", zh: "点赞" },
+    userProps: [],
+    eventProps: [],
+  },
+  {
     eventType: "follow-user", // https://docs.x.com/x-api/users/follow-user
+    sourceEventType: "follow-user",
     flowType: "action",
     label: { en: "Follow", zh: "关注" },
-    userProps: [
+    userProps: [],
+    userPropsFilter: [
+      { propId: "is_follow", value: 0 },
     ],
-    eventProps: [
-    ],
+    eventProps: [],
   },
   {
     eventType: "unfollow-user", // https://docs.x.com/x-api/users/unfollow-user
+    sourceEventType: "unfollow-user",
     flowType: "action",
     label: { en: "Unfollow", zh: "取关" },
-    userProps: [
+    userProps: [],
+    userPropsFilter: [
+      { propId: "is_follow", value: 1 },
     ],
-    eventProps: [
-    ],
+    eventProps: [],
   },
   {
     eventType: "create-dm", // https://docs.x.com/x-api/direct-messages/create-dm-message-by-participant-id
+    sourceEventType: "create-dm",
     flowType: "action",
     label: { en: "Direct message", zh: "发私信" },
     userProps: [
@@ -200,6 +251,7 @@ export const METADATA_X: EventMetadata[] = [
   },
   {
     eventType: "mute-user", // https://docs.x.com/x-api/users/mute-user
+    sourceEventType: "mute-user",
     flowType: "action",
     label: { en: "Mute", zh: "隐藏" },
     userProps: [
@@ -208,3 +260,21 @@ export const METADATA_X: EventMetadata[] = [
     ],
   },
 ];
+
+export const ContentMetadata_X: ContentMetadata[] = [
+  {
+    contentType: "post.create",
+    sourceContentType: "post.create",
+  },
+  {
+    contentType: "post.delete",
+    sourceContentType: "post.delete",
+  },
+]
+
+export const XAA_SUBSCRIPTION_EVENTS = [...new Set(
+  EventMetadata_X
+    .filter(e => e.flowType !== "action")
+    .map(e => e.sourceEventType)
+)];
+

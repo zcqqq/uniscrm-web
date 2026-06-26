@@ -58,6 +58,14 @@ queue = "maigret-jobs-dev"
 binding = "FLOW_QUEUE"
 queue = "flow-events-dev"
 
+[[env.dev.pipelines]]
+binding = "PIPELINE_EVENT"
+stream = "ef8f86e0735341bcb538af6ef0b40950"
+
+[[env.dev.pipelines]]
+binding = "PIPELINE_USER"
+stream = "9f1592f3a469465bb21b55fd73e62d66"
+
 [env.dev.triggers]
 crons = ["0 * * * *"]
 
@@ -99,6 +107,14 @@ queue = "maigret-jobs"
 [[env.production.queues.producers]]
 binding = "FLOW_QUEUE"
 queue = "flow-events"
+
+[[env.production.pipelines]]
+binding = "PIPELINE_EVENT"
+stream = "TODO_PROD_EVENT_STREAM_ID"
+
+[[env.production.pipelines]]
+binding = "PIPELINE_USER"
+stream = "TODO_PROD_USER_STREAM_ID"
 
 [env.production.triggers]
 crons = ["0 * * * *"]

@@ -1,12 +1,16 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import type { Env, IntervalAnalysis, IntervalResults } from "./types";
-import { TenantDataDB } from "../../shared/tenant-data-db";
-import { computeIntervals } from "./services/interval-compute";
+import { Container } from "@cloudflare/containers";
+import type { Env, IntervalResults, AnalyticsReport } from "./types";
 import { computeStats, computeDistribution } from "./services/stats";
-import { PROFILE_BATCH_SIZE } from "./constants";
 
-type HonoEnv = { Bindings: Env; Variables: { tenantId: string; memberId: string; tenantDataDb: TenantDataDB; tenantDbId: string } };
+export class AnalyticsContainer extends Container {
+  defaultPort = 8080;
+  sleepAfter = "5m";
+  enableInternet = true;
+}
+
+type HonoEnv = { Bindings: Env; Variables: { tenantId: string; memberId: string } };
 
 const app = new Hono<HonoEnv>();
 app.use("*", cors());
@@ -26,18 +30,11 @@ async function authMiddleware(c: any, next: any) {
   if (!data.member?.id || !data.tenant?.id) return c.json({ error: "Unauthorized" }, 401);
   c.set("tenantId", data.tenant.id);
   c.set("memberId", data.member.id);
-
-  const row = await (c.env.DB as D1Database)
-    .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-    .bind(Number(data.tenant.id))
-    .first<{ d1_database_id: string | null }>();
-  if (!row?.d1_database_id) return c.json({ error: "Tenant DB not provisioned" }, 503);
-  c.set("tenantDbId", row.d1_database_id);
-  c.set("tenantDataDb", new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, row.d1_database_id));
   await next();
 }
-app.use("/api/analyses", authMiddleware);
-app.use("/api/analyses/*", authMiddleware);
+
+app.use("/api/reports", authMiddleware);
+app.use("/api/reports/*", authMiddleware);
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
@@ -52,181 +49,185 @@ app.get("/api/auth/me", async (c) => {
   });
 });
 
-// List analyses
-app.get("/api/analyses", async (c) => {
+// ============ Reports API (async via Container + R2 SQL) ============
+
+app.get("/api/reports", async (c) => {
   const tenantId = c.get("tenantId");
+  const type = c.req.query("type");
   const page = Math.max(1, parseInt(c.req.query("page") || "1", 10));
   const limit = Math.min(50, Math.max(1, parseInt(c.req.query("limit") || "20", 10)));
   const offset = (page - 1) * limit;
 
+  const whereType = type ? " AND type = ?" : "";
+  const params: unknown[] = type ? [tenantId, type, limit, offset] : [tenantId, limit, offset];
+
   const countRow = await c.env.DB.prepare(
-    "SELECT COUNT(*) as total FROM interval_analyses WHERE tenant_id = ?"
-  ).bind(tenantId).first<{ total: number }>();
+    `SELECT COUNT(*) as total FROM analytics_reports WHERE tenant_id = ?${whereType}`
+  ).bind(...(type ? [tenantId, type] : [tenantId])).first<{ total: number }>();
   const total = countRow?.total || 0;
 
   const rows = await c.env.DB.prepare(
-    `SELECT id, event_type_a, event_type_b, time_range_start, time_range_end,
-            status, total_profiles, pair_count, created_at, updated_at
-     FROM interval_analyses WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`
-  ).bind(tenantId, limit, offset).all();
+    `SELECT id, type, params_json, status, results_json, error_message, created_at, updated_at
+     FROM analytics_reports WHERE tenant_id = ?${whereType} ORDER BY created_at DESC LIMIT ? OFFSET ?`
+  ).bind(...params).all();
 
-  return c.json({ analyses: rows.results, total, page, totalPages: Math.ceil(total / limit) });
+  const reports = rows.results.map((r: any) => ({
+    ...r,
+    params: JSON.parse(r.params_json),
+    results: r.results_json ? JSON.parse(r.results_json) : null,
+    params_json: undefined,
+    results_json: undefined,
+  }));
+
+  return c.json({ reports, total, page, totalPages: Math.ceil(total / limit) });
 });
 
-// Create and compute analysis (synchronous for now)
-app.post("/api/analyses", async (c) => {
+app.post("/api/reports", async (c) => {
   const tenantId = c.get("tenantId");
   const memberId = c.get("memberId");
-  const tenantDataDb = c.get("tenantDataDb");
-  const body = await c.req.json<{
-    event_type_a: string;
-    event_type_b: string;
-    time_range_start?: string;
-    time_range_end?: string;
-  }>();
+  const body = await c.req.json<{ type: string; params: Record<string, unknown> }>();
 
-  if (!body.event_type_a || !body.event_type_b) {
-    return c.json({ error: "event_type_a and event_type_b are required" }, 400);
+  if (!body.type || !body.params) {
+    return c.json({ error: "type and params are required" }, 400);
   }
 
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
   await c.env.DB.prepare(
-    `INSERT INTO interval_analyses (id, tenant_id, member_id, event_type_a, event_type_b,
-      time_range_start, time_range_end, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'computing', ?, ?)`
-  ).bind(
-    id, tenantId, memberId,
-    body.event_type_a, body.event_type_b,
-    body.time_range_start || null, body.time_range_end || null,
-    now, now
-  ).run();
+    `INSERT INTO analytics_reports (id, tenant_id, member_id, type, params_json, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`
+  ).bind(id, tenantId, memberId, body.type, JSON.stringify(body.params), now, now).run();
 
-  try {
-    const results = await runComputation(tenantDataDb, body.event_type_a, body.event_type_b, body.time_range_start, body.time_range_end);
+  await c.env.ANALYTICS_QUEUE.send({
+    report_id: id,
+    type: body.type,
+    params: body.params,
+    tenant_id: tenantId,
+    warehouse: c.env.R2_WAREHOUSE,
+  });
 
-    await c.env.DB.prepare(
-      `UPDATE interval_analyses SET status = 'ready', total_profiles = ?, pair_count = ?,
-       results_json = ?, updated_at = datetime('now') WHERE id = ?`
-    ).bind(results.total_profiles, results.total_pairs, JSON.stringify(results), id).run();
-
-    return c.json({ analysis: { id, status: "ready", results } }, 201);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    await c.env.DB.prepare(
-      "UPDATE interval_analyses SET status = 'error', error_message = ?, updated_at = datetime('now') WHERE id = ?"
-    ).bind(msg, id).run();
-    return c.json({ error: msg }, 500);
-  }
+  return c.json({ report: { id, status: "pending" } }, 201);
 });
 
-// Get analysis detail
-app.get("/api/analyses/:id", async (c) => {
+app.get("/api/reports/:id", async (c) => {
   const tenantId = c.get("tenantId");
-  const analysisId = c.req.param("id");
+  const reportId = c.req.param("id");
 
   const row = await c.env.DB.prepare(
-    "SELECT * FROM interval_analyses WHERE id = ? AND tenant_id = ?"
-  ).bind(analysisId, tenantId).first<IntervalAnalysis>();
+    "SELECT * FROM analytics_reports WHERE id = ? AND tenant_id = ?"
+  ).bind(reportId, tenantId).first<AnalyticsReport>();
 
   if (!row) return c.json({ error: "Not found" }, 404);
 
-  const results = row.results_json ? JSON.parse(row.results_json) as IntervalResults : null;
-  return c.json({ analysis: { ...row, results, results_json: undefined } });
+  const results = row.results_json ? JSON.parse(row.results_json) : null;
+  return c.json({ report: { ...row, results, results_json: undefined, params: JSON.parse(row.params_json), params_json: undefined } });
 });
 
-// Delete analysis
-app.delete("/api/analyses/:id", async (c) => {
+app.delete("/api/reports/:id", async (c) => {
   const tenantId = c.get("tenantId");
-  const analysisId = c.req.param("id");
+  const reportId = c.req.param("id");
 
   const result = await c.env.DB.prepare(
-    "DELETE FROM interval_analyses WHERE id = ? AND tenant_id = ?"
-  ).bind(analysisId, tenantId).run();
+    "DELETE FROM analytics_reports WHERE id = ? AND tenant_id = ?"
+  ).bind(reportId, tenantId).run();
 
   if (!result.meta.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
 });
 
-async function runComputation(
-  db: TenantDataDB,
-  eventTypeA: string,
-  eventTypeB: string,
-  timeStart?: string,
-  timeEnd?: string
-): Promise<IntervalResults> {
-  const timeConditions: string[] = [];
-  const timeParams: unknown[] = [];
-  if (timeStart) {
-    timeConditions.push("e.event_time >= ?");
-    timeParams.push(timeStart);
-  }
-  if (timeEnd) {
-    timeConditions.push("e.event_time <= ?");
-    timeParams.push(timeEnd);
-  }
-  const timeWhere = timeConditions.length ? " AND " + timeConditions.join(" AND ") : "";
+// ============ Queue Handler ============
 
-  // Get distinct profile_ids that have at least one relevant event
-  const profileRows = await db.query<{ profile_id: string }>(
-    `SELECT DISTINCT u.profile_id
-     FROM event e INNER JOIN user u ON u.id = e.user_id
-     WHERE e.event_type IN (?, ?) AND u.profile_id IS NOT NULL${timeWhere}
-     ORDER BY u.profile_id
-     LIMIT ?`,
-    [eventTypeA, eventTypeB, ...timeParams, PROFILE_BATCH_SIZE * 50]
-  );
-
-  const profileIds = profileRows.map((r) => r.profile_id);
-  const allIntervals: number[] = [];
-
-  // Process in batches
-  for (let i = 0; i < profileIds.length; i += PROFILE_BATCH_SIZE) {
-    const batch = profileIds.slice(i, i + PROFILE_BATCH_SIZE);
-    const placeholders = batch.map(() => "?").join(",");
-
-    const events = await db.query<{ profile_id: string; event_type: string; event_time: string }>(
-      `SELECT u.profile_id, e.event_type, e.event_time
-       FROM event e INNER JOIN user u ON u.id = e.user_id
-       WHERE u.profile_id IN (${placeholders})
-         AND e.event_type IN (?, ?)${timeWhere}
-       ORDER BY u.profile_id, e.event_time ASC`,
-      [...batch, eventTypeA, eventTypeB, ...timeParams]
-    );
-
-    // Group by profile_id and compute intervals
-    let currentProfile: string | null = null;
-    let profileEvents: { event_type: string; event_time: string }[] = [];
-
-    for (const evt of events) {
-      if (evt.profile_id !== currentProfile) {
-        if (currentProfile && profileEvents.length > 0) {
-          const intervals = computeIntervals(profileEvents, eventTypeA, eventTypeB);
-          allIntervals.push(...intervals);
-        }
-        currentProfile = evt.profile_id;
-        profileEvents = [];
-      }
-      profileEvents.push({ event_type: evt.event_type, event_time: evt.event_time });
-    }
-    // Process last profile
-    if (currentProfile && profileEvents.length > 0) {
-      const intervals = computeIntervals(profileEvents, eventTypeA, eventTypeB);
-      allIntervals.push(...intervals);
-    }
-  }
-
-  const stats = computeStats(allIntervals);
-  const buckets = computeDistribution(allIntervals);
-
-  return {
-    stats,
-    buckets,
-    total_profiles: profileIds.length,
-    total_pairs: allIntervals.length,
-  };
+interface QueueMessage {
+  report_id: string;
+  type: string;
+  params: Record<string, unknown>;
+  tenant_id: string;
+  warehouse: string;
 }
+
+async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<void> {
+  const { report_id, type, params, tenant_id, warehouse } = msg;
+
+  await env.DB.prepare(
+    "UPDATE analytics_reports SET status = 'computing', updated_at = datetime('now') WHERE id = ?"
+  ).bind(report_id).run();
+
+  const container = env.ANALYTICS_CONTAINER.getByName("analytics-singleton");
+  await container.startAndWaitForPorts();
+
+  const sql = buildSQL(type, params, tenant_id);
+
+  const response = await container.fetch("http://container/query", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sql, warehouse, token: env.CF_D1_API_TOKEN }),
+  });
+
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error(`Container query failed: ${errBody}`);
+  }
+
+  const result = await response.json() as { data: unknown[] };
+
+  let resultsJson: string;
+  if (type === "interval") {
+    resultsJson = JSON.stringify({ sql, ...processIntervalResults(result.data) });
+  } else {
+    resultsJson = JSON.stringify({ sql, data: result.data });
+  }
+
+  await env.DB.prepare(
+    "UPDATE analytics_reports SET status = 'ready', results_json = ?, updated_at = datetime('now') WHERE id = ?"
+  ).bind(resultsJson, report_id).run();
+}
+
+function buildSQL(type: string, params: Record<string, unknown>, tenantId: string): string {
+  if (type === "interval") {
+    const { event_type_a, event_type_b, time_range_start, time_range_end } = params as {
+      event_type_a: string; event_type_b: string; time_range_start?: string; time_range_end?: string;
+    };
+    const timeFilter = [
+      time_range_start ? `AND event_time >= '${time_range_start}'` : "",
+      time_range_end ? `AND event_time <= '${time_range_end}'` : "",
+    ].join(" ");
+
+    return `WITH ordered AS (
+  SELECT user_id, event_type, event_time,
+    LEAD(event_type) OVER (PARTITION BY user_id ORDER BY event_time) as next_type,
+    LEAD(event_time) OVER (PARTITION BY user_id ORDER BY event_time) as next_time
+  FROM uniscrm.event
+  WHERE tenant_id = ${tenantId} AND event_type IN ('${event_type_a}', '${event_type_b}') ${timeFilter}
+)
+SELECT user_id, event_time, next_time
+FROM ordered
+WHERE event_type = '${event_type_a}' AND next_type = '${event_type_b}'`;
+  }
+
+  return "SELECT 1";
+}
+
+function processIntervalResults(rows: unknown[]): IntervalResults {
+  const intervals: number[] = [];
+  const userIds = new Set<string>();
+
+  for (const row of rows as { user_id: string; event_time: string; next_time: string }[]) {
+    const start = new Date(row.event_time).getTime();
+    const end = new Date(row.next_time).getTime();
+    if (!isNaN(start) && !isNaN(end) && end > start) {
+      intervals.push((end - start) / 1000);
+      userIds.add(row.user_id);
+    }
+  }
+
+  const stats = computeStats(intervals);
+  const buckets = computeDistribution(intervals);
+
+  return { stats, buckets, total_profiles: userIds.size, total_pairs: intervals.length };
+}
+
+// ============ Export ============
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -251,5 +252,20 @@ export default {
       return env.ASSETS.fetch(new Request(new URL("/index.html", request.url)));
     }
     return res;
+  },
+
+  async queue(batch: MessageBatch<QueueMessage>, env: Env): Promise<void> {
+    for (const msg of batch.messages) {
+      try {
+        await handleQueueMessage(msg.body, env);
+        msg.ack();
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        await env.DB.prepare(
+          "UPDATE analytics_reports SET status = 'error', error_message = ?, updated_at = datetime('now') WHERE id = ?"
+        ).bind(errMsg, msg.body.report_id).run();
+        msg.ack();
+      }
+    }
   },
 };

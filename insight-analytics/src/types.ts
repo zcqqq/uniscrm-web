@@ -1,28 +1,36 @@
+export interface ContainerInstance {
+  startAndWaitForPorts(): Promise<void>;
+  fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
+}
+
+export interface ContainerNamespace {
+  getByName(name: string): ContainerInstance;
+}
+
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
   WEB_URL: string;
   CF_ACCOUNT_ID: string;
   CF_D1_API_TOKEN: string;
+  R2_WAREHOUSE: string;
+  ANALYTICS_CONTAINER: ContainerNamespace;
+  ANALYTICS_QUEUE: Queue;
 }
 
-export interface IntervalAnalysis {
+export interface AnalyticsReport {
   id: string;
   tenant_id: number;
   member_id: string;
-  event_type_a: string;
-  event_type_b: string;
-  time_range_start: string | null;
-  time_range_end: string | null;
+  type: string;
+  params_json: string;
   status: string;
-  total_profiles: number;
-  processed_profiles: number;
-  pair_count: number;
   results_json: string | null;
   error_message: string | null;
   created_at: string;
   updated_at: string;
 }
+
 
 export interface IntervalResults {
   stats: IntervalStats;

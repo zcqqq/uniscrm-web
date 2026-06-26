@@ -12,10 +12,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@cloudflare/containers": "^0.3.7",
     "hono": "^4.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.17.0"
+    "react-router-dom": "^7.17.0",
+    "recharts": "^3.9.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250410.0",

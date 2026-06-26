@@ -83,16 +83,14 @@ export function createAuthRouter() {
          .catch((e) => console.error("Tenant DB provisioning failed:", e))
       );
 
-      if (link.trial) {
-        c.executionCtx.waitUntil(
-          fetch(`${c.env.ADMIN_URL}/internal/subscriptions/activate-trial`, {
-            method: "POST",
-            headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
-            body: JSON.stringify({ tenant_id: tenantId, tier: link.trial, days: 30 }),
-          }).then((r) => r.json()).then((d) => console.log("Trial activated:", JSON.stringify(d)))
-           .catch((e) => console.error("Trial activation failed:", e))
-        );
-      }
+      c.executionCtx.waitUntil(
+        fetch(`${c.env.ADMIN_URL}/internal/subscriptions/activate-trial`, {
+          method: "POST",
+          headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
+          body: JSON.stringify({ tenant_id: tenantId, tier: "pro", days: 30 }),
+        }).then((r) => r.json()).then((d) => console.log("Trial activated:", JSON.stringify(d)))
+         .catch((e) => console.error("Trial activation failed:", e))
+      );
 
       member = { id: memberId, tenant_id: tenantId, email: link.email, preferred_location: "global", language: "en", timezone: tz };
     }

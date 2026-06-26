@@ -1,4 +1,8 @@
 import { TenantDataDB } from "../../../shared/tenant-data-db";
+import { PROPS_X } from "../../../metadata/x";
+import type { Pipeline } from "../types";
+
+const INSIGHT_PROPS = PROPS_X.filter((p) => p.isInsight);
 
 export interface XUserData {
   id: string;
@@ -31,31 +35,63 @@ function pickDbFields(user: XUserData): Record<string, unknown> {
 
 export class XUsersService {
   private queue?: Queue;
+  private pipelineEvent?: Pipeline;
+  private pipelineUser?: Pipeline;
+  private tenantId?: number;
 
-  constructor(private tenantDb: TenantDataDB, queue?: Queue) {
-    this.queue = queue;
+  constructor(private tenantDb: TenantDataDB, opts?: { queue?: Queue; pipelineEvent?: Pipeline; pipelineUser?: Pipeline; tenantId?: number }) {
+    this.queue = opts?.queue;
+    this.pipelineEvent = opts?.pipelineEvent;
+    this.pipelineUser = opts?.pipelineUser;
+    this.tenantId = opts?.tenantId;
   }
 
-  async upsertUser(user: XUserData): Promise<void> {
+  async upsertUser(user: XUserData, channelType?: string): Promise<void> {
     console.log(JSON.stringify({ event: "x_user_raw", user_id: user.id, payload: user }));
     const dbData = JSON.stringify(pickDbFields(user));
+    const now = new Date().toISOString();
     await this.tenantDb.run(
-      `INSERT INTO user (id, name, username, profile_image_url, raw_data, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `INSERT INTO user (id, channel_type, name, username, profile_image_url, raw_data, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
        ON CONFLICT(id) DO UPDATE SET
          name = CASE WHEN excluded.name IS NOT NULL AND excluded.name != '' THEN excluded.name ELSE user.name END,
          username = CASE WHEN excluded.username IS NOT NULL AND excluded.username != '' THEN excluded.username ELSE user.username END,
          profile_image_url = CASE WHEN excluded.profile_image_url IS NOT NULL AND excluded.profile_image_url != '' THEN excluded.profile_image_url ELSE user.profile_image_url END,
          raw_data = json_patch(user.raw_data, excluded.raw_data),
          updated_at = datetime('now')`,
-      [user.id, user.name || null, user.username || null, user.profile_image_url || null, dbData]
+      [user.id, channelType || null, user.name || null, user.username || null, user.profile_image_url || null, dbData]
     );
+
+    if (this.pipelineUser && this.tenantId) {
+      const record: Record<string, unknown> = {
+        tenant_id: this.tenantId,
+        id: user.id,
+        created_at: now,
+        updated_at: now,
+      };
+      for (const prop of INSIGHT_PROPS) {
+        const val = prop.propId.includes("_count")
+          ? user.public_metrics?.[prop.propId as keyof typeof user.public_metrics] ?? 0
+          : (user as Record<string, unknown>)[prop.propId] ?? 0;
+        record[prop.propId] = val;
+      }
+      await this.pipelineUser.send([record]).catch((err) => {
+        console.error(JSON.stringify({ event: "pipeline_user_error", error: String(err) }));
+      });
+    }
   }
 
   async setUserActive(userId: string, active: boolean): Promise<void> {
     await this.tenantDb.run(
       "UPDATE user SET is_active = ?, updated_at = datetime('now') WHERE id = ?",
       [active ? 1 : 0, userId]
+    );
+  }
+
+  async setFollowState(userId: string, field: "is_follow" | "is_followed", value: 0 | 1): Promise<void> {
+    await this.tenantDb.run(
+      `UPDATE user SET ${field} = ?, updated_at = datetime('now') WHERE id = ?`,
+      [value, userId]
     );
   }
 
@@ -105,18 +141,35 @@ export class XUsersService {
   async insertEvents(
     events: Array<{ userId: string; channelId: string; eventType: string; eventTime?: string; rawData?: unknown }>
   ): Promise<void> {
-    const statements = events.map((e) => ({
+    const now = new Date().toISOString();
+    const ids = events.map(() => crypto.randomUUID());
+    const statements = events.map((e, i) => ({
       sql: `INSERT INTO event (id, user_id, channel_id, event_type, event_time, raw_data, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
-      params: [
-        crypto.randomUUID(),
-        e.userId,
-        e.channelId,
-        e.eventType,
-        e.eventTime || null,
-        JSON.stringify(e.rawData || {}),
-      ],
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      params: [ids[i], e.userId, e.channelId, e.eventType, e.eventTime || null, JSON.stringify(e.rawData || {}), now],
     }));
     await this.tenantDb.batch(statements);
+
+    if (this.pipelineEvent && this.tenantId) {
+      const records = events.map((e, i) => {
+        const record: Record<string, unknown> = {
+          tenant_id: this.tenantId!,
+          id: ids[i],
+          user_id: e.userId,
+          channel_id: e.channelId,
+          event_type: e.eventType,
+          event_time: e.eventTime || now,
+          created_at: now,
+        };
+        const raw = (e.rawData || {}) as Record<string, unknown>;
+        for (const prop of INSIGHT_PROPS) {
+          if (prop.propId in raw) record[prop.propId] = raw[prop.propId];
+        }
+        return record;
+      });
+      await this.pipelineEvent.send(records).catch((err) => {
+        console.error(JSON.stringify({ event: "pipeline_event_error", error: String(err) }));
+      });
+    }
   }
 }

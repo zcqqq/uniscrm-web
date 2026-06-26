@@ -108,7 +108,12 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
   }
 
   const tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, d1DatabaseId);
-  const usersService = new XUsersService(tenantDb, env.MAIGRET_QUEUE);
+  const usersService = new XUsersService(tenantDb, {
+    queue: env.MAIGRET_QUEUE,
+    pipelineEvent: env.PIPELINE_EVENT,
+    pipelineUser: env.PIPELINE_USER,
+    tenantId: tenantId ?? undefined,
+  });
 
   if (eventType === "follow.follow" || eventType === "follow.unfollow") {
     const source = payload.source as { data?: Record<string, unknown> } | undefined;
@@ -123,10 +128,10 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
         name: userData.name as string | undefined,
         username: userData.username as string | undefined,
         profile_image_url: userData.profile_image_url as string | undefined,
-      });
+      }, "X");
       const isFollow = eventType === "follow.follow";
       const resolvedEventType = isFollow ? "follow.follow" : "follow.unfollow";
-      await usersService.setUserActive(userData.id as string, isFollow);
+      await usersService.setFollowState(userData.id as string, "is_follow", isFollow ? 1 : 0);
       await usersService.insertEvents([{
         userId: userData.id as string,
         channelId,
@@ -151,10 +156,10 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
         name: userData.name as string | undefined,
         username: userData.username as string | undefined,
         profile_image_url: userData.profile_image_url as string | undefined,
-      });
+      }, "X");
       const isFollow = eventType === "follow.follow";
       const resolvedEventType = isFollow ? "follow.followed" : "follow.unfollowed";
-      await usersService.setUserActive(userData.id as string, isFollow);
+      await usersService.setFollowState(userData.id as string, "is_followed", isFollow ? 1 : 0);
       await usersService.insertEvents([{
         userId: userData.id as string,
         channelId,
@@ -222,7 +227,7 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
         username: payload.sender_username as string | undefined || payload.username as string | undefined,
         name: payload.sender_name as string | undefined || payload.name as string | undefined,
         profile_image_url: payload.sender_profile_image_url as string | undefined || payload.profile_image_url as string | undefined,
-      });
+      }, "X");
     }
   }
 
@@ -232,10 +237,10 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
     if (tweetId) {
       const shareUrl = `https://x.com/i/web/status/${tweetId}`;
       await tenantDb.run(
-        `INSERT INTO content (id, channel_type, channel_id, source_content_id, title, summary, status, source_url, raw_data, created_at, updated_at)
-         VALUES (?, 'X', ?, ?, ?, NULL, 'new', ?, ?, datetime('now'), datetime('now'))
-         ON CONFLICT(channel_id, source_content_id) DO UPDATE SET title = excluded.title, raw_data = excluded.raw_data, updated_at = datetime('now')`,
-        [crypto.randomUUID(), channelId, tweetId, text.slice(0, 200), shareUrl, JSON.stringify(payload)]
+        `INSERT INTO content (id, channel_type, source_content_id, title, summary, status, source_url, raw_data, created_at, updated_at)
+         VALUES (?, 'X', ?, ?, NULL, 'new', ?, ?, datetime('now'), datetime('now'))
+         ON CONFLICT(channel_type, source_content_id) DO UPDATE SET title = excluded.title, raw_data = excluded.raw_data, updated_at = datetime('now')`,
+        [crypto.randomUUID(), tweetId, text.slice(0, 200), shareUrl, JSON.stringify(payload)]
       );
     }
   }
@@ -244,8 +249,8 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
     const tweetId = payload.id as string || payload.tweet_id as string;
     if (tweetId) {
       await tenantDb.run(
-        `UPDATE content SET status = 'deleted', updated_at = datetime('now') WHERE channel_id = ? AND source_content_id = ?`,
-        [channelId, tweetId]
+        `UPDATE content SET status = 'deleted', updated_at = datetime('now') WHERE channel_type = 'X' AND source_content_id = ?`,
+        [tweetId]
       );
     }
   }

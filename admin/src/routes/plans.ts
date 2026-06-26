@@ -1,13 +1,8 @@
 import type { Context } from "hono";
 import type { Env } from "../types";
-import { PLANS } from "../config/plans";
+import { TIER_LIST } from "../../../shared/plans";
 
 export async function plansRoute(c: Context<{ Bindings: Env }>) {
-  const plans = PLANS.map(({ tier, name, price_monthly, currency }) => ({
-    tier,
-    name,
-    price_monthly,
-    currency,
-  }));
+  const plans = TIER_LIST.map(({ tier, name, price_monthly }) => ({ tier, name, price_monthly, currency: "usd" }));
   return c.json({ plans });
 }

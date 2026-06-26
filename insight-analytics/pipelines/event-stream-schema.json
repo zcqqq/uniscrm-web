@@ -1,0 +1,19 @@
+{
+  "fields": [
+    { "name": "tenant_id", "type": "int32", "required": true },
+    { "name": "id", "type": "string", "required": true },
+    { "name": "user_id", "type": "string", "required": true },
+    { "name": "channel_id", "type": "string", "required": true },
+    { "name": "event_type", "type": "string", "required": true },
+    { "name": "event_time", "type": "string", "required": false },
+    { "name": "created_at", "type": "string", "required": true },
+    { "name": "followers_count", "type": "int32", "required": false },
+    { "name": "following_count", "type": "int32", "required": false },
+    { "name": "verified_type", "type": "string", "required": false },
+    { "name": "tweet_count", "type": "int32", "required": false },
+    { "name": "listed_count", "type": "int32", "required": false },
+    { "name": "like_count", "type": "int32", "required": false },
+    { "name": "media_count", "type": "int32", "required": false },
+    { "name": "message_text", "type": "string", "required": false }
+  ]
+}

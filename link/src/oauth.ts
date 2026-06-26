@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { getCookie } from "hono/cookie";
 import { Twitter, generateState, generateCodeVerifier } from "arctic";
 import type { Env, Session } from "./types";
@@ -8,13 +8,19 @@ import { ContentService } from "./services/content";
 import { TikTokChannel } from "./channels/tiktok";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 
-async function resolveSession(c: any): Promise<{ tenant_id: number; member_id: string } | null> {
+async function resolveSession(c: Context<{ Bindings: Env }>): Promise<{ tenant_id: number; member_id: string } | null> {
   const sessionId = getCookie(c, "session");
   if (!sessionId) return null;
-  const data = await c.env.KV.get(`session:${sessionId}`);
-  if (!data) return null;
-  const session = JSON.parse(data) as Session;
-  return { tenant_id: session.tenant_id, member_id: session.member_id };
+  const kvData = await c.env.KV.get(`session:${sessionId}`);
+  if (kvData) {
+    const session = JSON.parse(kvData) as Session;
+    return { tenant_id: session.tenant_id, member_id: session.member_id };
+  }
+  const dbRow = await c.env.WEB_DB
+    .prepare("SELECT tenant_id, member_id FROM sessions WHERE id = ? AND expires_at > datetime('now')")
+    .bind(sessionId)
+    .first<{ tenant_id: number; member_id: string }>();
+  return dbRow || null;
 }
 
 export function oauthRoutes() {

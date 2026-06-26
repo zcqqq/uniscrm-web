@@ -27,10 +27,20 @@ export async function checkoutRoute(c: Context<{ Bindings: Env }>) {
     const db = new SubscriptionDB(c.env.ADMIN_DB);
     await db.upsert(tenant_id, { stripe_customer_id: customerId });
 
+    const priceMap: Record<string, string> = {
+      pro: c.env.STRIPE_PRICE_PRO,
+      premium: c.env.STRIPE_PRICE_PREMIUM,
+    };
+    const priceId = priceMap[tier];
+    if (!priceId) {
+      return c.json({ error: `Invalid tier: ${tier}` }, 400);
+    }
+
     const approvalUrl = await createCheckoutSession(stripe, {
       customerId,
       tenantId: tenant_id,
       tier,
+      priceId,
       returnUrl: return_url,
       cancelUrl: cancel_url,
     });

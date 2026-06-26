@@ -1,27 +1,4 @@
-export const ALL_XAA_EVENTS = [
-  "post.create",
-  "post.delete",
-  "follow.follow",
-  "follow.unfollow",
-  "profile.update.bio",
-  "profile.update.profile_picture",
-  "profile.update.banner_picture",
-  "profile.update.screenname",
-  "profile.update.handle",
-  "profile.update.geo",
-  "profile.update.url",
-  "profile.update.verified_badge",
-  "profile.update.affiliate_badge",
-  "chat.received",
-  "chat.sent",
-  "chat.conversation_join",
-  "dm.received",
-  "dm.sent",
-  "dm.read",
-  "dm.indicate_typing",
-  "spaces.start",
-  "spaces.end",
-] as const;
+import { XAA_SUBSCRIPTION_EVENTS } from "../../../metadata/x";
 
 export class XWebhookService {
   constructor(private clientSecret: string) {}
@@ -128,7 +105,7 @@ export class XActivityService {
     const subscriptionIds: string[] = existing.map((s) => s.subscription_id);
 
     // Create missing subscriptions
-    for (const eventType of ALL_XAA_EVENTS) {
+    for (const eventType of XAA_SUBSCRIPTION_EVENTS) {
       if (existingTypes.has(eventType)) continue;
       try {
         const id = await this.createSubscription(eventType, userId, wId);

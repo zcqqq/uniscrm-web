@@ -1,11 +1,15 @@
+export interface Pipeline {
+  send(records: Record<string, unknown>[]): Promise<void>;
+}
+
 export interface Env {
-  DB: D1Database;       // main DB (tenants, channels)
+  WEB_DB: D1Database;   // uniscrm-db (tenants, sessions)
   FLOW_DB: D1Database;  // flow DB (flows, flow_pending, flow_executions, rate_limits)
   ASSETS: Fetcher;
   WEB_URL: string;
   FLOW_QUEUE: Queue;
   FLOW_LOG_QUEUE: Queue;
-  FLOW_ANALYTICS: AnalyticsEngineDataset;
+  PIPELINE_FLOW_NODE_LOG: Pipeline;
   PROFILE_URL: string;
   LINK_SOCIAL_URL: string;
   INTERNAL_SECRET: string;

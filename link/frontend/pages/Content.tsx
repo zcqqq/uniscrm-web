@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useContents } from "../hooks/useContents";
 import { LocalImport } from "../components/LocalImport";
 import { NotionConnect } from "../components/NotionConnect";
@@ -6,6 +6,7 @@ import { ContentTable } from "../components/ContentTable";
 import { ConfirmOverflow } from "../components/ConfirmOverflow";
 
 export function Content() {
+  useEffect(() => { document.title = "Content Library — UniSCRM" }, []);
   const { items, loading, refresh, importFiles, updateItem, deleteItem, overflowInfo, confirmImport, cancelImport } = useContents();
   const [importKey, setImportKey] = useState(0);
 

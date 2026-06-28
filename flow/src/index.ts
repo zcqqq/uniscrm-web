@@ -3,6 +3,8 @@ import { cors } from "hono/cors";
 import type { Env, FlowQueueMessage, FlowLogMessage } from "./types";
 import { executeFlow, resumeFromNode, evaluateCondition, type FlowGraph, type ActionResult, type NodeLog } from "./engine";
 import { EventMetadata_X } from "../../metadata/x";
+import { checkLimit } from "../../shared/plan-guard";
+import type { Tier } from "../../shared/plans";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 
 function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenantId: number, env: Env) {
@@ -69,6 +71,30 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
         }
       }
 
+      // Daily plan limit check (resets at midnight in tenant's timezone)
+      const dailyKey = `daily:xaction:${tenantId}`;
+      const dailyRow = await env.FLOW_DB.prepare("SELECT remaining, reset_at FROM rate_limits WHERE key = ?")
+        .bind(dailyKey).first<{ remaining: number; reset_at: string }>();
+      const now = new Date();
+      const tenantTz = await env.WEB_DB.prepare("SELECT timezone FROM tenants WHERE tenant_id = ?")
+        .bind(Number(tenantId)).first<{ timezone: string }>();
+      const tz = tenantTz?.timezone || "UTC";
+      const localDateStr = now.toLocaleDateString("sv-SE", { timeZone: tz });
+      const nextDay = new Date(localDateStr + "T00:00:00Z");
+      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+      const tzOffsetMs = now.getTime() - new Date(now.toLocaleString("sv-SE", { timeZone: tz }).replace(" ", "T") + "Z").getTime();
+      const todayEnd = new Date(nextDay.getTime() + tzOffsetMs).toISOString();
+      let dailyCount = (dailyRow && dailyRow.reset_at > now.toISOString()) ? dailyRow.remaining : 0;
+
+      const sub = await env.ADMIN_DB.prepare("SELECT tier FROM subscriptions WHERE tenant_id = ? AND status = 'active'")
+        .bind(Number(tenantId)).first<{ tier: string }>();
+      const tier = (sub?.tier || "basic") as Tier;
+      const limitCheck = checkLimit(tier, "flow.execution.xaction.daily", dailyCount);
+      if (!limitCheck.allowed) {
+        console.log(JSON.stringify({ event: "xaction_daily_limit", tenantId, tier, count: dailyCount, limit: limitCheck.limit }));
+        continue;
+      }
+
       const rateLimitKey = `x:${action.xEvent}:${action.channelId}`;
 
       // Check stored rate limit
@@ -112,6 +138,10 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
 
       if (body.rateLimited) {
         rateLimited.push({ action: { ...action, userId }, retryAt: body.rateLimitReset || new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+      } else {
+        await env.FLOW_DB.prepare(
+          "INSERT INTO rate_limits (key, remaining, reset_at) VALUES (?, 1, ?) ON CONFLICT(key) DO UPDATE SET remaining = remaining + 1, reset_at = excluded.reset_at"
+        ).bind(dailyKey, todayEnd).run();
       }
     }
   }

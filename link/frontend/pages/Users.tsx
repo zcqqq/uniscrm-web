@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useUsers } from "../hooks/useUsers";
 
 export function Users() {
+  useEffect(() => { document.title = "Users — UniSCRM" }, []);
   const { users, page, totalPages, total, loading, nextPage, prevPage } = useUsers();
   const navigate = useNavigate();
 

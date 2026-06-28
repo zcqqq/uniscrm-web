@@ -4,10 +4,11 @@ import { useBilling } from "../hooks/useBilling";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "../../../shared/frontend/ui/card";
 import { Badge } from "../../../shared/frontend/ui/badge";
-import { isActive, TIERS } from "../../../shared/plans";
+import { isActive, getTierDescriptions } from "../../../shared/plans";
 import type { SubStatus } from "../../../shared/plans";
 
 export function Billing() {
+  useEffect(() => { document.title = "Billing — UniSCRM" }, []);
   const { plans, subscription, loading, subscribe, cancel, manageSubscription } = useBilling();
   const [searchParams] = useSearchParams();
   const success = searchParams.get("success");
@@ -18,6 +19,12 @@ export function Billing() {
       window.history.replaceState({}, "", "/billing");
     }
   }, [success, cancelled]);
+
+  useEffect(() => {
+    if (subscription?.tier === "basic" || subscription?.tier === "pro") {
+      document.cookie = `tier=${subscription.tier};path=/;max-age=${30*24*60*60};secure;samesite=lax;domain=uni-scrm.com`;
+    }
+  }, [subscription?.tier]);
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading...</div>;
@@ -47,9 +54,9 @@ export function Billing() {
                 </CardHeader>
                 <CardContent>
                   <ul className="space-y-1.5">
-                    {(TIERS[plan.tier as keyof typeof TIERS]?.descriptions ?? []).map((f) => (
-                      <li key={f} className="text-sm text-muted-foreground flex gap-2">
-                        <span className="text-green-500">✓</span>{f}
+                    {getTierDescriptions(plan.tier as "basic" | "pro").map((f, i) => (
+                      <li key={f} className={`text-sm flex gap-2 ${f.startsWith("All in") ? "text-foreground font-medium mb-1" : "text-muted-foreground"}`}>
+                        {!f.startsWith("All in") && <span className="text-green-500">✓</span>}{f}
                       </li>
                     ))}
                   </ul>
@@ -112,7 +119,7 @@ export function Billing() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl">
         {plans.map((plan) => {
           const isCurrent = currentTier === plan.tier;
-          const features = TIERS[plan.tier as keyof typeof TIERS]?.descriptions ?? [];
+          const features = getTierDescriptions(plan.tier as "basic" | "pro");
 
           return (
             <Card key={plan.tier} className={isCurrent ? "border-primary ring-1 ring-primary/20" : ""}>
@@ -128,8 +135,8 @@ export function Billing() {
               <CardContent className="flex-1">
                 <ul className="space-y-2">
                   {features.map((f) => (
-                    <li key={f} className="flex items-start gap-2 text-sm text-muted-foreground">
-                      <span className="text-green-500 dark:text-green-400 mt-0.5">✓</span>
+                    <li key={f} className={`flex items-start gap-2 text-sm ${f.startsWith("All in") ? "text-foreground font-medium mb-1" : "text-muted-foreground"}`}>
+                      {!f.startsWith("All in") && <span className="text-green-500 dark:text-green-400 mt-0.5">✓</span>}
                       {f}
                     </li>
                   ))}

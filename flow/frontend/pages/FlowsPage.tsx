@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFlows } from "../hooks/useFlows";
 import { FLOW_TEMPLATES, type FlowTemplate } from "../config/templates";
@@ -8,6 +8,7 @@ import { Card, CardContent } from "../../../shared/frontend/ui/card";
 import { Badge } from "../../../shared/frontend/ui/badge";
 
 export default function FlowsPage() {
+  useEffect(() => { document.title = "Flow — UniSCRM" }, []);
   const { flows, loading, createFlow, deleteFlow } = useFlows();
   const navigate = useNavigate();
   const [showTemplates, setShowTemplates] = useState(false);

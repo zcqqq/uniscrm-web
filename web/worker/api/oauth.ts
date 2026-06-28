@@ -80,7 +80,7 @@ export function createOAuthRouter() {
 
     setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/" });
     setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/", domain: "uni-scrm.com" });
-    return c.html(`<!DOCTYPE html><html><head><script>document.cookie="session=;path=/;max-age=0;secure";document.cookie="session=;path=/;domain=uni-scrm.com;max-age=0;secure";document.cookie="session=${newSessionId};path=/;max-age=${7*24*60*60};secure;samesite=lax;domain=uni-scrm.com";window.location.replace("/")</script></head><body></body></html>`);
+    return c.html(`<!DOCTYPE html><html><head><script>document.cookie="session=;path=/;max-age=0;secure";document.cookie="session=;path=/;domain=uni-scrm.com;max-age=0;secure";document.cookie="session=${newSessionId};path=/;max-age=${7*24*60*60};secure;samesite=lax;domain=uni-scrm.com";document.cookie="tier=basic;path=/;max-age=${30*24*60*60};secure;samesite=lax;domain=uni-scrm.com";window.location.replace("/")</script></head><body></body></html>`);
   });
 
   router.get("/x", async (c) => {
@@ -189,7 +189,7 @@ export function createOAuthRouter() {
 
       setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/" });
       setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/", domain: "uni-scrm.com" });
-      return c.html(`<!DOCTYPE html><html><head><script>document.cookie="session=;path=/;max-age=0;secure";document.cookie="session=;path=/;domain=uni-scrm.com;max-age=0;secure";document.cookie="session=${newSessionId};path=/;max-age=${7*24*60*60};secure;samesite=lax;domain=uni-scrm.com";window.location.replace("/")</script></head><body></body></html>`);
+      return c.html(`<!DOCTYPE html><html><head><script>document.cookie="session=;path=/;max-age=0;secure";document.cookie="session=;path=/;domain=uni-scrm.com;max-age=0;secure";document.cookie="session=${newSessionId};path=/;max-age=${7*24*60*60};secure;samesite=lax;domain=uni-scrm.com";document.cookie="tier=basic;path=/;max-age=${30*24*60*60};secure;samesite=lax;domain=uni-scrm.com";window.location.replace("/")</script></head><body></body></html>`);
     }
 
     // No email — store pending with tokens and redirect to complete-profile
@@ -292,6 +292,14 @@ export function createOAuthRouter() {
       secure: true,
       sameSite: "Lax",
       maxAge: 7 * 24 * 60 * 60,
+      path: "/",
+      domain: "uni-scrm.com",
+    });
+    setCookie(c, "tier", "basic", {
+      httpOnly: false,
+      secure: true,
+      sameSite: "Lax",
+      maxAge: 30 * 24 * 60 * 60,
       path: "/",
       domain: "uni-scrm.com",
     });

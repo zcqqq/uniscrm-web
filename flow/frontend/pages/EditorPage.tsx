@@ -117,6 +117,7 @@ function EditorToolbar() {
 }
 
 export default function EditorPage() {
+  useEffect(() => { document.title = "Flow — UniSCRM" }, []);
   const { id } = useParams<{ id: string }>();
   const { setFlow } = useFlowEditor();
   const [loading, setLoading] = useState(true);

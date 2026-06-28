@@ -22,6 +22,9 @@ interface SidebarProps {
 
 const Icons = {
   Users: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-1.997M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>,
+  Profile: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>,
+  Content: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 7.5h1.5m-1.5 3h1.5m-7.5 3h7.5m-7.5 3h7.5m3-9h3.375c.621 0 1.125.504 1.125 1.125V18a2.25 2.25 0 01-2.25 2.25M16.5 7.5V18a2.25 2.25 0 002.25 2.25M16.5 7.5V4.875c0-.621-.504-1.125-1.125-1.125H4.125C3.504 3.75 3 4.254 3 4.875V18a2.25 2.25 0 002.25 2.25h13.5M6 7.5h3v3H6v-3z"/></svg>,
+  Insight: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>,
   FileText: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>,
   ShoppingBag: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5V6a3.75 3.75 0 10-7.5 0v4.5m11.356-1.993l1.263 12c.07.665-.45 1.243-1.119 1.243H4.25a1.125 1.125 0 01-1.12-1.243l1.264-12A1.125 1.125 0 015.513 7.5h12.974c.576 0 1.059.435 1.119 1.007zM8.625 10.5a.375.375 0 11-.75 0 .375.375 0 01.75 0zm7.5 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"/></svg>,
   Settings: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>,
@@ -53,19 +56,19 @@ export function Sidebar({ urls, tier: tierProp, currentModule, currentPath }: Si
   });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
-  const [fetchedTier, setFetchedTier] = useState<Tier | undefined>(tierProp);
+  const getTierFromCookie = (): Tier | undefined => {
+    if (typeof document === "undefined") return undefined;
+    const match = document.cookie.match(/(?:^|; )tier=([^;]*)/);
+    const v = match?.[1];
+    return v === "basic" || v === "pro" ? v : undefined;
+  };
+  const [fetchedTier] = useState<Tier | undefined>(tierProp ?? getTierFromCookie());
 
   useEffect(() => {
     fetch("/api/auth/me", { credentials: "include" })
       .then((r) => r.ok ? r.json() : null)
       .then((d: any) => { if (d?.member?.email) setEmail(d.member.email); })
       .catch(() => {});
-    if (!tierProp) {
-      fetch(`${urls.web}/api/billing/subscription`, { credentials: "include" })
-        .then((r) => r.ok ? r.json() : null)
-        .then((d: any) => { if (d?.tier === "basic" || d?.tier === "pro") setFetchedTier(d.tier); })
-        .catch(() => {});
-    }
   }, []);
 
   useEffect(() => {
@@ -96,13 +99,13 @@ export function Sidebar({ urls, tier: tierProp, currentModule, currentPath }: Si
       ],
     },
     {
-      id: "profile", label: "Profile", icon: Icons.FileText,
+      id: "profile", label: "Profile", icon: Icons.Profile,
       items: [
         { id: "segments", label: "Segments", href: urls.insightSegment },
       ],
     },
     {
-      id: "content", label: "Content", icon: Icons.FileText,
+      id: "content", label: "Content", icon: Icons.Content,
       items: [
         { id: "recommendation", label: "Recommendation", href: `${urls.web}/recommendations` },
         { id: "content-library", label: "Content Library", href: `${urls.link}/content` },
@@ -110,7 +113,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule, currentPath }: Si
     },
     { id: "commerce", label: "Commerce", icon: Icons.ShoppingBag, href: `${urls.link}/commerce` },
     {
-      id: "insight", label: "Insight", icon: Icons.FileText,
+      id: "insight", label: "Insight", icon: Icons.Insight,
       items: [
         { id: "dashboard", label: "Dashboard", href: `${urls.analytics ?? "#"}/dashboard` },
         { id: "analytics", label: "Analytics", href: `${urls.analytics ?? "#"}/analytics` },
@@ -128,7 +131,11 @@ export function Sidebar({ urls, tier: tierProp, currentModule, currentPath }: Si
   const tier = tierProp ?? fetchedTier;
   const tierModules = tier ? TIERS[tier]?.modules : undefined;
   const isGroupDisabled = (groupId: string) =>
-    tierModules ? groupId in tierModules && !tierModules[groupId] : false;
+    tierModules ? groupId in tierModules && !tierModules[groupId].enabled : false;
+  const isItemDisabled = (groupId: string, itemId: string) => {
+    const key = `${groupId}.${itemId}`;
+    return tierModules ? key in tierModules && !tierModules[key].enabled : false;
+  };
 
   const isActive = (groupId: string) => currentModule === groupId;
   const isItemActive = (href: string) => {
@@ -153,7 +160,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule, currentPath }: Si
               <>
                 <button
                   onClick={() => disabled ? window.location.href = `${urls.web}/billing` : toggleGroup(group.id)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-md cursor-pointer transition-colors ${disabled ? "text-muted-foreground/50 cursor-default" : isActive(group.id) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-md cursor-pointer transition-colors ${disabled ? "opacity-40 cursor-default" : isActive(group.id) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
                 >
                   <group.icon />
                   <span className="flex-1 text-left">{group.label}</span>
@@ -161,22 +168,26 @@ export function Sidebar({ urls, tier: tierProp, currentModule, currentPath }: Si
                 </button>
                 {!disabled && expandedGroups.has(group.id) && (
                   <div className="ml-5 pl-3 border-l border-border mt-0.5 mb-1">
-                    {group.items.map((item) => (
+                    {group.items.map((item) => {
+                      const itemLocked = isItemDisabled(group.id, item.id);
+                      return (
                       <a
                         key={item.id}
-                        href={item.href}
-                        className={`block py-1.5 px-2.5 text-[13px] rounded-md transition-colors ${isItemActive(item.href) ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                        href={itemLocked ? `${urls.web}/billing` : item.href}
+                        className={`flex items-center gap-1 py-1.5 px-2.5 text-[13px] rounded-md transition-colors ${itemLocked ? "opacity-40" : isItemActive(item.href) ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
                       >
-                        {item.label}
+                        <span className="flex-1">{item.label}</span>
+                        {itemLocked && <UpgradeIcon webUrl={urls.web} />}
                       </a>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </>
             ) : (
               <a
                 href={disabled ? `${urls.web}/billing` : group.href}
-                className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded-md transition-colors ${disabled ? "text-muted-foreground/50" : isActive(group.id) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded-md transition-colors ${disabled ? "opacity-40" : isActive(group.id) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
               >
                 <group.icon />
                 <span className="flex-1">{group.label}</span>

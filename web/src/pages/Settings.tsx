@@ -45,6 +45,7 @@ function getTimezoneLabel(tz: string): string {
 }
 
 export function Settings() {
+  useEffect(() => { document.title = "Settings — UniSCRM" }, []);
   const { member, updateLocation, updateLanguage, updateTimezone } = useAuth();
   const { t } = useTranslation();
   const [accounts, setAccounts] = useState<{ provider: string; created_at: string }[]>([]);
@@ -109,19 +110,6 @@ export function Settings() {
               {COMMON_TIMEZONES.map((tz) => (
                 <option key={tz} value={tz}>{getTimezoneLabel(tz)}</option>
               ))}
-            </Select>
-          </div>
-
-          <Separator />
-
-          <div className="space-y-2">
-            <Label>{t("settings.region")}</Label>
-            <Select
-              value={member?.preferred_location}
-              onChange={(e) => updateLocation(e.target.value)}
-            >
-              <option value="global">{t("region.global")}</option>
-              <option value="china">{t("region.china")}</option>
             </Select>
           </div>
         </CardContent>

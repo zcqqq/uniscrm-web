@@ -1,10 +1,11 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useProducts } from "../hooks/useProducts";
 import { LinkAdd } from "../components/LinkAdd";
 import { ShopifyConnect } from "../components/ShopifyConnect";
 import { ProductTable } from "../components/ProductTable";
 
 export function Commerce() {
+  useEffect(() => { document.title = "Commerce — UniSCRM" }, []);
   const { items, loading, refresh, deleteItem } = useProducts();
 
   const handleChange = useCallback(() => {

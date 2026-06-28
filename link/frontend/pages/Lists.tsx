@@ -5,6 +5,7 @@ import { Input } from "../../../shared/frontend/ui/input";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
 
 export function Lists() {
+  useEffect(() => { document.title = "Lists — UniSCRM" }, []);
   const [lists, setLists] = useState<ListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState("");

@@ -108,6 +108,14 @@ export function createAuthRouter() {
       path: "/",
       domain: "uni-scrm.com",
     });
+    setCookie(c, "tier", "basic", {
+      httpOnly: false,
+      secure: true,
+      sameSite: "Lax",
+      maxAge: 30 * 24 * 60 * 60,
+      path: "/",
+      domain: "uni-scrm.com",
+    });
 
     return c.json({
       ok: true,

@@ -37,6 +37,11 @@ database_name = "uniscrm-flow-dev"
 database_id = "68362488-c13f-4b15-a666-7282d1b0e430"
 migrations_dir = "migrations"
 
+[[env.dev.d1_databases]]
+binding = "ADMIN_DB"
+database_name = "uniscrm-admin-dev"
+database_id = "e82f67f3-3571-473f-abf4-fa0ad5a309a2"
+
 [[env.dev.queues.consumers]]
 queue = "uniscrm-event-dev"
 max_batch_size = 10
@@ -79,6 +84,11 @@ binding = "FLOW_DB"
 database_name = "uniscrm-flow"
 database_id = "TODO-create-prod-db"
 migrations_dir = "migrations"
+
+[[env.production.d1_databases]]
+binding = "ADMIN_DB"
+database_name = "uniscrm-admin"
+database_id = "TODO-create-prod-admin-db"
 
 [[env.production.queues.consumers]]
 queue = "uniscrm-event"

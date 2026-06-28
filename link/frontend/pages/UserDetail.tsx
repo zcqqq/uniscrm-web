@@ -2,6 +2,7 @@ import { useParams, Link } from "react-router-dom";
 import { useState, useEffect, useCallback } from "react";
 import { api, type XUser, type XEvent } from "../lib/api";
 
+
 const EVENT_LABELS: Record<string, string> = {
   follower: "Follower",
   follow_event: "New Follow",
@@ -9,6 +10,7 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 export function UserDetail() {
+  useEffect(() => { document.title = "Users — UniSCRM" }, []);
   const { id } = useParams<{ id: string }>();
   const [user, setUser] = useState<XUser | null>(null);
   const [events, setEvents] = useState<XEvent[]>([]);

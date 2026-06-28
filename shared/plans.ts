@@ -1,14 +1,17 @@
 export type Tier = "basic" | "pro";
 export type SubStatus = "trialing" | "active" | "past_due" | "expired";
 
+export interface ModuleEntry { enabled: boolean; description?: string }
+export interface FeatureEntry { enabled: boolean; description?: string }
+export interface LimitEntry { value: number; description?: string }
+
 export interface TierConfig {
   tier: Tier;
   name: string;
   price_monthly: number;
-  descriptions: string[];
-  modules: Record<string, boolean>;
-  features: Record<string, boolean>;
-  limits: Record<string, number>;
+  modules: Record<string, ModuleEntry>;
+  features: Record<string, FeatureEntry>;
+  limits: Record<string, LimitEntry>;
 }
 
 export const TIERS: Record<Tier, TierConfig> = {
@@ -16,50 +19,34 @@ export const TIERS: Record<Tier, TierConfig> = {
     tier: "basic",
     name: "Basic",
     price_monthly: 500,
-    descriptions: [
-      "Flow automation (5 flows)",
-      "3 linked channels",
-      "Recommendations",
-      "Content analytics",
-      "10 lists",
-      "5 segments",
-    ],
     modules: {
-      flow: true,
-      link: true,
-      insight: true,
-      "insight-segment": false,
-      profile: false,
+      "social.channels": { enabled: true, description: "Connect to your Twitter, TikTok, ... accounts" },
+      "social.flow": { enabled: true, description: "Automation flows in control" },
+      "social.users": { enabled: true, description: "Unlimited tracked users" },
+      "social.lists": { enabled: false },
+      profile: { enabled: false },
+      content: { enabled: false },
+      commerce: { enabled: false },
+      insight: { enabled: true, description: "Unlimited analytics and dashboards" },
+      settings: { enabled: true },
     },
     features: {
-      "link.list": false,
-      "link.content": false,
-      "link.commerce": false,
+      "link.tiktok": { enabled: false },
     },
     limits: {
-      flows: 5,
-      channels: 3,
-      lists: 10,
-      segments: 5,
+      "flow.execution.xaction.daily": { value: 100, description: "100 X flow actions/day" },
     },
   },
   pro: {
     tier: "pro",
     name: "Pro",
     price_monthly: 2000,
-    descriptions: [
-      "Unlimited flows & channels",
-      "Profile & Maigret lookup",
-      "TikTok integration",
-      "Unlimited lists & segments",
-      "Priority support",
-      "API access",
-    ],
     modules: {
     },
     features: {
     },
     limits: {
+      "flow.execution.xaction.daily": { value: 1000, description: "1000 X flow actions/day" },
     },
   },
 };
@@ -67,15 +54,35 @@ export const TIERS: Record<Tier, TierConfig> = {
 export const TIER_LIST: TierConfig[] = [TIERS.basic, TIERS.pro];
 
 export function canAccessModule(tier: Tier, module: string): boolean {
-  return TIERS[tier]?.modules[module] ?? false;
+  return TIERS[tier]?.modules[module]?.enabled ?? true;
 }
 
 export function canUseFeature(tier: Tier, feature: string): boolean {
-  return TIERS[tier]?.features[feature] ?? true;
+  return TIERS[tier]?.features[feature]?.enabled ?? true;
 }
 
 export function getLimit(tier: Tier, key: string): number {
-  return TIERS[tier]?.limits[key] ?? -1;
+  return TIERS[tier]?.limits[key]?.value ?? -1;
+}
+
+export function getTierDescriptions(tier: Tier): string[] {
+  const config = TIERS[tier];
+  if (!config) return [];
+  const descs: string[] = [];
+  const tierIndex = TIER_LIST.findIndex((t) => t.tier === tier);
+  if (tierIndex > 0) {
+    descs.push(`All in ${TIER_LIST[tierIndex - 1].name} Plan, plus:`);
+  }
+  for (const entry of Object.values(config.modules)) {
+    if (entry.description) descs.push(entry.description);
+  }
+  for (const entry of Object.values(config.features)) {
+    if (entry.description) descs.push(entry.description);
+  }
+  for (const entry of Object.values(config.limits)) {
+    if (entry.description) descs.push(entry.description);
+  }
+  return descs;
 }
 
 export function isActive(status: SubStatus): boolean {

@@ -16,11 +16,11 @@ export function createAuthRouter() {
     const token = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-    await c.env.DB_WEB.prepare("INSERT INTO magic_links (token, email, expires_at, trial, timezone) VALUES (?, ?, ?, ?, ?)")
+    await c.env.WEB_DB.prepare("INSERT INTO magic_links (token, email, expires_at, trial, timezone) VALUES (?, ?, ?, ?, ?)")
       .bind(token, body.email, expiresAt, body.trial ?? null, body.timezone ?? null)
       .run();
 
-    const emailService = new EmailService(c.env.RESEND_API_KEY, c.env.APP_URL);
+    const emailService = new EmailService(c.env.RESEND_API_KEY, c.env.WEB_URL);
     try {
       await emailService.sendMagicLink(body.email, token);
     } catch (e) {
@@ -38,7 +38,7 @@ export function createAuthRouter() {
       return c.json({ error: "Token is required" }, 400);
     }
 
-    const link = await c.env.DB_WEB.prepare("SELECT * FROM magic_links WHERE token = ?")
+    const link = await c.env.WEB_DB.prepare("SELECT * FROM magic_links WHERE token = ?")
       .bind(token)
       .first<{ token: string; email: string; expires_at: string; used: number; trial: string | null; timezone: string | null }>();
 
@@ -46,11 +46,11 @@ export function createAuthRouter() {
       return c.json({ error: "Invalid or expired token" }, 401);
     }
 
-    await c.env.DB_WEB.prepare("UPDATE magic_links SET used = 1 WHERE token = ?")
+    await c.env.WEB_DB.prepare("UPDATE magic_links SET used = 1 WHERE token = ?")
       .bind(token)
       .run();
 
-    let member = await c.env.DB_WEB.prepare(
+    let member = await c.env.WEB_DB.prepare(
       "SELECT id, tenant_id, email, preferred_location, language, timezone FROM members WHERE email = ?"
     )
       .bind(link.email)
@@ -60,16 +60,16 @@ export function createAuthRouter() {
       const memberId = crypto.randomUUID();
       const now = new Date().toISOString();
 
-      await c.env.DB_WEB.prepare("INSERT INTO tenants (email, created_at) VALUES (?, ?)")
+      await c.env.WEB_DB.prepare("INSERT INTO tenants (email, created_at) VALUES (?, ?)")
         .bind(link.email, now)
         .run();
-      const tenant = await c.env.DB_WEB.prepare("SELECT tenant_id FROM tenants WHERE email = ?")
+      const tenant = await c.env.WEB_DB.prepare("SELECT tenant_id FROM tenants WHERE email = ?")
         .bind(link.email)
         .first<{ tenant_id: number }>();
       const tenantId = tenant!.tenant_id;
 
       const tz = link.timezone || "UTC";
-      await c.env.DB_WEB.prepare(
+      await c.env.WEB_DB.prepare(
         "INSERT INTO members (id, tenant_id, email, preferred_location, timezone, created_at) VALUES (?, ?, ?, ?, ?, ?)"
       )
         .bind(memberId, tenantId, link.email, "global", tz, now)
@@ -87,7 +87,7 @@ export function createAuthRouter() {
         fetch(`${c.env.ADMIN_URL}/internal/subscriptions/activate-trial`, {
           method: "POST",
           headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
-          body: JSON.stringify({ tenant_id: tenantId, tier: "pro", days: 30 }),
+          body: JSON.stringify({ tenant_id: tenantId, tier: "basic", days: 30 }),
         }).then((r) => r.json()).then((d) => console.log("Trial activated:", JSON.stringify(d)))
          .catch((e) => console.error("Trial activation failed:", e))
       );
@@ -95,16 +95,18 @@ export function createAuthRouter() {
       member = { id: memberId, tenant_id: tenantId, email: link.email, preferred_location: "global", language: "en", timezone: tz };
     }
 
-    const sessions = new SessionService(c.env.DB_WEB);
+    const sessions = new SessionService(c.env.WEB_DB);
     const sessionId = await sessions.create(member.id, member.tenant_id, member.email, member.language || "en");
 
+    setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/" });
+    setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/", domain: "uni-scrm.com" });
     setCookie(c, "session", sessionId, {
       httpOnly: true,
       secure: true,
       sameSite: "Lax",
       maxAge: 7 * 24 * 60 * 60,
       path: "/",
-
+      domain: "uni-scrm.com",
     });
 
     return c.json({
@@ -117,7 +119,7 @@ export function createAuthRouter() {
   router.post("/logout", async (c) => {
     const sessionId = getCookie(c, "session");
     if (sessionId) {
-      const sessions = new SessionService(c.env.DB_WEB);
+      const sessions = new SessionService(c.env.WEB_DB);
       await sessions.destroy(sessionId);
     }
     deleteCookie(c, "session", { path: "/", domain: "uni-scrm.com" });
@@ -128,11 +130,11 @@ export function createAuthRouter() {
     const sessionId = getCookie(c, "session");
     if (!sessionId) return c.json({ error: "Unauthorized" }, 401);
 
-    const sessions = new SessionService(c.env.DB_WEB);
+    const sessions = new SessionService(c.env.WEB_DB);
     const session = await sessions.get(sessionId);
     if (!session) return c.json({ error: "Unauthorized" }, 401);
 
-    const member = await c.env.DB_WEB.prepare(
+    const member = await c.env.WEB_DB.prepare(
       "SELECT id, tenant_id, email, preferred_location, language, timezone FROM members WHERE id = ?"
     )
       .bind(session.member_id)

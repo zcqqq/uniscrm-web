@@ -46,17 +46,26 @@ export async function parseNaturalLanguage(
 ): Promise<ParseResult | ParseError> {
   const systemPrompt = buildSystemPrompt(fields);
 
-  const response = (await ai.run("@cf/meta/llama-3.1-8b-instruct" as Parameters<Ai["run"]>[0], {
+  const response = await ai.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast" as Parameters<Ai["run"]>[0], {
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: nlQuery },
     ],
     max_tokens: 512,
     temperature: 0,
-  })) as { response?: string };
+  });
 
-  const text = response.response || "";
-  if (!text) {
+  const raw = response as Record<string, unknown>;
+  let text: string;
+  if (typeof raw.response === "string") {
+    text = raw.response;
+  } else if (Array.isArray((raw as { choices?: unknown[] }).choices)) {
+    const choices = (raw as { choices: { message?: { content?: string } }[] }).choices;
+    text = choices[0]?.message?.content || "";
+  } else {
+    text = JSON.stringify(raw);
+  }
+  if (!text || text === "{}") {
     return { success: false, error: "LLM returned empty response" };
   }
 

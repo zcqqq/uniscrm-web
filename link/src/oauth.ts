@@ -8,6 +8,12 @@ import { ContentService } from "./services/content";
 import { TikTokChannel } from "./channels/tiktok";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 
+export const X_CHANNEL_SCOPES = [
+  "tweet.read", "tweet.write", "users.read", "follows.read", "follows.write",
+  "dm.read", "dm.write", "like.read", "list.read", "space.read",
+  "bookmark.read", "mute.read", "mute.write", "offline.access",
+];
+
 async function resolveSession(c: Context<{ Bindings: Env }>): Promise<{ tenant_id: number; member_id: string } | null> {
   const sessionId = getCookie(c, "session");
   if (!sessionId) return null;
@@ -33,14 +39,10 @@ export function oauthRoutes() {
     const memberId = session?.member_id || null;
 
     const url = new URL(c.req.url);
-    const twitter = new Twitter(c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET, `${url.origin}/oauth/x/callback`);
+    const twitter = new Twitter(c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET, `${url.origin}/api/auth/x/callback`);
     const state = generateState();
     const codeVerifier = generateCodeVerifier();
-    const arcticUrl = twitter.createAuthorizationURL(state, codeVerifier, [
-      "tweet.read", "tweet.write", "users.read", "follows.read", "follows.write",
-      "dm.read", "dm.write", "like.read", "list.read", "space.read", "bookmark.read",
-      "mute.read", "mute.write", "offline.access",
-    ]);
+    const arcticUrl = twitter.createAuthorizationURL(state, codeVerifier, X_CHANNEL_SCOPES);
     const oauthUrl = new URL(arcticUrl.toString().replace("https://twitter.com/", "https://x.com/"));
 
     await c.env.KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier, tenantId, memberId }), { expirationTtl: 300 });
@@ -59,7 +61,7 @@ export function oauthRoutes() {
     await c.env.KV.delete(`oauth_state:${state}`);
     const { codeVerifier, tenantId, memberId } = JSON.parse(stored) as { codeVerifier: string; tenantId?: string; memberId?: string };
 
-    const twitter = new Twitter(c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET, `${url.origin}/oauth/x/callback`);
+    const twitter = new Twitter(c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET, `${url.origin}/api/auth/x/callback`);
     const tokens = await twitter.validateAuthorizationCode(code, codeVerifier);
 
     const userRes = await fetch("https://api.x.com/2/users/me?user.fields=id,name,username,profile_image_url", {
@@ -127,7 +129,7 @@ export function oauthRoutes() {
     const state = crypto.randomUUID();
     await c.env.KV.put(`oauth_state:${state}`, JSON.stringify({ tenantId, memberId, provider: "tiktok" }), { expirationTtl: 300 });
 
-    const redirectUri = encodeURIComponent(`${url.origin}/oauth/tiktok/callback`);
+    const redirectUri = encodeURIComponent(`${url.origin}/api/auth/tiktok/callback`);
     const tiktokUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${c.env.TIKTOK_CLIENT_KEY}&scope=user.info.basic,video.list&response_type=code&redirect_uri=${redirectUri}&state=${state}`;
     return c.redirect(tiktokUrl, 302);
   });
@@ -152,7 +154,7 @@ export function oauthRoutes() {
         client_secret: c.env.TIKTOK_CLIENT_SECRET,
         code,
         grant_type: "authorization_code",
-        redirect_uri: `${url.origin}/oauth/tiktok/callback`,
+        redirect_uri: `${url.origin}/api/auth/tiktok/callback`,
       }),
     });
 

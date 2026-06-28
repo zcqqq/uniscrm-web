@@ -23,8 +23,8 @@ export function createBillingRouter() {
     const { tier } = await c.req.json<{ tier: string }>();
     const svc = new BillingService(c.env.ADMIN_URL, c.env.INTERNAL_SECRET);
 
-    const returnUrl = `${c.env.APP_URL}/api/billing/return`;
-    const cancelUrl = `${c.env.APP_URL}/billing?cancelled=true`;
+    const returnUrl = `${c.env.WEB_URL}/api/billing/return`;
+    const cancelUrl = `${c.env.WEB_URL}/billing?cancelled=true`;
 
     const result = await svc.createSubscription(tenantId, tier, returnUrl, cancelUrl);
     return c.json(result);
@@ -48,7 +48,7 @@ export function createBillingRouter() {
   router.post("/portal", async (c) => {
     const tenantId = c.get("tenantId" as never) as string;
     const svc = new BillingService(c.env.ADMIN_URL, c.env.INTERNAL_SECRET);
-    const returnUrl = `${c.env.APP_URL}/billing`;
+    const returnUrl = `${c.env.WEB_URL}/billing`;
     const result = await svc.createPortalSession(tenantId, returnUrl);
     return c.json(result);
   });

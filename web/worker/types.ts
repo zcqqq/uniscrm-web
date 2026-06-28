@@ -1,17 +1,17 @@
 export interface Env {
-  DB_WEB: D1Database;
+  WEB_DB: D1Database;
   KV: KVNamespace;
   VECTORIZE: VectorizeIndex;
   AI: Ai;
   ASSETS: Fetcher;
   RESEND_API_KEY: string;
   WEBHOOK_SECRET: string;
-  APP_URL: string;
+  WEB_URL: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   X_CLIENT_ID: string;
   X_CLIENT_SECRET: string;
-  LINK_SOCIAL_URL: string;
+  LINK_URL: string;
   INTERNAL_SECRET: string;
   ADMIN_URL: string;
 }

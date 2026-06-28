@@ -27,7 +27,7 @@ const authMiddleware = async (c: any, next: any) => {
   c.set("tenantId", data.tenant.id);
   c.set("memberId", data.member.id);
 
-  const row = await (c.env.DB as D1Database).prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+  const row = await (c.env.WEB_DB as D1Database).prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
     .bind(Number(data.tenant.id))
     .first<{ d1_database_id: string | null }>();
   if (row?.d1_database_id) {
@@ -54,12 +54,12 @@ app.post("/internal/lists/:id/users", async (c) => {
   const body = await c.req.json<{ userId: string }>();
   if (!body.userId) return c.json({ error: "userId is required" }, 400);
 
-  const list = await c.env.DB.prepare(
+  const list = await c.env.WEB_DB.prepare(
     "SELECT id FROM lists WHERE id = ? AND tenant_id = ?"
   ).bind(listId, Number(tenantId)).first();
   if (!list) return c.json({ error: "List not found" }, 404);
 
-  await c.env.DB.prepare(
+  await c.env.WEB_DB.prepare(
     "INSERT OR IGNORE INTO list_users (list_id, user_id, tenant_id) VALUES (?, ?, ?)"
   ).bind(listId, body.userId, Number(tenantId)).run();
 
@@ -137,7 +137,7 @@ app.get("/api/users", async (c) => {
 app.get("/api/lists", async (c) => {
   const tenantId = c.get("tenantId");
 
-  const { results: lists } = await c.env.DB.prepare(
+  const { results: lists } = await c.env.WEB_DB.prepare(
     `SELECT l.id, l.name, l.created_at, l.updated_at, COUNT(lu.user_id) as user_count
      FROM lists l
      LEFT JOIN list_users lu ON lu.list_id = l.id
@@ -156,7 +156,7 @@ app.post("/api/lists", async (c) => {
   if (!body.name?.trim()) return c.json({ error: "Name is required" }, 400);
 
   const id = crypto.randomUUID();
-  await c.env.DB.prepare(
+  await c.env.WEB_DB.prepare(
     "INSERT INTO lists (id, name, tenant_id, member_id) VALUES (?, ?, ?, ?)"
   ).bind(id, body.name.trim(), Number(tenantId), memberId).run();
 
@@ -167,7 +167,7 @@ app.delete("/api/lists/:id", async (c) => {
   const tenantId = c.get("tenantId");
   const listId = c.req.param("id");
 
-  await c.env.DB.prepare(
+  await c.env.WEB_DB.prepare(
     "DELETE FROM lists WHERE id = ? AND tenant_id = ?"
   ).bind(listId, Number(tenantId)).run();
 
@@ -184,12 +184,12 @@ app.get("/api/lists/:id/users", async (c) => {
   const limit = 20;
   const offset = (page - 1) * limit;
 
-  const countResult = await c.env.DB.prepare(
+  const countResult = await c.env.WEB_DB.prepare(
     "SELECT COUNT(*) as total FROM list_users WHERE list_id = ? AND tenant_id = ?"
   ).bind(listId, Number(tenantId)).first<{ total: number }>();
   const total = countResult?.total || 0;
 
-  const { results: listUserRows } = await c.env.DB.prepare(
+  const { results: listUserRows } = await c.env.WEB_DB.prepare(
     "SELECT user_id, created_at as added_at FROM list_users WHERE list_id = ? AND tenant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
   ).bind(listId, Number(tenantId), limit, offset).all<{ user_id: string; added_at: string }>();
 
@@ -217,12 +217,12 @@ app.post("/api/lists/:id/users", async (c) => {
   const body = await c.req.json<{ userId: string }>();
   if (!body.userId) return c.json({ error: "userId is required" }, 400);
 
-  const list = await c.env.DB.prepare(
+  const list = await c.env.WEB_DB.prepare(
     "SELECT id FROM lists WHERE id = ? AND tenant_id = ?"
   ).bind(listId, Number(tenantId)).first();
   if (!list) return c.json({ error: "List not found" }, 404);
 
-  await c.env.DB.prepare(
+  await c.env.WEB_DB.prepare(
     "INSERT OR IGNORE INTO list_users (list_id, user_id, tenant_id) VALUES (?, ?, ?)"
   ).bind(listId, body.userId, Number(tenantId)).run();
 
@@ -234,7 +234,7 @@ app.delete("/api/lists/:id/users/:userId", async (c) => {
   const listId = c.req.param("id");
   const userId = c.req.param("userId");
 
-  await c.env.DB.prepare(
+  await c.env.WEB_DB.prepare(
     "DELETE FROM list_users WHERE list_id = ? AND user_id = ? AND tenant_id = ?"
   ).bind(listId, userId, Number(tenantId)).run();
 

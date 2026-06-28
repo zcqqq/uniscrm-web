@@ -1,0 +1,103 @@
+name = "analytics"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "none"
+run_worker_first = true
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+invocation_logs = true
+
+[env.dev]
+name = "analytics-dev"
+routes = [{ pattern = "analytics-dev.uni-scrm.com", custom_domain = true }]
+
+[env.dev.vars]
+WEB_URL = "https://web-dev.uni-scrm.com"
+CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
+R2_WAREHOUSE = "b34f3ff4aec4c36584672d5bf1320757_uniscrm-dev"
+
+[[env.dev.d1_databases]]
+binding = "WEB_DB"
+database_name = "uniscrm-web-dev"
+database_id = "899d288e-198c-49d9-824b-bd8d5c0a3cb8"
+
+[[env.dev.d1_databases]]
+binding = "ANALYTICS_DB"
+database_name = "uniscrm-analytics-dev"
+database_id = "a56f6aec-5425-4c7c-973f-e61858024c9d"
+migrations_dir = "migrations-analytics"
+
+[[env.dev.queues.producers]]
+binding = "ANALYTICS_QUEUE"
+queue = "uniscrm-r2sql-dev"
+
+[[env.dev.queues.consumers]]
+queue = "uniscrm-r2sql-dev"
+max_batch_size = 1
+max_batch_timeout = 60
+
+[[env.dev.containers]]
+class_name = "AnalyticsContainer"
+image = "./Dockerfile"
+instance_type = "basic"
+max_instances = 1
+
+[[env.dev.durable_objects.bindings]]
+name = "ANALYTICS_CONTAINER"
+class_name = "AnalyticsContainer"
+
+[[env.dev.migrations]]
+tag = "v1"
+new_sqlite_classes = ["AnalyticsContainer"]
+
+[env.production]
+name = "analytics"
+routes = [{ pattern = "analytics.uni-scrm.com", custom_domain = true }]
+
+[env.production.vars]
+WEB_URL = "https://web.uni-scrm.com"
+CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
+R2_WAREHOUSE = "b34f3ff4aec4c36584672d5bf1320757_uniscrm"
+
+[[env.production.d1_databases]]
+binding = "WEB_DB"
+database_name = "uniscrm-web"
+database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
+
+[[env.production.d1_databases]]
+binding = "ANALYTICS_DB"
+database_name = "uniscrm-analytics"
+database_id = "TODO_PROD_ANALYTICS_DB_ID"
+migrations_dir = "migrations-analytics"
+
+[[env.production.queues.producers]]
+binding = "ANALYTICS_QUEUE"
+queue = "uniscrm-r2sql"
+
+[[env.production.queues.consumers]]
+queue = "uniscrm-r2sql"
+max_batch_size = 1
+max_batch_timeout = 60
+
+[[env.production.containers]]
+class_name = "AnalyticsContainer"
+image = "./Dockerfile"
+instance_type = "basic"
+max_instances = 3
+
+[[env.production.durable_objects.bindings]]
+name = "ANALYTICS_CONTAINER"
+class_name = "AnalyticsContainer"
+
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["AnalyticsContainer"]

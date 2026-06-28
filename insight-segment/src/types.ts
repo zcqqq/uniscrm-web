@@ -1,5 +1,5 @@
 export interface Env {
-  DB: D1Database;
+  WEB_DB: D1Database;
   AI: Ai;
   ASSETS: Fetcher;
   WEB_URL: string;

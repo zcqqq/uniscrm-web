@@ -1,4 +1,4 @@
-export type Tier = "pro" | "premium";
+export type Tier = "basic" | "pro";
 export type SubStatus = "trialing" | "active" | "past_due" | "expired";
 
 export interface TierConfig {
@@ -12,9 +12,9 @@ export interface TierConfig {
 }
 
 export const TIERS: Record<Tier, TierConfig> = {
-  pro: {
-    tier: "pro",
-    name: "Pro",
+  basic: {
+    tier: "basic",
+    name: "Basic",
     price_monthly: 500,
     descriptions: [
       "Flow automation (5 flows)",
@@ -27,15 +27,14 @@ export const TIERS: Record<Tier, TierConfig> = {
     modules: {
       flow: true,
       link: true,
-      "insight-analytics": true,
-      "insight-segment": true,
+      insight: true,
+      "insight-segment": false,
       profile: false,
     },
     features: {
-      "flow.waitForEvent": true,
-      "flow.xAction": true,
-      "profile.maigret": false,
-      "link.tiktok": false,
+      "link.list": false,
+      "link.content": false,
+      "link.commerce": false,
     },
     limits: {
       flows: 5,
@@ -44,9 +43,9 @@ export const TIERS: Record<Tier, TierConfig> = {
       segments: 5,
     },
   },
-  premium: {
-    tier: "premium",
-    name: "Premium",
+  pro: {
+    tier: "pro",
+    name: "Pro",
     price_monthly: 2000,
     descriptions: [
       "Unlimited flows & channels",
@@ -57,28 +56,15 @@ export const TIERS: Record<Tier, TierConfig> = {
       "API access",
     ],
     modules: {
-      flow: true,
-      link: true,
-      "insight-analytics": true,
-      "insight-segment": true,
-      profile: true,
     },
     features: {
-      "flow.waitForEvent": true,
-      "flow.xAction": true,
-      "profile.maigret": true,
-      "link.tiktok": true,
     },
     limits: {
-      flows: -1,
-      channels: -1,
-      lists: -1,
-      segments: -1,
     },
   },
 };
 
-export const TIER_LIST: TierConfig[] = [TIERS.pro, TIERS.premium];
+export const TIER_LIST: TierConfig[] = [TIERS.basic, TIERS.pro];
 
 export function canAccessModule(tier: Tier, module: string): boolean {
   return TIERS[tier]?.modules[module] ?? false;

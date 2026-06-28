@@ -4,6 +4,7 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { toPng } from "html-to-image";
 import { useFlowEditor } from "../store/flow-editor";
 import { api } from "../lib/api";
+import AiGenerateBar from "../../../shared/frontend/components/AiGenerateBar";
 import Sidebar from "../components/Sidebar";
 import Canvas from "../components/Canvas";
 import Inspector from "../components/Inspector";
@@ -11,7 +12,7 @@ import Inspector from "../components/Inspector";
 
 
 function EditorToolbar() {
-  const { flowId, flowName, isDirty, setFlowName, markClean, toGraphJson } =
+  const { flowId, flowName, isDirty, setFlowName, markClean, toGraphJson, replaceGraph } =
     useFlowEditor();
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
@@ -64,7 +65,18 @@ function EditorToolbar() {
       <input
         value={flowName}
         onChange={(e) => setFlowName(e.target.value)}
-        className="text-sm font-medium border-none outline-none bg-transparent flex-1 min-w-0"
+        className="text-sm font-medium border-none outline-none bg-transparent w-40 min-w-0"
+      />
+      <AiGenerateBar
+        endpoint="/api/flows/generate"
+        context={(() => { const { nodes, edges } = useFlowEditor.getState(); return { nodes, edges }; })()}
+        placeholder="Describe your flow..."
+        onResult={(graph) => {
+          if (Array.isArray(graph.nodes) && Array.isArray(graph.edges)) {
+            replaceGraph(graph.nodes, graph.edges);
+            setTimeout(() => document.querySelector<HTMLButtonElement>("[data-arrange]")?.click(), 100);
+          }
+        }}
       />
       <button
         onClick={() => {

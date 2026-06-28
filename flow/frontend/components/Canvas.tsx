@@ -148,6 +148,7 @@ export default function Canvas() {
             }}
             className="p-1.5 bg-white border border-gray-200 rounded shadow-sm hover:bg-gray-50 text-sm"
             title="Arrange"
+            data-arrange="true"
           >📐</button>
         </Panel>
       </ReactFlow>

@@ -28,8 +28,8 @@ export async function checkoutRoute(c: Context<{ Bindings: Env }>) {
     await db.upsert(tenant_id, { stripe_customer_id: customerId });
 
     const priceMap: Record<string, string> = {
+      basic: c.env.STRIPE_PRICE_BASIC,
       pro: c.env.STRIPE_PRICE_PRO,
-      premium: c.env.STRIPE_PRICE_PREMIUM,
     };
     const priceId = priceMap[tier];
     if (!priceId) {

@@ -18,12 +18,12 @@ TREND_RETENTION_DAYS = "30"
 
 [[env.dev.kv_namespaces]]
 binding = "TREND_KV"
-id = "ac8b64b59ac540e0ab482f25bb78d41e"
+id = "58fa452dbfa94c308d8aaa21fb6c8e0a"
 
 [[env.dev.d1_databases]]
 binding = "TREND_DB"
-database_name = "uniscrm-db-dev"
-database_id = "95ad8842-5b0d-4ff4-854d-9c42f4b0685f"
+database_name = "uniscrm-web-dev"
+database_id = "899d288e-198c-49d9-824b-bd8d5c0a3cb8"
 
 [[env.dev.vectorize]]
 binding = "TREND_VECTORIZE"
@@ -40,11 +40,11 @@ TREND_RETENTION_DAYS = "30"
 
 [[env.production.kv_namespaces]]
 binding = "TREND_KV"
-id = "88bc8c114dfb4ec3a77589c64f991a2e"
+id = "58fa452dbfa94c308d8aaa21fb6c8e0a"
 
 [[env.production.d1_databases]]
 binding = "TREND_DB"
-database_name = "uniscrm-db"
+database_name = "uniscrm-web"
 database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
 
 [[env.production.vectorize]]

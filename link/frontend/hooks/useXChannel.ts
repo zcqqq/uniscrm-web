@@ -25,7 +25,7 @@ export function useXChannel() {
   useEffect(() => { load(); }, [load]);
 
   const connect = () => {
-    window.location.href = "/oauth/x/connect";
+    window.location.href = "/api/auth/x/connect";
   };
 
   const disconnect = async () => {

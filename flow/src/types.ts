@@ -6,12 +6,12 @@ export interface Env {
   WEB_DB: D1Database;   // uniscrm-db (tenants, sessions)
   FLOW_DB: D1Database;  // flow DB (flows, flow_pending, flow_executions, rate_limits)
   ASSETS: Fetcher;
+  AI: Ai;
   WEB_URL: string;
   FLOW_QUEUE: Queue;
   FLOW_LOG_QUEUE: Queue;
-  PIPELINE_FLOW_NODE_LOG: Pipeline;
-  PROFILE_URL: string;
-  LINK_SOCIAL_URL: string;
+  PIPELINE_FLOW_LOG: Pipeline;
+  LINK_URL: string;
   INTERNAL_SECRET: string;
   CF_ACCOUNT_ID: string;
   CF_D1_API_TOKEN: string;

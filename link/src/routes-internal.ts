@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
 import { XTokenService } from "./services/x-token";
+import { XActivityService } from "./services/x-webhook";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 
 export function internalRoutes() {
@@ -91,6 +92,65 @@ export function internalRoutes() {
     ).bind(listId, body.userId, Number(tenantId)).run();
 
     return c.json({ ok: true }, 201);
+  });
+
+  // Create X channel (called by web worker during X sign-up/login)
+  router.post("/channels/create-x", async (c) => {
+    const { tenant_id, member_id, access_token, refresh_token, expires_at } = await c.req.json<{
+      tenant_id: number; member_id: string; access_token: string; refresh_token: string | null; expires_at: string;
+    }>();
+    if (!tenant_id || !member_id || !access_token) {
+      return c.json({ error: "tenant_id, member_id, access_token required" }, 400);
+    }
+
+    const userRes = await fetch("https://api.x.com/2/users/me?user.fields=id,name,username,profile_image_url", {
+      headers: { Authorization: `Bearer ${access_token}` },
+    });
+    if (!userRes.ok) return c.json({ error: "Failed to fetch X user info" }, 502);
+    const userData = await userRes.json() as { data: { id: string; name: string; username: string; profile_image_url?: string } };
+    const xUser = userData.data;
+
+    const config = JSON.stringify({
+      x_user_id: xUser.id,
+      x_username: xUser.username,
+      x_name: xUser.name,
+      access_token,
+      refresh_token,
+      expires_at,
+    });
+
+    const channelId = crypto.randomUUID();
+    await c.env.LINK_DB
+      .prepare(`INSERT INTO channels (id, channel_type, config, source_channel_id, access_token, tenant_id, member_id, created_at, updated_at)
+         VALUES (?, 'X', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+         ON CONFLICT(channel_type, source_channel_id) DO UPDATE SET config = excluded.config, access_token = excluded.access_token, tenant_id = excluded.tenant_id, member_id = excluded.member_id, is_active = 1, updated_at = datetime('now')`)
+      .bind(channelId, config, xUser.id, access_token, tenant_id, member_id)
+      .run();
+
+    const row = await c.env.LINK_DB
+      .prepare("SELECT id FROM channels WHERE channel_type = 'X' AND source_channel_id = ? AND is_active = 1")
+      .bind(xUser.id)
+      .first<{ id: string }>();
+    const actualChannelId = row?.id || channelId;
+
+    const url = new URL(c.req.url);
+    const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
+    try {
+      const webhookUrl = `${url.origin}/x/webhook`;
+      const bearerService = new XActivityService(c.env.TWITTER_BEARER_TOKEN);
+      let webhook = await bearerService.getWebhook();
+      if (!webhook || webhook.url !== webhookUrl) {
+        const whId = await bearerService.createWebhook(webhookUrl);
+        webhook = { webhook_id: whId, url: webhookUrl };
+      }
+      const userService = new XActivityService(access_token);
+      const ids = await userService.setupAllSubscriptions(xUser.id, webhookUrl, webhook.webhook_id);
+      await tokenService.updateConfig(actualChannelId, { subscription_ids: ids });
+    } catch (e) {
+      console.error("XAA subscription setup failed:", e);
+    }
+
+    return c.json({ channel_id: actualChannelId });
   });
 
   // TikTok content sync (internal, no session)

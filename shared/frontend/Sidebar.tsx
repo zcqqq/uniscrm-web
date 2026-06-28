@@ -1,17 +1,21 @@
 import { useState, useEffect } from "react";
+import { TIERS } from "../plans";
+import type { Tier } from "../plans";
+import { UpgradeIcon } from "./UpgradeIcon";
 
 export interface SidebarUrls {
   web: string;
   link: string;
   insightSegment: string;
-  insightAnalytics?: string;
+  analytics?: string;
   flow: string;
 }
 
-export type CurrentModule = "social" | "profile" | "content" | "commerce" | "analytics" | "settings";
+export type CurrentModule = "social" | "profile" | "content" | "commerce" | "insight" | "settings";
 
 interface SidebarProps {
   urls: SidebarUrls;
+  tier?: Tier;
   currentModule?: CurrentModule;
   currentPath?: string;
 }
@@ -41,7 +45,7 @@ interface MenuGroup {
   href?: string;
 }
 
-export function Sidebar({ urls, currentModule, currentPath }: SidebarProps) {
+export function Sidebar({ urls, tier: tierProp, currentModule, currentPath }: SidebarProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set(["social"]);
     const saved = localStorage.getItem("sidebar-groups");
@@ -49,12 +53,19 @@ export function Sidebar({ urls, currentModule, currentPath }: SidebarProps) {
   });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
+  const [fetchedTier, setFetchedTier] = useState<Tier | undefined>(tierProp);
 
   useEffect(() => {
     fetch("/api/auth/me", { credentials: "include" })
       .then((r) => r.ok ? r.json() : null)
       .then((d: any) => { if (d?.member?.email) setEmail(d.member.email); })
       .catch(() => {});
+    if (!tierProp) {
+      fetch(`${urls.web}/api/billing/subscription`, { credentials: "include" })
+        .then((r) => r.ok ? r.json() : null)
+        .then((d: any) => { if (d?.tier === "basic" || d?.tier === "pro") setFetchedTier(d.tier); })
+        .catch(() => {});
+    }
   }, []);
 
   useEffect(() => {
@@ -98,7 +109,13 @@ export function Sidebar({ urls, currentModule, currentPath }: SidebarProps) {
       ],
     },
     { id: "commerce", label: "Commerce", icon: Icons.ShoppingBag, href: `${urls.link}/commerce` },
-    { id: "analytics", label: "Analytics", icon: Icons.FileText, href: urls.insightAnalytics || "#" },
+    {
+      id: "insight", label: "Insight", icon: Icons.FileText,
+      items: [
+        { id: "dashboard", label: "Dashboard", href: `${urls.analytics ?? "#"}/dashboard` },
+        { id: "analytics", label: "Analytics", href: `${urls.analytics ?? "#"}/analytics` },
+      ],
+    },
     {
       id: "settings", label: "Settings", icon: Icons.Settings,
       items: [
@@ -107,6 +124,11 @@ export function Sidebar({ urls, currentModule, currentPath }: SidebarProps) {
       ],
     },
   ];
+
+  const tier = tierProp ?? fetchedTier;
+  const tierModules = tier ? TIERS[tier]?.modules : undefined;
+  const isGroupDisabled = (groupId: string) =>
+    tierModules ? groupId in tierModules && !tierModules[groupId] : false;
 
   const isActive = (groupId: string) => currentModule === groupId;
   const isItemActive = (href: string) => {
@@ -123,19 +145,21 @@ export function Sidebar({ urls, currentModule, currentPath }: SidebarProps) {
 
       {/* Menu */}
       <nav className="flex-1 overflow-y-auto py-3 px-2">
-        {groups.map((group) => (
+        {groups.map((group) => {
+          const disabled = isGroupDisabled(group.id);
+          return (
           <div key={group.id} className="mb-0.5">
             {group.items ? (
               <>
                 <button
-                  onClick={() => toggleGroup(group.id)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-md cursor-pointer transition-colors ${isActive(group.id) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                  onClick={() => disabled ? window.location.href = `${urls.web}/billing` : toggleGroup(group.id)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-md cursor-pointer transition-colors ${disabled ? "text-muted-foreground/50 cursor-default" : isActive(group.id) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
                 >
                   <group.icon />
                   <span className="flex-1 text-left">{group.label}</span>
-                  {expandedGroups.has(group.id) ? <Icons.ChevronDown /> : <Icons.ChevronRight />}
+                  {disabled ? <UpgradeIcon webUrl={urls.web} /> : expandedGroups.has(group.id) ? <Icons.ChevronDown /> : <Icons.ChevronRight />}
                 </button>
-                {expandedGroups.has(group.id) && (
+                {!disabled && expandedGroups.has(group.id) && (
                   <div className="ml-5 pl-3 border-l border-border mt-0.5 mb-1">
                     {group.items.map((item) => (
                       <a
@@ -151,15 +175,17 @@ export function Sidebar({ urls, currentModule, currentPath }: SidebarProps) {
               </>
             ) : (
               <a
-                href={group.href}
-                className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded-md transition-colors ${isActive(group.id) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                href={disabled ? `${urls.web}/billing` : group.href}
+                className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded-md transition-colors ${disabled ? "text-muted-foreground/50" : isActive(group.id) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
               >
                 <group.icon />
-                <span>{group.label}</span>
+                <span className="flex-1">{group.label}</span>
+                {disabled && <UpgradeIcon webUrl={urls.web} />}
               </a>
             )}
           </div>
-        ))}
+          );
+        })}
       </nav>
 
       {/* Footer */}

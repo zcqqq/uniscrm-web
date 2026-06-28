@@ -17,7 +17,7 @@ function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenan
       direction: log.direction,
       created_at: timestamp,
     }));
-    env.PIPELINE_FLOW_NODE_LOG.send(records).catch(() => {});
+    env.PIPELINE_FLOW_LOG.send(records).catch(() => {});
 
     env.FLOW_LOG_QUEUE.send({
       flowId,
@@ -40,8 +40,8 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
 
   for (const action of actions) {
     if (action.type === "addToList" && action.listId) {
-      const profileUrl = env.PROFILE_URL || "https://profile-dev.uni-scrm.com";
-      await fetch(`${profileUrl}/internal/lists/${action.listId}/users`, {
+      const linkUrl = env.LINK_URL || "https://link-dev.uni-scrm.com";
+      await fetch(`${linkUrl}/internal/lists/${action.listId}/users`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -79,7 +79,7 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
         continue;
       }
 
-      const linkSocialUrl = env.LINK_SOCIAL_URL || "https://link-social-dev.uni-scrm.com";
+      const linkUrl = env.LINK_URL || "https://link-dev.uni-scrm.com";
       const xEvent = action.xEvent as string;
       const xAction = xEvent === "follow-user" ? "follow"
         : xEvent === "unfollow-user" ? "unfollow"
@@ -91,7 +91,7 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
           return val != null ? String(val) : "";
         });
       }
-      const res = await fetch(`${linkSocialUrl}/internal/x/action`, {
+      const res = await fetch(`${linkUrl}/internal/x/action`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -167,8 +167,8 @@ app.get("/api/auth/me", async (c) => {
 // Proxy lists from profile worker
 app.use("/api/lists", authMiddleware);
 app.get("/api/lists", async (c) => {
-  const profileUrl = c.env.PROFILE_URL || "https://profile-dev.uni-scrm.com";
-  const res = await fetch(`${profileUrl}/api/lists`, {
+  const linkUrl = c.env.LINK_URL || "https://link-dev.uni-scrm.com";
+  const res = await fetch(`${linkUrl}/api/lists`, {
     headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
   });
   const body = await res.text();
@@ -180,7 +180,7 @@ app.get("/api/lists", async (c) => {
 
 // Proxy channels from link worker
 app.get("/api/channels", async (c) => {
-  const linkUrl = c.env.LINK_SOCIAL_URL || "https://link-dev.uni-scrm.com";
+  const linkUrl = c.env.LINK_URL || "https://link-dev.uni-scrm.com";
   const type = c.req.query("type") || "";
   const res = await fetch(`${linkUrl}/api/channels?type=${type}`, {
     headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
@@ -337,7 +337,7 @@ app.post("/api/flows/:id/unpublish", async (c) => {
   return c.json({ ok: true });
 });
 
-// Analytics: node counts (from tenant D1 flow_node_log)
+// Analytics: node counts (from tenant D1 flow_log)
 app.get("/api/flows/:id/analytics", async (c) => {
   const flowId = c.req.param("id");
   const tenantId = c.get("tenantId");
@@ -351,7 +351,7 @@ app.get("/api/flows/:id/analytics", async (c) => {
 
   try {
     const rows = await tdb.query<{ node_id: string; direction: string; count: number }>(
-      "SELECT node_id, direction, COUNT(*) as count FROM flow_node_log WHERE flow_id = ? GROUP BY node_id, direction",
+      "SELECT node_id, direction, COUNT(*) as count FROM flow_log WHERE flow_id = ? GROUP BY node_id, direction",
       [flowId]
     );
     const nodes: Record<string, { enter: number; exit: number }> = {};
@@ -381,7 +381,7 @@ app.get("/api/flows/:id/nodes/:nodeId/logs", async (c) => {
     const tdb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, row.d1_database_id);
     const logs = await tdb.query<{ user_id: string; name: string | null; created_at: string }>(
       `SELECT l.user_id, u.name, l.created_at
-       FROM flow_node_log l LEFT JOIN user u ON u.id = l.user_id
+       FROM flow_log l LEFT JOIN user u ON u.id = l.user_id
        WHERE l.flow_id = ? AND l.node_id = ? AND l.direction = 'enter'
        GROUP BY l.user_id, l.created_at
        ORDER BY l.created_at DESC LIMIT 50`,
@@ -395,7 +395,65 @@ app.get("/api/flows/:id/nodes/:nodeId/logs", async (c) => {
   }
 });
 
-const FLOW_NODE_LOG_SCHEMA = `CREATE TABLE IF NOT EXISTS flow_node_log (
+const FLOW_GENERATE_SYSTEM_PROMPT = `You are a workflow graph generator for a social CRM.
+
+Available node types:
+1. xTrigger - triggers on X (Twitter) events
+   data: { channelType: "X", eventType: string }
+   eventTypes: "follow.followed" (someone follows you), "follow.follow" (you follow someone), "follow.unfollowed" (someone unfollows you), "follow.unfollow" (you unfollow someone), "dm.received", "post.create", "like.create"
+
+2. wait - delay execution
+   data: { duration: number, unit: "minutes"|"hours"|"days" }
+
+3. waitForEvent - wait for an event within a time window, has "yes"/"no" branches
+   data: { eventType: string, duration: number, unit: "minutes"|"hours"|"days", conditions: [] }
+
+4. action - perform an action
+   For X actions: data: { actionType: "xAction", xEvent: string }
+   xEvents: "follow-user", "unfollow-user", "create-dm", "mute-user"
+   For list actions: data: { actionType: "addToList", listId: "", listName: "" }
+
+Rules:
+- Each node needs: id (UUID format like "a1b2c3d4-..."), type, position: {x:0,y:0}, data
+- Edges: { id: string, source: nodeId, target: nodeId, sourceHandle?: string }
+- xAction nodes have sourceHandle "success" or "failed" for branching
+- waitForEvent nodes have sourceHandle "yes" or "no"
+- Flow must start with exactly one xTrigger node
+- Generate UUIDs for all ids (8-4-4-4-12 format)
+
+Think step by step about what nodes and connections are needed. Your thinking is shown to the user as a progress log.
+End your response with ONLY the JSON object on a new line: {"nodes":[...],"edges":[...]}`;
+
+app.post("/api/flows/generate", async (c) => {
+  const { prompt, currentContext, currentGraph } = await c.req.json<{ prompt: string; currentContext?: any; currentGraph?: any }>();
+  if (!prompt) return c.json({ error: "prompt required" }, 400);
+
+  const ctx = currentContext || currentGraph;
+  const hasContext = ctx && (Array.isArray(ctx.nodes) ? ctx.nodes.length > 0 : Object.keys(ctx).length > 0);
+  const userMessage = hasContext
+    ? `Current flow: ${JSON.stringify(ctx)}\n\nUser request: ${prompt}`
+    : `Create a new flow: ${prompt}`;
+
+  try {
+    const stream = await c.env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast" as any, {
+      messages: [
+        { role: "system", content: FLOW_GENERATE_SYSTEM_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+      max_tokens: 2048,
+      stream: true,
+    });
+
+    return new Response(stream as ReadableStream, {
+      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+    });
+  } catch (e) {
+    console.error(JSON.stringify({ event: "flow_generate_error", error: String(e) }));
+    return c.json({ error: "Generation failed" }, 500);
+  }
+});
+
+const FLOW_NODE_LOG_SCHEMA = `CREATE TABLE IF NOT EXISTS flow_log (
   id TEXT PRIMARY KEY,
   flow_id TEXT NOT NULL,
   node_id TEXT NOT NULL,
@@ -403,7 +461,7 @@ const FLOW_NODE_LOG_SCHEMA = `CREATE TABLE IF NOT EXISTS flow_node_log (
   direction TEXT NOT NULL,
   created_at TEXT NOT NULL
 )`;
-const FLOW_NODE_LOG_INDEX = `CREATE INDEX IF NOT EXISTS idx_fnl_flow_node ON flow_node_log(flow_id, node_id)`;
+const FLOW_NODE_LOG_INDEX = `CREATE INDEX IF NOT EXISTS idx_fnl_flow_node ON flow_log(flow_id, node_id)`;
 
 async function deterministicId(parts: string[]): Promise<string> {
   const data = new TextEncoder().encode(parts.join("|"));
@@ -439,13 +497,13 @@ async function handleLogQueue(batch: MessageBatch<any>, env: Env): Promise<void>
       for (const log of logs) {
         const id = await deterministicId([log.flowId, log.nodeId, log.userId, log.direction, log.timestamp]);
         await tdb.run(
-          `INSERT OR IGNORE INTO flow_node_log (id, flow_id, node_id, user_id, direction, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT OR IGNORE INTO flow_log (id, flow_id, node_id, user_id, direction, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
           [id, log.flowId, log.nodeId, log.userId, log.direction, log.timestamp]
         );
       }
-      console.log(JSON.stringify({ event: "flow_node_log_written", tenantId, count: logs.length }));
+      console.log(JSON.stringify({ event: "flow_log_written", tenantId, count: logs.length }));
     } catch (e) {
-      console.error(JSON.stringify({ event: "flow_node_log_error", tenantId, error: String(e) }));
+      console.error(JSON.stringify({ event: "flow_log_error", tenantId, error: String(e) }));
     }
   }
 

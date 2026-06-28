@@ -9,6 +9,9 @@ export interface OAuthState {
 export interface PendingOAuthData {
   provider: string;
   providerUserId: string;
+  access_token?: string;
+  refresh_token?: string | null;
+  expires_at?: string;
 }
 
 export interface ResolveUserResult {
@@ -155,7 +158,7 @@ export class OAuthService {
 
   async storePendingOAuth(pendingId: string, data: PendingOAuthData): Promise<void> {
     await this.kv.put(`pending_oauth:${pendingId}`, JSON.stringify(data), {
-      expirationTtl: 300,
+      expirationTtl: 600,
     });
   }
 

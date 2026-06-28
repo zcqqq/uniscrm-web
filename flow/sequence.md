@@ -1,16 +1,16 @@
 ```mermaid
 sequenceDiagram
-    participant LS as link-social Worker
-    participant FQ as Queue: flow-events
+    participant LW as link Worker
+    participant EQ as Queue: uniscrm-event
     participant FW as flow Worker
-    participant AE as Analytics Engine
-    participant LQ as Queue: flow-log
+    participant PLG as Pipeline: PIPELINE_FLOW_LOG
+    participant LQ as Queue: uniscrm-flow-log
     participant TDB as Tenant D1
 
-    LS->>FQ: 事件入队
-    FQ->>FW: 消费事件，执行flow
-    FW->>AE: 写入节点计数
+    LW->>EQ: 事件入队
+    EQ->>FW: 消费事件，执行flow
+    FW->>PLG: 节点日志写入 R2 Iceberg
     FW->>LQ: 节点日志入队
     LQ->>FW: 批量消费日志
-    FW->>TDB: 写入 flow_node_log 表
+    FW->>TDB: 写入 flow_log 表
 ```

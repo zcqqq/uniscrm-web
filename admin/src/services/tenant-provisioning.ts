@@ -7,11 +7,12 @@ export class TenantProvisioning {
   constructor(
     private accountId: string,
     private apiToken: string,
-    private mainDb: D1Database
+    private mainDb: D1Database,
+    private env: "dev" | "production" = "dev"
   ) {}
 
   async provisionDatabase(tenantId: number): Promise<string> {
-    const dbName = `uniscrm-tenant-${tenantId}`;
+    const dbName = this.env === "production" ? `uniscrm-t${tenantId}` : `uniscrm-t${tenantId}-dev`;
 
     const res = await fetch(`${CF_API_BASE}/accounts/${this.accountId}/d1/database`, {
       method: "POST",

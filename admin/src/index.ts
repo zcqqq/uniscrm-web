@@ -26,7 +26,8 @@ app.post("/internal/portal/create", portalRoute);
 app.post("/internal/tenants/:tenantId/provision-db", async (c) => {
   const tenantId = parseInt(c.req.param("tenantId"), 10);
   if (!tenantId) return c.json({ error: "Invalid tenant_id" }, 400);
-  const provisioning = new TenantProvisioning(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, c.env.WEB_DB);
+  const env = c.env.ENVIRONMENT === "production" ? "production" as const : "dev" as const;
+  const provisioning = new TenantProvisioning(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, c.env.WEB_DB, env);
   const existing = await provisioning.getTenantDbId(tenantId);
   if (existing) return c.json({ d1_database_id: existing });
   const dbId = await provisioning.provisionDatabase(tenantId);

@@ -4,6 +4,7 @@ const urls = {
   web: import.meta.env.VITE_WEB_URL || "https://web-dev.uni-scrm.com",
   link: import.meta.env.VITE_LINK_URL || "https://link-dev.uni-scrm.com",
   insightSegment: import.meta.env.VITE_INSIGHT_SEGMENT_URL || "https://insight-segment-dev.uni-scrm.com",
+  analytics: import.meta.env.VITE_ANALYTICS_URL || "https://analytics-dev.uni-scrm.com",
   flow: "",
 };
 

@@ -8,6 +8,8 @@ export const TENANT_DB_INIT_SQL = [
   )`,
   `CREATE TABLE IF NOT EXISTS user (
     id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    source_user_id TEXT NOT NULL,
     channel_type TEXT,
     name TEXT,
     username TEXT,
@@ -20,6 +22,7 @@ export const TENANT_DB_INIT_SQL = [
     updated_at TEXT NOT NULL,
     profile_id TEXT REFERENCES profile(id)
   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_user_channel_source ON user(channel_id, source_user_id)`,
   `CREATE TABLE IF NOT EXISTS event (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,

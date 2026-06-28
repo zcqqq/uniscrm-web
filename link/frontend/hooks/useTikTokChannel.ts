@@ -25,7 +25,7 @@ export function useTikTokChannel() {
   useEffect(() => { load(); }, [load]);
 
   const connect = () => {
-    window.location.href = "/oauth/tiktok/connect";
+    window.location.href = "/api/auth/tiktok/connect";
   };
 
   const disconnect = async () => {

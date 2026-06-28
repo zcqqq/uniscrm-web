@@ -33,9 +33,9 @@ export function createWebhookRouter() {
     const valid = await verifySignature(body, signature, c.env.WEBHOOK_SECRET);
     if (!valid) return c.json({ error: "Invalid signature" }, 401);
 
-    const service = new RecommendService(c.env.DB_WEB, c.env.VECTORIZE, c.env.KV);
+    const service = new RecommendService(c.env.WEB_DB, c.env.VECTORIZE, c.env.KV);
 
-    const { results: tenants } = await c.env.DB_WEB
+    const { results: tenants } = await c.env.WEB_DB
       .prepare("SELECT tenant_id FROM tenants WHERE d1_database_id IS NOT NULL")
       .all<{ tenant_id: number }>();
 

@@ -30,8 +30,8 @@ export async function webhookRoute(c: Context<{ Bindings: Env }>) {
 
   const db = new SubscriptionDB(c.env.ADMIN_DB);
   const priceMap: Record<string, Tier> = {
+    [c.env.STRIPE_PRICE_BASIC]: "basic",
     [c.env.STRIPE_PRICE_PRO]: "pro",
-    [c.env.STRIPE_PRICE_PREMIUM]: "premium",
   };
 
   switch (event.type) {
@@ -82,7 +82,7 @@ async function handleSubscriptionUpdated(db: SubscriptionDB, subscription: Strip
   const plan = priceId ? getTierByPriceId(priceId, priceMap) : null;
 
   await db.updateByStripeSubscriptionId(subscription.id, {
-    tier: plan?.tier ?? "pro",
+    tier: plan?.tier ?? "basic",
     status: subscription.status,
     current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
     cancel_at_period_end: subscription.cancel_at_period_end ? 1 : 0,

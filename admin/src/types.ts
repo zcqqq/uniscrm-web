@@ -3,11 +3,12 @@ export interface Env {
   WEB_DB: D1Database;
   STRIPE_SECRET_KEY: string;
   STRIPE_WEBHOOK_SECRET: string;
+  STRIPE_PRICE_BASIC: string;
   STRIPE_PRICE_PRO: string;
-  STRIPE_PRICE_PREMIUM: string;
   INTERNAL_SECRET: string;
   CF_ACCOUNT_ID: string;
   CF_D1_API_TOKEN: string;
+  ENVIRONMENT: string;
 }
 
 export interface SubscriptionRow {

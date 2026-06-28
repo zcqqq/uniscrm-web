@@ -46,26 +46,35 @@ export class XUsersService {
     this.tenantId = opts?.tenantId;
   }
 
-  async upsertUser(user: XUserData, channelType?: string): Promise<void> {
+  async upsertUser(user: XUserData, channelId: string, channelType: string): Promise<void> {
     console.log(JSON.stringify({ event: "x_user_raw", user_id: user.id, payload: user }));
     const dbData = JSON.stringify(pickDbFields(user));
     const now = new Date().toISOString();
+    const id = crypto.randomUUID();
     await this.tenantDb.run(
-      `INSERT INTO user (id, channel_type, name, username, profile_image_url, raw_data, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-       ON CONFLICT(id) DO UPDATE SET
+      `INSERT INTO user (id, channel_id, source_user_id, channel_type, name, username, profile_image_url, raw_data, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+       ON CONFLICT(channel_id, source_user_id) DO UPDATE SET
          name = CASE WHEN excluded.name IS NOT NULL AND excluded.name != '' THEN excluded.name ELSE user.name END,
          username = CASE WHEN excluded.username IS NOT NULL AND excluded.username != '' THEN excluded.username ELSE user.username END,
          profile_image_url = CASE WHEN excluded.profile_image_url IS NOT NULL AND excluded.profile_image_url != '' THEN excluded.profile_image_url ELSE user.profile_image_url END,
          raw_data = json_patch(user.raw_data, excluded.raw_data),
          updated_at = datetime('now')`,
-      [user.id, channelType || null, user.name || null, user.username || null, user.profile_image_url || null, dbData]
+      [id, channelId, user.id, channelType, user.name || null, user.username || null, user.profile_image_url || null, dbData]
     );
 
     if (this.pipelineUser && this.tenantId) {
       const record: Record<string, unknown> = {
         tenant_id: this.tenantId,
-        id: user.id,
+        id: id,
+        channel_id: channelId,
+        source_user_id: user.id,
+        channel_type: channelType,
+        name: user.name || null,
+        username: user.username || null,
+        is_active: 1,
+        is_follow: 0,
+        is_followed: 0,
         created_at: now,
         updated_at: now,
       };
@@ -88,10 +97,10 @@ export class XUsersService {
     );
   }
 
-  async setFollowState(userId: string, field: "is_follow" | "is_followed", value: 0 | 1): Promise<void> {
+  async setFollowState(sourceUserId: string, channelId: string, field: "is_follow" | "is_followed", value: 0 | 1): Promise<void> {
     await this.tenantDb.run(
-      `UPDATE user SET ${field} = ?, updated_at = datetime('now') WHERE id = ?`,
-      [value, userId]
+      `UPDATE user SET ${field} = ?, updated_at = datetime('now') WHERE channel_id = ? AND source_user_id = ?`,
+      [value, channelId, sourceUserId]
     );
   }
 

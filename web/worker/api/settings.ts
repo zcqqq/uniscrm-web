@@ -20,7 +20,7 @@ export function createSettingsRouter() {
 
   router.get("/", async (c) => {
     const memberId = c.get("memberId" as never) as string;
-    const member = await c.env.DB_WEB.prepare("SELECT preferred_location, timezone FROM members WHERE id = ?")
+    const member = await c.env.WEB_DB.prepare("SELECT preferred_location, timezone FROM members WHERE id = ?")
       .bind(memberId)
       .first<{ preferred_location: string; timezone: string }>();
     return c.json({ preferred_location: member?.preferred_location ?? "global", timezone: member?.timezone ?? "UTC" });
@@ -34,13 +34,13 @@ export function createSettingsRouter() {
       return c.json({ error: "Invalid location" }, 400);
     }
 
-    await c.env.DB_WEB.prepare("UPDATE members SET preferred_location = ? WHERE id = ?")
+    await c.env.WEB_DB.prepare("UPDATE members SET preferred_location = ? WHERE id = ?")
       .bind(preferred_location, memberId)
       .run();
 
     try {
       const tenantId = c.get("tenantId" as never) as number;
-      const recommend = new RecommendService(c.env.DB_WEB, c.env.VECTORIZE, c.env.KV);
+      const recommend = new RecommendService(c.env.WEB_DB, c.env.VECTORIZE, c.env.KV);
       await recommend.computeForUser(tenantId, preferred_location);
     } catch (e) {
       console.error("Recommendation recompute failed:", e instanceof Error ? e.message : e);
@@ -57,7 +57,7 @@ export function createSettingsRouter() {
       return c.json({ error: "Invalid language" }, 400);
     }
 
-    await c.env.DB_WEB.prepare("UPDATE members SET language = ? WHERE id = ?")
+    await c.env.WEB_DB.prepare("UPDATE members SET language = ? WHERE id = ?")
       .bind(language, memberId)
       .run();
 
@@ -72,7 +72,7 @@ export function createSettingsRouter() {
       return c.json({ error: "Invalid timezone" }, 400);
     }
 
-    await c.env.DB_WEB.prepare("UPDATE members SET timezone = ? WHERE id = ?")
+    await c.env.WEB_DB.prepare("UPDATE members SET timezone = ? WHERE id = ?")
       .bind(timezone, memberId)
       .run();
 
@@ -81,7 +81,7 @@ export function createSettingsRouter() {
 
   router.get("/linked-accounts", async (c) => {
     const memberId = c.get("memberId" as never) as string;
-    const oauthService = new OAuthService(c.env.DB_WEB, c.env.KV);
+    const oauthService = new OAuthService(c.env.WEB_DB, c.env.KV);
     const accounts = await oauthService.getLinkedAccounts(memberId);
     return c.json({ accounts });
   });
@@ -92,7 +92,7 @@ export function createSettingsRouter() {
     if (provider !== "google" && provider !== "x") {
       return c.json({ error: "Invalid provider" }, 400);
     }
-    const oauthService = new OAuthService(c.env.DB_WEB, c.env.KV);
+    const oauthService = new OAuthService(c.env.WEB_DB, c.env.KV);
     await oauthService.unlinkAccount(memberId, provider);
     return c.json({ ok: true });
   });

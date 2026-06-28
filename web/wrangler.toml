@@ -1,4 +1,4 @@
-name = "uniscrm-web"
+name = "web"
 main = "worker/index.ts"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
@@ -14,25 +14,25 @@ enabled = true
 head_sampling_rate = 1
 
 [env.dev]
-name = "uniscrm-web-dev"
+name = "web-dev"
 routes = [{ pattern = "web-dev.uni-scrm.com", custom_domain = true }]
 
 [env.dev.vars]
 GOOGLE_CLIENT_ID = "1038882920781-unbsoa2prpnvqufeicaqqe1mlgso5ac9.apps.googleusercontent.com"
 X_CLIENT_ID = "cS1kY2RlNnc1VldHSWw0LVJQSFM6MTpjaQ"
-APP_URL = "https://web-dev.uni-scrm.com"
-LINK_SOCIAL_URL = "https://link-social-dev.uni-scrm.com"
+WEB_URL = "https://web-dev.uni-scrm.com"
+LINK_URL = "https://link-dev.uni-scrm.com"
 INTERNAL_SECRET = "dev-internal-secret"
 ADMIN_URL = "https://admin-dev.uni-scrm.com"
 
 [[env.dev.kv_namespaces]]
 binding = "KV"
-id = "ac8b64b59ac540e0ab482f25bb78d41e"
+id = "9f65b37e6ac94f81948a0018f816f89f"
 
 [[env.dev.d1_databases]]
-binding = "DB_WEB"
-database_name = "uniscrm-db-dev"
-database_id = "95ad8842-5b0d-4ff4-854d-9c42f4b0685f"
+binding = "WEB_DB"
+database_name = "uniscrm-web-dev"
+database_id = "899d288e-198c-49d9-824b-bd8d5c0a3cb8"
 
 [[env.dev.vectorize]]
 binding = "VECTORIZE"
@@ -42,23 +42,23 @@ index_name = "uniscrm-embeddings-dev"
 binding = "AI"
 
 [env.production]
-name = "uniscrm-web"
+name = "web"
 routes = [{ pattern = "web.uni-scrm.com", custom_domain = true }]
 
 [env.production.vars]
 GOOGLE_CLIENT_ID = "1038882920781-qado86f0g0hcf7t3l74b8acgu1a8teg4.apps.googleusercontent.com"
 X_CLIENT_ID = "cXVhYUNyWVJWSlFtdFdjekt3V1U6MTpjaQ"
-APP_URL = "https://web.uni-scrm.com"
-LINK_SOCIAL_URL = "https://link-social.uni-scrm.com"
+WEB_URL = "https://web.uni-scrm.com"
+LINK_URL = "https://link.uni-scrm.com"
 ADMIN_URL = "https://admin.uni-scrm.com"
 
 [[env.production.kv_namespaces]]
 binding = "KV"
-id = "88bc8c114dfb4ec3a77589c64f991a2e"
+id = "9f65b37e6ac94f81948a0018f816f89f"
 
 [[env.production.d1_databases]]
-binding = "DB_WEB"
-database_name = "uniscrm-db"
+binding = "WEB_DB"
+database_name = "uniscrm-web"
 database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
 
 [[env.production.vectorize]]

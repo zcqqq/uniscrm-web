@@ -6,6 +6,8 @@ const OPERATOR_COMPAT: Record<string, Operator[]> = {
   INT: ["=", "!=", ">", "<", ">=", "<=", "IN", "BETWEEN"],
   TEXT: ["=", "!=", "IN"],
   ENUM: ["=", "!=", "IN"],
+  ENUM_TEXT: ["=", "!=", "IN"],
+  ENUM_INT: ["=", "!=", "IN"],
   DATETIME: ["=", "!=", ">", "<", ">=", "<=", "BETWEEN"],
 };
 

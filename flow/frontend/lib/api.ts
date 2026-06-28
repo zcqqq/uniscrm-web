@@ -62,6 +62,11 @@ export const api = {
       request<{ logs: { user_id: string; name: string | null; created_at: string }[] }>(
         `/api/flows/${flowId}/nodes/${nodeId}/logs`
       ),
+    generate: (prompt: string, currentGraph: { nodes: any[]; edges: any[] }) =>
+      request<{ nodes: any[]; edges: any[] }>("/api/flows/generate", {
+        method: "POST",
+        body: JSON.stringify({ prompt, currentGraph }),
+      }),
   },
   channels: {
     list: (channelType: string) =>

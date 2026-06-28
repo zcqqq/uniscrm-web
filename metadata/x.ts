@@ -3,6 +3,11 @@ import type { PropDefinition, EventMetadata, ContentMetadata } from "./dataTypes
 
 export const PROPS_X: PropDefinition[] = [
   {
+    propId: "source_user_id",
+    dataType: "TEXT",
+    label: { en: "source user id", zh: "源 user id" },
+  },
+  {
     propId: "name",
     dataType: "TEXT",
     label: { en: "Name", zh: "名称" },
@@ -95,6 +100,7 @@ export const EventMetadata_X: EventMetadata[] = [
     label: { en: "Follow", zh: "关注" },
     description: { en: "Triggered when the Account follows someone", zh: "当账号关注某人时触发" },
    userProps: [
+          { propId: "source_user_id", dataId: "{linkPrefix}.id" },
       { propId: "name", dataId: "{linkPrefix}.name" },
       { propId: "username", dataId: "{linkPrefix}.username" },
       { propId: "is_follow", value: 1 },
@@ -113,6 +119,7 @@ export const EventMetadata_X: EventMetadata[] = [
     label: { en: "Followed", zh: "被关注" },
     description: { en: "Triggered when someone follows the Account", zh: "当有人关注账号时触发" },
     userProps: [
+                { propId: "source_user_id", dataId: "{linkPrefix}.id" },
       { propId: "name", dataId: "{linkPrefix}.name" },
       { propId: "username", dataId: "{linkPrefix}.username" },
             { propId: "is_followed", value: 1 },
@@ -131,6 +138,7 @@ export const EventMetadata_X: EventMetadata[] = [
     label: { en: "Unfollow", zh: "取关" },
     description: { en: "Triggered when the Account unfollows someone", zh: "当账号取关某人时触发" },
     userProps: [
+                { propId: "source_user_id", dataId: "{linkPrefix}.id" },
       { propId: "name", dataId: "{linkPrefix}.name" },
       { propId: "username", dataId: "{linkPrefix}.username" },
             { propId: "is_follow", value: 0 },
@@ -149,6 +157,7 @@ export const EventMetadata_X: EventMetadata[] = [
     label: { en: "Unfollowed", zh: "被取关" },
     description: { en: "Triggered when someone unfollows the Account", zh: "当有人取关账号时触发" },
     userProps: [
+                { propId: "source_user_id", dataId: "{linkPrefix}.id" },
       { propId: "name", dataId: "{linkPrefix}.name" },
       { propId: "username", dataId: "{linkPrefix}.username" },
             { propId: "is_followed", value: 0 },
@@ -167,6 +176,7 @@ export const EventMetadata_X: EventMetadata[] = [
     label: { en: "Direct Message read", zh: "私信已读" },
     description: { en: "Triggered when someone read a Direct Message", zh: "当有人读私信时触发" },
     userProps: [
+                { propId: "source_user_id", dataId: "{linkPrefix}.id" },
       { propId: "name", dataId: "{linkPrefix}.name" },
       { propId: "username", dataId: "{linkPrefix}.username" },
       { propId: "verified_type", dataId: "{linkPrefix}.verified_type" },
@@ -188,6 +198,7 @@ export const EventMetadata_X: EventMetadata[] = [
     label: { en: "Direct Message received", zh: "收到私信" },
     description: { en: "Triggered when received a Direct Message from someone", zh: "当收到某人的私信时触发" },
     userProps: [
+                { propId: "source_user_id", dataId: "{linkPrefix}.id" },
       { propId: "name", dataId: "{linkPrefix}.name" },
       { propId: "username", dataId: "{linkPrefix}.username" },
       { propId: "verified_type", dataId: "{linkPrefix}.verified_type" },

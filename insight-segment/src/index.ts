@@ -31,7 +31,7 @@ async function segmentAuth(c: any, next: any) {
   c.set("tenantId", data.tenant.id);
   c.set("memberId", data.member.id);
 
-  const row = await (c.env.DB as D1Database).prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+  const row = await (c.env.WEB_DB as D1Database).prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
     .bind(Number(data.tenant.id))
     .first<{ d1_database_id: string | null }>();
   if (!row?.d1_database_id) return c.json({ error: "Tenant DB not provisioned" }, 503);
@@ -63,14 +63,14 @@ app.get("/api/segments", async (c) => {
   const limit = Math.min(50, Math.max(1, parseInt(c.req.query("limit") || "20", 10)));
   const offset = (page - 1) * limit;
 
-  const countRow = await c.env.DB.prepare(
+  const countRow = await c.env.WEB_DB.prepare(
     `SELECT COUNT(*) as total FROM segments WHERE tenant_id = ?`
   )
     .bind(tenantId)
     .first<{ total: number }>();
   const total = countRow?.total || 0;
 
-  const rows = await c.env.DB.prepare(
+  const rows = await c.env.WEB_DB.prepare(
     `SELECT id, name, nl_query, user_count, status, created_at, updated_at
      FROM segments WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`
   )
@@ -89,7 +89,13 @@ app.post("/api/segments", async (c) => {
   }
 
   const fields = getAllFields();
-  const parseResult = await parseNaturalLanguage(c.env.AI, body.nl_query, fields);
+  let parseResult;
+  try {
+    parseResult = await parseNaturalLanguage(c.env.AI, body.nl_query, fields);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return c.json({ error: `AI parse failed: ${msg}`, stage: "parse" }, 422);
+  }
   if (!parseResult.success) {
     return c.json({ error: parseResult.error, stage: "parse" }, 422);
   }
@@ -103,7 +109,7 @@ app.post("/api/segments", async (c) => {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  await c.env.DB.prepare(
+  await c.env.WEB_DB.prepare(
     `INSERT INTO segments (id, tenant_id, name, nl_query, conditions_json, sql_query, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)`
   )
@@ -133,7 +139,13 @@ app.post("/api/segments/preview", async (c) => {
   if (!body.nl_query) return c.json({ error: "nl_query is required" }, 400);
 
   const fields = getAllFields();
-  const parseResult = await parseNaturalLanguage(c.env.AI, body.nl_query, fields);
+  let parseResult;
+  try {
+    parseResult = await parseNaturalLanguage(c.env.AI, body.nl_query, fields);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return c.json({ error: `AI parse failed: ${msg}`, stage: "parse" }, 422);
+  }
   if (!parseResult.success) {
     return c.json({ error: parseResult.error, stage: "parse" }, 422);
   }
@@ -161,7 +173,7 @@ app.get("/api/segments/:id", async (c) => {
   const tenantId = c.get("tenantId");
   const segmentId = c.req.param("id");
 
-  const segment = await c.env.DB.prepare(
+  const segment = await c.env.WEB_DB.prepare(
     `SELECT * FROM segments WHERE id = ? AND tenant_id = ?`
   )
     .bind(segmentId, tenantId)
@@ -176,7 +188,7 @@ app.post("/api/segments/:id/compute", async (c) => {
   const tenantId = c.get("tenantId");
   const segmentId = c.req.param("id");
 
-  const segment = await c.env.DB.prepare(
+  const segment = await c.env.WEB_DB.prepare(
     `SELECT id, sql_query, conditions_json FROM segments WHERE id = ? AND tenant_id = ?`
   )
     .bind(segmentId, tenantId)
@@ -184,7 +196,7 @@ app.post("/api/segments/:id/compute", async (c) => {
 
   if (!segment) return c.json({ error: "Not found" }, 404);
 
-  await c.env.DB.prepare(`UPDATE segments SET status = 'computing', updated_at = datetime('now') WHERE id = ?`)
+  await c.env.WEB_DB.prepare(`UPDATE segments SET status = 'computing', updated_at = datetime('now') WHERE id = ?`)
     .bind(segmentId)
     .run();
 
@@ -210,7 +222,7 @@ app.post("/api/segments/:id/compute", async (c) => {
       await tenantDataDb.batch(stmts);
     }
 
-    await c.env.DB.prepare(
+    await c.env.WEB_DB.prepare(
       `UPDATE segments SET status = 'ready', user_count = ?, updated_at = datetime('now') WHERE id = ?`
     )
       .bind(profileIds.length, segmentId)
@@ -219,7 +231,7 @@ app.post("/api/segments/:id/compute", async (c) => {
     return c.json({ segment: { id: segmentId, status: "ready", user_count: profileIds.length } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    await c.env.DB.prepare(
+    await c.env.WEB_DB.prepare(
       `UPDATE segments SET status = 'error', updated_at = datetime('now') WHERE id = ?`
     )
       .bind(segmentId)
@@ -237,7 +249,7 @@ app.get("/api/segments/:id/users", async (c) => {
   const offset = (page - 1) * limit;
 
   // Verify segment belongs to tenant (main DB)
-  const segment = await c.env.DB.prepare(
+  const segment = await c.env.WEB_DB.prepare(
     `SELECT id FROM segments WHERE id = ? AND tenant_id = ?`
   )
     .bind(segmentId, tenantId)
@@ -273,7 +285,7 @@ app.delete("/api/segments/:id", async (c) => {
   const tenantId = c.get("tenantId");
   const segmentId = c.req.param("id");
 
-  const result = await c.env.DB.prepare(
+  const result = await c.env.WEB_DB.prepare(
     `DELETE FROM segments WHERE id = ? AND tenant_id = ?`
   )
     .bind(segmentId, tenantId)

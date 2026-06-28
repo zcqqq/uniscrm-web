@@ -5,19 +5,20 @@ import type { Env } from "../types";
 import { OAuthService } from "../services/oauth";
 import { SessionService } from "../auth/session";
 import { EmailService } from "../services/email";
+import { X_CHANNEL_SCOPES } from "../../../link/src/oauth";
 
 export function createOAuthRouter() {
   const router = new Hono<{ Bindings: Env }>();
 
   router.get("/google", async (c) => {
-    const google = new Google(c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, `${c.env.APP_URL}/api/auth/google/callback`);
+    const google = new Google(c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, `${c.env.WEB_URL}/api/auth/google/callback`);
     const state = generateState();
     const codeVerifier = generateCodeVerifier();
     const url = google.createAuthorizationURL(state, codeVerifier, ["openid", "email"]);
 
-    const oauthService = new OAuthService(c.env.DB_WEB, c.env.KV);
+    const oauthService = new OAuthService(c.env.WEB_DB, c.env.KV);
     const sessionId = getCookie(c, "session");
-    const sessions = new SessionService(c.env.DB_WEB);
+    const sessions = new SessionService(c.env.WEB_DB);
     const session = sessionId ? await sessions.get(sessionId) : null;
     const mode = c.req.query("link") === "true" && session ? "link" as const : "login" as const;
     const trial = c.req.query("trial");
@@ -39,18 +40,18 @@ export function createOAuthRouter() {
     const state = c.req.query("state");
     if (!code || !state) return c.json({ error: "Missing code or state" }, 400);
 
-    const oauthService = new OAuthService(c.env.DB_WEB, c.env.KV);
+    const oauthService = new OAuthService(c.env.WEB_DB, c.env.KV);
     const stored = await oauthService.getState(state);
     if (!stored) return c.json({ error: "Invalid or expired state" }, 400);
 
-    const google = new Google(c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, `${c.env.APP_URL}/api/auth/google/callback`);
+    const google = new Google(c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, `${c.env.WEB_URL}/api/auth/google/callback`);
     const tokens = await google.validateAuthorizationCode(code, stored.codeVerifier);
     const claims = decodeIdToken(tokens.idToken()) as { sub: string; email: string };
     const email = claims.email;
     const sub = claims.sub;
 
     if (stored.mode === "link" && stored.userId) {
-      const member = await c.env.DB_WEB.prepare("SELECT tenant_id FROM members WHERE id = ?")
+      const member = await c.env.WEB_DB.prepare("SELECT tenant_id FROM members WHERE id = ?")
         .bind(stored.userId)
         .first<{ tenant_id: string }>();
       await oauthService.linkAccount(stored.userId, member!.tenant_id, "google", sub);
@@ -70,11 +71,11 @@ export function createOAuthRouter() {
         fetch(`${c.env.ADMIN_URL}/internal/subscriptions/activate-trial`, {
           method: "POST",
           headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
-          body: JSON.stringify({ tenant_id: tenantId, tier: "pro", days: 30 }),
+          body: JSON.stringify({ tenant_id: tenantId, tier: "basic", days: 30 }),
         }).catch((e) => console.error("Trial activation failed:", e))
       );
     }
-    const sessions = new SessionService(c.env.DB_WEB);
+    const sessions = new SessionService(c.env.WEB_DB);
     const newSessionId = await sessions.create(memberId, tenantId, email);
 
     setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/" });
@@ -83,14 +84,14 @@ export function createOAuthRouter() {
   });
 
   router.get("/x", async (c) => {
-    const twitter = new Twitter(c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET, `${c.env.APP_URL}/api/auth/x/callback`);
+    const twitter = new Twitter(c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET, `${c.env.WEB_URL}/api/auth/x/callback`);
     const state = generateState();
     const codeVerifier = generateCodeVerifier();
-    const url = twitter.createAuthorizationURL(state, codeVerifier, ["tweet.read", "users.read"]);
+    const url = twitter.createAuthorizationURL(state, codeVerifier, X_CHANNEL_SCOPES);
 
-    const oauthService = new OAuthService(c.env.DB_WEB, c.env.KV);
+    const oauthService = new OAuthService(c.env.WEB_DB, c.env.KV);
     const sessionId = getCookie(c, "session");
-    const sessions = new SessionService(c.env.DB_WEB);
+    const sessions = new SessionService(c.env.WEB_DB);
     const session = sessionId ? await sessions.get(sessionId) : null;
     const mode = c.req.query("link") === "true" && session ? "link" as const : "login" as const;
     const trial = c.req.query("trial");
@@ -112,11 +113,11 @@ export function createOAuthRouter() {
     const state = c.req.query("state");
     if (!code || !state) return c.json({ error: "Missing code or state" }, 400);
 
-    const oauthService = new OAuthService(c.env.DB_WEB, c.env.KV);
+    const oauthService = new OAuthService(c.env.WEB_DB, c.env.KV);
     const stored = await oauthService.getState(state);
     if (!stored) return c.json({ error: "Invalid or expired state" }, 400);
 
-    const twitter = new Twitter(c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET, `${c.env.APP_URL}/api/auth/x/callback`);
+    const twitter = new Twitter(c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET, `${c.env.WEB_URL}/api/auth/x/callback`);
     const tokens = await twitter.validateAuthorizationCode(code, stored.codeVerifier);
 
     const userRes = await fetch("https://api.x.com/2/users/me?user.fields=id,name,username", {
@@ -125,11 +126,27 @@ export function createOAuthRouter() {
     const userData = await userRes.json() as { data: { id: string; name: string; username: string } };
     const xUserId = userData.data.id;
 
+    let expiresAt: string;
+    try {
+      expiresAt = new Date(Date.now() + tokens.accessTokenExpiresInSeconds() * 1000).toISOString();
+    } catch {
+      expiresAt = new Date(Date.now() + 7200 * 1000).toISOString();
+    }
+
     if (stored.mode === "link" && stored.userId) {
-      const member = await c.env.DB_WEB.prepare("SELECT tenant_id FROM members WHERE id = ?")
+      const member = await c.env.WEB_DB.prepare("SELECT tenant_id FROM members WHERE id = ?")
         .bind(stored.userId)
-        .first<{ tenant_id: string }>();
-      await oauthService.linkAccount(stored.userId, member!.tenant_id, "x", xUserId);
+        .first<{ tenant_id: number }>();
+      await oauthService.linkAccount(stored.userId, String(member!.tenant_id), "x", xUserId);
+
+      c.executionCtx.waitUntil(
+        fetch(`${c.env.LINK_URL}/internal/channels/create-x`, {
+          method: "POST",
+          headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
+          body: JSON.stringify({ tenant_id: member!.tenant_id, member_id: stored.userId, access_token: tokens.accessToken(), refresh_token: tokens.hasRefreshToken() ? tokens.refreshToken() : null, expires_at: expiresAt }),
+        }).catch((e) => console.error("X channel creation failed:", e))
+      );
+
       return c.redirect("/settings");
     }
 
@@ -153,27 +170,42 @@ export function createOAuthRouter() {
           fetch(`${c.env.ADMIN_URL}/internal/subscriptions/activate-trial`, {
             method: "POST",
             headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
-            body: JSON.stringify({ tenant_id: tenantId, tier: "pro", days: 30 }),
+            body: JSON.stringify({ tenant_id: tenantId, tier: "basic", days: 30 }),
           }).catch((e) => console.error("Trial activation failed:", e))
         );
       }
-      const sessions = new SessionService(c.env.DB_WEB);
+
+      c.executionCtx.waitUntil(
+        fetch(`${c.env.LINK_URL}/internal/channels/create-x`, {
+          method: "POST",
+          headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
+          body: JSON.stringify({ tenant_id: tenantId, member_id: memberId, access_token: tokens.accessToken(), refresh_token: tokens.hasRefreshToken() ? tokens.refreshToken() : null, expires_at: expiresAt }),
+        }).then((r) => r.json()).then((d) => console.log("X channel created:", JSON.stringify(d)))
+         .catch((e) => console.error("X channel creation failed:", e))
+      );
+
+      const sessions = new SessionService(c.env.WEB_DB);
       const newSessionId = await sessions.create(memberId, tenantId, email);
 
-      setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/" });
       setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/" });
       setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/", domain: "uni-scrm.com" });
       return c.html(`<!DOCTYPE html><html><head><script>document.cookie="session=;path=/;max-age=0;secure";document.cookie="session=;path=/;domain=uni-scrm.com;max-age=0;secure";document.cookie="session=${newSessionId};path=/;max-age=${7*24*60*60};secure;samesite=lax;domain=uni-scrm.com";window.location.replace("/")</script></head><body></body></html>`);
     }
 
-    // No email — store pending and redirect to complete-profile
+    // No email — store pending with tokens and redirect to complete-profile
     const pendingId = crypto.randomUUID();
-    await oauthService.storePendingOAuth(pendingId, { provider: "x", providerUserId: xUserId });
+    await oauthService.storePendingOAuth(pendingId, {
+      provider: "x",
+      providerUserId: xUserId,
+      access_token: tokens.accessToken(),
+      refresh_token: tokens.hasRefreshToken() ? tokens.refreshToken() : null,
+      expires_at: expiresAt,
+    });
     setCookie(c, "pending_oauth", pendingId, {
       httpOnly: true,
       secure: true,
       sameSite: "Lax",
-      maxAge: 300,
+      maxAge: 600,
       path: "/",
     });
     return c.redirect("/auth/complete-profile");
@@ -183,7 +215,7 @@ export function createOAuthRouter() {
     const pendingId = getCookie(c, "pending_oauth");
     if (!pendingId) return c.json({ error: "No pending OAuth session" }, 400);
 
-    const oauthService = new OAuthService(c.env.DB_WEB, c.env.KV);
+    const oauthService = new OAuthService(c.env.WEB_DB, c.env.KV);
     const pending = await oauthService.getPendingOAuth(pendingId);
     if (!pending) return c.json({ error: "Pending session expired" }, 400);
 
@@ -195,109 +227,18 @@ export function createOAuthRouter() {
       expirationTtl: 600,
     });
 
-    const emailService = new EmailService(c.env.RESEND_API_KEY, c.env.APP_URL);
+    const emailService = new EmailService(c.env.RESEND_API_KEY, c.env.WEB_URL);
     await emailService.sendVerificationCode(email, code);
 
     return c.json({ ok: true });
   });
 
-  router.get("/x/channel", async (c) => {
-    const sessionId = getCookie(c, "session");
-    const sessions = new SessionService(c.env.DB_WEB);
-    const session = sessionId ? await sessions.get(sessionId) : null;
-    if (!session) return c.json({ error: "Not authenticated" }, 401);
-
-    const twitter = new Twitter(c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET, `${c.env.APP_URL}/api/auth/x/channel/callback`);
-    const state = generateState();
-    const codeVerifier = generateCodeVerifier();
-    const arcticUrl = twitter.createAuthorizationURL(state, codeVerifier, [
-      "tweet.read", "users.read", "follows.read", "tweet.write", "offline.access",
-    ]);
-    const url = new URL(arcticUrl.toString().replace("https://twitter.com/", "https://x.com/"));
-
-    const oauthService = new OAuthService(c.env.DB_WEB, c.env.KV);
-    await oauthService.storeState(state, {
-      codeVerifier,
-      mode: "channel" as const,
-      userId: session.member_id,
-    });
-
-    return c.redirect(url.toString());
-  });
-
-  router.get("/x/channel/callback", async (c) => {
-    const code = c.req.query("code");
-    const state = c.req.query("state");
-    if (!code || !state) return c.json({ error: "Missing code or state" }, 400);
-
-    const oauthService = new OAuthService(c.env.DB_WEB, c.env.KV);
-    const stored = await oauthService.getState(state);
-    if (!stored || stored.mode !== "channel" || !stored.userId) {
-      return c.json({ error: "Invalid state" }, 400);
-    }
-
-    const twitter = new Twitter(c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET, `${c.env.APP_URL}/api/auth/x/channel/callback`);
-    const tokens = await twitter.validateAuthorizationCode(code, stored.codeVerifier);
-
-    const userRes = await fetch("https://api.x.com/2/users/me?user.fields=id,name,username,profile_image_url", {
-      headers: { Authorization: `Bearer ${tokens.accessToken()}` },
-    });
-    const userData = await userRes.json() as { data: { id: string; name: string; username: string; profile_image_url?: string } };
-    const xUser = userData.data;
-
-    const channelId = crypto.randomUUID();
-    let expiresAt: string | null = null;
-    try {
-      const expiresIn = tokens.accessTokenExpiresInSeconds();
-      expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
-    } catch {
-      expiresAt = new Date(Date.now() + 7200 * 1000).toISOString();
-    }
-    const config = JSON.stringify({
-      x_user_id: xUser.id,
-      x_username: xUser.username,
-      x_name: xUser.name,
-      access_token: tokens.accessToken(),
-      refresh_token: tokens.hasRefreshToken() ? tokens.refreshToken() : null,
-      expires_at: expiresAt,
-    });
-
-    await c.env.DB_WEB
-      .prepare(
-        `INSERT INTO channels (id, channel_type, config, source_channel_id, member_id, tenant_id, created_at, updated_at)
-         VALUES (?, 'X', ?, ?, ?, (SELECT tenant_id FROM members WHERE id = ?), datetime('now'), datetime('now'))
-         ON CONFLICT(channel_type, source_channel_id) DO UPDATE SET
-           config = excluded.config, member_id = excluded.member_id, updated_at = datetime('now')`
-      )
-      .bind(channelId, config, xUser.id, stored.userId, stored.userId)
-      .run();
-
-    const row = await c.env.DB_WEB
-      .prepare(`SELECT id FROM channels WHERE channel_type IN ('X', 'TWITTER') AND source_channel_id = ?`)
-      .bind(xUser.id)
-      .first<{ id: string }>();
-    const actualChannelId = row?.id || channelId;
-
-    c.executionCtx.waitUntil(
-      fetch(`${c.env.LINK_SOCIAL_URL}/x/sync-followers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Internal-Secret": c.env.INTERNAL_SECRET },
-        body: JSON.stringify({
-          channel_id: actualChannelId,
-          x_user_id: xUser.id,
-          access_token: tokens.accessToken(),
-        }),
-      }).catch(() => {})
-    );
-
-    return c.redirect("/settings");
-  });
 
   router.post("/verify-code", async (c) => {
     const pendingId = getCookie(c, "pending_oauth");
     if (!pendingId) return c.json({ error: "No pending OAuth session" }, 400);
 
-    const oauthService = new OAuthService(c.env.DB_WEB, c.env.KV);
+    const oauthService = new OAuthService(c.env.WEB_DB, c.env.KV);
     const pending = await oauthService.getPendingOAuth(pendingId);
     if (!pending) return c.json({ error: "Pending session expired" }, 400);
 
@@ -331,14 +272,28 @@ export function createOAuthRouter() {
       );
     }
 
-    const sessions = new SessionService(c.env.DB_WEB);
+    if (pending.provider === "x" && pending.access_token) {
+      c.executionCtx.waitUntil(
+        fetch(`${c.env.LINK_URL}/internal/channels/create-x`, {
+          method: "POST",
+          headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
+          body: JSON.stringify({ tenant_id: tenantId, member_id: memberId, access_token: pending.access_token, refresh_token: pending.refresh_token, expires_at: pending.expires_at }),
+        }).then((r) => r.json()).then((d) => console.log("X channel created:", JSON.stringify(d)))
+         .catch((e) => console.error("X channel creation failed:", e))
+      );
+    }
+
+    const sessions = new SessionService(c.env.WEB_DB);
     const newSessionId = await sessions.create(memberId, tenantId, email);
+    setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/" });
+    setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/", domain: "uni-scrm.com" });
     setCookie(c, "session", newSessionId, {
       httpOnly: true,
       secure: true,
       sameSite: "Lax",
       maxAge: 7 * 24 * 60 * 60,
       path: "/",
+      domain: "uni-scrm.com",
     });
 
     return c.json({

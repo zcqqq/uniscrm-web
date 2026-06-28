@@ -1,4 +1,4 @@
-import { METADATA_X, PROPS_X, t } from "../../../metadata";
+import { EventMetadata_X, PROPS_X, t } from "../../../metadata";
 import type { Locale } from "../../../metadata";
 
 export interface TriggerFieldDefinition {
@@ -57,7 +57,7 @@ export function getChannelTypes(locale: Locale = "en"): ChannelTypeDefinition[] 
     group: "event",
   };
 
-  const xEvents = METADATA_X
+  const xEvents = EventMetadata_X
     .filter((m) => m.flowType === "trigger")
     .map((m) => ({
       eventType: m.eventType,

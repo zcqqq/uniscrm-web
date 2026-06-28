@@ -128,10 +128,10 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
         name: userData.name as string | undefined,
         username: userData.username as string | undefined,
         profile_image_url: userData.profile_image_url as string | undefined,
-      }, "X");
+      }, channelId, "X");
       const isFollow = eventType === "follow.follow";
       const resolvedEventType = isFollow ? "follow.follow" : "follow.unfollow";
-      await usersService.setFollowState(userData.id as string, "is_follow", isFollow ? 1 : 0);
+      await usersService.setFollowState(userData.id as string, channelId, "is_follow", isFollow ? 1 : 0);
       await usersService.insertEvents([{
         userId: userData.id as string,
         channelId,
@@ -156,10 +156,10 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
         name: userData.name as string | undefined,
         username: userData.username as string | undefined,
         profile_image_url: userData.profile_image_url as string | undefined,
-      }, "X");
+      }, channelId, "X");
       const isFollow = eventType === "follow.follow";
       const resolvedEventType = isFollow ? "follow.followed" : "follow.unfollowed";
-      await usersService.setFollowState(userData.id as string, "is_followed", isFollow ? 1 : 0);
+      await usersService.setFollowState(userData.id as string, channelId, "is_followed", isFollow ? 1 : 0);
       await usersService.insertEvents([{
         userId: userData.id as string,
         channelId,
@@ -195,7 +195,7 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
           name: userData.name as string | undefined,
           username: userData.username as string | undefined,
           profile_image_url: userData.profile_image_url as string | undefined,
-        });
+        }, channelId, "X");
 
         const flatPayload = flattenUserPayload(userData);
         if (eventType === "dm.received") {
@@ -227,7 +227,7 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
         username: payload.sender_username as string | undefined || payload.username as string | undefined,
         name: payload.sender_name as string | undefined || payload.name as string | undefined,
         profile_image_url: payload.sender_profile_image_url as string | undefined || payload.profile_image_url as string | undefined,
-      }, "X");
+      }, channelId, "X");
     }
   }
 

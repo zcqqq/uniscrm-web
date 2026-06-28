@@ -133,6 +133,8 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
 
   markClean: () => set({ isDirty: false }),
 
+  replaceGraph: (nodes: any[], edges: any[]) => set({ nodes, edges, isDirty: true }),
+
   toGraphJson: () => {
     const { nodes, edges } = get();
     return JSON.stringify({ nodes, edges });

@@ -1,4 +1,4 @@
-import { PROPS_X, METADATA_X, t } from "../../metadata";
+import { PROPS_X, EventMetadata_X, t } from "../../metadata";
 import type { PropDefinition, Locale } from "../../metadata";
 
 export type Operator = "=" | "!=" | ">" | "<" | ">=" | "<=" | "IN" | "BETWEEN";
@@ -52,7 +52,7 @@ export function getAllFields(locale: Locale = "en"): InsightField[] {
     source: "event",
     sqlExpr: "event.event_type",
     description: locale === "zh" ? "事件类型" : "Event Type",
-    enums: METADATA_X.map((m) => ({ value: m.eventType, label: t(m.label, locale) })),
+    enums: EventMetadata_X.map((m) => ({ value: m.eventType, label: t(m.label, locale) })),
   };
 
   const eventTimeField: InsightField = {

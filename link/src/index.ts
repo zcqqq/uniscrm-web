@@ -20,8 +20,8 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 // Public: X webhook
 app.route("/x", webhookRoutes());
 
-// Public: OAuth connect/callback flows (e.g. /oauth/x/connect, /oauth/tiktok/callback)
-app.route("/oauth", oauthRoutes());
+// Public: OAuth connect/callback flows (e.g. /api/auth/x/connect, /api/auth/x/callback)
+app.route("/api/auth", oauthRoutes());
 
 // Internal: secret-authenticated endpoints
 app.use("/internal/*", internalAuthMiddleware);

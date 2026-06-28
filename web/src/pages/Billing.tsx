@@ -23,7 +23,8 @@ export function Billing() {
     return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading...</div>;
   }
 
-  const currentTier = subscription?.tier;
+  const rawTier = subscription?.tier;
+  const currentTier = rawTier === "basic" || rawTier === "pro" ? rawTier : undefined;
   const status = (subscription?.status ?? "expired") as SubStatus;
   const locked = !isActive(status);
 
@@ -80,13 +81,13 @@ export function Billing() {
         </div>
       )}
 
-      <Card className="mb-8">
+      {currentTier && <Card className="mb-8">
         <CardContent className="pt-6">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-foreground">
-                  {plans.find((p) => p.tier === currentTier)?.name ?? "Pro"}{status === "trialing" ? " Trial" : ""}
+                  {plans.find((p) => p.tier === currentTier)?.name ?? currentTier}{status === "trialing" ? " Trial" : ""}
                 </span>
                 <Badge variant={status === "active" ? "default" : "secondary"} className="text-xs">
                   {status === "trialing" ? "Trial" : status === "active" ? "Active" : "Past Due"}
@@ -106,7 +107,7 @@ export function Billing() {
             )}
           </div>
         </CardContent>
-      </Card>
+      </Card>}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl">
         {plans.map((plan) => {
@@ -163,7 +164,7 @@ export function Billing() {
                   </>
                 ) : (
                   <Button className="w-full" onClick={() => subscribe(plan.tier)}>
-                    {currentTier === "pro" ? "Upgrade" : "Subscribe"}
+                    {currentTier === "basic" ? "Upgrade" : "Subscribe"}
                   </Button>
                 )}
               </CardFooter>

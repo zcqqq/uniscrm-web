@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [web, link, flow, admin, insight-segment, trend-skill]
+        module: [web, link, flow, admin, analytics, insight-segment, profile, trend-skill]
     steps:
       - uses: actions/checkout@v4
 
@@ -18,7 +18,10 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install dependencies
+      - name: Install shared dependencies
+        run: npm ci
+
+      - name: Install module dependencies
         run: |
           if [ -f "${{ matrix.module }}/package-lock.json" ]; then
             cd ${{ matrix.module }} && npm ci
@@ -31,7 +34,7 @@ jobs:
           fi
 
       - name: Deploy
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}

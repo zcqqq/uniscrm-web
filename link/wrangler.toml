@@ -81,7 +81,7 @@ X_CLIENT_ID = "cXVhYUNyWVJWSlFtdFdjekt3V1U6MTpjaQ"
 [[env.production.d1_databases]]
 binding = "LINK_DB"
 database_name = "uniscrm-link"
-database_id = "TODO_CREATE_PROD_DB"
+database_id = "279a86a5-985c-4a22-8d50-ebc64c8ed63b"
 migrations_dir = "migrations"
 
 [[env.production.d1_databases]]
@@ -110,11 +110,11 @@ queue = "uniscrm-event"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_EVENT"
-stream = "TODO_PROD_EVENT_STREAM_ID"
+stream = "a0ee570cbd4842b0b11e30af75abb779"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_USER"
-stream = "TODO_PROD_USER_STREAM_ID"
+stream = "c62a940e5b6b45b4aa865ea808caa3b0"
 
 [env.production.triggers]
 crons = ["0 * * * *"]

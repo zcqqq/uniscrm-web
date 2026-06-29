@@ -76,7 +76,7 @@ database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
 [[env.production.d1_databases]]
 binding = "ANALYTICS_DB"
 database_name = "uniscrm-analytics"
-database_id = "TODO_PROD_ANALYTICS_DB_ID"
+database_id = "ad147746-93eb-4e06-ad76-5104fe5797bf"
 migrations_dir = "migrations-analytics"
 
 [[env.production.queues.producers]]

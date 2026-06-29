@@ -82,13 +82,13 @@ database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
 [[env.production.d1_databases]]
 binding = "FLOW_DB"
 database_name = "uniscrm-flow"
-database_id = "TODO-create-prod-db"
+database_id = "a6525634-a740-42ce-964f-0da6324afdb1"
 migrations_dir = "migrations"
 
 [[env.production.d1_databases]]
 binding = "ADMIN_DB"
 database_name = "uniscrm-admin"
-database_id = "TODO-create-prod-admin-db"
+database_id = "ecf7a3be-2457-4e40-a537-bab4cc0ec281"
 
 [[env.production.queues.consumers]]
 queue = "uniscrm-event"
@@ -106,7 +106,7 @@ queue = "uniscrm-flow-log"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_FLOW_LOG"
-stream = "TODO_PROD_FLOW_NODE_LOG_STREAM_ID"
+stream = "64ad6d8c53ed4d179de5036524f755d5"
 
 [env.production.ai]
 binding = "AI"

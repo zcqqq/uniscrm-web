@@ -17,8 +17,6 @@ crons = ["0 */6 * * *"]
 [env.dev.vars]
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 ENVIRONMENT = "dev"
-STRIPE_PRICE_BASIC = "price_1TiW9PLhYonpsSAWQbGlYm9D"
-STRIPE_PRICE_PRO = "price_1TiW9sLhYonpsSAWeyyfaQUU"
 INTERNAL_SECRET = "dev-internal-secret"
 
 [[env.dev.d1_databases]]

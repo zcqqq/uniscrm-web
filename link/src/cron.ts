@@ -86,7 +86,7 @@ async function handleTokenRefresh(env: Env): Promise<void> {
 
       if (!config.subscription_ids?.length) {
         try {
-          const webhookUrl = `https://link-dev.uni-scrm.com/x/webhook`;
+          const webhookUrl = `${env.LINK_URL}/x/webhook`;
           const bearerService = new XActivityService(env.X_BEARER_TOKEN);
           let webhook = await bearerService.getWebhook();
           if (!webhook || webhook.url !== webhookUrl) {

@@ -17,17 +17,17 @@ const NODE_ICON: Record<string, string> = {
 
 function getNodeIcons(nodes: { type: string; data: Record<string, unknown> }[]) {
   const icons: string[] = [];
-  const trigger = nodes.find(n => n.type === "xTrigger");
-  if (trigger) icons.push(NODE_ICON.xTrigger);
-  const condition = nodes.find(n => n.type === "waitForEvent");
-  if (condition) icons.push(NODE_ICON.waitForEvent);
-  const action = nodes.find(n => n.type === "action");
-  if (action) {
-    const at = action.data.actionType as string;
-    icons.push(NODE_ICON[at] || "⚡");
+  for (const n of nodes) {
+    if (icons.length >= 3) break;
+    if (n.type === "xTrigger") icons.push(NODE_ICON.xTrigger);
+    else if (n.type === "waitForEvent") icons.push(NODE_ICON.waitForEvent);
+    else if (n.type === "wait") icons.push(NODE_ICON.wait);
+    else if (n.type === "action") {
+      const at = n.data.actionType as string;
+      icons.push(NODE_ICON[at] || "⚡");
+    }
   }
-  const uniqueTypes = new Set(nodes.map(n => n.type));
-  const extra = uniqueTypes.size - icons.length;
+  const extra = nodes.length - icons.length;
   return { icons, extra: extra > 0 ? extra : 0 };
 }
 
@@ -88,22 +88,25 @@ export default function FlowsPage() {
             {FLOW_TEMPLATES.map((tpl) => {
               const { icons, extra } = getNodeIcons(tpl.graph.nodes);
               return (
-                <button
+                <div
                   key={tpl.id}
                   onClick={() => handleCreate(tpl)}
-                  className="border-2 border-primary/40 hover:border-primary rounded-lg p-4 transition-all text-left bg-card hover:shadow-sm"
+                  className="border-2 border-primary/40 hover:border-primary rounded-lg p-4 transition-all text-left bg-card hover:shadow-sm cursor-pointer flex flex-col"
                 >
                   <span className="text-sm font-medium text-foreground block mb-1">{tpl.name}</span>
-                  <p className="text-xs text-muted-foreground line-clamp-2 mb-3">{tpl.description}</p>
-                  <div className="flex items-center gap-1.5">
-                    {icons.map((icon, i) => (
-                      <span key={i} className="w-6 h-6 flex items-center justify-center rounded bg-muted text-xs">{icon}</span>
-                    ))}
-                    {extra > 0 && (
-                      <span className="w-6 h-6 flex items-center justify-center rounded bg-muted text-[10px] text-muted-foreground">+{extra}</span>
-                    )}
+                  <p className="text-xs text-muted-foreground line-clamp-2 mb-3 flex-1">{tpl.description}</p>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      {icons.map((icon, i) => (
+                        <span key={i} className="w-6 h-6 flex items-center justify-center rounded bg-muted text-xs">{icon}</span>
+                      ))}
+                      {extra > 0 && (
+                        <span className="w-6 h-6 flex items-center justify-center rounded bg-muted text-[10px] text-muted-foreground">+{extra}</span>
+                      )}
+                    </div>
+                    <Button size="sm" onClick={(e) => { e.stopPropagation(); handleCreate(tpl); }}>Use</Button>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>

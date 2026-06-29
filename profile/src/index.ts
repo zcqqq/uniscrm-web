@@ -17,7 +17,7 @@ export class MaigretContainer extends Container {
 
 const authMiddleware = async (c: any, next: any) => {
   const cookie = c.req.raw.headers.get("Cookie") || "";
-  const webUrl = c.env.WEB_URL || "https://web-dev.uni-scrm.com";
+  const webUrl = c.env.WEB_URL;
   const res = await fetch(`${webUrl}/api/auth/me`, {
     headers: { Cookie: cookie },
   });
@@ -100,7 +100,7 @@ app.post("/internal/maigret-retry", async (c) => {
 // --- Auth proxy ---
 
 app.get("/api/auth/me", async (c) => {
-  const webUrl = c.env.WEB_URL || "https://web-dev.uni-scrm.com";
+  const webUrl = c.env.WEB_URL;
   const res = await fetch(`${webUrl}/api/auth/me`, {
     headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
   });
@@ -367,7 +367,7 @@ export default {
     if (accept.includes("text/html") && !isApiPath) {
       const sessionCookie = getCookieValue(request, "session");
       if (!sessionCookie) {
-        const webUrl = env.WEB_URL || "https://web-dev.uni-scrm.com";
+        const webUrl = env.WEB_URL;
         return Response.redirect(`${webUrl}/login`, 302);
       }
     }

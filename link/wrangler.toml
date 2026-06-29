@@ -21,6 +21,7 @@ name = "link-dev"
 routes = [{ pattern = "link-dev.uni-scrm.com", custom_domain = true }]
 
 [env.dev.vars]
+LINK_URL = "https://link-dev.uni-scrm.com"
 TREND_RETENTION_DAYS = "30"
 WEB_URL = "https://web-dev.uni-scrm.com"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
@@ -74,6 +75,7 @@ name = "link"
 routes = [{ pattern = "link.uni-scrm.com", custom_domain = true }]
 
 [env.production.vars]
+LINK_URL = "https://link.uni-scrm.com"
 TREND_RETENTION_DAYS = "30"
 WEB_URL = "https://web.uni-scrm.com"
 X_CLIENT_ID = "cXVhYUNyWVJWSlFtdFdjekt3V1U6MTpjaQ"

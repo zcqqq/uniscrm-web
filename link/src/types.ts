@@ -16,6 +16,7 @@ export interface Env {
 
   // Config
   TREND_RETENTION_DAYS: string;
+  LINK_URL: string;
   WEB_URL: string;
   CF_ACCOUNT_ID: string;
   CF_D1_API_TOKEN: string;

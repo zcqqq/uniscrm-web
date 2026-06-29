@@ -14,9 +14,10 @@ import { Billing } from "./pages/Billing";
 
 const urls = {
   web: "",
-  link: import.meta.env.VITE_LINK_URL || "https://link-dev.uni-scrm.com",
-  insightSegment: import.meta.env.VITE_INSIGHT_SEGMENT_URL || "https://insight-segment-dev.uni-scrm.com",
-  flow: import.meta.env.VITE_FLOW_URL || "https://flow-dev.uni-scrm.com",
+  link: import.meta.env.VITE_LINK_URL,
+  insightSegment: import.meta.env.VITE_SEGMENT_URL,
+  flow: import.meta.env.VITE_FLOW_URL,
+  analytics: import.meta.env.VITE_ANALYTICS_URL,
 };
 
 function AppLayout({ children }: { children: React.ReactNode }) {

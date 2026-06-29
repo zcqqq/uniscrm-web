@@ -42,7 +42,7 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
 
   for (const action of actions) {
     if (action.type === "addToList" && action.listId) {
-      const linkUrl = env.LINK_URL || "https://link-dev.uni-scrm.com";
+      const linkUrl = env.LINK_URL;
       await fetch(`${linkUrl}/internal/lists/${action.listId}/users`, {
         method: "POST",
         headers: {
@@ -105,7 +105,7 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
         continue;
       }
 
-      const linkUrl = env.LINK_URL || "https://link-dev.uni-scrm.com";
+      const linkUrl = env.LINK_URL;
       const xEvent = action.xEvent as string;
       const xAction = xEvent === "follow-user" ? "follow"
         : xEvent === "unfollow-user" ? "unfollow"
@@ -163,7 +163,7 @@ function getCookieValue(request: Request, name: string): string | null {
 // Auth middleware
 const authMiddleware = async (c: any, next: any) => {
   const cookie = c.req.raw.headers.get("Cookie") || "";
-  const webUrl = c.env.WEB_URL || "https://web-dev.uni-scrm.com";
+  const webUrl = c.env.WEB_URL;
   const res = await fetch(`${webUrl}/api/auth/me`, {
     headers: { Cookie: cookie },
   });
@@ -183,7 +183,7 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 
 // Auth proxy
 app.get("/api/auth/me", async (c) => {
-  const webUrl = c.env.WEB_URL || "https://web-dev.uni-scrm.com";
+  const webUrl = c.env.WEB_URL;
   const res = await fetch(`${webUrl}/api/auth/me`, {
     headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
   });
@@ -197,7 +197,7 @@ app.get("/api/auth/me", async (c) => {
 // Proxy lists from profile worker
 app.use("/api/lists", authMiddleware);
 app.get("/api/lists", async (c) => {
-  const linkUrl = c.env.LINK_URL || "https://link-dev.uni-scrm.com";
+  const linkUrl = c.env.LINK_URL;
   const res = await fetch(`${linkUrl}/api/lists`, {
     headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
   });
@@ -210,7 +210,7 @@ app.get("/api/lists", async (c) => {
 
 // Proxy channels from link worker
 app.get("/api/channels", async (c) => {
-  const linkUrl = c.env.LINK_URL || "https://link-dev.uni-scrm.com";
+  const linkUrl = c.env.LINK_URL;
   const type = c.req.query("type") || "";
   const res = await fetch(`${linkUrl}/api/channels?type=${type}`, {
     headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
@@ -565,7 +565,7 @@ export default {
     if (accept.includes("text/html") && !url.pathname.startsWith("/api")) {
       const sessionCookie = getCookieValue(request, "session");
       if (!sessionCookie) {
-        const webUrl = env.WEB_URL || "https://web-dev.uni-scrm.com";
+        const webUrl = env.WEB_URL;
         return Response.redirect(`${webUrl}/login`, 302);
       }
     }

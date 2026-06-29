@@ -21,7 +21,7 @@ function getCookieValue(request: Request, name: string): string | null {
 // Auth middleware for /api/segments routes
 async function segmentAuth(c: any, next: any) {
   const cookie = c.req.raw.headers.get("Cookie") || "";
-  const webUrl = c.env.WEB_URL || "https://web-dev.uni-scrm.com";
+  const webUrl = c.env.WEB_URL;
   const res = await fetch(`${webUrl}/api/auth/me`, {
     headers: { Cookie: cookie },
   });
@@ -45,7 +45,7 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 
 // Auth proxy
 app.get("/api/auth/me", async (c) => {
-  const webUrl = c.env.WEB_URL || "https://web-dev.uni-scrm.com";
+  const webUrl = c.env.WEB_URL;
   const res = await fetch(`${webUrl}/api/auth/me`, {
     headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
   });
@@ -304,7 +304,7 @@ export default {
     if (accept.includes("text/html") && !url.pathname.startsWith("/api")) {
       const sessionCookie = getCookieValue(request, "session");
       if (!sessionCookie) {
-        const webUrl = env.WEB_URL || "https://web-dev.uni-scrm.com";
+        const webUrl = env.WEB_URL;
         return Response.redirect(`${webUrl}/login`, 302);
       }
     }

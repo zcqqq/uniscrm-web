@@ -23,6 +23,7 @@ routes = [{ pattern = "profile-dev.uni-scrm.com", custom_domain = true }]
 [env.dev.vars]
 WEB_URL = "https://web-dev.uni-scrm.com"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
+INTERNAL_SECRET = "dev-internal-secret"
 
 [[env.dev.d1_databases]]
 binding = "WEB_DB"
@@ -55,6 +56,7 @@ routes = [{ pattern = "profile.uni-scrm.com", custom_domain = true }]
 
 [env.production.vars]
 WEB_URL = "https://web.uni-scrm.com"
+INTERNAL_SECRET = "prod-internal-secret-change-me"
 
 [[env.production.d1_databases]]
 binding = "WEB_DB"

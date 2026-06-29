@@ -27,6 +27,7 @@ WEB_URL = "https://web-dev.uni-scrm.com"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 X_CLIENT_ID = "cS1kY2RlNnc1VldHSWw0LVJQSFM6MTpjaQ"
 TIKTOK_CLIENT_KEY = "sbaw7873x5p4wuwsiw"
+INTERNAL_SECRET = "dev-internal-secret"
 
 [[env.dev.d1_databases]]
 binding = "LINK_DB"
@@ -78,6 +79,7 @@ LINK_URL = "https://link.uni-scrm.com"
 TREND_RETENTION_DAYS = "30"
 WEB_URL = "https://web.uni-scrm.com"
 X_CLIENT_ID = "cXVhYUNyWVJWSlFtdFdjekt3V1U6MTpjaQ"
+INTERNAL_SECRET = "prod-internal-secret-change-me"
 
 [[env.production.d1_databases]]
 binding = "LINK_DB"

@@ -19,6 +19,7 @@ CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 ENVIRONMENT = "dev"
 STRIPE_PRICE_BASIC = "price_1TiW9PLhYonpsSAWQbGlYm9D"
 STRIPE_PRICE_PRO = "price_1TiW9sLhYonpsSAWeyyfaQUU"
+INTERNAL_SECRET = "dev-internal-secret"
 
 [[env.dev.d1_databases]]
 binding = "ADMIN_DB"
@@ -33,6 +34,10 @@ database_id = "899d288e-198c-49d9-824b-bd8d5c0a3cb8"
 [env.production]
 name = "admin"
 routes = [{ pattern = "admin.uni-scrm.com", custom_domain = true }]
+
+[env.production.vars]
+INTERNAL_SECRET = "prod-internal-secret-change-me"
+ENVIRONMENT = "production"
 
 [[env.production.d1_databases]]
 binding = "ADMIN_DB"

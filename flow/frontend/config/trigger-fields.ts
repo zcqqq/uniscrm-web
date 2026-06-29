@@ -32,7 +32,7 @@ function propToField(propId: string, locale: Locale, group: "event" | "user"): T
   const prop = PROPS_X.find((p) => p.propId === propId);
   if (!prop) return null;
 
-  if (prop.dataType === "ENUM") {
+  if (prop.dataType === "ENUM_INT" || prop.dataType === "ENUM_TEXT") {
     return {
       id: propId,
       label: t(prop.label, locale),

@@ -23,6 +23,7 @@ X_CLIENT_ID = "cS1kY2RlNnc1VldHSWw0LVJQSFM6MTpjaQ"
 WEB_URL = "https://web-dev.uni-scrm.com"
 LINK_URL = "https://link-dev.uni-scrm.com"
 ADMIN_URL = "https://admin-dev.uni-scrm.com"
+INTERNAL_SECRET = "dev-internal-secret"
 
 [[env.dev.kv_namespaces]]
 binding = "KV"
@@ -50,6 +51,7 @@ X_CLIENT_ID = "cXVhYUNyWVJWSlFtdFdjekt3V1U6MTpjaQ"
 WEB_URL = "https://web.uni-scrm.com"
 LINK_URL = "https://link.uni-scrm.com"
 ADMIN_URL = "https://admin.uni-scrm.com"
+INTERNAL_SECRET = "prod-internal-secret-change-me"
 
 [[env.production.kv_namespaces]]
 binding = "KV"

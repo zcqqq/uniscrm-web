@@ -5,7 +5,7 @@ import type { Env } from "../types";
 import { OAuthService } from "../services/oauth";
 import { SessionService } from "../auth/session";
 import { EmailService } from "../services/email";
-import { X_CHANNEL_SCOPES } from "../../../link/src/oauth";
+import { X_CHANNEL_SCOPES } from "../../../shared/x-scopes";
 
 export function createOAuthRouter() {
   const router = new Hono<{ Bindings: Env }>();

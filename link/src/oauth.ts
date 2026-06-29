@@ -8,11 +8,8 @@ import { ContentService } from "./services/content";
 import { TikTokChannel } from "./channels/tiktok";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 
-export const X_CHANNEL_SCOPES = [
-  "tweet.read", "tweet.write", "users.read", "follows.read", "follows.write",
-  "dm.read", "dm.write", "like.read", "list.read", "space.read",
-  "bookmark.read", "mute.read", "mute.write", "offline.access",
-];
+import { X_CHANNEL_SCOPES } from "../../shared/x-scopes";
+export { X_CHANNEL_SCOPES };
 
 async function resolveSession(c: Context<{ Bindings: Env }>): Promise<{ tenant_id: number; member_id: string } | null> {
   const sessionId = getCookie(c, "session");

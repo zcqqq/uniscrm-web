@@ -100,7 +100,7 @@ export function oauthRoutes() {
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
     try {
       const webhookUrl = `${url.origin}/x/webhook`;
-      const bearerService = new XActivityService(c.env.TWITTER_BEARER_TOKEN);
+      const bearerService = new XActivityService(c.env.X_BEARER_TOKEN);
       let webhook = await bearerService.getWebhook();
       if (!webhook || webhook.url !== webhookUrl) {
         const whId = await bearerService.createWebhook(webhookUrl);

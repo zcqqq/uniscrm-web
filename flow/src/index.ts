@@ -236,13 +236,28 @@ app.get("/api/flows", async (c) => {
   const total = countRow?.total || 0;
 
   const rows = await c.env.FLOW_DB.prepare(
-    `SELECT id, name, description, status, created_at, updated_at
-     FROM flows WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?`
+    `SELECT f.id, f.name, f.description, f.status, f.member_id, f.created_at, f.updated_at,
+       (SELECT COUNT(*) FROM flow_executions WHERE flow_id = f.id) as trigger_count
+     FROM flows f WHERE f.tenant_id = ? ORDER BY f.updated_at DESC LIMIT ? OFFSET ?`
   )
     .bind(tenantId, limit, offset)
-    .all();
+    .all<{ id: string; name: string; description: string; status: string; member_id: string; created_at: string; updated_at: string; trigger_count: number }>();
 
-  return c.json({ flows: rows.results, total, page, totalPages: Math.ceil(total / limit) });
+  const memberIds = [...new Set(rows.results.map(r => r.member_id).filter(Boolean))];
+  let memberMap: Record<string, string> = {};
+  if (memberIds.length > 0) {
+    const members = await c.env.WEB_DB.prepare(
+      `SELECT id, email FROM members WHERE id IN (${memberIds.map(() => "?").join(",")})`
+    ).bind(...memberIds).all<{ id: string; email: string }>();
+    memberMap = Object.fromEntries(members.results.map(m => [m.id, m.email]));
+  }
+
+  const flows = rows.results.map(f => ({
+    ...f,
+    member_email: memberMap[f.member_id] || "",
+  }));
+
+  return c.json({ flows, total, page, totalPages: Math.ceil(total / limit) });
 });
 
 // Create flow

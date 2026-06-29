@@ -22,7 +22,7 @@ export interface Env {
   INTERNAL_SECRET: string;
 
   // X / Twitter
-  TWITTER_BEARER_TOKEN: string;
+  X_BEARER_TOKEN: string;
   X_CLIENT_ID: string;
   X_CLIENT_SECRET: string;
   X_CONSUMER_SECRET: string;

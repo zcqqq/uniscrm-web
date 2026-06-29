@@ -19,6 +19,9 @@ export interface FlowSummary {
   name: string;
   description: string;
   status: string;
+  trigger_count: number;
+  member_id: string;
+  member_email: string;
   created_at: string;
   updated_at: string;
 }

@@ -21,8 +21,8 @@ async function handleTrendAggregation(env: Env): Promise<void> {
   const sources: TrendSource[] = [];
 
   const twitterConfig = getTwitterConfig();
-  if (twitterConfig && env.TWITTER_BEARER_TOKEN) {
-    sources.push(new TwitterTrendSource(env.TWITTER_BEARER_TOKEN));
+  if (twitterConfig && env.X_BEARER_TOKEN) {
+    sources.push(new TwitterTrendSource(env.X_BEARER_TOKEN));
   }
 
   const tiktokConfig = getTikTokConfig();
@@ -87,7 +87,7 @@ async function handleTokenRefresh(env: Env): Promise<void> {
       if (!config.subscription_ids?.length) {
         try {
           const webhookUrl = `https://link-dev.uni-scrm.com/x/webhook`;
-          const bearerService = new XActivityService(env.TWITTER_BEARER_TOKEN);
+          const bearerService = new XActivityService(env.X_BEARER_TOKEN);
           let webhook = await bearerService.getWebhook();
           if (!webhook || webhook.url !== webhookUrl) {
             const whId = await bearerService.createWebhook(webhookUrl);

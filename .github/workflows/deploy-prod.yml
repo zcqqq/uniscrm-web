@@ -43,7 +43,7 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
           X_CONSUMER_SECRET: ${{ secrets.X_CONSUMER_SECRET }}
-          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
           CF_D1_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}

@@ -7,6 +7,7 @@ on:
 jobs:
   sync-secrets:
     runs-on: ubuntu-latest
+    environment: dev
     strategy:
       fail-fast: false
       matrix:
@@ -128,6 +129,7 @@ jobs:
   setup-stripe:
     needs: [deploy]
     runs-on: ubuntu-latest
+    environment: dev
     steps:
       - uses: actions/checkout@v4
 

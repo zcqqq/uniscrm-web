@@ -15,7 +15,6 @@ routes = [{ pattern = "admin-dev.uni-scrm.com", custom_domain = true }]
 crons = ["0 */6 * * *"]
 
 [env.dev.vars]
-INTERNAL_SECRET = "dev-internal-secret"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 ENVIRONMENT = "dev"
 STRIPE_PRICE_BASIC = "price_1TiW9PLhYonpsSAWQbGlYm9D"

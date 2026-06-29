@@ -22,7 +22,6 @@ GOOGLE_CLIENT_ID = "1038882920781-unbsoa2prpnvqufeicaqqe1mlgso5ac9.apps.googleus
 X_CLIENT_ID = "cS1kY2RlNnc1VldHSWw0LVJQSFM6MTpjaQ"
 WEB_URL = "https://web-dev.uni-scrm.com"
 LINK_URL = "https://link-dev.uni-scrm.com"
-INTERNAL_SECRET = "dev-internal-secret"
 ADMIN_URL = "https://admin-dev.uni-scrm.com"
 
 [[env.dev.kv_namespaces]]

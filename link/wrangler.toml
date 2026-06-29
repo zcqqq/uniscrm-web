@@ -25,7 +25,6 @@ LINK_URL = "https://link-dev.uni-scrm.com"
 TREND_RETENTION_DAYS = "30"
 WEB_URL = "https://web-dev.uni-scrm.com"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
-INTERNAL_SECRET = "dev-internal-secret"
 X_CLIENT_ID = "cS1kY2RlNnc1VldHSWw0LVJQSFM6MTpjaQ"
 TIKTOK_CLIENT_KEY = "sbaw7873x5p4wuwsiw"
 

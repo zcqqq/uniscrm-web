@@ -15,13 +15,12 @@ Required callback/redirect URLs to register in third-party developer consoles.
 ## TikTok
 - Dev: `https://link-dev.uni-scrm.com/api/auth/tiktok/callback`
 - Prod: `https://link.uni-scrm.com/api/auth/tiktok/callback`
-- Console: TikTok Developer Portal → App → Redirect URI
+- Console: https://developers.tiktok.com → App → Redirect URI
 
 ## Stripe Webhooks
-- Dev: `https://admin-dev.uni-scrm.com/api/stripe/webhook`
-- Prod: `https://admin.uni-scrm.com/api/stripe/webhook`
-- Console: https://dashboard.stripe.com → Webhooks → Add endpoint
+- Automated: CI deploy auto-registers webhook endpoint and syncs signing secret via `scripts/setup-stripe-webhook.sh`
+- No manual configuration needed
 
 ## GitHub Secrets
 - Page: https://github.com/zcqqq/uniscrm-web/settings/secrets/actions
-- Required: X_CLIENT_SECRET, X_CONSUMER_SECRET, X_BEARER_TOKEN, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, TIKTOK_CLIENT_SECRET, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+- Required: X_CLIENT_SECRET, X_CONSUMER_SECRET, X_BEARER_TOKEN, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, TIKTOK_CLIENT_SECRET, STRIPE_SECRET_KEY

@@ -24,6 +24,7 @@ id = "58fa452dbfa94c308d8aaa21fb6c8e0a"
 binding = "TREND_DB"
 database_name = "uniscrm-web-dev"
 database_id = "899d288e-198c-49d9-824b-bd8d5c0a3cb8"
+migrations_dir = "migrations"
 
 [[env.dev.vectorize]]
 binding = "TREND_VECTORIZE"
@@ -46,6 +47,7 @@ id = "58fa452dbfa94c308d8aaa21fb6c8e0a"
 binding = "TREND_DB"
 database_name = "uniscrm-web"
 database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
+migrations_dir = "migrations"
 
 [[env.production.vectorize]]
 binding = "TREND_VECTORIZE"

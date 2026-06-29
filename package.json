@@ -26,5 +26,8 @@
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.6.0",
     "wrangler": "^4.10.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0"
   }
 }

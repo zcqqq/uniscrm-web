@@ -5,7 +5,55 @@ on:
     branches: [main]
 
 jobs:
+  sync-secrets:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - module: web
+            config: web/wrangler.toml
+          - module: link
+            config: link/wrangler.toml
+          - module: flow
+            config: flow/wrangler.toml
+          - module: admin
+            config: admin/wrangler.toml
+          - module: profile
+            config: profile/wrangler.toml
+          - module: insight-segment
+            config: insight-segment/wrangler.toml
+          - module: trend-skill
+            config: trend-skill/wrangler.toml
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install wrangler
+        run: npm ci
+
+      - name: Sync secrets
+        run: ./scripts/sync-secrets.sh dev ${{ matrix.module }} ${{ matrix.config }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          X_CLIENT_SECRET: ${{ secrets.X_CLIENT_SECRET }}
+          X_CONSUMER_SECRET: ${{ secrets.X_CONSUMER_SECRET }}
+          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
+          INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
+          CF_D1_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+
   migrate:
+    needs: [sync-secrets]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -77,3 +125,37 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+  smoke-test:
+    needs: [deploy]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - module: web
+            url: https://web-dev.uni-scrm.com/api/health
+          - module: link
+            url: https://link-dev.uni-scrm.com/api/health
+          - module: flow
+            url: https://flow-dev.uni-scrm.com/api/health
+          - module: admin
+            url: https://admin-dev.uni-scrm.com/api/health
+          - module: analytics
+            url: https://analytics-dev.uni-scrm.com/api/health
+          - module: insight-segment
+            url: https://insight-segment-dev.uni-scrm.com/api/health
+          - module: profile
+            url: https://profile-dev.uni-scrm.com/api/health
+          - module: trend-skill
+            url: https://trend-skill-dev.uni-scrm.com/api/health
+    steps:
+      - name: Health check ${{ matrix.module }}
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ matrix.url }}" || echo "000")
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ ${{ matrix.module }}: OK"
+          else
+            echo "❌ ${{ matrix.module }}: HTTP $STATUS"
+            exit 1
+          fi

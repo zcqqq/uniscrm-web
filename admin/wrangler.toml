@@ -36,6 +36,12 @@ name = "admin"
 routes = [{ pattern = "admin.uni-scrm.com", custom_domain = true }]
 
 [[env.production.d1_databases]]
-binding = "DB"
+binding = "ADMIN_DB"
+database_name = "uniscrm-admin"
+database_id = "ecf7a3be-2457-4e40-a537-bab4cc0ec281"
+migrations_dir = "migrations"
+
+[[env.production.d1_databases]]
+binding = "WEB_DB"
 database_name = "uniscrm-web"
-database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
+database_id = "98ea05ba-91de-423d-9126-aa3cd9b42382"

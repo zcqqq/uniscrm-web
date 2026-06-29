@@ -27,6 +27,7 @@ WEB_URL = "https://web-dev.uni-scrm.com"
 binding = "WEB_DB"
 database_name = "uniscrm-web-dev"
 database_id = "899d288e-198c-49d9-824b-bd8d5c0a3cb8"
+migrations_dir = "migrations"
 
 [env.dev.ai]
 binding = "AI"
@@ -41,7 +42,8 @@ WEB_URL = "https://web.uni-scrm.com"
 [[env.production.d1_databases]]
 binding = "WEB_DB"
 database_name = "uniscrm-web"
-database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
+database_id = "98ea05ba-91de-423d-9126-aa3cd9b42382"
+migrations_dir = "migrations"
 
 [env.production.ai]
 binding = "AI"

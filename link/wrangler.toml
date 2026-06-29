@@ -87,7 +87,7 @@ migrations_dir = "migrations"
 [[env.production.d1_databases]]
 binding = "WEB_DB"
 database_name = "uniscrm-web"
-database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
+database_id = "98ea05ba-91de-423d-9126-aa3cd9b42382"
 
 [[env.production.kv_namespaces]]
 binding = "KV"

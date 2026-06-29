@@ -71,7 +71,7 @@ R2_WAREHOUSE = "b34f3ff4aec4c36584672d5bf1320757_uniscrm"
 [[env.production.d1_databases]]
 binding = "WEB_DB"
 database_name = "uniscrm-web"
-database_id = "ccd56e94-b85c-4144-ac18-a6946897a5b3"
+database_id = "98ea05ba-91de-423d-9126-aa3cd9b42382"
 
 [[env.production.d1_databases]]
 binding = "ANALYTICS_DB"

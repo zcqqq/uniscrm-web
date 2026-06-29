@@ -22,6 +22,8 @@ jobs:
           - db: uniscrm-analytics-dev
             config: analytics/wrangler.toml
           - db: uniscrm-web-dev
+            config: insight-segment/wrangler.toml
+          - db: uniscrm-web-dev
             config: profile/wrangler.toml
           - db: uniscrm-web-dev
             config: trend-skill/wrangler.toml

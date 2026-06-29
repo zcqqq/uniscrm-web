@@ -152,6 +152,8 @@ jobs:
           - module: trend-skill
             url: https://trend-skill.uni-scrm.com/api/health
     steps:
+      - uses: actions/checkout@v4
+
       - name: Health check ${{ matrix.module }}
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ matrix.url }}" || echo "000")
@@ -159,5 +161,8 @@ jobs:
             echo "✅ ${{ matrix.module }}: OK"
           else
             echo "❌ ${{ matrix.module }}: HTTP $STATUS"
+            echo ""
+            echo "📋 Check external platform configuration:"
+            cat EXTERNAL_CONFIG.md
             exit 1
           fi

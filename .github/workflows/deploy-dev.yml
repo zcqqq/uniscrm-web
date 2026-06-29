@@ -5,7 +5,27 @@ on:
     branches: [main]
 
 jobs:
+  setup-stripe:
+    runs-on: ubuntu-latest
+    outputs:
+      price_basic: ${{ steps.stripe.outputs.price_basic }}
+      price_pro: ${{ steps.stripe.outputs.price_pro }}
+      webhook_secret: ${{ steps.stripe.outputs.webhook_secret }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Stripe CLI
+        run: npm i -g @stripe/cli
+      - name: Setup Stripe resources
+        id: stripe
+        run: ./scripts/setup-stripe.sh
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          ENVIRONMENT: dev
+          ADMIN_URL: https://admin-dev.uni-scrm.com
+
   sync-secrets:
+    needs: [setup-stripe]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -49,7 +69,9 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          STRIPE_WEBHOOK_SECRET: ${{ needs.setup-stripe.outputs.webhook_secret || secrets.STRIPE_WEBHOOK_SECRET }}
+          STRIPE_PRICE_BASIC: ${{ needs.setup-stripe.outputs.price_basic }}
+          STRIPE_PRICE_PRO: ${{ needs.setup-stripe.outputs.price_pro }}
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
 
   migrate:
@@ -150,6 +172,8 @@ jobs:
           - module: trend-skill
             url: https://trend-skill-dev.uni-scrm.com/api/health
     steps:
+      - uses: actions/checkout@v4
+
       - name: Health check ${{ matrix.module }}
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ matrix.url }}" || echo "000")
@@ -157,5 +181,8 @@ jobs:
             echo "✅ ${{ matrix.module }}: OK"
           else
             echo "❌ ${{ matrix.module }}: HTTP $STATUS"
+            echo ""
+            echo "📋 Check external platform configuration:"
+            cat EXTERNAL_CONFIG.md
             exit 1
           fi

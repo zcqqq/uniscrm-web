@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { ReactFlowProvider } from "@xyflow/react";
 import { toPng } from "html-to-image";
 import { useFlowEditor } from "../store/flow-editor";
 import { api } from "../lib/api";
+import { FLOW_TEMPLATES } from "../config/templates";
 import AiGenerateBar from "../../../shared/frontend/components/AiGenerateBar";
 import Sidebar from "../components/Sidebar";
 import Canvas from "../components/Canvas";
@@ -18,8 +19,6 @@ function EditorToolbar() {
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
-    if (!flowId) return;
-
     const { nodes } = useFlowEditor.getState();
     for (const node of nodes) {
       if (node.type === "action") {
@@ -44,20 +43,33 @@ function EditorToolbar() {
 
     setSaving(true);
     try {
-      await api.flows.update(flowId, {
-        name: flowName,
-        graph_json: toGraphJson(),
-      });
+      if (flowId) {
+        await api.flows.update(flowId, { name: flowName, graph_json: toGraphJson() });
+      } else {
+        const { flow } = await api.flows.create(flowName, toGraphJson());
+        useFlowEditor.setState({ flowId: flow.id });
+        window.history.replaceState(null, "", `/flows/${flow.id}`);
+      }
       markClean();
     } finally {
       setSaving(false);
     }
   };
 
+  const handleBack = () => {
+    if (isDirty) {
+      if (confirm("You have unsaved changes. Save before leaving?")) {
+        handleSave().then(() => navigate("/"));
+        return;
+      }
+    }
+    navigate("/");
+  };
+
   return (
     <div className="flex items-center h-12 px-4 border-b border-border bg-card gap-3">
       <button
-        onClick={() => navigate("/")}
+        onClick={handleBack}
         className="text-sm text-muted-foreground hover:text-foreground"
       >
         ← Back
@@ -119,12 +131,33 @@ function EditorToolbar() {
 export default function EditorPage() {
   useEffect(() => { document.title = "Flow — UniSCRM" }, []);
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const { setFlow } = useFlowEditor();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (useFlowEditor.getState().isDirty) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
+
+  useEffect(() => {
     if (!id) return;
+    if (id === "new") {
+      const tplId = searchParams.get("template");
+      const tpl = tplId ? FLOW_TEMPLATES.find(t => t.id === tplId) : null;
+      const name = tpl?.name || "Untitled Flow";
+      const nodes = tpl?.graph.nodes || [];
+      const edges = tpl?.graph.edges || [];
+      setFlow(null as any, name, false, nodes, edges);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     api.flows
       .get(id)
@@ -134,7 +167,7 @@ export default function EditorPage() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [id, setFlow]);
+  }, [id, searchParams, setFlow]);
 
   if (loading) {
     return <div className="flex items-center justify-center h-screen text-muted-foreground">Loading...</div>;

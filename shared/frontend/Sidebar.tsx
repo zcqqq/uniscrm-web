@@ -17,7 +17,6 @@ interface SidebarProps {
   urls: SidebarUrls;
   tier?: Tier;
   currentModule?: CurrentModule;
-  currentPath?: string;
 }
 
 const Icons = {
@@ -48,7 +47,7 @@ interface MenuGroup {
   href?: string;
 }
 
-export function Sidebar({ urls, tier: tierProp, currentModule, currentPath }: SidebarProps) {
+export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set(["social"]);
     const saved = localStorage.getItem("sidebar-groups");
@@ -137,11 +136,34 @@ export function Sidebar({ urls, tier: tierProp, currentModule, currentPath }: Si
     return tierModules ? key in tierModules && !tierModules[key].enabled : false;
   };
 
-  const isActive = (groupId: string) => currentModule === groupId;
+  const currentUrl = typeof window !== "undefined" ? window.location.origin + window.location.pathname : "";
+
   const isItemActive = (href: string) => {
-    if (!currentPath) return false;
-    return href.includes(currentPath);
+    if (!currentUrl) return false;
+    const normalized = currentUrl.replace(/\/$/, "");
+    const hrefNormalized = href.replace(/\/$/, "");
+    if (normalized === hrefNormalized) return true;
+    try {
+      const hrefUrl = new URL(href, window.location.origin);
+      if (hrefUrl.origin === window.location.origin && hrefUrl.pathname !== "/") {
+        return window.location.pathname.startsWith(hrefUrl.pathname);
+      }
+    } catch {}
+    return normalized.startsWith(hrefNormalized);
   };
+
+  const isActive = (group: MenuGroup) => {
+    if (currentModule === group.id) return true;
+    if (group.href) return isItemActive(group.href);
+    return group.items?.some((item) => isItemActive(item.href)) ?? false;
+  };
+
+  useEffect(() => {
+    const activeGroup = groups.find((g) => isActive(g));
+    if (activeGroup && !expandedGroups.has(activeGroup.id)) {
+      setExpandedGroups((prev) => new Set([...prev, activeGroup.id]));
+    }
+  }, []);
 
   const sidebarContent = (
     <div className="flex flex-col h-full w-[220px] bg-muted border-r border-border">
@@ -160,7 +182,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule, currentPath }: Si
               <>
                 <button
                   onClick={() => disabled ? window.location.href = `${urls.web}/billing` : toggleGroup(group.id)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-md cursor-pointer transition-colors ${disabled ? "opacity-40 cursor-default" : isActive(group.id) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-md cursor-pointer transition-colors ${disabled ? "opacity-40 cursor-default" : isActive(group) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
                 >
                   <group.icon />
                   <span className="flex-1 text-left">{group.label}</span>
@@ -187,7 +209,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule, currentPath }: Si
             ) : (
               <a
                 href={disabled ? `${urls.web}/billing` : group.href}
-                className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded-md transition-colors ${disabled ? "opacity-40" : isActive(group.id) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded-md transition-colors ${disabled ? "opacity-40" : isActive(group) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
               >
                 <group.icon />
                 <span className="flex-1">{group.label}</span>

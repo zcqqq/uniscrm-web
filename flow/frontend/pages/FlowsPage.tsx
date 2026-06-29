@@ -42,11 +42,12 @@ export default function FlowsPage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
-  const handleCreate = async (template?: FlowTemplate) => {
-    const name = template?.name || undefined;
-    const graphJson = template ? JSON.stringify(template.graph) : undefined;
-    const flow = await createFlow(name, graphJson);
-    navigate(`/flows/${flow.id}`);
+  const handleCreate = (template?: FlowTemplate) => {
+    if (template) {
+      navigate(`/flows/new?template=${template.id}`);
+    } else {
+      navigate("/flows/new");
+    }
   };
 
   const toggleSort = (key: SortKey) => {

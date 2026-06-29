@@ -17,9 +17,6 @@ Required callback/redirect URLs to register in third-party developer consoles.
 - Prod: `https://link.uni-scrm.com/api/auth/tiktok/callback`
 - Console: https://developers.tiktok.com → App → Redirect URI
 
-## Stripe Webhooks
-- Automated: CI deploy auto-registers webhook endpoint and syncs signing secret via `scripts/setup-stripe-webhook.sh`
-- No manual configuration needed
 
 ## GitHub Secrets
 - Page: https://github.com/zcqqq/uniscrm-web/settings/secrets/actions

@@ -19,7 +19,7 @@ export interface FlowEditorState {
   selectedNodeId: string | null;
   isDirty: boolean;
 
-  setFlow: (id: string, name: string, enabled: boolean, nodes: Node[], edges: Edge[]) => void;
+  setFlow: (id: string | null, name: string, enabled: boolean, nodes: Node[], edges: Edge[]) => void;
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   onConnect: (connection: Connection) => void;

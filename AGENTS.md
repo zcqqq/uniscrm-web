@@ -10,6 +10,8 @@ uniscrm-web库是多租户SaaS，分多个模块/worker：
 - shared: 不是模块/worker。包含UI组件等所有模块通用的组件。
 - web: 登录页及通用功能如设置等。
 
+git分dev和main分支，提交到main分支时自动通过github部署dev环境（cloudflare资源加-dev后缀），cloudflare上prodution环境部署由github action手动触发。
+
 # Technical
 大数据存储基于R2 data catalog.
 各模块间尽量减少逻辑耦合，通过数据（Cloudflare各组件）耦合。所以在Cloudflare组件的配置文件中，尽量用模块名做前后缀，如DB_WEB，而不是通用的DB、以减少各个模块间的歧义。比较特殊的是tenantdb，各个模块可能都有数据量大的表，要按租户分库放到tenantdb。

@@ -26,7 +26,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const currentModule = path.startsWith("/recommendations") ? "content" as const : "settings" as const;
   return (
     <div className="flex min-h-screen">
-      <Sidebar urls={urls} currentModule={currentModule} currentPath={path} />
+      <Sidebar urls={urls} currentModule={currentModule} />
       <main className="flex-1 overflow-auto bg-background text-foreground">{children}</main>
     </div>
   );

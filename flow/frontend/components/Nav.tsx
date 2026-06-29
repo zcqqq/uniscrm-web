@@ -9,5 +9,5 @@ const urls = {
 };
 
 export function Nav() {
-  return <Sidebar urls={urls} currentModule="social" currentPath="/flow" />;
+  return <Sidebar urls={urls} currentModule="social" />;
 }

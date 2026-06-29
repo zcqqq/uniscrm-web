@@ -21,7 +21,7 @@ export function App() {
   return (
     <BrowserRouter>
       <div className="flex min-h-screen">
-        <Sidebar urls={urls} currentModule="social" currentPath={path} />
+        <Sidebar urls={urls} currentModule="social" />
         <main className="flex-1 overflow-auto bg-background text-foreground">
           <Routes>
             <Route path="/" element={<Social />} />

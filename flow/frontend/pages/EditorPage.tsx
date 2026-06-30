@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { ReactFlowProvider } from "@xyflow/react";
-import { toPng } from "html-to-image";
 import { useFlowEditor } from "../store/flow-editor";
 import { api } from "../lib/api";
 import { FLOW_TEMPLATES } from "../config/templates";
 import AiGenerateBar from "../../../shared/frontend/components/AiGenerateBar";
+import { MoreVerticalIcon } from "../../../shared/frontend/ui/icons";
 import Sidebar from "../components/Sidebar";
 import Canvas from "../components/Canvas";
 import Inspector from "../components/Inspector";
@@ -17,6 +17,7 @@ function EditorToolbar() {
     useFlowEditor();
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const handleSave = async () => {
     const { nodes } = useFlowEditor.getState();
@@ -90,28 +91,7 @@ function EditorToolbar() {
           }
         }}
       />
-      <button
-        onClick={() => {
-          const el = document.querySelector(".react-flow") as HTMLElement;
-          if (!el) return;
-          toPng(el, { backgroundColor: "#fff" }).then((dataUrl) => {
-            const a = document.createElement("a");
-            a.href = dataUrl;
-            a.download = `${flowName || "flow"}.png`;
-            a.click();
-          });
-        }}
-        className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded"
-        title="Export as PNG"
-      >📷</button>
       {isDirty && <span className="text-xs text-amber-500">Unsaved</span>}
-      <button
-        onClick={handleSave}
-        disabled={saving}
-        className="px-3 py-1.5 bg-secondary text-secondary-foreground rounded text-sm font-medium hover:bg-secondary/80 disabled:opacity-50"
-      >
-        {saving ? "Saving..." : "Save Draft"}
-      </button>
       <button
         onClick={async () => {
           await handleSave();
@@ -124,6 +104,21 @@ function EditorToolbar() {
       >
         Publish
       </button>
+      <div className="relative">
+        <button
+          onClick={() => setMenuOpen(!menuOpen)}
+          className="p-1.5 rounded hover:bg-accent text-muted-foreground"
+        ><MoreVerticalIcon /></button>
+        {menuOpen && (
+          <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-md shadow-lg z-20 min-w-[100px]">
+            <button
+              onClick={() => { setMenuOpen(false); handleSave(); }}
+              disabled={saving}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-accent text-foreground"
+            >{saving ? "Saving..." : "Save"}</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

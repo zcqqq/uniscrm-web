@@ -7,7 +7,7 @@ export interface SidebarUrls {
   web: string;
   link: string;
   insightSegment: string;
-  analytics?: string;
+  analytics: string;
   flow: string;
 }
 
@@ -93,7 +93,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
       items: [
         { id: "channels", label: "Channels", href: `${urls.link}/channel` },
         { id: "flow", label: "Flow", href: urls.flow },
-        { id: "users", label: "Users", href: `${urls.link}/user` },
+        { id: "users", label: "Users", href: `${urls.link}/users` },
         { id: "lists", label: "Lists", href: `${urls.link}/list` },
       ],
     },
@@ -114,8 +114,8 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
     {
       id: "insight", label: "Insight", icon: Icons.Insight,
       items: [
-        { id: "dashboard", label: "Dashboard", href: `${urls.analytics ?? "#"}/dashboard` },
-        { id: "analytics", label: "Analytics", href: `${urls.analytics ?? "#"}/analytics` },
+        { id: "dashboard", label: "Dashboard", href: `${urls.analytics}/dashboard` },
+        { id: "analytics", label: "Analytics", href: `${urls.analytics}/analytics` },
       ],
     },
     {
@@ -139,7 +139,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
   const currentUrl = typeof window !== "undefined" ? window.location.origin + window.location.pathname : "";
 
   const isItemActive = (href: string) => {
-    if (!currentUrl) return false;
+    if (!currentUrl || !href) return false;
     const normalized = currentUrl.replace(/\/$/, "");
     const hrefNormalized = href.replace(/\/$/, "");
     if (normalized === hrefNormalized) return true;

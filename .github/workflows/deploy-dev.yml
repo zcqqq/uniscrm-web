@@ -116,7 +116,7 @@ jobs:
       - name: Build frontend
         run: |
           if [ -f "${{ matrix.module }}/vite.config.ts" ]; then
-            cd ${{ matrix.module }} && npx vite build
+            cd ${{ matrix.module }} && npx vite build --mode development
           fi
 
       - name: Deploy

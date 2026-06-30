@@ -26,8 +26,8 @@ export function App() {
           <Routes>
             <Route path="/" element={<Social />} />
             <Route path="/channel" element={<Social />} />
-            <Route path="/user" element={<Users />} />
-            <Route path="/user/:id" element={<UserDetail />} />
+            <Route path="/users" element={<Users />} />
+            <Route path="/users/:id" element={<UserDetail />} />
             <Route path="/content" element={<Content />} />
             <Route path="/commerce" element={<Commerce />} />
             <Route path="/list" element={<Lists />} />

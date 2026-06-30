@@ -44,7 +44,7 @@ export default function AnalyticsPage() {
     ...n,
     draggable: false,
     selectable: true,
-    data: { ...n.data, _analytics: counts[n.id] || null },
+    data: { ...n.data, _analytics: counts[n.id] || { enter: 0, exit: 0 } },
   }));
   const edges = graph.edges;
 
@@ -60,7 +60,6 @@ export default function AnalyticsPage() {
         <div className="flex items-center h-12 px-4 border-b border-border bg-background gap-3">
           <button onClick={() => navigate("/")} className="text-sm text-muted-foreground hover:text-foreground">← Back</button>
           <span className="text-sm font-medium flex-1">{flow.name}</span>
-          <Badge className="bg-green-100 text-green-700 border-0">Published</Badge>
           <Button variant="outline" size="sm" onClick={handleUnpublish}>Unpublish</Button>
         </div>
         <div className="flex-1 relative">

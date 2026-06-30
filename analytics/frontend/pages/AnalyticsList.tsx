@@ -1,22 +1,23 @@
 import { useState, useEffect, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { listReports, deleteReport, type ReportSummary } from "../lib/api";
 import { useLocale } from "../hooks/useLocale";
 
 const UI = {
-  en: { title: "Analytics", newBtn: "New", event: "Event Analysis", interval: "Interval Analysis", delete: "Delete", empty: "No reports yet", createFirst: "Create your first analysis" },
-  zh: { title: "分析", newBtn: "新建", event: "事件分析", interval: "间隔分析", delete: "删除", empty: "暂无报表", createFirst: "创建你的第一个分析" },
+  en: { title: "Analytics", newBtn: "New", event: "Event Analysis", interval: "Interval Analysis", name: "Name", type: "Type", status: "Status", created: "Created", actions: "Actions", empty: "No reports yet", createFirst: "Create your first analysis" },
+  zh: { title: "分析", newBtn: "新建", event: "事件分析", interval: "间隔分析", name: "名称", type: "类型", status: "状态", created: "创建时间", actions: "操作", empty: "暂无报表", createFirst: "创建你的第一个分析" },
 };
 
 const TYPE_LABELS = { en: { event: "Event", interval: "Interval" }, zh: { event: "事件", interval: "间隔" } };
 
 export function AnalyticsList() {
   const navigate = useNavigate();
-  const { locale } = useLocale();
+  const { locale, timezone } = useLocale();
   const s = UI[locale];
   const [reports, setReports] = useState<ReportSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const dropRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -31,14 +32,32 @@ export function AnalyticsList() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
     if (!confirm("Delete?")) return;
     await deleteReport(id);
     setReports((prev) => prev.filter((r) => r.id !== id));
   };
 
+  const toggleSort = () => {
+    setSortDir((d) => d === "desc" ? "asc" : "desc");
+  };
+
+  const sorted = [...reports].sort((a, b) => {
+    const cmp = a.created_at.localeCompare(b.created_at);
+    return sortDir === "desc" ? -cmp : cmp;
+  });
+
+  const formatDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleString(locale === "zh" ? "zh-CN" : "en-US", { timeZone: timezone, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return iso.slice(0, 16).replace("T", " ");
+    }
+  };
+
   return (
-    <div className="max-w-4xl mx-auto p-6">
+    <div className="max-w-5xl mx-auto p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-foreground">{s.title}</h1>
         <div className="relative" ref={dropRef}>
@@ -75,30 +94,52 @@ export function AnalyticsList() {
           <p className="text-sm">{s.createFirst}</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {reports.map((r) => (
-            <div key={r.id} className="bg-card rounded-lg border border-border p-4 flex items-center justify-between hover:border-primary/30 transition-colors">
-              <Link to={`/analytics/${r.id}`} className="flex-1 min-w-0">
-                <div className="flex items-center gap-3">
-                  <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${r.type === "event" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"}`}>
-                    {TYPE_LABELS[locale][r.type as keyof typeof TYPE_LABELS["en"]] || r.type}
-                  </span>
-                  <span className="text-sm font-medium text-foreground truncate">
+        <div className="bg-card rounded-lg border border-border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/30">
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">{s.name}</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">{s.type}</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">{s.status}</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground cursor-pointer select-none" onClick={toggleSort}>
+                  {s.created} {sortDir === "desc" ? "↓" : "↑"}
+                </th>
+                <th className="text-right px-4 py-3 font-medium text-muted-foreground">{s.actions}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr
+                  key={r.id}
+                  onClick={() => navigate(`/analytics/${r.id}`)}
+                  className="border-b border-border last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
+                >
+                  <td className="px-4 py-3 font-medium text-foreground">
                     {(r.params as any).name || `${r.type} #${r.id.slice(0, 8)}`}
-                  </span>
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {r.created_at.slice(0, 16).replace("T", " ")}
-                </div>
-              </Link>
-              <div className="flex items-center gap-3 ml-4">
-                <StatusBadge status={r.status} />
-                <button onClick={() => handleDelete(r.id)} className="text-xs text-destructive hover:text-red-700">
-                  {s.delete}
-                </button>
-              </div>
-            </div>
-          ))}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${r.type === "event" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"}`}>
+                      {TYPE_LABELS[locale][r.type as keyof typeof TYPE_LABELS["en"]] || r.type}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <StatusBadge status={r.status} />
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {formatDate(r.created_at)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={(e) => handleDelete(e, r.id)}
+                      className="text-xs text-destructive hover:text-red-700"
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

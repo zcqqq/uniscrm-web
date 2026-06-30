@@ -7,7 +7,11 @@ set -e
 
 ENV=${1:?Usage: seed-e2e.sh <env>}
 CONFIG="web/wrangler.toml"
-DB_NAME="uniscrm-web-${ENV}"
+if [ "$ENV" = "production" ]; then
+  DB_NAME="uniscrm-web"
+else
+  DB_NAME="uniscrm-web-${ENV}"
+fi
 
 E2E_TENANT_ID=99999
 E2E_MEMBER_ID="e2e-test-member-00000000-0000-0000-0000-000000000001"

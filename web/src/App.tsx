@@ -12,13 +12,9 @@ import { CompleteProfile } from "./pages/CompleteProfile";
 import { Settings } from "./pages/Settings";
 import { Billing } from "./pages/Billing";
 
-const urls = {
-  web: "",
-  link: import.meta.env.VITE_LINK_URL,
-  insightSegment: import.meta.env.VITE_SEGMENT_URL,
-  flow: import.meta.env.VITE_FLOW_URL,
-  analytics: import.meta.env.VITE_ANALYTICS_URL,
-};
+import { URLS } from "../../shared/frontend/urls";
+
+const urls = { ...URLS, web: "", insightSegment: URLS.segment };
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   const { member } = useAuth();

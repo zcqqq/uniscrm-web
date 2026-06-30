@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useFlows } from "../hooks/useFlows";
 import { FLOW_TEMPLATES, type FlowTemplate } from "../config/templates";
 import { Nav } from "../components/Nav";
+import { formatDateTime } from "../../../shared/frontend/lib/format-time";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Badge } from "../../../shared/frontend/ui/badge";
 import { EditIcon, MoreVerticalIcon, XIcon, SearchIcon, ClockIcon, ListIcon } from "../../../shared/frontend/ui/icons";
@@ -152,8 +153,7 @@ export default function FlowsPage() {
                         </td>
                         <td className="py-4 pr-4 text-muted-foreground">{flow.trigger_count || "-"}</td>
                         <td className="py-4 pr-4 text-muted-foreground">
-                          <div>{new Date(flow.updated_at).toLocaleDateString()}</div>
-                          <div className="text-xs">{new Date(flow.updated_at).toLocaleTimeString()}</div>
+                          <div>{formatDateTime(flow.updated_at, Intl.DateTimeFormat().resolvedOptions().timeZone)}</div>
                         </td>
                         <td className="py-4 pr-4 text-muted-foreground">{flow.member_email || "-"}</td>
                         <td className="py-4 text-right relative" onClick={(e) => e.stopPropagation()}>

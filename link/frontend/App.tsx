@@ -7,13 +7,9 @@ import { Content } from "./pages/Content";
 import { Commerce } from "./pages/Commerce";
 import { Lists } from "./pages/Lists";
 
-const urls: SidebarUrls = {
-  web: import.meta.env.VITE_WEB_URL,
-  link: "",
-  insightSegment: import.meta.env.VITE_SEGMENT_URL,
-  analytics: import.meta.env.VITE_ANALYTICS_URL,
-  flow: import.meta.env.VITE_FLOW_URL,
-};
+import { URLS } from "../../shared/frontend/urls";
+
+const urls: SidebarUrls = { ...URLS, link: "", insightSegment: URLS.segment };
 
 export function App() {
   const path = window.location.pathname;

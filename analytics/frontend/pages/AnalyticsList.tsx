@@ -2,10 +2,11 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { listReports, deleteReport, type ReportSummary } from "../lib/api";
 import { useLocale } from "../hooks/useLocale";
+import { formatDateTime } from "../../../shared/frontend/lib/format-time";
 
 const UI = {
-  en: { title: "Analytics", newBtn: "New", event: "Event Analysis", interval: "Interval Analysis", name: "Name", type: "Type", status: "Status", created: "Created", actions: "Actions", empty: "No reports yet", createFirst: "Create your first analysis" },
-  zh: { title: "分析", newBtn: "新建", event: "事件分析", interval: "间隔分析", name: "名称", type: "类型", status: "状态", created: "创建时间", actions: "操作", empty: "暂无报表", createFirst: "创建你的第一个分析" },
+  en: { newBtn: "New", event: "Event Analysis", interval: "Interval Analysis", name: "Name", type: "Type", status: "Status", created: "Created", empty: "No reports yet", createFirst: "Create your first analysis" },
+  zh: { newBtn: "新建", event: "事件分析", interval: "间隔分析", name: "名称", type: "类型", status: "状态", created: "创建时间", empty: "暂无报表", createFirst: "创建你的第一个分析" },
 };
 
 const TYPE_LABELS = { en: { event: "Event", interval: "Interval" }, zh: { event: "事件", interval: "间隔" } };
@@ -39,27 +40,16 @@ export function AnalyticsList() {
     setReports((prev) => prev.filter((r) => r.id !== id));
   };
 
-  const toggleSort = () => {
-    setSortDir((d) => d === "desc" ? "asc" : "desc");
-  };
+  const toggleSort = () => setSortDir((d) => d === "desc" ? "asc" : "desc");
 
   const sorted = [...reports].sort((a, b) => {
     const cmp = a.created_at.localeCompare(b.created_at);
     return sortDir === "desc" ? -cmp : cmp;
   });
 
-  const formatDate = (iso: string) => {
-    try {
-      return new Date(iso).toLocaleString(locale === "zh" ? "zh-CN" : "en-US", { timeZone: timezone, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-    } catch {
-      return iso.slice(0, 16).replace("T", " ");
-    }
-  };
-
   return (
-    <div className="max-w-5xl mx-auto p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-foreground">{s.title}</h1>
+    <div className="max-w-6xl mx-auto p-6">
+      <div className="flex items-center gap-4 mb-6">
         <div className="relative" ref={dropRef}>
           <button
             onClick={() => setDropdownOpen(!dropdownOpen)}
@@ -68,7 +58,7 @@ export function AnalyticsList() {
             + {s.newBtn}
           </button>
           {dropdownOpen && (
-            <div className="absolute right-0 mt-1 w-48 bg-card border border-border rounded-lg shadow-lg z-10">
+            <div className="absolute left-0 mt-1 w-48 bg-card border border-border rounded-lg shadow-lg z-10">
               <button
                 onClick={() => { navigate("/analytics/event/new"); setDropdownOpen(false); }}
                 className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted transition-colors rounded-t-lg"
@@ -104,7 +94,7 @@ export function AnalyticsList() {
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground cursor-pointer select-none" onClick={toggleSort}>
                   {s.created} {sortDir === "desc" ? "↓" : "↑"}
                 </th>
-                <th className="text-right px-4 py-3 font-medium text-muted-foreground">{s.actions}</th>
+                <th className="w-10"></th>
               </tr>
             </thead>
             <tbody>
@@ -126,12 +116,12 @@ export function AnalyticsList() {
                     <StatusBadge status={r.status} />
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
-                    {formatDate(r.created_at)}
+                    {formatDateTime(r.created_at, timezone)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <button
                       onClick={(e) => handleDelete(e, r.id)}
-                      className="text-xs text-destructive hover:text-red-700"
+                      className="text-muted-foreground hover:text-destructive transition-colors"
                     >
                       ✕
                     </button>

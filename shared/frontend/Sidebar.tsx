@@ -31,6 +31,8 @@ const Icons = {
   ChevronRight: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>,
   Menu: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>,
   LogOut: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>,
+  Collapse: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7"/></svg>,
+  Expand: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>,
 };
 
 interface MenuItem {
@@ -53,6 +55,11 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
     const saved = localStorage.getItem("sidebar-groups");
     return saved ? new Set(JSON.parse(saved)) : new Set([currentModule || "social"]);
   });
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("sidebar-collapsed") === "true";
+  });
+  const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
   const getTierFromCookie = (): Tier | undefined => {
@@ -73,6 +80,10 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
   useEffect(() => {
     localStorage.setItem("sidebar-groups", JSON.stringify([...expandedGroups]));
   }, [expandedGroups]);
+
+  useEffect(() => {
+    localStorage.setItem("sidebar-collapsed", String(collapsed));
+  }, [collapsed]);
 
   const toggleGroup = (id: string) => {
     setExpandedGroups((prev) => {
@@ -165,14 +176,12 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
     }
   }, []);
 
-  const sidebarContent = (
+  const renderExpandedContent = () => (
     <div className="flex flex-col h-full w-[220px] bg-muted border-r border-border">
-      {/* Header */}
       <div className="px-5 py-4 border-b border-border">
         <span className="font-semibold text-foreground text-sm tracking-tight">UniSCRM</span>
       </div>
 
-      {/* Menu */}
       <nav className="flex-1 overflow-y-auto py-3 px-2">
         {groups.map((group) => {
           const disabled = isGroupDisabled(group.id);
@@ -221,12 +230,84 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
         })}
       </nav>
 
-      {/* Footer */}
       <div className="border-t border-border px-4 py-3">
         {email && <div className="text-xs text-muted-foreground truncate mb-2">{email}</div>}
-        <button onClick={handleLogout} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-destructive cursor-pointer transition-colors">
+        <div className="flex items-center justify-between">
+          <button onClick={handleLogout} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-destructive cursor-pointer transition-colors">
+            <Icons.LogOut />
+            <span>Logout</span>
+          </button>
+          <button onClick={() => setCollapsed(true)} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer transition-colors" title="Collapse">
+            <Icons.Collapse />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderCollapsedContent = () => (
+    <div className="flex flex-col h-full w-[56px] bg-muted border-r border-border items-center">
+      <div className="py-4 border-b border-border w-full flex justify-center">
+        <span className="font-semibold text-foreground text-sm">U</span>
+      </div>
+
+      <nav className="flex-1 overflow-y-auto py-3 w-full">
+        {groups.map((group) => {
+          const disabled = isGroupDisabled(group.id);
+          const active = isActive(group);
+          return (
+            <div
+              key={group.id}
+              className="relative mb-0.5 flex justify-center"
+              onMouseEnter={() => !disabled && setHoveredGroup(group.id)}
+              onMouseLeave={() => setHoveredGroup(null)}
+            >
+              {group.items ? (
+                <a
+                  href={disabled ? `${urls.web}/billing` : undefined}
+                  className={`flex items-center justify-center w-10 h-10 rounded-md cursor-pointer transition-colors ${disabled ? "opacity-40" : active ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                >
+                  <group.icon />
+                </a>
+              ) : (
+                <a
+                  href={disabled ? `${urls.web}/billing` : group.href}
+                  className={`flex items-center justify-center w-10 h-10 rounded-md transition-colors ${disabled ? "opacity-40" : active ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                >
+                  <group.icon />
+                </a>
+              )}
+
+              {hoveredGroup === group.id && group.items && !disabled && (
+                <div className="absolute left-full top-0 pl-1 z-50">
+                <div className="bg-popover border border-border rounded-md shadow-md py-1.5 min-w-[160px]">
+                  <div className="px-3 py-1.5 text-xs font-medium text-foreground border-b border-border mb-1">{group.label}</div>
+                  {group.items.map((item) => {
+                    const itemLocked = isItemDisabled(group.id, item.id);
+                    return (
+                      <a
+                        key={item.id}
+                        href={itemLocked ? `${urls.web}/billing` : item.href}
+                        className={`block px-3 py-1.5 text-sm transition-colors ${itemLocked ? "opacity-40" : isItemActive(item.href) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                      >
+                        {item.label}
+                      </a>
+                    );
+                  })}
+                </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </nav>
+
+      <div className="border-t border-border py-3 w-full flex flex-col items-center gap-2">
+        <button onClick={handleLogout} className="flex items-center justify-center w-10 h-10 rounded-md text-muted-foreground hover:text-destructive cursor-pointer transition-colors" title="Logout">
           <Icons.LogOut />
-          <span>Logout</span>
+        </button>
+        <button onClick={() => setCollapsed(false)} className="flex items-center justify-center w-10 h-10 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer transition-colors" title="Expand">
+          <Icons.Expand />
         </button>
       </div>
     </div>
@@ -239,17 +320,17 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
         <Icons.Menu />
       </button>
 
-      {/* Mobile overlay */}
+      {/* Mobile overlay — always expanded */}
       {mobileOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
-          <div className="relative h-full">{sidebarContent}</div>
+          <div className="relative h-full">{renderExpandedContent()}</div>
         </div>
       )}
 
       {/* Desktop sidebar */}
-      <div className="hidden md:block h-screen sticky top-0">
-        {sidebarContent}
+      <div className="hidden md:block h-screen sticky top-0 transition-all duration-200">
+        {collapsed ? renderCollapsedContent() : renderExpandedContent()}
       </div>
     </>
   );

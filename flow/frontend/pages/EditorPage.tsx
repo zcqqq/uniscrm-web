@@ -4,8 +4,11 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { useFlowEditor } from "../store/flow-editor";
 import { api } from "../lib/api";
 import { FLOW_TEMPLATES } from "../config/templates";
-import AiGenerateBar from "../../../shared/frontend/components/AiGenerateBar";
-import { MoreVerticalIcon } from "../../../shared/frontend/ui/icons";
+import AiGenerateBar from "../../../shared/frontend/components/BarAiGenerate";
+import { Button } from "../../../shared/frontend/ui/button";
+import { Skeleton } from "../../../shared/frontend/ui/skeleton";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
+import { MoreVertical as MoreVerticalIcon } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import Canvas from "../components/Canvas";
 import Inspector from "../components/Inspector";
@@ -69,12 +72,9 @@ function EditorToolbar() {
 
   return (
     <div className="flex items-center h-12 px-4 border-b border-border bg-card gap-3">
-      <button
-        onClick={handleBack}
-        className="text-sm text-muted-foreground hover:text-foreground"
-      >
+      <Button variant="ghost" size="sm" onClick={handleBack}>
         ← Back
-      </button>
+      </Button>
       <input
         value={flowName}
         onChange={(e) => setFlowName(e.target.value)}
@@ -92,7 +92,8 @@ function EditorToolbar() {
         }}
       />
       {isDirty && <span className="text-xs text-amber-500">Unsaved</span>}
-      <button
+      <Button
+        size="sm"
         onClick={async () => {
           await handleSave();
           if (flowId) {
@@ -100,25 +101,24 @@ function EditorToolbar() {
             navigate(`/flows/${flowId}/analytics`);
           }
         }}
-        className="px-3 py-1.5 bg-primary text-primary-foreground rounded text-sm font-medium hover:bg-primary/90"
       >
         Publish
-      </button>
-      <div className="relative">
-        <button
-          onClick={() => setMenuOpen(!menuOpen)}
-          className="p-1.5 rounded hover:bg-accent text-muted-foreground"
-        ><MoreVerticalIcon /></button>
-        {menuOpen && (
-          <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-md shadow-lg z-20 min-w-[100px]">
-            <button
-              onClick={() => { setMenuOpen(false); handleSave(); }}
-              disabled={saving}
-              className="w-full text-left px-3 py-2 text-sm hover:bg-accent text-foreground"
-            >{saving ? "Saving..." : "Save"}</button>
-          </div>
-        )}
-      </div>
+      </Button>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8">
+            <MoreVerticalIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            onClick={() => { setMenuOpen(false); handleSave(); }}
+            disabled={saving}
+          >
+            {saving ? "Saving..." : "Save"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -165,7 +165,7 @@ export default function EditorPage() {
   }, [id, searchParams, setFlow]);
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen text-muted-foreground">Loading...</div>;
+    return <div className="flex items-center justify-center h-screen"><Skeleton className="h-8 w-48" /></div>;
   }
   if (error) {
     return <div className="flex items-center justify-center h-screen text-destructive">{error}</div>;

@@ -10,7 +10,7 @@ export function usersRoutes() {
     if (!tdb) return c.json({ users: [], total: 0, page: 1, totalPages: 0 });
 
     const page = Math.max(1, parseInt(c.req.query("page") || "1", 10));
-    const limit = Math.min(100, Math.max(1, parseInt(c.req.query("limit") || "20", 10)));
+    const limit = Math.min(100, Math.max(1, parseInt(c.req.query("limit") || "10", 10)));
     const offset = (page - 1) * limit;
 
     const countRows = await tdb.query<{ total: number }>("SELECT COUNT(*) as total FROM user");

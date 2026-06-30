@@ -1,11 +1,17 @@
 import { useRecommendations } from "../hooks/useRecommendations";
 import { useAuth } from "../hooks/useAuth";
+import { Badge } from "../../../shared/frontend/ui/badge";
+import { Select } from "../../../shared/frontend/ui/select";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
+import { Skeleton } from "../../../shared/frontend/ui/skeleton";
+import { PageHeader } from "../../../shared/frontend/components/PageHeader";
+import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 
 function ScoreBadge({ score }: { score: number }) {
   return (
-    <span className="text-xs font-mono bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded">
+    <Badge variant="secondary" className="font-mono">
       {(score * 100).toFixed(0)}%
-    </span>
+    </Badge>
   );
 }
 
@@ -14,43 +20,53 @@ export function Home() {
   const { recommendations, loading } = useRecommendations();
 
   if (loading) {
-    return <div className="max-w-5xl mx-auto p-8"><p className="text-muted-foreground">Loading recommendations...</p></div>;
+    return (
+      <div className="max-w-5xl mx-auto p-8 space-y-4">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
   }
 
   if (recommendations.length === 0) {
     return (
       <div className="max-w-5xl mx-auto p-8">
-        <h1 className="text-2xl font-bold mb-4">Recommendations</h1>
-        <p className="text-muted-foreground">No recommendations yet. Import content and products, then wait for trend matching.</p>
+        <PageHeader title="Recommendations" />
+        <EmptyState
+          title="No recommendations yet"
+          description="Import content and products, then wait for trend matching."
+        />
       </div>
     );
   }
 
   return (
     <div className="max-w-5xl mx-auto p-8">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Top Recommendations</h1>
-        <select
-          value={member?.preferred_location}
-          onChange={(e) => updateLocation(e.target.value)}
-          className="text-sm border rounded px-3 py-1.5"
-        >
-          <option value="global">Global</option>
-          <option value="china">China</option>
-        </select>
-      </div>
-      <table className="w-full text-sm border-collapse">
-        <thead>
-          <tr className="border-b text-left">
-            <th className="py-2 px-3 font-medium w-1/3">Trend</th>
-            <th className="py-2 px-3 font-medium w-1/3">Content</th>
-            <th className="py-2 px-3 font-medium w-1/3">Product</th>
-          </tr>
-        </thead>
-        <tbody>
+      <PageHeader
+        title="Top Recommendations"
+        actions={
+          <Select
+            value={member?.preferred_location}
+            onChange={(e) => updateLocation(e.target.value)}
+            className="text-sm"
+          >
+            <option value="global">Global</option>
+            <option value="china">China</option>
+          </Select>
+        }
+      />
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-1/3">Trend</TableHead>
+            <TableHead className="w-1/3">Content</TableHead>
+            <TableHead className="w-1/3">Product</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {recommendations.map((group, i) => (
-            <tr key={i} className="border-b hover:bg-background">
-              <td className="py-3 px-3">
+            <TableRow key={i}>
+              <TableCell>
                 {group.trend ? (
                   <div>
                     <div className="font-medium">{group.trend.title}</div>
@@ -62,8 +78,8 @@ export function Home() {
                 ) : (
                   <span className="text-muted-foreground/40">{"—"}</span>
                 )}
-              </td>
-              <td className="py-3 px-3">
+              </TableCell>
+              <TableCell>
                 {group.content ? (
                   <div>
                     <div className="font-medium truncate max-w-xs">{group.content.title}</div>
@@ -72,8 +88,8 @@ export function Home() {
                 ) : (
                   <span className="text-muted-foreground/40">{"—"}</span>
                 )}
-              </td>
-              <td className="py-3 px-3">
+              </TableCell>
+              <TableCell>
                 {group.product ? (
                   <div>
                     <div className="font-medium truncate max-w-xs">{group.product.title}</div>
@@ -82,11 +98,11 @@ export function Home() {
                 ) : (
                   <span className="text-muted-foreground/40">{"—"}</span>
                 )}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }

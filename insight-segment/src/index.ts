@@ -60,7 +60,7 @@ app.get("/api/auth/me", async (c) => {
 app.get("/api/segments", async (c) => {
   const tenantId = c.get("tenantId");
   const page = Math.max(1, parseInt(c.req.query("page") || "1", 10));
-  const limit = Math.min(50, Math.max(1, parseInt(c.req.query("limit") || "20", 10)));
+  const limit = Math.min(50, Math.max(1, parseInt(c.req.query("limit") || "10", 10)));
   const offset = (page - 1) * limit;
 
   const countRow = await c.env.WEB_DB.prepare(

@@ -2,6 +2,12 @@ import { useState, useEffect } from "react";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { listDashboards, createDashboard, getDashboard, deleteDashboard, updateDashboardItem, deleteDashboardItem, type Dashboard, type DashboardItem } from "../lib/api";
 import { useLocale } from "../hooks/useLocale";
+import { Button } from "../../../shared/frontend/ui/button";
+import { Input } from "../../../shared/frontend/ui/input";
+import { Card, CardContent } from "../../../shared/frontend/ui/card";
+import { Skeleton } from "../../../shared/frontend/ui/skeleton";
+import { EmptyState } from "../../../shared/frontend/components/EmptyState";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
 
 const UI = {
   en: { allDashboards: "All Dashboards", search: "Search", delete: "Delete", noData: "No data", remove: "Remove", empty: "Select or create a dashboard", noItems: "No charts yet. Add reports from Analytics." },
@@ -69,7 +75,7 @@ export function DashboardPage() {
 
   const filtered = dashboards.filter((d) => d.name.toLowerCase().includes(search.toLowerCase()));
 
-  if (loading) return <div className="p-6 text-muted-foreground text-sm">Loading...</div>;
+  if (loading) return <div className="p-6 space-y-4"><Skeleton className="h-8 w-48" /><Skeleton className="h-64 w-full" /></div>;
 
   return (
     <div className="flex h-full">
@@ -78,25 +84,26 @@ export function DashboardPage() {
         <div className="px-4 py-3 border-b border-border">
           <div className="text-sm font-medium text-primary mb-2">{s.allDashboards}</div>
           <div className="flex gap-2">
-            <input
+            <Input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={s.search}
-              className="flex-1 text-xs border border-border rounded px-2 py-1"
+              className="h-7 flex-1 text-xs"
             />
-            <button onClick={handleCreate} className="w-6 h-6 flex items-center justify-center bg-primary text-white rounded text-xs font-bold">+</button>
+            <Button size="icon" className="h-7 w-7 shrink-0" onClick={handleCreate}>+</Button>
           </div>
         </div>
         <div className="flex-1 overflow-auto py-1">
           {filtered.map((d) => (
-            <button
+            <Button
               key={d.id}
+              variant={activeDashId === d.id ? "secondary" : "ghost"}
               onClick={() => setActiveDashId(d.id)}
-              className={`w-full text-left px-4 py-2 text-sm transition-colors ${activeDashId === d.id ? "bg-primary/10 text-primary font-medium" : "text-foreground hover:bg-muted"}`}
+              className={`w-full justify-start rounded-none px-4 ${activeDashId === d.id ? "text-primary font-medium" : ""}`}
             >
               {d.name}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
@@ -104,16 +111,18 @@ export function DashboardPage() {
       {/* Main area */}
       <div className="flex-1 overflow-auto">
         {!activeDashboard ? (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">{s.empty}</div>
+          <div className="flex items-center justify-center h-full">
+            <EmptyState title={s.empty} />
+          </div>
         ) : (
           <div className="p-6">
             <div className="flex items-center justify-between mb-6">
               <h1 className="text-xl font-bold text-foreground">{activeDashboard.name}</h1>
-              <button onClick={handleDelete} className="text-sm text-destructive hover:text-red-700">{s.delete}</button>
+              <Button variant="destructive" size="sm" onClick={handleDelete}>{s.delete}</Button>
             </div>
 
             {items.length === 0 ? (
-              <div className="text-center py-16 text-muted-foreground text-sm">{s.noItems}</div>
+              <EmptyState title={s.noItems} />
             ) : (
               <div className="grid grid-cols-4 gap-4">
                 {items.map((item) => (
@@ -138,49 +147,54 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
     : [];
 
   return (
-    <div className={`${colSpan} bg-card rounded-lg border border-border p-4 relative`}>
-      <div className="flex items-start justify-between mb-2">
-        <div>
-          <div className="text-sm font-medium text-foreground">{item.report_name || `${item.type} #${item.report_id.slice(0, 8)}`}</div>
-          {item.params && (item.params as any).time_range_start && (
-            <div className="text-xs text-muted-foreground mt-0.5">{(item.params as any).time_range_start} ~ {(item.params as any).time_range_end || "now"}</div>
-          )}
-        </div>
-        <button onClick={() => setMenuOpen(!menuOpen)} className="text-muted-foreground hover:text-foreground text-lg leading-none px-1">⋯</button>
-      </div>
-
-      {menuOpen && (
-        <div className="absolute top-10 right-4 bg-card border border-border rounded-lg shadow-lg z-10 py-1 w-32">
-          <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border">
-            {SIZES.map((sz) => (
-              <button
-                key={sz.value}
-                onClick={() => { onSizeChange(sz.value); setMenuOpen(false); }}
-                className={`px-2 py-0.5 text-xs rounded ${item.size === sz.value ? "bg-primary text-white" : "text-muted-foreground hover:bg-muted"}`}
-              >
-                {sz.label}
-              </button>
-            ))}
+    <Card className={`${colSpan} relative`}>
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between mb-2">
+          <div>
+            <div className="text-sm font-medium text-foreground">{item.report_name || `${item.type} #${item.report_id.slice(0, 8)}`}</div>
+            {item.params && (item.params as any).time_range_start && (
+              <div className="text-xs text-muted-foreground mt-0.5">{(item.params as any).time_range_start} ~ {(item.params as any).time_range_end || "now"}</div>
+            )}
           </div>
-          <button onClick={() => { onRemove(); setMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-sm text-destructive hover:bg-muted">
-            {s.remove}
-          </button>
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-6 w-6">⋯</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border">
+                {SIZES.map((sz) => (
+                  <Button
+                    key={sz.value}
+                    variant={item.size === sz.value ? "default" : "ghost"}
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => { onSizeChange(sz.value); setMenuOpen(false); }}
+                  >
+                    {sz.label}
+                  </Button>
+                ))}
+              </div>
+              <DropdownMenuItem onClick={onRemove} className="text-destructive focus:text-destructive">
+                {s.remove}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      )}
 
-      {chartData.length > 0 ? (
-        <ResponsiveContainer width="100%" height={item.size === "small" ? 80 : 140}>
-          <AreaChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.4} />
-            <XAxis dataKey="period" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} />
-            <YAxis tick={{ fontSize: 9 }} tickLine={false} axisLine={false} width={28} />
-            <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11 }} />
-            <Area type="monotone" dataKey="value" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.1} strokeWidth={2} dot={{ r: 2 }} />
-          </AreaChart>
-        </ResponsiveContainer>
-      ) : (
-        <div className="flex items-center justify-center h-20 text-muted-foreground text-xs">{s.noData}</div>
-      )}
-    </div>
+        {chartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={item.size === "small" ? 80 : 140}>
+            <AreaChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.4} />
+              <XAxis dataKey="period" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontSize: 9 }} tickLine={false} axisLine={false} width={28} />
+              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11 }} />
+              <Area type="monotone" dataKey="value" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.1} strokeWidth={2} dot={{ r: 2 }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex items-center justify-center h-20 text-muted-foreground text-xs">{s.noData}</div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

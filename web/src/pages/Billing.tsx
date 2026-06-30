@@ -4,6 +4,9 @@ import { useBilling } from "../hooks/useBilling";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "../../../shared/frontend/ui/card";
 import { Badge } from "../../../shared/frontend/ui/badge";
+import { Alert, AlertDescription } from "../../../shared/frontend/ui/alert";
+import { PageHeader } from "../../../shared/frontend/components/PageHeader";
+import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 import { isActive, getTierDescriptions } from "../../../shared/plans";
 import type { SubStatus } from "../../../shared/plans";
 
@@ -27,7 +30,16 @@ export function Billing() {
   }, [subscription?.tier]);
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading...</div>;
+    return (
+      <div className="max-w-4xl mx-auto p-8 space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-4 w-72" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
+          <Skeleton className="h-64 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      </div>
+    );
   }
 
   const rawTier = subscription?.tier;
@@ -38,7 +50,7 @@ export function Billing() {
   if (locked) {
     return (
       <div className="max-w-4xl mx-auto p-8">
-        <h1 className="text-2xl font-bold text-foreground mb-2">Billing</h1>
+        <PageHeader title="Billing" />
         <div className="mt-8 p-8 border border-destructive/30 bg-destructive/5 rounded-lg text-center">
           <h2 className="text-xl font-semibold text-foreground mb-2">Your trial has expired</h2>
           <p className="text-muted-foreground mb-6">Subscribe to continue using UniSCRM.</p>
@@ -56,7 +68,7 @@ export function Billing() {
                   <ul className="space-y-1.5">
                     {getTierDescriptions(plan.tier as "basic" | "pro").map((f, i) => (
                       <li key={f} className={`text-sm flex gap-2 ${f.startsWith("All in") ? "text-foreground font-medium mb-1" : "text-muted-foreground"}`}>
-                        {!f.startsWith("All in") && <span className="text-green-500">✓</span>}{f}
+                        {!f.startsWith("All in") && <span className="text-primary">✓</span>}{f}
                       </li>
                     ))}
                   </ul>
@@ -74,18 +86,17 @@ export function Billing() {
 
   return (
     <div className="max-w-4xl mx-auto p-8">
-      <h1 className="text-2xl font-bold text-foreground mb-2">Billing</h1>
-      <p className="text-muted-foreground mb-8">Manage your subscription plan</p>
+      <PageHeader title="Billing" description="Manage your subscription plan" />
 
       {success && (
-        <div className="mb-6 p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-md text-green-800 dark:text-green-200 text-sm">
-          Subscription activated successfully!
-        </div>
+        <Alert className="mb-6 border-primary/30 bg-primary/5 text-primary">
+          <AlertDescription>Subscription activated successfully!</AlertDescription>
+        </Alert>
       )}
       {cancelled && (
-        <div className="mb-6 p-4 bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-md text-yellow-800 dark:text-yellow-200 text-sm">
-          Subscription was not completed.
-        </div>
+        <Alert className="mb-6 border-muted-foreground/30 bg-muted text-muted-foreground">
+          <AlertDescription>Subscription was not completed.</AlertDescription>
+        </Alert>
       )}
 
       {currentTier && <Card className="mb-8">
@@ -136,7 +147,7 @@ export function Billing() {
                 <ul className="space-y-2">
                   {features.map((f) => (
                     <li key={f} className={`flex items-start gap-2 text-sm ${f.startsWith("All in") ? "text-foreground font-medium mb-1" : "text-muted-foreground"}`}>
-                      {!f.startsWith("All in") && <span className="text-green-500 dark:text-green-400 mt-0.5">✓</span>}
+                      {!f.startsWith("All in") && <span className="text-primary mt-0.5">✓</span>}
                       {f}
                     </li>
                   ))}

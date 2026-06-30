@@ -3,11 +3,17 @@ import { useNavigate } from "react-router-dom";
 import { useFlows } from "../hooks/useFlows";
 import { FLOW_TEMPLATES, type FlowTemplate } from "../config/templates";
 import { Nav } from "../components/Nav";
-import { formatDateTime } from "../../../shared/frontend/lib/format-time";
+import { DateCell } from "../../../shared/frontend/components/CellDate";
+import { StatusCell } from "../../../shared/frontend/components/CellStatus";
+import { OperationCell } from "../../../shared/frontend/components/CellOperation";
+import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 import { Button } from "../../../shared/frontend/ui/button";
-import { Badge } from "../../../shared/frontend/ui/badge";
-import { EditIcon, MoreVerticalIcon, XIcon, SearchIcon, ClockIcon, ListIcon } from "../../../shared/frontend/ui/icons";
-import type { FlowSummary } from "../lib/api";
+import { TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
+import { DataTable } from "../../../shared/frontend/components/DataTable";
+import { Card, CardContent } from "../../../shared/frontend/ui/card";
+import { Skeleton } from "../../../shared/frontend/ui/skeleton";
+import { Pencil as EditIcon, Search as SearchIcon, Clock as ClockIcon, List as ListIcon } from "lucide-react";
+import { XIcon } from "../../../shared/frontend/ui/icons";
 
 function getNodeIcon(type: string, data: Record<string, unknown>) {
   if (type === "xTrigger") return XIcon;
@@ -22,7 +28,7 @@ function getNodeIcon(type: string, data: Record<string, unknown>) {
 }
 
 function getNodeIcons(nodes: { type: string; data: Record<string, unknown> }[]) {
-  const icons: Array<typeof XIcon> = [];
+  const icons: Array<React.ComponentType<{ className?: string }>> = [];
   for (const n of nodes) {
     if (icons.length >= 3) break;
     icons.push(getNodeIcon(n.type, n.data));
@@ -36,11 +42,10 @@ type SortDir = "asc" | "desc";
 
 export default function FlowsPage() {
   useEffect(() => { document.title = "Flow — UniSCRM"; }, []);
-  const { flows, loading, page, totalPages, setPage, createFlow, deleteFlow } = useFlows();
+  const { flows, loading, page, total, totalPages, setPage, createFlow, deleteFlow } = useFlows();
   const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<SortKey>("updated_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
   const handleCreate = (template?: FlowTemplate) => {
     if (template) {
@@ -88,129 +93,102 @@ export default function FlowsPage() {
             {FLOW_TEMPLATES.map((tpl) => {
               const { icons, extra } = getNodeIcons(tpl.graph.nodes);
               return (
-                <div
+                <Card
                   key={tpl.id}
                   onClick={() => handleCreate(tpl)}
-                  className="border-2 border-primary/40 hover:border-primary rounded-lg p-4 transition-all text-left bg-card hover:shadow-sm cursor-pointer flex flex-col"
+                  className="border-2 border-primary/40 hover:border-primary transition-all cursor-pointer flex flex-col"
                 >
-                  <span className="text-sm font-medium text-foreground block mb-1">{tpl.name}</span>
-                  <p className="text-xs text-muted-foreground line-clamp-2 mb-3 flex-1">{tpl.description}</p>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      {icons.map((Icon, i) => (
-                        <span key={i} className="w-6 h-6 flex items-center justify-center rounded bg-muted text-muted-foreground"><Icon className="w-3.5 h-3.5" /></span>
-                      ))}
-                      {extra > 0 && (
-                        <span className="w-6 h-6 flex items-center justify-center rounded bg-muted text-[10px] text-muted-foreground">+{extra}</span>
-                      )}
+                  <CardContent className="p-4 flex flex-col flex-1">
+                    <span className="text-sm font-medium text-foreground block mb-1">{tpl.name}</span>
+                    <p className="text-xs text-muted-foreground line-clamp-2 mb-3 flex-1">{tpl.description}</p>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        {icons.map((Icon, i) => (
+                          <span key={i} className="w-6 h-6 flex items-center justify-center rounded bg-muted text-muted-foreground"><Icon className="w-3.5 h-3.5" /></span>
+                        ))}
+                        {extra > 0 && (
+                          <span className="w-6 h-6 flex items-center justify-center rounded bg-muted text-[10px] text-muted-foreground">+{extra}</span>
+                        )}
+                      </div>
+                      <Button size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleCreate(tpl); }}>Use</Button>
                     </div>
-                    <Button size="sm" onClick={(e) => { e.stopPropagation(); handleCreate(tpl); }}>Use</Button>
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               );
             })}
           </div>
 
           {/* Table */}
           {loading ? (
-            <p className="text-muted-foreground text-sm">Loading...</p>
-          ) : flows.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <p>No workflows yet.</p>
-              <p className="text-sm mt-1">Create one to get started.</p>
+            <div className="space-y-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
             </div>
+          ) : flows.length === 0 ? (
+            <EmptyState
+              title="No workflows yet"
+              description="Create one to get started."
+              action={<Button onClick={() => handleCreate()}>+ New</Button>}
+            />
           ) : (
             <>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-muted-foreground">
-                    <th className="py-3 pr-4 font-medium">Name</th>
-                    <th className="py-3 pr-4 font-medium">Status</th>
-                    <th className="py-3 pr-4 font-medium cursor-pointer select-none" onClick={() => toggleSort("trigger_count")}>
+              <DataTable total={total} page={page} totalPages={totalPages} onPageChange={setPage}>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("trigger_count")}>
                       No. Triggered<SortIcon active={sortKey === "trigger_count"} dir={sortDir} />
-                    </th>
-                    <th className="py-3 pr-4 font-medium cursor-pointer select-none" onClick={() => toggleSort("updated_at")}>
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("updated_at")}>
                       Updated At<SortIcon active={sortKey === "updated_at"} dir={sortDir} />
-                    </th>
-                    <th className="py-3 pr-4 font-medium">Updated By</th>
-                    <th className="py-3 font-medium text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
+                    </TableHead>
+                    <TableHead>Updated By</TableHead>
+                    <TableHead className="text-right">Operations</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {sorted.map((flow) => {
                     const isPublished = flow.status === "published";
                     return (
-                      <tr
+                      <TableRow
                         key={flow.id}
-                        className="border-b border-border hover:bg-accent/50 transition-colors cursor-pointer"
+                        className="cursor-pointer"
                         onClick={() => navigate(isPublished ? `/flows/${flow.id}/analytics` : `/flows/${flow.id}`)}
                       >
-                        <td className="py-4 pr-4 font-medium text-foreground">{flow.name}</td>
-                        <td className="py-4 pr-4">
-                          <Badge variant={isPublished ? "default" : "secondary"} className={isPublished ? "bg-green-100 text-green-700 border-0" : ""}>
-                            {isPublished ? "Published" : "Draft"}
-                          </Badge>
-                        </td>
-                        <td className="py-4 pr-4 text-muted-foreground">{flow.trigger_count || "-"}</td>
-                        <td className="py-4 pr-4 text-muted-foreground">
-                          <div>{formatDateTime(flow.updated_at, Intl.DateTimeFormat().resolvedOptions().timeZone)}</div>
-                        </td>
-                        <td className="py-4 pr-4 text-muted-foreground">{flow.member_email || "-"}</td>
-                        <td className="py-4 text-right relative" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-1">
-                            {isPublished ? (
-                              <button
-                                onClick={() => {/* duplicate */}}
-                                className="p-1.5 rounded hover:bg-accent text-muted-foreground"
-                                title="Duplicate"
-                              ><svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg></button>
-                            ) : (
-                              <button
-                                onClick={() => navigate(`/flows/${flow.id}`)}
-                                className="p-1.5 rounded hover:bg-accent text-muted-foreground"
-                                title="Edit"
-                              ><EditIcon /></button>
-                            )}
-                            <button
-                              onClick={() => setMenuOpen(menuOpen === flow.id ? null : flow.id)}
-                              className="p-1.5 rounded hover:bg-accent text-muted-foreground"
-                            ><MoreVerticalIcon /></button>
-                          </div>
-                          {menuOpen === flow.id && (
-                            <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-md shadow-lg z-20 min-w-[120px]">
-                              {isPublished ? (
-                                <button
-                                  onClick={() => { setMenuOpen(null); fetch(`/api/flows/${flow.id}/unpublish`, { method: "POST", credentials: "include" }).then(() => window.location.reload()); }}
-                                  className="w-full text-left px-3 py-2 text-sm hover:bg-accent text-destructive"
-                                >Stop</button>
-                              ) : (
-                                <>
-                                  <button
-                                    onClick={() => { setMenuOpen(null); fetch(`/api/flows/${flow.id}/publish`, { method: "POST", credentials: "include" }).then(() => window.location.reload()); }}
-                                    className="w-full text-left px-3 py-2 text-sm hover:bg-accent text-foreground"
-                                  >Publish</button>
-                                  <button
-                                    onClick={() => { setMenuOpen(null); if (confirm("Delete this flow?")) deleteFlow(flow.id); }}
-                                    className="w-full text-left px-3 py-2 text-sm hover:bg-accent text-destructive"
-                                  >Delete</button>
-                                </>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
+                        <TableCell className="font-medium text-foreground">{flow.name}</TableCell>
+                        <TableCell>
+                          <StatusCell status={isPublished ? "published" : "draft"} label={isPublished ? "Published" : "Draft"} />
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">{flow.trigger_count || "-"}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          <DateCell iso={flow.updated_at} timezone={Intl.DateTimeFormat().resolvedOptions().timeZone} />
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">{flow.member_email || "-"}</TableCell>
+                        <TableCell className="text-right">
+                          <OperationCell
+                            status={flow.status}
+                            operations={{
+                              published: {
+                                primary: { icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg>, title: "Duplicate", onClick: () => {} },
+                                menu: [{ label: "Stop", onClick: () => fetch(`/api/flows/${flow.id}/unpublish`, { method: "POST", credentials: "include" }).then(() => window.location.reload()), destructive: true }],
+                              },
+                              draft: {
+                                primary: { icon: <EditIcon />, title: "Edit", onClick: () => navigate(`/flows/${flow.id}`) },
+                                menu: [
+                                  { label: "Publish", onClick: () => fetch(`/api/flows/${flow.id}/publish`, { method: "POST", credentials: "include" }).then(() => window.location.reload()) },
+                                  { label: "Delete", onClick: () => { if (confirm("Delete this flow?")) deleteFlow(flow.id); }, destructive: true },
+                                ],
+                              },
+                            }}
+                          />
+                        </TableCell>
+                      </TableRow>
                     );
                   })}
-                </tbody>
-              </table>
-
-              {totalPages > 1 && (
-                <div className="flex items-center justify-end gap-2 mt-4">
-                  <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>←</Button>
-                  <span className="text-sm text-muted-foreground">{page} / {totalPages}</span>
-                  <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>→</Button>
-                </div>
-              )}
+                </TableBody>
+              </DataTable>
             </>
           )}
         </div>

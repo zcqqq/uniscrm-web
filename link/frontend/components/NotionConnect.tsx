@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
 import { useNotion } from "../hooks/useNotion";
 import { ConfirmOverflow } from "./ConfirmOverflow";
+import { Button } from "../../../shared/frontend/ui/button";
+import { Card, CardContent } from "../../../shared/frontend/ui/card";
+import { Checkbox } from "../../../shared/frontend/ui/checkbox";
+import { Label } from "../../../shared/frontend/ui/label";
 
 interface Props {
   onSyncComplete: () => void;
@@ -32,16 +36,15 @@ export function NotionConnect({ onSyncComplete }: Props) {
 
   if (!connected) {
     return (
-      <div className="border-2 border-dashed rounded-lg p-6 text-center border-gray-300">
-        <div className="text-sm font-medium text-gray-700 mb-2">Notion</div>
-        <p className="text-gray-500 text-sm mb-3">Connect to sync your notes</p>
-        <button
-          onClick={startAuth}
-          className="px-3 py-1.5 text-sm bg-black text-white rounded-md hover:bg-gray-800"
-        >
-          Connect Notion
-        </button>
-      </div>
+      <Card className="border-2 border-dashed">
+        <CardContent className="p-6 text-center">
+          <div className="text-sm font-medium text-foreground mb-2">Notion</div>
+          <p className="text-muted-foreground text-sm mb-3">Connect to sync your notes</p>
+          <Button size="sm" onClick={startAuth}>
+            Connect Notion
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 
@@ -68,85 +71,72 @@ export function NotionConnect({ onSyncComplete }: Props) {
   };
 
   return (
-    <div className="border rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <span className="text-sm font-medium text-gray-700">Notion</span>
-          {workspaceName && (
-            <span className="text-xs text-gray-400 ml-2">{workspaceName}</span>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={handleOpenFolders}
-            className="px-3 py-1 text-xs border rounded hover:bg-gray-50"
-          >
-            Select
-          </button>
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-          >
-            {syncing ? "Syncing..." : "Sync"}
-          </button>
-        </div>
-      </div>
-
-      {syncResult && (
-        <div className="text-xs text-gray-500">
-          Added: {syncResult.added}, Updated: {syncResult.updated}, Skipped:{" "}
-          {syncResult.skipped}
-        </div>
-      )}
-
-      {showFolders && (
-        <div className="mt-3 pt-3 border-t">
-          <h4 className="text-sm font-medium mb-2">Select databases</h4>
-          {folders.length === 0 ? (
-            <p className="text-sm text-gray-400">No databases found</p>
-          ) : (
-            <div className="max-h-40 overflow-y-auto space-y-1 mb-3">
-              {folders.map((f) => (
-                <label key={f.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={localSelection.includes(f.id)}
-                    onChange={() => handleToggleFolder(f.id)}
-                  />
-                  {f.title}
-                </label>
-              ))}
-            </div>
-          )}
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <span className="text-sm font-medium text-foreground">Notion</span>
+            {workspaceName && (
+              <span className="text-xs text-muted-foreground ml-2">{workspaceName}</span>
+            )}
+          </div>
           <div className="flex gap-2">
-            <button
-              onClick={handleConfirmFolders}
-              className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
-            >
-              Confirm
-            </button>
-            <button
-              onClick={() => setShowFolders(false)}
-              className="px-3 py-1 text-xs border rounded hover:bg-gray-50"
-            >
-              Cancel
-            </button>
+            <Button variant="outline" size="sm" onClick={handleOpenFolders}>
+              Select
+            </Button>
+            <Button size="sm" onClick={handleSync} disabled={syncing}>
+              {syncing ? "Syncing..." : "Sync"}
+            </Button>
           </div>
         </div>
-      )}
 
-      {overflowInfo && (
-        <ConfirmOverflow
-          overflow={overflowInfo.overflow}
-          wouldDelete={overflowInfo.wouldDelete}
-          onConfirm={async () => {
-            await confirmSync();
-            onSyncComplete();
-          }}
-          onCancel={cancelSync}
-        />
-      )}
-    </div>
+        {syncResult && (
+          <p className="text-xs text-muted-foreground">
+            Added: {syncResult.added}, Updated: {syncResult.updated}, Skipped: {syncResult.skipped}
+          </p>
+        )}
+
+        {showFolders && (
+          <div className="mt-3 pt-3 border-t border-border">
+            <h4 className="text-sm font-medium mb-2">Select databases</h4>
+            {folders.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No databases found</p>
+            ) : (
+              <div className="max-h-40 overflow-y-auto space-y-1 mb-3">
+                {folders.map((f) => (
+                  <Label key={f.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox
+                      checked={localSelection.includes(f.id)}
+                      onCheckedChange={() => handleToggleFolder(f.id)}
+                    />
+                    {f.title}
+                  </Label>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleConfirmFolders}>
+                Confirm
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setShowFolders(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {overflowInfo && (
+          <ConfirmOverflow
+            overflow={overflowInfo.overflow}
+            wouldDelete={overflowInfo.wouldDelete}
+            onConfirm={async () => {
+              await confirmSync();
+              onSyncComplete();
+            }}
+            onCancel={cancelSync}
+          />
+        )}
+      </CardContent>
+    </Card>
   );
 }

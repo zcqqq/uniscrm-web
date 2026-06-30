@@ -1,8 +1,17 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { listReports, deleteReport, type ReportSummary } from "../lib/api";
 import { useLocale } from "../hooks/useLocale";
-import { formatDateTime } from "../../../shared/frontend/lib/format-time";
+import { DateCell } from "../../../shared/frontend/components/CellDate";
+import { StatusCell } from "../../../shared/frontend/components/CellStatus";
+import { OperationCell, type OperationsByStatus } from "../../../shared/frontend/components/CellOperation";
+import { Button } from "../../../shared/frontend/ui/button";
+import { Badge } from "../../../shared/frontend/ui/badge";
+import { TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
+import { DataTable } from "../../../shared/frontend/components/DataTable";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
+import { EmptyState } from "../../../shared/frontend/components/EmptyState";
+import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 
 const UI = {
   en: { newBtn: "New", event: "Event Analysis", interval: "Interval Analysis", name: "Name", type: "Type", status: "Status", created: "Created", empty: "No reports yet", createFirst: "Create your first analysis" },
@@ -19,26 +28,18 @@ export function AnalyticsList() {
   const [loading, setLoading] = useState(true);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
-  const dropRef = useRef<HTMLDivElement>(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
   useEffect(() => {
-    listReports(1).then((d) => setReports(d.reports)).finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setDropdownOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    if (!confirm("Delete?")) return;
-    await deleteReport(id);
-    setReports((prev) => prev.filter((r) => r.id !== id));
-  };
+    setLoading(true);
+    listReports(page).then((d) => {
+      setReports(d.reports);
+      setTotal(d.total);
+      setTotalPages(d.totalPages);
+    }).finally(() => setLoading(false));
+  }, [page]);
 
   const toggleSort = () => setSortDir((d) => d === "desc" ? "asc" : "desc");
 
@@ -47,105 +48,87 @@ export function AnalyticsList() {
     return sortDir === "desc" ? -cmp : cmp;
   });
 
+  const getOperations = (id: string): OperationsByStatus => ({
+    ready: { menu: [{ label: "Delete", onClick: () => handleDelete(id), destructive: true }] },
+    error: { menu: [{ label: "Delete", onClick: () => handleDelete(id), destructive: true }] },
+    "*": { menu: [] },
+  });
+
+  const handleDelete = (id: string) => {
+    if (confirm("Delete?")) deleteReport(id).then(() => setReports((p) => p.filter((x) => x.id !== id)));
+  };
+
   return (
     <div className="max-w-6xl mx-auto p-6">
       <div className="flex items-center gap-4 mb-6">
-        <div className="relative" ref={dropRef}>
-          <button
-            onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
-          >
-            + {s.newBtn}
-          </button>
-          {dropdownOpen && (
-            <div className="absolute left-0 mt-1 w-48 bg-card border border-border rounded-lg shadow-lg z-10">
-              <button
-                onClick={() => { navigate("/analytics/event/new"); setDropdownOpen(false); }}
-                className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted transition-colors rounded-t-lg"
-              >
-                {s.event}
-              </button>
-              <button
-                onClick={() => { navigate("/analytics/interval/new"); setDropdownOpen(false); }}
-                className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted transition-colors rounded-b-lg"
-              >
-                {s.interval}
-              </button>
-            </div>
-          )}
-        </div>
+        <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm">+ {s.newBtn}</Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={() => navigate("/analytics/event/new")}>
+              {s.event}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate("/analytics/interval/new")}>
+              {s.interval}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {loading ? (
-        <div className="text-muted-foreground text-sm">Loading...</div>
+        <div className="space-y-3">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </div>
       ) : reports.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">
-          <p className="mb-2">{s.empty}</p>
-          <p className="text-sm">{s.createFirst}</p>
-        </div>
+        <EmptyState title={s.empty} description={s.createFirst} />
       ) : (
-        <div className="bg-card rounded-lg border border-border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/30">
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">{s.name}</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">{s.type}</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">{s.status}</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground cursor-pointer select-none" onClick={toggleSort}>
-                  {s.created} {sortDir === "desc" ? "↓" : "↑"}
-                </th>
-                <th className="w-10"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((r) => (
-                <tr
-                  key={r.id}
-                  onClick={() => navigate(`/analytics/${r.id}`)}
-                  className="border-b border-border last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
-                >
-                  <td className="px-4 py-3 font-medium text-foreground">
-                    {(r.params as any).name || `${r.type} #${r.id.slice(0, 8)}`}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${r.type === "event" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"}`}>
-                      {TYPE_LABELS[locale][r.type as keyof typeof TYPE_LABELS["en"]] || r.type}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={r.status} />
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {formatDateTime(r.created_at, timezone)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={(e) => handleDelete(e, r.id)}
-                      className="text-muted-foreground hover:text-destructive transition-colors"
-                    >
-                      ✕
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable total={total} page={page} totalPages={totalPages} onPageChange={setPage}>
+          <TableHeader>
+            <TableRow className="bg-muted/30">
+              <TableHead>{s.name}</TableHead>
+              <TableHead>{s.type}</TableHead>
+              <TableHead>{s.status}</TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={toggleSort}>
+                {s.created} {sortDir === "desc" ? "↓" : "↑"}
+              </TableHead>
+              <TableHead className="text-right">Operations</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((r) => (
+              <TableRow
+                key={r.id}
+                onClick={() => navigate(`/analytics/${r.id}`)}
+                className="cursor-pointer"
+              >
+                <TableCell className="font-medium">
+                  {(r.params as any).name || `${r.type} #${r.id.slice(0, 8)}`}
+                </TableCell>
+                <TableCell>
+                  <Badge variant={r.type === "event" ? "default" : "secondary"}>
+                    {TYPE_LABELS[locale][r.type as keyof typeof TYPE_LABELS["en"]] || r.type}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <StatusCell status={r.status} />
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  <DateCell iso={r.created_at} timezone={timezone} />
+                </TableCell>
+                <TableCell className="text-right">
+                  <OperationCell
+                    status={r.status}
+                    operations={getOperations(r.id)}
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </DataTable>
       )}
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    ready: "bg-green-100 text-green-700",
-    computing: "bg-yellow-100 text-yellow-700",
-    error: "bg-red-100 text-red-700",
-    pending: "bg-gray-100 text-muted-foreground",
-  };
-  return (
-    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${styles[status] || styles.pending}`}>
-      {status}
-    </span>
   );
 }

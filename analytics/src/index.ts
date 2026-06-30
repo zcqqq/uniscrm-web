@@ -58,7 +58,7 @@ app.get("/api/reports", async (c) => {
   const tenantId = c.get("tenantId");
   const type = c.req.query("type");
   const page = Math.max(1, parseInt(c.req.query("page") || "1", 10));
-  const limit = Math.min(50, Math.max(1, parseInt(c.req.query("limit") || "20", 10)));
+  const limit = Math.min(50, Math.max(1, parseInt(c.req.query("limit") || "10", 10)));
   const offset = (page - 1) * limit;
 
   const whereType = type ? " AND type = ?" : "";
@@ -293,26 +293,49 @@ async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<void> {
 
 function buildSQL(type: string, params: Record<string, unknown>, tenantId: string): string {
   if (type === "event") {
-    const { event_type, measure, dimension, granularity, time_range_start, time_range_end } = params as {
+    const { event_type, measure, dimension, granularity, time_range_start, time_range_end, filters } = params as {
       event_type: string; measure: string; dimension?: string; granularity?: string;
       time_range_start?: string; time_range_end?: string;
+      filters?: { field: string; operator: string; value: string; value2?: string }[];
     };
     const gran = granularity || "day";
-    const periodExpr = gran === "month" ? "DATE_TRUNC('month', event_time)"
-      : gran === "week" ? "DATE_TRUNC('week', event_time)"
-      : "DATE_TRUNC('day', event_time)";
+
     const timeFilter = [
       time_range_start ? `AND event_time >= '${time_range_start}'` : "",
       time_range_end ? `AND event_time <= '${time_range_end}'` : "",
     ].join(" ");
+
+    const filterClauses = (filters || []).filter(f => f.field && f.operator).map(f => {
+      if (f.operator === "has value") return `AND ${f.field} IS NOT NULL`;
+      if (f.operator === "no value") return `AND ${f.field} IS NULL`;
+      if (f.operator === "between") return `AND ${f.field} BETWEEN ${f.value} AND ${f.value2 || f.value}`;
+      const op = f.operator === "≠" ? "!=" : f.operator;
+      const val = isNaN(Number(f.value)) ? `'${f.value}'` : f.value;
+      return `AND ${f.field} ${op} ${val}`;
+    }).join(" ");
+
     const dimCol = dimension ? `, ${dimension} as dimension` : "";
     const dimGroup = dimension ? `, ${dimension}` : "";
+
+    // Total (aggregate) mode — no time grouping
+    if (gran === "total") {
+      const agg = measure === "users" ? "COUNT(DISTINCT user_id)" : measure === "avg" ? "CAST(COUNT(*) AS DOUBLE) / NULLIF(COUNT(DISTINCT user_id), 0)" : "COUNT(*)";
+      return `SELECT 'total' as period${dimCol}, ${agg} as value
+FROM uniscrm.event
+WHERE tenant_id = ${tenantId} AND event_type = '${event_type}' ${timeFilter} ${filterClauses}${dimGroup ? ` GROUP BY ${dimension}` : ""}`;
+    }
+
+    const periodExpr = gran === "month" ? "DATE_TRUNC('month', event_time)"
+      : gran === "week" ? "DATE_TRUNC('week', event_time)"
+      : gran === "hour" ? "EXTRACT(HOUR FROM event_time)"
+      : gran === "weekday" ? "EXTRACT(DOW FROM event_time)"
+      : "DATE_TRUNC('day', event_time)";
 
     if (measure === "avg") {
       return `SELECT period${dimCol ? ", dimension" : ""}, CAST(total AS DOUBLE) / NULLIF(users, 0) as value FROM (
   SELECT ${periodExpr} as period${dimCol}, COUNT(*) as total, COUNT(DISTINCT user_id) as users
   FROM uniscrm.event
-  WHERE tenant_id = ${tenantId} AND event_type = '${event_type}' ${timeFilter}
+  WHERE tenant_id = ${tenantId} AND event_type = '${event_type}' ${timeFilter} ${filterClauses}
   GROUP BY period${dimGroup}
 ) ORDER BY period`;
     }
@@ -320,7 +343,7 @@ function buildSQL(type: string, params: Record<string, unknown>, tenantId: strin
     const agg = measure === "users" ? "COUNT(DISTINCT user_id)" : "COUNT(*)";
     return `SELECT ${periodExpr} as period${dimCol}, ${agg} as value
 FROM uniscrm.event
-WHERE tenant_id = ${tenantId} AND event_type = '${event_type}' ${timeFilter}
+WHERE tenant_id = ${tenantId} AND event_type = '${event_type}' ${timeFilter} ${filterClauses}
 GROUP BY period${dimGroup} ORDER BY period`;
   }
 
@@ -401,7 +424,7 @@ export default {
         msg.ack();
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
-        await env.WEB_DB.prepare(
+        await env.ANALYTICS_DB.prepare(
           "UPDATE analytics_reports SET status = 'error', error_message = ?, updated_at = datetime('now') WHERE id = ?"
         ).bind(errMsg, msg.body.report_id).run();
         msg.ack();

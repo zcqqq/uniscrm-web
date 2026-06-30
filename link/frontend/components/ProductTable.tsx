@@ -1,4 +1,8 @@
 import type { ProductItem } from "../lib/api";
+import { Button } from "../../../shared/frontend/ui/button";
+import { Badge } from "../../../shared/frontend/ui/badge";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
+import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 
 interface Props {
   items: ProductItem[];
@@ -8,70 +12,62 @@ interface Props {
 export function ProductTable({ items, onDelete }: Props) {
   if (items.length === 0) {
     return (
-      <p className="text-gray-500 text-center py-8">
-        No products yet. Add a link or sync from Shopify.
-      </p>
+      <EmptyState
+        title="No products yet"
+        description="Add a link or sync from Shopify."
+      />
     );
   }
 
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b text-left">
-          <th className="py-2 font-medium">Name</th>
-          <th className="py-2 font-medium w-20">Channel</th>
-          <th className="py-2 font-medium">Description</th>
-          <th className="py-2 font-medium w-28">Updated</th>
-          <th className="py-2 font-medium w-20">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Name</TableHead>
+          <TableHead className="w-20">Channel</TableHead>
+          <TableHead>Description</TableHead>
+          <TableHead className="w-28">Updated</TableHead>
+          <TableHead className="w-20">Actions</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {items.map((item) => (
-          <tr key={item.id} className="border-b hover:bg-gray-50">
-            <td className="py-2">
+          <TableRow key={item.id}>
+            <TableCell>
               {item.source_url ? (
                 <a
                   href={item.source_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="font-medium hover:underline text-blue-600"
+                  className="font-medium hover:underline text-primary"
                 >
                   {item.title}
                 </a>
               ) : (
                 <span className="font-medium">{item.title}</span>
               )}
-            </td>
-            <td className="py-2">
-              <span
-                className={`text-xs px-2 py-0.5 rounded-full ${
-                  item.channel_type === "LINK"
-                    ? "bg-amber-100 text-amber-700"
-                    : "bg-blue-100 text-blue-700"
-                }`}
-              >
+            </TableCell>
+            <TableCell>
+              <Badge variant={item.channel_type === "LINK" ? "outline" : "default"}>
                 {item.channel_type === "LINK" ? "Link" : "Shopify"}
-              </span>
-            </td>
-            <td className="py-2 text-gray-400 truncate max-w-xs">
+              </Badge>
+            </TableCell>
+            <TableCell className="text-muted-foreground truncate max-w-xs">
               {item.description ?? "—"}
-            </td>
-            <td className="py-2 text-gray-400">
+            </TableCell>
+            <TableCell className="text-muted-foreground">
               {item.source_modified_at
                 ? new Date(item.source_modified_at).toLocaleDateString()
                 : "—"}
-            </td>
-            <td className="py-2">
-              <button
-                onClick={() => onDelete(item.id)}
-                className="text-red-500 text-xs hover:underline"
-              >
+            </TableCell>
+            <TableCell>
+              <Button variant="ghost" size="sm" className="text-destructive" onClick={() => onDelete(item.id)}>
                 Delete
-              </button>
-            </td>
-          </tr>
+              </Button>
+            </TableCell>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }

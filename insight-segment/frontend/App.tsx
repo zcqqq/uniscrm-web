@@ -3,6 +3,7 @@ import { Nav } from "./components/Nav";
 import { Segments } from "./pages/Segments";
 import { SegmentDetail } from "./pages/SegmentDetail";
 import { SegmentCreate } from "./pages/SegmentCreate";
+import { Toaster } from "../../shared/frontend/ui/toaster";
 
 export function App() {
   return (
@@ -17,6 +18,7 @@ export function App() {
           </Routes>
         </main>
       </div>
+      <Toaster />
     </BrowserRouter>
   );
 }

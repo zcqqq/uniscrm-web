@@ -4,7 +4,7 @@ import { ReactFlowProvider, ReactFlow, Background, Controls } from "@xyflow/reac
 import { nodeTypes } from "../nodes";
 import { api, type FlowDetail } from "../lib/api";
 import { Button } from "../../../shared/frontend/ui/button";
-import { Badge } from "../../../shared/frontend/ui/badge";
+import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 
 export default function AnalyticsPage() {
   const { id } = useParams<{ id: string }>();
@@ -36,7 +36,7 @@ export default function AnalyticsPage() {
       .finally(() => setLogsLoading(false));
   }, [id, selectedNode]);
 
-  if (loading) return <div className="flex items-center justify-center h-screen text-muted-foreground">Loading...</div>;
+  if (loading) return <div className="flex items-center justify-center h-screen"><Skeleton className="h-8 w-48" /></div>;
   if (!flow) return <div className="flex items-center justify-center h-screen text-destructive">Flow not found</div>;
 
   const graph = JSON.parse(flow.graph_json || '{"nodes":[],"edges":[]}');
@@ -58,7 +58,7 @@ export default function AnalyticsPage() {
     <ReactFlowProvider>
       <div className="h-screen flex flex-col">
         <div className="flex items-center h-12 px-4 border-b border-border bg-background gap-3">
-          <button onClick={() => navigate("/")} className="text-sm text-muted-foreground hover:text-foreground">← Back</button>
+          <Button variant="ghost" size="sm" onClick={() => navigate("/")}>← Back</Button>
           <span className="text-sm font-medium flex-1">{flow.name}</span>
           <Button variant="outline" size="sm" onClick={handleUnpublish}>Unpublish</Button>
         </div>
@@ -107,10 +107,10 @@ export default function AnalyticsPage() {
                   <h3 className="text-sm font-semibold text-foreground">{nodeName}</h3>
                   <p className="text-xs text-muted-foreground">Node Analytics</p>
                 </div>
-                <button onClick={() => setSelectedNode(null)} className="text-muted-foreground hover:text-foreground text-sm">×</button>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setSelectedNode(null)}>×</Button>
               </div>
               <div className="mb-4">
-                <p className="text-2xl font-bold text-green-600">{counts[selectedNode]?.enter || 0}</p>
+                <p className="text-2xl font-bold text-primary">{counts[selectedNode]?.enter || 0}</p>
                 <p className="text-xs text-muted-foreground">Entered</p>
               </div>
               <h4 className="text-xs font-medium text-muted-foreground mb-2">Users Entered</h4>

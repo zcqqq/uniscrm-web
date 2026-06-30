@@ -225,7 +225,7 @@ app.get("/api/channels", async (c) => {
 app.get("/api/flows", async (c) => {
   const tenantId = c.get("tenantId");
   const page = Math.max(1, parseInt(c.req.query("page") || "1", 10));
-  const limit = Math.min(50, Math.max(1, parseInt(c.req.query("limit") || "20", 10)));
+  const limit = Math.min(50, Math.max(1, parseInt(c.req.query("limit") || "10", 10)));
   const offset = (page - 1) * limit;
 
   const countRow = await c.env.FLOW_DB.prepare(

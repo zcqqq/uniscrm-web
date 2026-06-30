@@ -118,7 +118,7 @@ app.get("/api/users", async (c) => {
   if (!tdb) return c.json({ users: [], total: 0, page: 1, totalPages: 0 });
 
   const page = Math.max(1, Number(c.req.query("page")) || 1);
-  const limit = Math.min(50, Math.max(1, Number(c.req.query("limit")) || 20));
+  const limit = Math.min(50, Math.max(1, Number(c.req.query("limit")) || 10));
   const offset = (page - 1) * limit;
 
   const countRows = await tdb.query<{ total: number }>("SELECT COUNT(*) as total FROM user");

@@ -3,8 +3,8 @@ import { Nav } from "./components/Nav";
 import { AnalyticsList } from "./pages/AnalyticsList";
 import { AnalysisCreate } from "./pages/AnalysisCreate";
 import { AnalysisResult } from "./pages/AnalysisResult";
-import { EventAnalysisCreate } from "./pages/EventAnalysisCreate";
 import { DashboardPage } from "./pages/DashboardPage";
+import { Toaster } from "../../shared/frontend/ui/toaster";
 
 export function App() {
   return (
@@ -16,12 +16,13 @@ export function App() {
             <Route path="/" element={<Navigate to="/analytics" replace />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/analytics" element={<AnalyticsList />} />
-            <Route path="/analytics/event/new" element={<EventAnalysisCreate />} />
-            <Route path="/analytics/interval/new" element={<AnalysisCreate />} />
+            <Route path="/analytics/event/new" element={<AnalysisCreate mode="event" />} />
+            <Route path="/analytics/interval/new" element={<AnalysisCreate mode="interval" />} />
             <Route path="/analytics/:id" element={<AnalysisResult />} />
           </Routes>
         </main>
       </div>
+      <Toaster />
     </BrowserRouter>
   );
 }

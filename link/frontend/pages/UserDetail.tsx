@@ -1,7 +1,11 @@
 import { useParams, Link } from "react-router-dom";
 import { useState, useEffect, useCallback } from "react";
 import { api, type XUser, type XEvent } from "../lib/api";
-
+import { Button } from "../../../shared/frontend/ui/button";
+import { Badge } from "../../../shared/frontend/ui/badge";
+import { Skeleton } from "../../../shared/frontend/ui/skeleton";
+import { Avatar, AvatarImage, AvatarFallback } from "../../../shared/frontend/ui/avatar";
+import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 
 const EVENT_LABELS: Record<string, string> = {
   follower: "Follower",
@@ -61,35 +65,28 @@ export function UserDetail() {
 
   return (
     <main className="max-w-4xl mx-auto px-8 py-8">
-      <Link to="/users" className="text-sm text-muted-foreground hover:text-black mb-4 inline-block">&larr; Back</Link>
+      <Link to="/users" className="text-sm text-muted-foreground hover:text-foreground mb-4 inline-block">&larr; Back</Link>
 
       {user && (
         <>
           <div className="flex items-center gap-3 mb-4">
-            {user.profile_image_url ? (
-              <img src={user.profile_image_url} alt="" className="w-12 h-12 rounded-full" />
-            ) : (
-              <div className="w-12 h-12 rounded-full bg-gray-200" />
-            )}
+            <Avatar className="h-12 w-12">
+              {user.profile_image_url && <AvatarImage src={user.profile_image_url} alt="" />}
+              <AvatarFallback>{user.name?.charAt(0) ?? "?"}</AvatarFallback>
+            </Avatar>
             <div>
-              <div className="text-lg font-semibold">{user.name}</div>
+              <div className="text-lg font-semibold text-foreground">{user.name}</div>
               <div className="text-sm text-muted-foreground">@{user.username}</div>
             </div>
           </div>
 
           {user.socials && Object.keys(JSON.parse(user.socials || "{}")).length > 0 && (
-            <div className="mb-6 p-3 bg-card border rounded-lg">
+            <div className="mb-6 p-3 bg-card border border-border rounded-lg">
               <h3 className="text-xs font-medium text-muted-foreground mb-2">Other Platforms</h3>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(JSON.parse(user.socials || "{}") as Record<string, string>).map(([platform, profileUrl]) => (
-                  <a
-                    key={platform}
-                    href={profileUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100"
-                  >
-                    {platform}
+                  <a key={platform} href={profileUrl} target="_blank" rel="noopener noreferrer">
+                    <Badge variant="secondary">{platform}</Badge>
                   </a>
                 ))}
               </div>
@@ -101,19 +98,19 @@ export function UserDetail() {
       <h2 className="text-sm font-medium text-foreground mb-3">Events ({events.length}{hasMore ? "+" : ""})</h2>
 
       {loading ? (
-        <div className="animate-pulse space-y-2">
-          {[...Array(5)].map((_, i) => <div key={i} className="h-10 bg-gray-200 rounded" />)}
+        <div className="space-y-2">
+          {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10" />)}
         </div>
       ) : events.length === 0 ? (
-        <p className="text-muted-foreground text-sm">No events recorded.</p>
+        <EmptyState title="No events recorded" />
       ) : (
-        <div className="bg-card rounded-lg border divide-y">
+        <div className="bg-card rounded-lg border border-border divide-y divide-border">
           {events.map((event) => (
             <div key={event.id} className="flex items-center gap-3 px-4 py-2">
-              <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-muted-foreground font-medium">
+              <Badge variant="secondary">
                 {EVENT_LABELS[event.event_type] || event.event_type}
-              </span>
-              <span className="text-xs text-muted-foreground/60 flex-1">
+              </Badge>
+              <span className="text-xs text-muted-foreground flex-1">
                 {event.event_time ? new Date(event.event_time).toLocaleString() : "—"}
               </span>
             </div>
@@ -122,12 +119,9 @@ export function UserDetail() {
       )}
 
       {hasMore && (
-        <button
-          onClick={loadMore}
-          className="mt-4 w-full py-2 text-sm text-muted-foreground border rounded hover:bg-background"
-        >
+        <Button variant="outline" className="mt-4 w-full" onClick={loadMore}>
           Load more
-        </button>
+        </Button>
       )}
     </main>
   );

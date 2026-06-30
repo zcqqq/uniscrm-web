@@ -6,6 +6,7 @@ export function useFlows() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
 
   const fetchFlows = useCallback(async (p: number) => {
     setLoading(true);
@@ -13,6 +14,7 @@ export function useFlows() {
       const data = await api.flows.list(p);
       setFlows(data.flows);
       setTotalPages(data.totalPages);
+      setTotal(data.total);
     } catch {
       setFlows([]);
     } finally {
@@ -34,5 +36,5 @@ export function useFlows() {
     await fetchFlows(page);
   };
 
-  return { flows, loading, page, totalPages, setPage, createFlow, deleteFlow, refresh: () => fetchFlows(page) };
+  return { flows, loading, page, total, totalPages, setPage, createFlow, deleteFlow, refresh: () => fetchFlows(page) };
 }

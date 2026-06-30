@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
+import { Card, CardHeader, CardTitle, CardContent } from "../../../shared/frontend/ui/card";
 
 export function Verify() {
   const [searchParams] = useSearchParams();
@@ -27,12 +28,16 @@ export function Verify() {
   if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="max-w-md w-full p-8 bg-card rounded-lg shadow">
-          <h2 className="text-xl font-semibold text-destructive mb-4">
-            Verification Failed
-          </h2>
-          <p className="text-muted-foreground">{error}</p>
-        </div>
+        <Card className="max-w-md w-full">
+          <CardHeader>
+            <CardTitle className="text-xl text-destructive">
+              Verification Failed
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground">{error}</p>
+          </CardContent>
+        </Card>
       </div>
     );
   }

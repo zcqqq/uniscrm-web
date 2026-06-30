@@ -3,6 +3,7 @@ import "./lib/i18n";
 import { initTheme } from "../../shared/frontend/theme";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { Sidebar } from "../../shared/frontend/Sidebar";
+import { Toaster } from "../../shared/frontend/ui/toaster";
 
 initTheme();
 import { Login } from "./pages/Login";
@@ -89,6 +90,7 @@ export function App() {
             />
           </Routes>
         </AppLayout>
+        <Toaster />
       </AuthProvider>
     </BrowserRouter>
   );

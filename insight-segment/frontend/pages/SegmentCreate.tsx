@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import { PageHeader } from "../../../shared/frontend/components/PageHeader";
+import { FormField } from "../../../shared/frontend/components/FormField";
+import { Input } from "../../../shared/frontend/ui/input";
+import { Textarea } from "../../../shared/frontend/ui/textarea";
+import { Button } from "../../../shared/frontend/ui/button";
 
 export function SegmentCreate() {
   const navigate = useNavigate();
@@ -40,50 +45,48 @@ export function SegmentCreate() {
 
   return (
     <div className="max-w-2xl mx-auto p-8">
-      <h1 className="text-xl font-semibold mb-6">Create Segment</h1>
+      <PageHeader title="Create Segment" />
 
       <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium mb-1">Name</label>
-          <input
+        <FormField label="Name">
+          <Input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. 蓝V高粉丝近7天关注"
-            className="w-full border rounded px-3 py-2"
           />
-        </div>
+        </FormField>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Condition (natural language)</label>
-          <textarea
+        <FormField label="Condition (natural language)">
+          <Textarea
             value={nlQuery}
             onChange={(e) => setNlQuery(e.target.value)}
             placeholder="e.g. 过去7天内关注我、且粉丝数大于100的蓝V"
             rows={3}
-            className="w-full border rounded px-3 py-2"
           />
-        </div>
+        </FormField>
 
         <div className="flex gap-3">
-          <button
+          <Button
+            variant="outline"
             onClick={handlePreview}
             disabled={loading || !nlQuery.trim()}
-            className="px-4 py-2 border rounded text-sm hover:bg-background disabled:opacity-30"
           >
             Preview
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="default"
             onClick={handleCreate}
             disabled={loading || !name.trim() || !nlQuery.trim()}
-            className="px-4 py-2 bg-black text-white rounded text-sm hover:bg-gray-800 disabled:opacity-30"
           >
             Create
-          </button>
+          </Button>
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{error}</div>
+          <div className="text-destructive bg-destructive/10 border border-destructive/20 rounded-md p-3 text-sm">
+            {error}
+          </div>
         )}
 
         {preview && (

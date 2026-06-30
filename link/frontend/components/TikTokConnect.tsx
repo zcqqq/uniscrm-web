@@ -1,4 +1,7 @@
 import { useTikTokChannel } from "../hooks/useTikTokChannel";
+import { Button } from "../../../shared/frontend/ui/button";
+import { Card, CardContent } from "../../../shared/frontend/ui/card";
+import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 
 function TikTokIcon() {
   return (
@@ -13,47 +16,45 @@ export function TikTokConnect() {
 
   if (loading) {
     return (
-      <div className="border rounded-lg p-6 animate-pulse">
-        <div className="h-4 bg-gray-200 rounded w-24" />
-      </div>
+      <Card className="p-6">
+        <Skeleton className="h-4 w-24" />
+      </Card>
     );
   }
 
   if (!connected) {
     return (
-      <div className="border-2 border-dashed rounded-lg p-6 text-center border-gray-300">
-        <div className="flex items-center justify-center gap-2 mb-2">
-          <TikTokIcon />
-          <span className="text-sm font-medium text-gray-700">TikTok</span>
-        </div>
-        <p className="text-gray-500 text-sm mb-3">Connect your TikTok account</p>
-        <button
-          onClick={connect}
-          className="px-3 py-1.5 text-sm bg-black text-white rounded-md hover:bg-gray-800"
-        >
-          Connect TikTok
-        </button>
-      </div>
+      <Card className="border-2 border-dashed">
+        <CardContent className="p-6 text-center">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <TikTokIcon />
+            <span className="text-sm font-medium text-foreground">TikTok</span>
+          </div>
+          <p className="text-muted-foreground text-sm mb-3">Connect your TikTok account</p>
+          <Button size="sm" onClick={connect}>
+            Connect TikTok
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className="border rounded-lg p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <TikTokIcon />
-          <span className="text-sm font-medium text-gray-700">TikTok</span>
-          {displayName && (
-            <span className="text-xs text-gray-400">{displayName}</span>
-          )}
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <TikTokIcon />
+            <span className="text-sm font-medium text-foreground">TikTok</span>
+            {displayName && (
+              <span className="text-xs text-muted-foreground">{displayName}</span>
+            )}
+          </div>
+          <Button variant="link" size="sm" className="text-destructive" onClick={disconnect}>
+            Disconnect
+          </Button>
         </div>
-        <button
-          onClick={disconnect}
-          className="text-sm text-red-600 hover:text-red-800"
-        >
-          Disconnect
-        </button>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }

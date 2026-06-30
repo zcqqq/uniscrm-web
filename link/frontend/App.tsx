@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Sidebar, type SidebarUrls } from "../../shared/frontend/Sidebar";
+import { Toaster } from "../../shared/frontend/ui/toaster";
 import { Social } from "./pages/Social";
 import { Users } from "./pages/Users";
 import { UserDetail } from "./pages/UserDetail";
@@ -30,6 +31,7 @@ export function App() {
           </Routes>
         </main>
       </div>
+      <Toaster />
     </BrowserRouter>
   );
 }

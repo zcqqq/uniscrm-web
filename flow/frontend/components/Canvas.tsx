@@ -12,6 +12,7 @@ import {
 } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
 import { useFlowEditor } from "../store/flow-editor";
+import { Button } from "../../../shared/frontend/ui/button";
 import DeletableEdge from "../edges/DeletableEdge";
 
 const edgeTypes = { default: DeletableEdge };
@@ -89,7 +90,10 @@ export default function Canvas() {
         <Background />
         <Controls />
         <Panel position="bottom-left" className="!ml-12">
-          <button
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
             onClick={() => {
               const { nodes: ns, edges: es } = useFlowEditor.getState();
               if (ns.length === 0) return;
@@ -146,10 +150,9 @@ export default function Canvas() {
               useFlowEditor.setState({ nodes: layouted, isDirty: true });
               setTimeout(() => reactFlowRef.current?.fitView({ padding: 0.2 }), 50);
             }}
-            className="p-1.5 bg-white border border-gray-200 rounded shadow-sm hover:bg-gray-50 text-sm"
             title="Arrange"
             data-arrange="true"
-          >📐</button>
+          >📐</Button>
         </Panel>
       </ReactFlow>
     </div>

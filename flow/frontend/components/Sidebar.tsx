@@ -22,17 +22,17 @@ function DraggableItem({ type, label, description, color, icon }: DraggableItemP
     >
       <div className="flex items-center gap-2">
         <span>{icon}</span>
-        <span className="text-sm font-medium">{label}</span>
+        <span className="text-sm font-medium text-foreground">{label}</span>
       </div>
-      <p className="text-xs text-gray-500 mt-1">{description}</p>
+      <p className="text-xs text-muted-foreground mt-1">{description}</p>
     </div>
   );
 }
 
 export default function Sidebar() {
   return (
-    <aside className="w-60 border-r border-gray-200 bg-white p-4 overflow-y-auto">
-      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Triggers</h3>
+    <aside className="w-60 border-r border-border bg-background p-4 overflow-y-auto">
+      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Triggers</h3>
       <div className="space-y-2 mb-6">
         {CHANNEL_TYPES.map((ct) => (
           <DraggableItem
@@ -40,44 +40,44 @@ export default function Sidebar() {
             type="xTrigger"
             label={`${ct.label} Trigger`}
             description={`${ct.events.length} events`}
-            color="border-purple-200 bg-purple-50/50"
+            color="border-primary/30 bg-primary/5"
             icon={ct.icon}
           />
         ))}
       </div>
 
-      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Flow Control</h3>
+      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Flow Control</h3>
       <div className="space-y-2 mb-6">
         <DraggableItem
           type="waitForEvent"
           label="Wait for Event"
           description="Check if event has occurred"
-          color="border-indigo-200 bg-indigo-50/50"
+          color="border-secondary bg-secondary/30"
           icon="🔍"
         />
         <DraggableItem
           type="wait"
           label="Wait"
           description="Delay for a specified duration"
-          color="border-sky-200 bg-sky-50/50"
+          color="border-secondary bg-secondary/30"
           icon="⏳"
         />
       </div>
 
-      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Actions</h3>
+      <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Actions</h3>
       <div className="space-y-2">
         <DraggableItem
           type="addToList"
           label="Add to List"
           description="Add user to a profile list"
-          color="border-green-200 bg-green-50/50"
+          color="border-accent bg-accent/50"
           icon="📋"
         />
         <DraggableItem
           type="xAction"
           label="X Action"
           description="Follow or unfollow user on X"
-          color="border-green-200 bg-green-50/50"
+          color="border-accent bg-accent/50"
           icon="𝕏"
         />
       </div>

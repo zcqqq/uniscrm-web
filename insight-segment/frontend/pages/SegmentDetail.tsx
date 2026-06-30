@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, type Segment, type SegmentUser } from "../lib/api";
+import { PageHeader } from "../../../shared/frontend/components/PageHeader";
+import { Button } from "../../../shared/frontend/ui/button";
+import { Card, CardContent } from "../../../shared/frontend/ui/card";
+import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 
 export function SegmentDetail() {
   const { id } = useParams<{ id: string }>();
@@ -47,49 +51,53 @@ export function SegmentDetail() {
     navigate("/");
   };
 
-  if (loading) return <div className="p-8 text-muted-foreground/60">Loading...</div>;
+  if (loading) return <div className="p-8"><Skeleton className="h-6 w-48" /></div>;
   if (!segment) return <div className="p-8 text-destructive">Segment not found</div>;
 
   return (
     <div className="max-w-4xl mx-auto p-8">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-xl font-semibold">{segment.name}</h1>
-        <div className="flex gap-2">
-          {segment.status === "draft" && (
-            <button
-              onClick={handleCompute}
-              disabled={computing}
-              className="px-4 py-2 bg-black text-white rounded text-sm hover:bg-gray-800 disabled:opacity-30"
-            >
-              {computing ? "Computing..." : "Compute"}
-            </button>
-          )}
-          {segment.status === "ready" && (
-            <button
-              onClick={handleCompute}
-              disabled={computing}
-              className="px-4 py-2 border rounded text-sm hover:bg-background disabled:opacity-30"
-            >
-              {computing ? "Recomputing..." : "Recompute"}
-            </button>
-          )}
-          <button onClick={handleDelete} className="px-4 py-2 border border-red-200 text-destructive rounded text-sm hover:bg-red-50">
-            Delete
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title={segment.name}
+        actions={
+          <>
+            {segment.status === "draft" && (
+              <Button
+                onClick={handleCompute}
+                disabled={computing}
+                variant="default"
+              >
+                {computing ? "Computing..." : "Compute"}
+              </Button>
+            )}
+            {segment.status === "ready" && (
+              <Button
+                onClick={handleCompute}
+                disabled={computing}
+                variant="outline"
+              >
+                {computing ? "Recomputing..." : "Recompute"}
+              </Button>
+            )}
+            <Button onClick={handleDelete} variant="destructive">
+              Delete
+            </Button>
+          </>
+        }
+      />
 
-      <div className="bg-card border rounded p-4 space-y-3 mb-6">
-        <div className="text-sm"><strong>Query:</strong> {segment.nl_query}</div>
-        <div className="text-sm"><strong>Status:</strong> {segment.status} &middot; <strong>Users:</strong> {segment.user_count}</div>
-        <details className="text-sm">
-          <summary className="cursor-pointer text-muted-foreground">Conditions & SQL</summary>
-          <pre className="mt-2 text-xs bg-background rounded p-2 overflow-x-auto">
-            {JSON.stringify(JSON.parse(segment.conditions_json || "{}"), null, 2)}
-          </pre>
-          <pre className="mt-2 text-xs bg-background rounded p-2 overflow-x-auto">{segment.sql_query}</pre>
-        </details>
-      </div>
+      <Card className="mb-6">
+        <CardContent className="p-4 space-y-3">
+          <div className="text-sm"><strong>Query:</strong> {segment.nl_query}</div>
+          <div className="text-sm"><strong>Status:</strong> {segment.status} &middot; <strong>Users:</strong> {segment.user_count}</div>
+          <details className="text-sm">
+            <summary className="cursor-pointer text-muted-foreground">Conditions & SQL</summary>
+            <pre className="mt-2 text-xs bg-background rounded p-2 overflow-x-auto">
+              {JSON.stringify(JSON.parse(segment.conditions_json || "{}"), null, 2)}
+            </pre>
+            <pre className="mt-2 text-xs bg-background rounded p-2 overflow-x-auto">{segment.sql_query}</pre>
+          </details>
+        </CardContent>
+      </Card>
 
       {segment.status === "ready" && users.length > 0 && (
         <div>
@@ -109,9 +117,9 @@ export function SegmentDetail() {
           </div>
           {userTotalPages > 1 && (
             <div className="flex justify-center gap-2 mt-4">
-              <button disabled={userPage <= 1} onClick={() => setUserPage(userPage - 1)} className="px-3 py-1 border rounded disabled:opacity-30">Prev</button>
+              <Button variant="outline" size="sm" disabled={userPage <= 1} onClick={() => setUserPage(userPage - 1)}>Prev</Button>
               <span className="px-3 py-1 text-sm text-muted-foreground">{userPage} / {userTotalPages}</span>
-              <button disabled={userPage >= userTotalPages} onClick={() => setUserPage(userPage + 1)} className="px-3 py-1 border rounded disabled:opacity-30">Next</button>
+              <Button variant="outline" size="sm" disabled={userPage >= userTotalPages} onClick={() => setUserPage(userPage + 1)}>Next</Button>
             </div>
           )}
         </div>

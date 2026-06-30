@@ -1,8 +1,17 @@
 import { useState, useEffect } from "react";
 import { useFlowEditor } from "../store/flow-editor";
-import { CHANNEL_TYPES, getEventDefinition, type TriggerFieldDefinition } from "../config/trigger-fields";
-import { SelectProps } from "../../../shared/frontend/components/SelectProps";
+import { CHANNEL_TYPES, type TriggerFieldDefinition } from "../config/trigger-fields";
+import { SelectPropsValue } from "../../../shared/frontend/components/SelectPropsValue";
 import { api } from "../lib/api";
+import { Button } from "../../../shared/frontend/ui/button";
+import { Input } from "../../../shared/frontend/ui/input";
+import { Select } from "../../../shared/frontend/ui/select";
+import { Textarea } from "../../../shared/frontend/ui/textarea";
+import { Label } from "../../../shared/frontend/ui/label";
+
+type SelectChange = React.ChangeEvent<HTMLSelectElement>;
+type InputChange = React.ChangeEvent<HTMLInputElement>;
+type TextareaChange = React.ChangeEvent<HTMLTextAreaElement>;
 
 interface ChannelOption {
   id: string;
@@ -30,23 +39,25 @@ function ValueInput({
   return (
     <div className="flex-1 relative">
       <div className="flex gap-0.5">
-        <input
+        <Input
           type="text"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e: InputChange) => onChange(e.target.value)}
           placeholder="value or $field"
-          className="flex-1 text-xs border border-gray-300 rounded-l px-1.5 py-1 min-w-0"
+          className="flex-1 h-7 text-xs rounded-l rounded-r-none min-w-0"
         />
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={() => setShowFields(!showFields)}
-          className="text-xs border border-gray-300 border-l-0 rounded-r px-1.5 py-1 bg-gray-50 hover:bg-gray-100 text-gray-500 cursor-pointer"
+          className="h-7 px-1.5 rounded-l-none text-xs"
           title="Insert field reference"
         >
           $
-        </button>
+        </Button>
       </div>
-      <SelectProps
+      <SelectPropsValue
         variant="insert"
         value=""
         open={showFields}
@@ -78,11 +89,11 @@ function ConditionsEditor({
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <label className="text-xs font-medium text-gray-600">Conditions</label>
-        <button onClick={addCondition} className="text-xs text-blue-600 hover:text-blue-800 cursor-pointer">+ Add</button>
+        <Label className="text-xs">Conditions</Label>
+        <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={addCondition}>+ Add</Button>
       </div>
       {conditions.length === 0 && (
-        <p className="text-xs text-gray-400 italic">No filters — all matching events pass.</p>
+        <p className="text-xs text-muted-foreground italic">No filters — all matching events pass.</p>
       )}
       {conditions.map((cond, idx) => {
         const fieldDef = fields.find((f) => f.id === cond.field);
@@ -90,7 +101,7 @@ function ConditionsEditor({
         return (
           <div key={idx} className="flex gap-1 items-start mb-2">
             <div className="flex-1 space-y-1">
-              <SelectProps
+              <SelectPropsValue
                 value={cond.field}
                 onChange={(v) => updateCondition(idx, { field: v, operator: "==", value: "" })}
                 options={fields.map((f) => ({ id: f.id, label: f.label, group: f.group, dataType: f.dataType }))}
@@ -98,24 +109,24 @@ function ConditionsEditor({
               />
               {cond.field && (
                 <div className="flex gap-1">
-                  <select
+                  <Select
                     value={cond.operator}
-                    onChange={(e) => updateCondition(idx, { operator: e.target.value })}
-                    className="text-xs border border-gray-300 rounded px-1.5 py-1"
+                    onChange={(e: SelectChange) => updateCondition(idx, { operator: e.target.value })}
+                    className="h-7 text-xs w-auto"
                   >
                     {operators.map((op) => <option key={op} value={op}>{op}</option>)}
-                  </select>
+                  </Select>
                   {fieldDef?.dataType === "enum" && fieldDef.enums ? (
-                    <select
+                    <Select
                       value={cond.value}
-                      onChange={(e) => updateCondition(idx, { value: e.target.value })}
-                      className="flex-1 text-xs border border-gray-300 rounded px-1.5 py-1"
+                      onChange={(e: SelectChange) => updateCondition(idx, { value: e.target.value })}
+                      className="flex-1 h-7 text-xs"
                     >
                       <option value="">Select...</option>
                       {fieldDef.enums.map((opt) => (
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
-                    </select>
+                    </Select>
                   ) : (
                     <ValueInput
                       value={cond.value}
@@ -127,7 +138,7 @@ function ConditionsEditor({
                 </div>
               )}
             </div>
-            <button onClick={() => removeCondition(idx)} className="text-sm text-red-400 hover:text-red-600 mt-1 cursor-pointer">×</button>
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => removeCondition(idx)}>×</Button>
           </div>
         );
       })}
@@ -157,45 +168,45 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
       .finally(() => setLoadingChannels(false));
   }, [eventType, channelType]);
 
-  if (!ctDef) return <p className="text-sm text-gray-500">Unknown channel type</p>;
+  if (!ctDef) return <p className="text-sm text-muted-foreground">Unknown channel type</p>;
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-purple-700 mb-3">{ctDef.label} Trigger</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{ctDef.label} Trigger</h4>
 
       <div className="space-y-3">
         <div>
-          <label className="text-xs font-medium text-gray-600 block mb-1">Event</label>
-          <select
+          <Label className="text-xs block mb-1">Event</Label>
+          <Select
             value={eventType || ""}
-            onChange={(e) => updateNodeData(nodeId, { eventType: e.target.value, channelId: "", conditions: [] })}
-            className="w-full text-sm border border-gray-300 rounded px-2 py-1.5"
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { eventType: e.target.value, channelId: "", conditions: [] })}
+            className="w-full text-sm"
           >
             <option value="">Select event...</option>
             {ctDef.events.map((ev) => (
               <option key={ev.eventType} value={ev.eventType}>{ev.label}</option>
             ))}
-          </select>
+          </Select>
         </div>
 
         {eventType && (
           <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">Account</label>
+            <Label className="text-xs block mb-1">Account</Label>
             {loadingChannels ? (
-              <p className="text-xs text-gray-400">Loading...</p>
+              <p className="text-xs text-muted-foreground">Loading...</p>
             ) : channels.length === 0 ? (
-              <p className="text-xs text-gray-400 italic">No accounts linked</p>
+              <p className="text-xs text-muted-foreground italic">No accounts linked</p>
             ) : (
-              <select
+              <Select
                 value={channelId || ""}
-                onChange={(e) => updateNodeData(nodeId, { channelId: e.target.value })}
-                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5"
+                onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
+                className="w-full text-sm"
               >
                 <option value="">All accounts</option>
                 {channels.map((ch) => (
                   <option key={ch.id} value={ch.id}>@{ch.username}</option>
                 ))}
-              </select>
+              </Select>
             )}
           </div>
         )}
@@ -218,30 +229,30 @@ function WaitInspector({ nodeId, data }: { nodeId: string; data: Record<string, 
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-sky-700 mb-3">Wait</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">Wait</h4>
       <div className="space-y-3">
         <div>
-          <label className="text-xs font-medium text-gray-600 block mb-1">Duration</label>
-          <input
+          <Label className="text-xs block mb-1">Duration</Label>
+          <Input
             type="number"
             min="1"
             value={data.duration || ""}
-            onChange={(e) => updateNodeData(nodeId, { duration: parseInt(e.target.value) || 0 })}
+            onChange={(e: InputChange) => updateNodeData(nodeId, { duration: parseInt(e.target.value) || 0 })}
             placeholder="Enter duration..."
-            className="w-full text-sm border border-gray-300 rounded px-2 py-1.5"
+            className="w-full h-9 text-sm"
           />
         </div>
         <div>
-          <label className="text-xs font-medium text-gray-600 block mb-1">Unit</label>
-          <select
+          <Label className="text-xs block mb-1">Unit</Label>
+          <Select
             value={data.unit || "minutes"}
-            onChange={(e) => updateNodeData(nodeId, { unit: e.target.value })}
-            className="w-full text-sm border border-gray-300 rounded px-2 py-1.5"
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { unit: e.target.value })}
+            className="w-full text-sm"
           >
             <option value="minutes">Minutes</option>
             <option value="hours">Hours</option>
             <option value="days">Days</option>
-          </select>
+          </Select>
         </div>
       </div>
     </div>
@@ -256,41 +267,41 @@ function WaitForEventInspector({ nodeId, data }: { nodeId: string; data: Record<
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-indigo-700 mb-3">Wait for Event</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">Wait for Event</h4>
       <div className="space-y-3">
         <div>
-          <label className="text-xs font-medium text-gray-600 block mb-1">Wait for event</label>
-          <select
+          <Label className="text-xs block mb-1">Wait for event</Label>
+          <Select
             value={data.eventType || ""}
-            onChange={(e) => updateNodeData(nodeId, { eventType: e.target.value, conditions: [] })}
-            className="w-full text-sm border border-gray-300 rounded px-2 py-1.5"
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { eventType: e.target.value, conditions: [] })}
+            className="w-full text-sm"
           >
             <option value="">Select event...</option>
             {allEvents.map((ev) => (
               <option key={ev.eventType} value={ev.eventType}>{ev.label}</option>
             ))}
-          </select>
+          </Select>
         </div>
         <div>
-          <label className="text-xs font-medium text-gray-600 block mb-1">Timeout</label>
+          <Label className="text-xs block mb-1">Timeout</Label>
           <div className="flex gap-2">
-            <input
+            <Input
               type="number"
               min="1"
               value={data.duration || ""}
-              onChange={(e) => updateNodeData(nodeId, { duration: parseInt(e.target.value) || 0 })}
+              onChange={(e: InputChange) => updateNodeData(nodeId, { duration: parseInt(e.target.value) || 0 })}
               placeholder="1"
-              className="w-20 text-sm border border-gray-300 rounded px-2 py-1.5"
+              className="w-20 h-9 text-sm"
             />
-            <select
+            <Select
               value={data.unit || "days"}
-              onChange={(e) => updateNodeData(nodeId, { unit: e.target.value })}
-              className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5"
+              onChange={(e: SelectChange) => updateNodeData(nodeId, { unit: e.target.value })}
+              className="flex-1 text-sm"
             >
               <option value="minutes">Minutes</option>
               <option value="hours">Hours</option>
               <option value="days">Days</option>
-            </select>
+            </Select>
           </div>
         </div>
 
@@ -302,7 +313,7 @@ function WaitForEventInspector({ nodeId, data }: { nodeId: string; data: Record<
           />
         )}
       </div>
-      <p className="text-xs text-gray-400 mt-3 italic">Yes = matching event received. No = timed out.</p>
+      <p className="text-xs text-muted-foreground mt-3 italic">Yes = matching event received. No = timed out.</p>
     </div>
   );
 }
@@ -325,27 +336,27 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
   if (actionType === "addToList") {
     return (
       <div>
-        <h4 className="text-sm font-semibold text-green-700 mb-3">Add to List</h4>
+        <h4 className="text-sm font-semibold text-primary mb-3">Add to List</h4>
         <div>
-          <label className="text-xs font-medium text-gray-600 block mb-1">List</label>
+          <Label className="text-xs block mb-1">List</Label>
           {loading ? (
-            <p className="text-xs text-gray-400">Loading...</p>
+            <p className="text-xs text-muted-foreground">Loading...</p>
           ) : lists.length === 0 ? (
-            <p className="text-xs text-gray-400 italic">No lists found. Create one in Profile.</p>
+            <p className="text-xs text-muted-foreground italic">No lists found. Create one in Profile.</p>
           ) : (
-            <select
+            <Select
               value={data.listId || ""}
-              onChange={(e) => {
+              onChange={(e: SelectChange) => {
                 const list = lists.find((l) => l.id === e.target.value);
                 updateNodeData(nodeId, { listId: e.target.value, listName: list?.name || "" });
               }}
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5"
+              className="w-full text-sm"
             >
               <option value="">Select list...</option>
               {lists.map((l) => (
                 <option key={l.id} value={l.id}>{l.name}</option>
               ))}
-            </select>
+            </Select>
           )}
         </div>
       </div>
@@ -356,7 +367,7 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
     return <XActionInspector nodeId={nodeId} data={data} />;
   }
 
-  return <p className="text-sm text-gray-500">Unknown action type</p>;
+  return <p className="text-sm text-muted-foreground">Unknown action type</p>;
 }
 
 function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
@@ -371,50 +382,50 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-green-700 mb-3">X Action</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">X Action</h4>
       <div className="space-y-3">
         <div>
-          <label className="text-xs font-medium text-gray-600 block mb-1">Action</label>
-          <select
+          <Label className="text-xs block mb-1">Action</Label>
+          <Select
             value={data.xEvent || ""}
-            onChange={(e) => updateNodeData(nodeId, { xEvent: e.target.value, messageText: "" })}
-            className="w-full text-sm border border-gray-300 rounded px-2 py-1.5"
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { xEvent: e.target.value, messageText: "" })}
+            className="w-full text-sm"
           >
             <option value="">Select action...</option>
             <option value="follow-user">Follow User</option>
             <option value="unfollow-user">Unfollow User</option>
             <option value="create-dm">Direct Message</option>
             <option value="mute-user">Mute User</option>
-          </select>
+          </Select>
         </div>
         {data.xEvent === "create-dm" && (
           <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">Message</label>
-            <textarea
+            <Label className="text-xs block mb-1">Message</Label>
+            <Textarea
               value={data.messageText || ""}
-              onChange={(e) => updateNodeData(nodeId, { messageText: e.target.value })}
+              onChange={(e: TextareaChange) => updateNodeData(nodeId, { messageText: e.target.value })}
               placeholder="Hi $user.username!"
               rows={3}
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 font-mono"
+              className="w-full text-sm font-mono"
             />
-            <p className="text-xs text-gray-400 mt-1">Use $user.name, $event.message_text etc.</p>
+            <p className="text-xs text-muted-foreground mt-1">Use $user.name, $event.message_text etc.</p>
           </div>
         )}
         <div>
-          <label className="text-xs font-medium text-gray-600 block mb-1">Account</label>
+          <Label className="text-xs block mb-1">Account</Label>
           {channels.length === 0 ? (
-            <p className="text-xs text-gray-400 italic">No X accounts linked</p>
+            <p className="text-xs text-muted-foreground italic">No X accounts linked</p>
           ) : (
-            <select
+            <Select
               value={data.channelId || ""}
-              onChange={(e) => updateNodeData(nodeId, { channelId: e.target.value })}
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5"
+              onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
+              className="w-full text-sm"
             >
               <option value="">Select account...</option>
               {channels.map((ch) => (
                 <option key={ch.id} value={ch.id}>@{ch.username}</option>
               ))}
-            </select>
+            </Select>
           )}
         </div>
       </div>
@@ -431,15 +442,17 @@ export default function Inspector() {
   if (!node) return null;
 
   return (
-    <aside className="w-72 border-l border-gray-200 bg-white p-4 overflow-y-auto">
+    <aside className="w-72 border-l border-border bg-background p-4 overflow-y-auto">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Properties</h3>
-        <button
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Properties</h3>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-auto p-0 text-xs text-destructive hover:text-destructive"
           onClick={deleteSelectedNode}
-          className="text-xs text-red-500 hover:text-red-700"
         >
           Delete
-        </button>
+        </Button>
       </div>
 
       {node.type === "xTrigger" && (

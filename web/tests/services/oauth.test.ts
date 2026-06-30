@@ -77,32 +77,38 @@ describe("OAuthService", () => {
 
   describe("resolveUser", () => {
     it("returns existing user if oauth_account found", async () => {
-      // First query: oauth_accounts lookup returns a user_id
+      // First query: oauth_accounts lookup
       db.prepare.mockReturnValueOnce({
         bind: vi.fn().mockReturnValue({
-          first: vi.fn().mockResolvedValue({ user_id: "existing-user-id" }),
+          first: vi.fn().mockResolvedValue({ member_id: "existing-member-id" }),
+        }),
+      });
+      // Second query: members lookup for tenant_id
+      db.prepare.mockReturnValueOnce({
+        bind: vi.fn().mockReturnValue({
+          first: vi.fn().mockResolvedValue({ tenant_id: 1 }),
         }),
       });
 
       const result = await service.resolveUser("google", "goog-123", "user@test.com");
 
-      expect(result).toEqual({ userId: "existing-user-id", isNew: false });
+      expect(result).toEqual({ memberId: "existing-member-id", tenantId: 1, isNew: false });
       expect(db.prepare).toHaveBeenCalledWith(
-        "SELECT user_id FROM oauth_accounts WHERE provider = ? AND provider_user_id = ?"
+        "SELECT member_id FROM oauth_accounts WHERE provider = ? AND provider_user_id = ?"
       );
     });
 
-    it("links to existing user if email matches", async () => {
+    it("links to existing member if email matches", async () => {
       // First query: oauth_accounts lookup returns null
       db.prepare.mockReturnValueOnce({
         bind: vi.fn().mockReturnValue({
           first: vi.fn().mockResolvedValue(null),
         }),
       });
-      // Second query: users lookup by email returns a user
+      // Second query: members lookup by email
       db.prepare.mockReturnValueOnce({
         bind: vi.fn().mockReturnValue({
-          first: vi.fn().mockResolvedValue({ id: "email-user-id" }),
+          first: vi.fn().mockResolvedValue({ id: "email-member-id", tenant_id: 2 }),
         }),
       });
       // Third query: INSERT into oauth_accounts
@@ -114,35 +120,47 @@ describe("OAuthService", () => {
 
       const result = await service.resolveUser("google", "goog-456", "existing@test.com");
 
-      expect(result).toEqual({ userId: "email-user-id", isNew: false });
+      expect(result).toEqual({ memberId: "email-member-id", tenantId: 2, isNew: false });
       expect(db.prepare).toHaveBeenCalledWith(
-        "SELECT id FROM users WHERE email = ?"
+        "SELECT id, tenant_id FROM members WHERE email = ?"
       );
       expect(db.prepare).toHaveBeenCalledWith(
-        "INSERT INTO oauth_accounts (provider, provider_user_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+        "INSERT INTO oauth_accounts (provider, provider_user_id, member_id, tenant_id, created_at) VALUES (?, ?, ?, ?, ?)"
       );
     });
 
-    it("creates new user if neither oauth_account nor email match", async () => {
+    it("creates new tenant and member if no match", async () => {
       // First query: oauth_accounts lookup returns null
       db.prepare.mockReturnValueOnce({
         bind: vi.fn().mockReturnValue({
           first: vi.fn().mockResolvedValue(null),
         }),
       });
-      // Second query: users lookup by email returns null
+      // Second query: members lookup by email returns null
       db.prepare.mockReturnValueOnce({
         bind: vi.fn().mockReturnValue({
           first: vi.fn().mockResolvedValue(null),
         }),
       });
-      // Third query: INSERT into users
+      // Third query: INSERT into tenants
       db.prepare.mockReturnValueOnce({
         bind: vi.fn().mockReturnValue({
           run: vi.fn().mockResolvedValue({ success: true }),
         }),
       });
-      // Fourth query: INSERT into oauth_accounts
+      // Fourth query: SELECT tenant_id from tenants
+      db.prepare.mockReturnValueOnce({
+        bind: vi.fn().mockReturnValue({
+          first: vi.fn().mockResolvedValue({ tenant_id: 3 }),
+        }),
+      });
+      // Fifth query: INSERT into members
+      db.prepare.mockReturnValueOnce({
+        bind: vi.fn().mockReturnValue({
+          run: vi.fn().mockResolvedValue({ success: true }),
+        }),
+      });
+      // Sixth query: INSERT into oauth_accounts
       db.prepare.mockReturnValueOnce({
         bind: vi.fn().mockReturnValue({
           run: vi.fn().mockResolvedValue({ success: true }),
@@ -152,9 +170,13 @@ describe("OAuthService", () => {
       const result = await service.resolveUser("google", "goog-789", "new@test.com");
 
       expect(result.isNew).toBe(true);
-      expect(result.userId).toBeDefined();
+      expect(result.memberId).toBeDefined();
+      expect(result.tenantId).toBe(3);
       expect(db.prepare).toHaveBeenCalledWith(
-        "INSERT INTO users (id, email, preferred_location, created_at) VALUES (?, ?, ?, ?)"
+        "INSERT INTO tenants (email, created_at) VALUES (?, ?)"
+      );
+      expect(db.prepare).toHaveBeenCalledWith(
+        "INSERT INTO oauth_accounts (provider, provider_user_id, member_id, tenant_id, created_at) VALUES (?, ?, ?, ?, ?)"
       );
     });
   });
@@ -174,10 +196,10 @@ describe("OAuthService", () => {
         }),
       });
 
-      await service.linkAccount("user-1", "github", "gh-123");
+      await service.linkAccount("user-1", 1, "github", "gh-123");
 
       expect(db.prepare).toHaveBeenCalledWith(
-        "INSERT INTO oauth_accounts (provider, provider_user_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+        "INSERT INTO oauth_accounts (provider, provider_user_id, member_id, tenant_id, created_at) VALUES (?, ?, ?, ?, ?)"
       );
     });
 
@@ -185,12 +207,12 @@ describe("OAuthService", () => {
       // Check existing returns a different user
       db.prepare.mockReturnValueOnce({
         bind: vi.fn().mockReturnValue({
-          first: vi.fn().mockResolvedValue({ user_id: "other-user" }),
+          first: vi.fn().mockResolvedValue({ member_id: "other-user" }),
         }),
       });
 
       await expect(
-        service.linkAccount("user-1", "github", "gh-123")
+        service.linkAccount("user-1", 1, "github", "gh-123")
       ).rejects.toThrow("already linked");
     });
   });
@@ -206,7 +228,7 @@ describe("OAuthService", () => {
       await service.unlinkAccount("user-1", "google");
 
       expect(db.prepare).toHaveBeenCalledWith(
-        "DELETE FROM oauth_accounts WHERE user_id = ? AND provider = ?"
+        "DELETE FROM oauth_accounts WHERE member_id = ? AND provider = ?"
       );
     });
   });
@@ -227,20 +249,20 @@ describe("OAuthService", () => {
 
       expect(result).toEqual(accounts);
       expect(db.prepare).toHaveBeenCalledWith(
-        "SELECT provider, created_at FROM oauth_accounts WHERE user_id = ?"
+        "SELECT provider, created_at FROM oauth_accounts WHERE member_id = ?"
       );
     });
   });
 
   describe("storePendingOAuth", () => {
-    it("stores pending data in KV with 5min TTL", async () => {
+    it("stores pending data in KV with 10min TTL", async () => {
       const data = { provider: "google", providerUserId: "g-1", email: "a@b.com" };
       await service.storePendingOAuth("pending-123", data);
 
       expect(kv.put).toHaveBeenCalledWith(
         "pending_oauth:pending-123",
         JSON.stringify(data),
-        { expirationTtl: 300 }
+        { expirationTtl: 600 }
       );
     });
   });

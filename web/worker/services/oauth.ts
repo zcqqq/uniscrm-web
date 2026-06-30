@@ -52,17 +52,17 @@ export class OAuthService {
   ): Promise<ResolveUserResult> {
     const existing = await this.db
       .prepare(
-        "SELECT user_id FROM oauth_accounts WHERE provider = ? AND provider_user_id = ?"
+        "SELECT member_id FROM oauth_accounts WHERE provider = ? AND provider_user_id = ?"
       )
       .bind(provider, providerUserId)
-      .first<{ user_id: string }>();
+      .first<{ member_id: string }>();
 
     if (existing) {
       const member = await this.db
         .prepare("SELECT tenant_id FROM members WHERE id = ?")
-        .bind(existing.user_id)
+        .bind(existing.member_id)
         .first<{ tenant_id: number }>();
-      return { memberId: existing.user_id, tenantId: member!.tenant_id, isNew: false };
+      return { memberId: existing.member_id, tenantId: member!.tenant_id, isNew: false };
     }
 
     if (email) {
@@ -74,7 +74,7 @@ export class OAuthService {
       if (memberByEmail) {
         await this.db
           .prepare(
-            "INSERT INTO oauth_accounts (provider, provider_user_id, user_id, tenant_id, created_at) VALUES (?, ?, ?, ?, ?)"
+            "INSERT INTO oauth_accounts (provider, provider_user_id, member_id, tenant_id, created_at) VALUES (?, ?, ?, ?, ?)"
           )
           .bind(provider, providerUserId, memberByEmail.id, memberByEmail.tenant_id, new Date().toISOString())
           .run();
@@ -103,7 +103,7 @@ export class OAuthService {
 
     await this.db
       .prepare(
-        "INSERT INTO oauth_accounts (provider, provider_user_id, user_id, tenant_id, created_at) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO oauth_accounts (provider, provider_user_id, member_id, tenant_id, created_at) VALUES (?, ?, ?, ?, ?)"
       )
       .bind(provider, providerUserId, memberId, tenantId, now)
       .run();
@@ -113,24 +113,24 @@ export class OAuthService {
 
   async linkAccount(
     memberId: string,
-    tenantId: string,
+    tenantId: number,
     provider: string,
     providerUserId: string
   ): Promise<void> {
     const existing = await this.db
       .prepare(
-        "SELECT user_id FROM oauth_accounts WHERE provider = ? AND provider_user_id = ?"
+        "SELECT member_id FROM oauth_accounts WHERE provider = ? AND provider_user_id = ?"
       )
       .bind(provider, providerUserId)
-      .first<{ user_id: string }>();
+      .first<{ member_id: string }>();
 
-    if (existing && existing.user_id !== memberId) {
+    if (existing && existing.member_id !== memberId) {
       throw new Error("This account is already linked to a different user");
     }
 
     await this.db
       .prepare(
-        "INSERT INTO oauth_accounts (provider, provider_user_id, user_id, tenant_id, created_at) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO oauth_accounts (provider, provider_user_id, member_id, tenant_id, created_at) VALUES (?, ?, ?, ?, ?)"
       )
       .bind(provider, providerUserId, memberId, tenantId, new Date().toISOString())
       .run();
@@ -139,7 +139,7 @@ export class OAuthService {
   async unlinkAccount(memberId: string, provider: string): Promise<void> {
     await this.db
       .prepare(
-        "DELETE FROM oauth_accounts WHERE user_id = ? AND provider = ?"
+        "DELETE FROM oauth_accounts WHERE member_id = ? AND provider = ?"
       )
       .bind(memberId, provider)
       .run();
@@ -148,7 +148,7 @@ export class OAuthService {
   async getLinkedAccounts(memberId: string): Promise<LinkedAccount[]> {
     const result = await this.db
       .prepare(
-        "SELECT provider, created_at FROM oauth_accounts WHERE user_id = ?"
+        "SELECT provider, created_at FROM oauth_accounts WHERE member_id = ?"
       )
       .bind(memberId)
       .all<LinkedAccount>();

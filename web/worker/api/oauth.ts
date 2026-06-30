@@ -53,7 +53,7 @@ export function createOAuthRouter() {
     if (stored.mode === "link" && stored.userId) {
       const member = await c.env.WEB_DB.prepare("SELECT tenant_id FROM members WHERE id = ?")
         .bind(stored.userId)
-        .first<{ tenant_id: string }>();
+        .first<{ tenant_id: number }>();
       await oauthService.linkAccount(stored.userId, member!.tenant_id, "google", sub);
       return c.redirect("/settings");
     }
@@ -137,7 +137,7 @@ export function createOAuthRouter() {
       const member = await c.env.WEB_DB.prepare("SELECT tenant_id FROM members WHERE id = ?")
         .bind(stored.userId)
         .first<{ tenant_id: number }>();
-      await oauthService.linkAccount(stored.userId, String(member!.tenant_id), "x", xUserId);
+      await oauthService.linkAccount(stored.userId, member!.tenant_id, "x", xUserId);
 
       c.executionCtx.waitUntil(
         fetch(`${c.env.LINK_URL}/internal/channels/create-x`, {

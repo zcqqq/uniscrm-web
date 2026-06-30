@@ -34,6 +34,7 @@ name = "admin"
 routes = [{ pattern = "admin.uni-scrm.com", custom_domain = true }]
 
 [env.production.vars]
+CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 INTERNAL_SECRET = "prod-internal-secret-change-me"
 ENVIRONMENT = "production"
 

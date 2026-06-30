@@ -3,6 +3,8 @@ import { cors } from "hono/cors";
 import type { Env } from "./types";
 import { createAuthRouter } from "./api/auth";
 import { createOAuthRouter } from "./api/oauth";
+import { PendingTaskService } from "./services/pending-tasks";
+import { executePendingTask } from "./services/task-executor";
 
 import { createRecommendationsRouter } from "./api/recommendations";
 import { createWebhookRouter } from "./api/webhook";
@@ -44,4 +46,17 @@ app.all("/*", async (c) => {
 
 export default {
   fetch: app.fetch,
+  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
+    const tasks = new PendingTaskService(env.WEB_DB);
+    const pending = await tasks.getRetryable(new Date().toISOString());
+    for (const task of pending) {
+      if (task.retry_count >= 5) {
+        console.error(
+          `CRITICAL: Task ${task.id} (${task.task_type}) exhausted after 5 retries. Payload: ${task.payload}`
+        );
+        continue;
+      }
+      await executePendingTask(env, tasks, task.id);
+    }
+  },
 };

@@ -17,6 +17,9 @@ head_sampling_rate = 1
 name = "web-dev"
 routes = [{ pattern = "web-dev.uni-scrm.com", custom_domain = true }]
 
+[env.dev.triggers]
+crons = ["*/5 * * * *"]
+
 [env.dev.vars]
 GOOGLE_CLIENT_ID = "1038882920781-unbsoa2prpnvqufeicaqqe1mlgso5ac9.apps.googleusercontent.com"
 X_CLIENT_ID = "cS1kY2RlNnc1VldHSWw0LVJQSFM6MTpjaQ"
@@ -44,6 +47,9 @@ binding = "AI"
 [env.production]
 name = "web"
 routes = [{ pattern = "web.uni-scrm.com", custom_domain = true }]
+
+[env.production.triggers]
+crons = ["*/5 * * * *"]
 
 [env.production.vars]
 GOOGLE_CLIENT_ID = "1038882920781-qado86f0g0hcf7t3l74b8acgu1a8teg4.apps.googleusercontent.com"

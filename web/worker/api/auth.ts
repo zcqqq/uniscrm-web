@@ -3,6 +3,8 @@ import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { SessionService } from "../auth/session";
 import { EmailService } from "../services/email";
+import { PendingTaskService } from "../services/pending-tasks";
+import { executePendingTask } from "../services/task-executor";
 
 export function createAuthRouter() {
   const router = new Hono<{ Bindings: Env }>();
@@ -75,22 +77,11 @@ export function createAuthRouter() {
         .bind(memberId, tenantId, link.email, "global", tz, now)
         .run();
 
-      c.executionCtx.waitUntil(
-        fetch(`${c.env.ADMIN_URL}/internal/tenants/${tenantId}/provision-db`, {
-          method: "POST",
-          headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET },
-        }).then((r) => r.json()).then((d) => console.log("Tenant DB provisioned:", JSON.stringify(d)))
-         .catch((e) => console.error("Tenant DB provisioning failed:", e))
-      );
-
-      c.executionCtx.waitUntil(
-        fetch(`${c.env.ADMIN_URL}/internal/subscriptions/activate-trial`, {
-          method: "POST",
-          headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
-          body: JSON.stringify({ tenant_id: tenantId, tier: "basic", days: 30 }),
-        }).then((r) => r.json()).then((d) => console.log("Trial activated:", JSON.stringify(d)))
-         .catch((e) => console.error("Trial activation failed:", e))
-      );
+      const tasks = new PendingTaskService(c.env.WEB_DB);
+      const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
+      const t2 = await tasks.create("activate-trial", { tenant_id: tenantId, tier: "basic", days: 30 });
+      c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t1));
+      c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t2));
 
       member = { id: memberId, tenant_id: tenantId, email: link.email, preferred_location: "global", language: "en", timezone: tz };
     }

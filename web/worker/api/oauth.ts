@@ -6,6 +6,8 @@ import { OAuthService } from "../services/oauth";
 import { SessionService } from "../auth/session";
 import { EmailService } from "../services/email";
 import { X_CHANNEL_SCOPES } from "../../../shared/x-scopes";
+import { PendingTaskService } from "../services/pending-tasks";
+import { executePendingTask } from "../services/task-executor";
 
 export function createOAuthRouter() {
   const router = new Hono<{ Bindings: Env }>();
@@ -60,20 +62,11 @@ export function createOAuthRouter() {
 
     const { memberId, tenantId, isNew } = await oauthService.resolveUser("google", sub, email, stored.timezone || "UTC");
     if (isNew) {
-      c.executionCtx.waitUntil(
-        fetch(`${c.env.ADMIN_URL}/internal/tenants/${tenantId}/provision-db`, {
-          method: "POST",
-          headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET },
-        }).then((r) => r.json()).then((d) => console.log("Tenant DB provisioned:", JSON.stringify(d)))
-         .catch((e) => console.error("Tenant DB provisioning failed:", e))
-      );
-      c.executionCtx.waitUntil(
-        fetch(`${c.env.ADMIN_URL}/internal/subscriptions/activate-trial`, {
-          method: "POST",
-          headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
-          body: JSON.stringify({ tenant_id: tenantId, tier: "basic", days: 30 }),
-        }).catch((e) => console.error("Trial activation failed:", e))
-      );
+      const tasks = new PendingTaskService(c.env.WEB_DB);
+      const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
+      const t2 = await tasks.create("activate-trial", { tenant_id: tenantId, tier: "basic", days: 30 });
+      c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t1));
+      c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t2));
     }
     const sessions = new SessionService(c.env.WEB_DB);
     const newSessionId = await sessions.create(memberId, tenantId, email);
@@ -159,20 +152,11 @@ export function createOAuthRouter() {
     if (email) {
       const { memberId, tenantId, isNew } = await oauthService.resolveUser("x", xUserId, email, stored.timezone || "UTC");
       if (isNew) {
-        c.executionCtx.waitUntil(
-          fetch(`${c.env.ADMIN_URL}/internal/tenants/${tenantId}/provision-db`, {
-            method: "POST",
-            headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET },
-          }).then((r) => r.json()).then((d) => console.log("Tenant DB provisioned:", JSON.stringify(d)))
-           .catch((e) => console.error("Tenant DB provisioning failed:", e))
-        );
-        c.executionCtx.waitUntil(
-          fetch(`${c.env.ADMIN_URL}/internal/subscriptions/activate-trial`, {
-            method: "POST",
-            headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET, "Content-Type": "application/json" },
-            body: JSON.stringify({ tenant_id: tenantId, tier: "basic", days: 30 }),
-          }).catch((e) => console.error("Trial activation failed:", e))
-        );
+        const tasks = new PendingTaskService(c.env.WEB_DB);
+        const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
+        const t2 = await tasks.create("activate-trial", { tenant_id: tenantId, tier: "basic", days: 30 });
+        c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t1));
+        c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t2));
       }
 
       c.executionCtx.waitUntil(
@@ -263,13 +247,11 @@ export function createOAuthRouter() {
     const { memberId, tenantId, isNew } = await oauthService.resolveUser(pending.provider, pending.providerUserId, email, "UTC");
     await oauthService.deletePendingOAuth(pendingId);
     if (isNew) {
-      c.executionCtx.waitUntil(
-        fetch(`${c.env.ADMIN_URL}/internal/tenants/${tenantId}/provision-db`, {
-          method: "POST",
-          headers: { "X-Internal-Secret": c.env.INTERNAL_SECRET },
-        }).then((r) => r.json()).then((d) => console.log("Tenant DB provisioned:", JSON.stringify(d)))
-         .catch((e) => console.error("Tenant DB provisioning failed:", e))
-      );
+      const tasks = new PendingTaskService(c.env.WEB_DB);
+      const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
+      const t2 = await tasks.create("activate-trial", { tenant_id: tenantId, tier: "basic", days: 30 });
+      c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t1));
+      c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t2));
     }
 
     if (pending.provider === "x" && pending.access_token) {

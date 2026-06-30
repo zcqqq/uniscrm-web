@@ -25,6 +25,8 @@ LINK_URL = "https://link-dev.uni-scrm.com"
 TREND_RETENTION_DAYS = "30"
 WEB_URL = "https://web-dev.uni-scrm.com"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
+R2_BUCKET = "uniscrm-dev"
+R2_WAREHOUSE = "b34f3ff4aec4c36584672d5bf1320757_uniscrm-dev"
 X_CLIENT_ID = "cS1kY2RlNnc1VldHSWw0LVJQSFM6MTpjaQ"
 TIKTOK_CLIENT_KEY = "sbaw7873x5p4wuwsiw"
 INTERNAL_SECRET = "dev-internal-secret"
@@ -61,11 +63,11 @@ queue = "uniscrm-event-dev"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_EVENT"
-stream = "ef8f86e0735341bcb538af6ef0b40950"
+pipeline = "e2f817de66a44955b7a921ab4caafbef"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_USER"
-stream = "9f1592f3a469465bb21b55fd73e62d66"
+pipeline = "aaca3fdd3c4f4ab4a2622125c57db1d9"
 
 [env.dev.triggers]
 crons = ["0 * * * *"]

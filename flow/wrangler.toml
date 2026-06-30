@@ -58,7 +58,7 @@ queue = "uniscrm-flow-log-dev"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_FLOW_LOG"
-stream = "e39cbcf14b494c51b3d9ad5f01076e7d"
+pipeline = "d3d880e6c0ab44ef947d0d3d63d6a01d"
 
 [env.dev.ai]
 binding = "AI"
@@ -76,7 +76,7 @@ LINK_URL = "https://link.uni-scrm.com"
 INTERNAL_SECRET = "prod-internal-secret-change-me"
 
 [[env.production.d1_databases]]
-binding = "DB"
+binding = "WEB_DB"
 database_name = "uniscrm-web"
 database_id = "98ea05ba-91de-423d-9126-aa3cd9b42382"
 

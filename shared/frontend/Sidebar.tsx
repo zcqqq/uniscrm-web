@@ -56,8 +56,9 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
     return saved ? new Set(JSON.parse(saved)) : new Set([currentModule || "social"]);
   });
   const [collapsed, setCollapsed] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem("sidebar-collapsed") === "true";
+    if (typeof document === "undefined") return true;
+    const match = document.cookie.match(/(?:^|; )sidebar=([^;]*)/);
+    return match ? match[1] === "collapsed" : true;
   });
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -82,7 +83,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
   }, [expandedGroups]);
 
   useEffect(() => {
-    localStorage.setItem("sidebar-collapsed", String(collapsed));
+    document.cookie = `sidebar=${collapsed ? "collapsed" : "expanded"};path=/;max-age=${365*24*60*60};secure;samesite=lax;domain=uni-scrm.com`;
   }, [collapsed]);
 
   const toggleGroup = (id: string) => {
@@ -246,12 +247,12 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
   );
 
   const renderCollapsedContent = () => (
-    <div className="flex flex-col h-full w-[56px] bg-muted border-r border-border items-center">
+    <div className="flex flex-col h-full w-[56px] bg-muted border-r border-border items-center overflow-visible">
       <div className="py-4 border-b border-border w-full flex justify-center">
         <span className="font-semibold text-foreground text-sm">U</span>
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-3 w-full">
+      <nav className="flex-1 py-3 w-full">
         {groups.map((group) => {
           const disabled = isGroupDisabled(group.id);
           const active = isActive(group);
@@ -262,38 +263,40 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
               onMouseEnter={() => !disabled && setHoveredGroup(group.id)}
               onMouseLeave={() => setHoveredGroup(null)}
             >
-              {group.items ? (
-                <a
-                  href={disabled ? `${urls.web}/billing` : undefined}
-                  className={`flex items-center justify-center w-10 h-10 rounded-md cursor-pointer transition-colors ${disabled ? "opacity-40" : active ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
-                >
-                  <group.icon />
-                </a>
-              ) : (
-                <a
-                  href={disabled ? `${urls.web}/billing` : group.href}
-                  className={`flex items-center justify-center w-10 h-10 rounded-md transition-colors ${disabled ? "opacity-40" : active ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
-                >
-                  <group.icon />
-                </a>
-              )}
+              <div
+                className={`flex items-center justify-center w-10 h-10 rounded-md cursor-pointer transition-colors ${disabled ? "opacity-40" : active ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                title={group.label}
+                onClick={() => {
+                  if (disabled) { window.location.href = `${urls.web}/billing`; return; }
+                  if (!group.items && group.href) { window.location.href = group.href; }
+                }}
+              >
+                <group.icon />
+              </div>
 
-              {hoveredGroup === group.id && group.items && !disabled && (
+              {hoveredGroup === group.id && !disabled && (
                 <div className="absolute left-full top-0 pl-1 z-50">
                 <div className="bg-popover border border-border rounded-md shadow-md py-1.5 min-w-[160px]">
                   <div className="px-3 py-1.5 text-xs font-medium text-foreground border-b border-border mb-1">{group.label}</div>
-                  {group.items.map((item) => {
+                  {group.items ? group.items.map((item) => {
                     const itemLocked = isItemDisabled(group.id, item.id);
                     return (
                       <a
                         key={item.id}
                         href={itemLocked ? `${urls.web}/billing` : item.href}
-                        className={`block px-3 py-1.5 text-sm transition-colors ${itemLocked ? "opacity-40" : isItemActive(item.href) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                        className={`block px-3 py-1.5 text-sm rounded-sm transition-colors ${itemLocked ? "opacity-40" : isItemActive(item.href) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
                       >
                         {item.label}
                       </a>
                     );
-                  })}
+                  }) : (
+                    <a
+                      href={group.href}
+                      className={`block px-3 py-1.5 text-sm rounded-sm transition-colors ${isItemActive(group.href!) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
+                    >
+                      {group.label}
+                    </a>
+                  )}
                 </div>
                 </div>
               )}
@@ -303,11 +306,11 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
       </nav>
 
       <div className="border-t border-border py-3 w-full flex flex-col items-center gap-2">
-        <button onClick={handleLogout} className="flex items-center justify-center w-10 h-10 rounded-md text-muted-foreground hover:text-destructive cursor-pointer transition-colors" title="Logout">
-          <Icons.LogOut />
-        </button>
         <button onClick={() => setCollapsed(false)} className="flex items-center justify-center w-10 h-10 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer transition-colors" title="Expand">
           <Icons.Expand />
+        </button>
+        <button onClick={handleLogout} className="flex items-center justify-center w-10 h-10 rounded-md text-muted-foreground hover:text-destructive cursor-pointer transition-colors" title="Logout">
+          <Icons.LogOut />
         </button>
       </div>
     </div>

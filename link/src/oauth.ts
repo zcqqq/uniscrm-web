@@ -43,7 +43,7 @@ export function oauthRoutes() {
 
     if (byokChannelId) {
       const row = await c.env.LINK_DB
-        .prepare("SELECT config FROM channels WHERE id = ? AND is_active = 1")
+        .prepare("SELECT config FROM channels WHERE id = ? AND is_byok = 1 AND is_active = 1")
         .bind(byokChannelId)
         .first<{ config: string }>();
       if (!row) return c.json({ error: "Channel not found" }, 404);
@@ -52,7 +52,6 @@ export function oauthRoutes() {
       clientId = creds.clientId;
       clientSecret = creds.clientSecret;
     }
-
     const twitter = new Twitter(clientId, clientSecret, `${url.origin}/api/auth/x/callback`);
     const state = generateState();
     const codeVerifier = generateCodeVerifier();
@@ -83,7 +82,7 @@ export function oauthRoutes() {
 
     if (byokChannelId) {
       const row = await c.env.LINK_DB
-        .prepare("SELECT config FROM channels WHERE id = ? AND is_active = 1")
+        .prepare("SELECT config FROM channels WHERE id = ? AND is_byok = 1 AND is_active = 1")
         .bind(byokChannelId)
         .first<{ config: string }>();
       if (row) {
@@ -166,9 +165,9 @@ export function oauthRoutes() {
 
       const channelId = crypto.randomUUID();
       await c.env.LINK_DB
-        .prepare(`INSERT INTO channels (id, channel_type, config, source_channel_id, access_token, tenant_id, member_id, created_at, updated_at)
-           VALUES (?, 'X', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-           ON CONFLICT(channel_type, source_channel_id) DO UPDATE SET config = excluded.config, access_token = excluded.access_token, tenant_id = excluded.tenant_id, member_id = excluded.member_id, is_active = 1, updated_at = datetime('now')`)
+        .prepare(`INSERT INTO channels (id, channel_type, config, source_channel_id, access_token, is_byok, tenant_id, member_id, created_at, updated_at)
+           VALUES (?, 'X', ?, ?, ?, 0, ?, ?, datetime('now'), datetime('now'))
+           ON CONFLICT(channel_type, source_channel_id) DO UPDATE SET config = excluded.config, access_token = excluded.access_token, is_byok = 0, tenant_id = excluded.tenant_id, member_id = excluded.member_id, is_active = 1, updated_at = datetime('now')`)
         .bind(channelId, config, xUser.id, tokens.accessToken(), tenantId || null, memberId || null)
         .run();
 

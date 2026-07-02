@@ -11,7 +11,6 @@ import {
   fetchShopifyProducts,
 } from "./channels/shopify";
 import { encrypt } from "./services/crypto";
-import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 
 export function channelsRoutes() {
   const router = new Hono<{ Bindings: Env }>();
@@ -68,15 +67,14 @@ export function channelsRoutes() {
 
     const channelId = channel_id || crypto.randomUUID();
     const config = JSON.stringify({
-      is_byok: true,
       app_client_id: encClientId,
       app_client_secret: encClientSecret,
       app_consumer_secret: encConsumerSecret,
     });
 
     await c.env.LINK_DB
-      .prepare(`INSERT INTO channels (id, channel_type, config, tenant_id, member_id, created_at, updated_at)
-         VALUES (?, 'X', ?, ?, ?, datetime('now'), datetime('now'))`)
+      .prepare(`INSERT INTO channels (id, channel_type, config, is_byok, tenant_id, member_id, created_at, updated_at)
+         VALUES (?, 'X', ?, 1, ?, ?, datetime('now'), datetime('now'))`)
       .bind(channelId, config, tenantId, memberId)
       .run();
 
@@ -91,22 +89,19 @@ export function channelsRoutes() {
   router.get("/x/byok", async (c) => {
     const tenantId = c.get("tenantId" as never) as number;
     const rows = await c.env.LINK_DB
-      .prepare("SELECT id, config FROM channels WHERE tenant_id = ? AND channel_type = 'X' AND is_active = 1")
+      .prepare("SELECT id, config FROM channels WHERE tenant_id = ? AND channel_type = 'X' AND is_byok = 1 AND is_active = 1")
       .bind(tenantId)
       .all<{ id: string; config: string }>();
 
-    const byokChannels = rows.results
-      .map((r) => {
-        const cfg = JSON.parse(r.config) as ByokConfig & { x_username?: string; x_user_id?: string };
-        if (!cfg.is_byok) return null;
-        return {
-          id: r.id,
-          username: cfg.x_username || null,
-          x_user_id: cfg.x_user_id || null,
-          authorized: !!cfg.x_user_id,
-        };
-      })
-      .filter(Boolean);
+    const byokChannels = rows.results.map((r) => {
+      const cfg = JSON.parse(r.config) as { x_username?: string; x_user_id?: string };
+      return {
+        id: r.id,
+        username: cfg.x_username || null,
+        x_user_id: cfg.x_user_id || null,
+        authorized: !!cfg.x_user_id,
+      };
+    });
 
     return c.json(byokChannels);
   });

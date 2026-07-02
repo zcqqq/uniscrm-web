@@ -18,9 +18,15 @@ export interface Env {
   TREND_RETENTION_DAYS: string;
   LINK_URL: string;
   WEB_URL: string;
+  R2_SQL_TOKEN: string;
+  R2_BUCKET: string;
+  R2_WAREHOUSE: string;
   CF_ACCOUNT_ID: string;
   CF_D1_API_TOKEN: string;
   INTERNAL_SECRET: string;
+
+  // Secrets Store
+  ENCRYPTION_KEY: { get(): Promise<string> };
 
   // X / Twitter
   X_BEARER_TOKEN: string;

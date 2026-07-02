@@ -1,7 +1,9 @@
+import { authFetch } from "../../../shared/frontend/lib/auth-fetch";
+
 const BASE = "/api/segments";
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(path, { credentials: "include", ...opts });
+  const res = await authFetch(path, opts);
   const data = await res.json();
   if (!res.ok) throw new Error((data as { error?: string }).error || `HTTP ${res.status}`);
   return data as T;

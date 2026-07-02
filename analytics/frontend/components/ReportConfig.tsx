@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { EventMetadata_X } from "../../../metadata/x";
+import { EventMetadata_X, PROPS_X } from "../../../metadata/x";
 import { t } from "../../../metadata/locale";
 import { SelectProps } from "../../../shared/frontend/components/SelectProps";
 import { useLocale } from "../hooks/useLocale";
@@ -11,6 +11,8 @@ import { Button } from "../../../shared/frontend/ui/button";
 import { Checkbox } from "../../../shared/frontend/ui/checkbox";
 
 const TRIGGER_EVENTS = EventMetadata_X.filter((e) => e.flowType !== "action");
+const USER_PROPS = PROPS_X.filter((p) => p.isInsight);
+const NUMERIC_USER_PROPS = USER_PROPS.filter((p) => p.dataType === "INT");
 
 const UI = {
   en: {
@@ -62,23 +64,28 @@ export interface FilterCondition {
 }
 
 export interface ReportConfigValues {
-  mode?: "event" | "interval";
+  mode?: "event" | "interval" | "user" | "funnel";
   eventType: string;
-  measure: "count" | "users" | "avg";
+  measure: "count" | "users" | "avg" | "sum";
+  measureField?: string;
   eventTypeA?: string;
   eventTypeB?: string;
   dimension: string;
+  buckets?: string;
   timeRange: string;
   granularity: "total" | "day" | "week" | "month" | "hour" | "weekday";
   compareEnabled?: boolean;
   compareTimeRange?: string;
   filters?: FilterCondition[];
+  funnelSteps?: string[];
+  windowValue?: number;
+  windowUnit?: "day" | "hour";
 }
 
 interface ReportConfigProps {
   values: ReportConfigValues;
   onChange: (values: ReportConfigValues) => void;
-  mode?: "event" | "interval";
+  mode?: "event" | "interval" | "user" | "funnel";
 }
 
 export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigProps) {
@@ -108,8 +115,47 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
   return (
     <Card className="mb-5">
       <CardContent className="p-5">
-        {/* Measure (event) or Event Pair (interval) */}
-        <div className="flex gap-8 flex-wrap">
+        {/* Funnel mode — steps + window */}
+        {mode === "funnel" && (
+          <div className="space-y-3 mb-4">
+            <Label className="block">{locale === "zh" ? "漏斗步骤" : "Funnel Steps"}</Label>
+            {(values.funnelSteps || ["", ""]).map((step, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center shrink-0">{i + 1}</span>
+                <Select value={step} onChange={(e) => {
+                  const steps = [...(values.funnelSteps || ["", ""])];
+                  steps[i] = e.target.value;
+                  update({ funnelSteps: steps });
+                }} className="flex-1">
+                  <option value="">{s.selectEvent}</option>
+                  {TRIGGER_EVENTS.map((ev) => <option key={ev.eventType} value={ev.eventType}>{t(ev.label, locale)}</option>)}
+                </Select>
+                {(values.funnelSteps || []).length > 2 && (
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => {
+                    const steps = (values.funnelSteps || []).filter((_, j) => j !== i);
+                    update({ funnelSteps: steps });
+                  }}>✕</Button>
+                )}
+              </div>
+            ))}
+            {(values.funnelSteps || []).length < 10 && (
+              <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => update({ funnelSteps: [...(values.funnelSteps || ["", ""]), ""] })}>
+                + {locale === "zh" ? "添加步骤" : "Add step"}
+              </Button>
+            )}
+            <div className="flex items-center gap-2 mt-3">
+              <Label className="text-sm text-muted-foreground shrink-0">{locale === "zh" ? "窗口期" : "Window"}:</Label>
+              <Input type="number" value={values.windowValue ?? 7} onChange={(e) => update({ windowValue: parseInt(e.target.value) || 7 })} className="h-7 w-16 text-xs" min={1} />
+              <Select value={values.windowUnit || "day"} onChange={(e) => update({ windowUnit: e.target.value as any })} className="h-7 text-xs">
+                <option value="day">{locale === "zh" ? "天" : "days"}</option>
+                <option value="hour">{locale === "zh" ? "小时" : "hours"}</option>
+              </Select>
+            </div>
+          </div>
+        )}
+
+        {/* Measure + Dimension */}
+        {mode !== "funnel" && <div className="flex gap-8 flex-wrap">
           <div className="flex-1 min-w-[280px]">
             {mode === "interval" ? (
               <>
@@ -129,6 +175,25 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                       {TRIGGER_EVENTS.map((e) => <option key={e.eventType} value={e.eventType}>{t(e.label, locale)}</option>)}
                     </Select>
                   </div>
+                </div>
+              </>
+            ) : mode === "user" ? (
+              <>
+                <Label className="mb-2 block">{s.measure}</Label>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Select value={values.measure} onChange={(e) => update({ measure: e.target.value as any, measureField: e.target.value !== "count" ? (values.measureField || NUMERIC_USER_PROPS[0]?.propId || "") : undefined })}>
+                    <option value="count">{locale === "zh" ? "用户数" : "User count"}</option>
+                    <option value="avg">{locale === "zh" ? "平均值" : "Average"}</option>
+                    <option value="sum">{locale === "zh" ? "总和" : "Sum"}</option>
+                  </Select>
+                  {(values.measure === "avg" || values.measure === "sum") && (
+                    <>
+                      <span className="text-muted-foreground text-sm">→</span>
+                      <Select value={values.measureField || ""} onChange={(e) => update({ measureField: e.target.value })}>
+                        {NUMERIC_USER_PROPS.map((p) => <option key={p.propId} value={p.propId}>{t(p.label, locale)}</option>)}
+                      </Select>
+                    </>
+                  )}
                 </div>
               </>
             ) : (
@@ -153,16 +218,34 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
             <Label className="mb-2 block">{s.dimension}</Label>
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground text-sm">{s.viewBy}</span>
-              <SelectProps
-                eventType={mode === "interval" ? (values.eventTypeA || "") : values.eventType}
-                value={values.dimension}
-                onChange={(v) => update({ dimension: v })}
-                locale={locale}
-                placeholder={s.noGroup}
-              />
+              {mode === "user" ? (
+                <Select value={values.dimension} onChange={(e) => update({ dimension: e.target.value, buckets: "" })}>
+                  <option value="">{s.noGroup}</option>
+                  {USER_PROPS.map((p) => <option key={p.propId} value={p.propId}>{t(p.label, locale)}</option>)}
+                </Select>
+              ) : (
+                <SelectProps
+                  eventType={mode === "interval" ? (values.eventTypeA || "") : values.eventType}
+                  value={values.dimension}
+                  onChange={(v) => update({ dimension: v })}
+                  locale={locale}
+                  placeholder={s.noGroup}
+                />
+              )}
             </div>
+            {values.dimension && USER_PROPS.find(p => p.propId === values.dimension)?.dataType === "INT" && (
+              <div className="mt-2">
+                <Input
+                  type="text"
+                  value={values.buckets || ""}
+                  onChange={(e) => update({ buckets: e.target.value })}
+                  placeholder={locale === "zh" ? "分档边界 (逗号分隔, 如 100,1000,10000)" : "Bucket boundaries (comma-separated, e.g. 100,1000,10000)"}
+                  className="text-xs h-7"
+                />
+              </div>
+            )}
           </div>
-        </div>
+        </div>}
 
         {/* Filter conditions */}
         {showFilter && (values.filters || []).length > 0 && (
@@ -196,32 +279,34 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
           </Button>
         </div>
 
-        {/* Time range + Granularity + Compare */}
-        <div className="flex items-center gap-3 mt-4 flex-wrap">
+        {/* Time range + Granularity + Compare (not for user mode) */}
+        {mode !== "user" && <div className="flex items-center gap-3 mt-4 flex-wrap">
           <Select value={values.timeRange} onChange={(e) => update({ timeRange: e.target.value })}>
             {TIME_RANGES.map((r) => <option key={r.value} value={r.value}>{s[r.key]}</option>)}
           </Select>
-          <Select value={values.granularity} onChange={(e) => update({ granularity: e.target.value as any })}>
+          {mode !== "funnel" && <Select value={values.granularity} onChange={(e) => update({ granularity: e.target.value as any })}>
             <option value="total">{s.total}</option>
             <option value="day">{s.day}</option>
             <option value="week">{s.week}</option>
             <option value="month">{s.month}</option>
             <option value="hour">{s.hour}</option>
             <option value="weekday">{s.weekday}</option>
-          </Select>
-          <label className="flex items-center gap-1.5 text-sm text-muted-foreground cursor-pointer ml-2">
-            <Checkbox
-              checked={values.compareEnabled || false}
-              onCheckedChange={(checked) => update({ compareEnabled: !!checked })}
-            />
-            {s.compare}
-          </label>
-          {values.compareEnabled && (
-            <Select value={values.compareTimeRange || "7"} onChange={(e) => update({ compareTimeRange: e.target.value })}>
-              {TIME_RANGES.map((r) => <option key={r.value} value={r.value}>{s[r.key]}</option>)}
-            </Select>
-          )}
-        </div>
+          </Select>}
+          {mode !== "funnel" && <>
+            <label className="flex items-center gap-1.5 text-sm text-muted-foreground cursor-pointer ml-2">
+              <Checkbox
+                checked={values.compareEnabled || false}
+                onCheckedChange={(checked) => update({ compareEnabled: !!checked })}
+              />
+              {s.compare}
+            </label>
+            {values.compareEnabled && (
+              <Select value={values.compareTimeRange || "7"} onChange={(e) => update({ compareTimeRange: e.target.value })}>
+                {TIME_RANGES.map((r) => <option key={r.value} value={r.value}>{s[r.key]}</option>)}
+              </Select>
+            )}
+          </>}
+        </div>}
       </CardContent>
     </Card>
   );

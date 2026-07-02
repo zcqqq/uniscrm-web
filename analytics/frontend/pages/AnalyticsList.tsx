@@ -14,11 +14,11 @@ import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 
 const UI = {
-  en: { newBtn: "New", event: "Event Analysis", interval: "Interval Analysis", name: "Name", type: "Type", status: "Status", created: "Created", empty: "No reports yet", createFirst: "Create your first analysis" },
-  zh: { newBtn: "新建", event: "事件分析", interval: "间隔分析", name: "名称", type: "类型", status: "状态", created: "创建时间", empty: "暂无报表", createFirst: "创建你的第一个分析" },
+  en: { newBtn: "New", event: "Event Analysis", interval: "Interval Analysis", user: "User Analysis", funnel: "Funnel Analysis", name: "Name", type: "Type", status: "Status", created: "Created", empty: "No reports yet", createFirst: "Create your first analysis" },
+  zh: { newBtn: "新建", event: "事件分析", interval: "间隔分析", user: "用户分析", funnel: "漏斗分析", name: "名称", type: "类型", status: "状态", created: "创建时间", empty: "暂无报表", createFirst: "创建你的第一个分析" },
 };
 
-const TYPE_LABELS = { en: { event: "Event", interval: "Interval" }, zh: { event: "事件", interval: "间隔" } };
+const TYPE_LABELS = { en: { event: "Event", interval: "Interval", user: "User", funnel: "Funnel" }, zh: { event: "事件", interval: "间隔", user: "用户", funnel: "漏斗" } };
 
 export function AnalyticsList() {
   const navigate = useNavigate();
@@ -59,7 +59,7 @@ export function AnalyticsList() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
+    <div className="p-6">
       <div className="flex items-center gap-4 mb-6">
         <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
           <DropdownMenuTrigger asChild>
@@ -71,6 +71,12 @@ export function AnalyticsList() {
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => navigate("/analytics/interval/new")}>
               {s.interval}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate("/analytics/user/new")}>
+              {s.user}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate("/analytics/funnel/new")}>
+              {s.funnel}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -102,7 +108,7 @@ export function AnalyticsList() {
               <TableRow
                 key={r.id}
                 onClick={() => navigate(`/analytics/${r.id}`)}
-                className="cursor-pointer"
+                className="cursor-pointer hover:bg-muted/50"
               >
                 <TableCell className="font-medium">
                   {(r.params as any).name || `${r.type} #${r.id.slice(0, 8)}`}

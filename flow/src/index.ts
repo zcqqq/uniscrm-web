@@ -31,6 +31,32 @@ function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenan
   }
 }
 
+function shouldCronFire(data: Record<string, unknown>, now: Date): boolean {
+  const type = data.scheduleType as string;
+  const minute = now.getUTCMinutes();
+  const hour = now.getUTCHours();
+
+  if (type === "daily") {
+    const [h, m] = (data.dailyTime as string || "09:00").split(":").map(Number);
+    return hour === h && minute === m;
+  }
+  if (type === "interval") {
+    const val = Number(data.intervalValue || 60);
+    const unit = data.intervalUnit as string || "minutes";
+    if (unit === "minutes") return minute % val === 0;
+    if (unit === "hours") return minute === 0 && hour % val === 0;
+    return minute === 0 && hour === 0;
+  }
+  if (type === "cron") {
+    const expr = data.cronExpr as string || "0 * * * *";
+    const [cm, ch] = expr.split(" ");
+    const matchMin = cm === "*" || cm.includes("/") ? (minute % parseInt(cm.replace("*/", ""))) === 0 : parseInt(cm) === minute;
+    const matchHour = ch === "*" || ch.includes("/") ? (hour % parseInt(ch.replace("*/", ""))) === 0 : parseInt(ch) === hour;
+    return matchMin && matchHour;
+  }
+  return false;
+}
+
 interface ActionExecResult {
   stmts: D1PreparedStatement[];
   rateLimited: { action: ActionResult; retryAt: string }[];
@@ -143,6 +169,27 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
           "INSERT INTO rate_limits (key, remaining, reset_at) VALUES (?, 1, ?) ON CONFLICT(key) DO UPDATE SET remaining = remaining + 1, reset_at = excluded.reset_at"
         ).bind(dailyKey, todayEnd).run();
       }
+    } else if (action.type === "webhook" && action.url) {
+      const method = (action.method as string) || "POST";
+      const headers: Record<string, string> = { "Content-Type": "application/json", ...(action.headers as Record<string, string> || {}) };
+      const bodyStr = action.body ? String(action.body).replace(/\$(user|event)\.(\w+)/g, (_, _p, field) => String(payload?.[field] ?? "")) : JSON.stringify({ userId, ...payload });
+      try {
+        const res = await fetch(action.url as string, { method, headers, body: method !== "GET" ? bodyStr : undefined });
+        (action as any).success = res.ok;
+      } catch {
+        (action as any).success = false;
+      }
+    } else if (action.type === "changeUserProps" && action.updates) {
+      const tenantRow = await env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+        .bind(Number(tenantId)).first<{ d1_database_id: string }>();
+      if (tenantRow?.d1_database_id) {
+        const tdb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
+        const updates = action.updates as { field: string; value: string }[];
+        for (const u of updates) {
+          const val = u.value.replace(/\$(user|event)\.(\w+)/g, (_, _p, field) => String(payload?.[field] ?? ""));
+          await tdb.run(`UPDATE user SET ${u.field} = ? WHERE id = ?`, [val, userId]);
+        }
+      }
     }
   }
 
@@ -180,6 +227,31 @@ app.use("/api/flows/*", authMiddleware);
 app.use("/api/channels", authMiddleware);
 
 app.get("/health", (c) => c.json({ status: "ok" }));
+
+// Internal: mock trigger event for testing
+app.post("/internal/trigger", async (c) => {
+  const secret = c.req.header("X-Internal-Secret");
+  if (secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
+  const { tenantId, eventType, userId, channelId, payload } = await c.req.json<any>();
+  const now = new Date().toISOString();
+  const flows = await c.env.FLOW_DB.prepare("SELECT id, graph_json FROM flows WHERE tenant_id = ? AND status = 'published'")
+    .bind(tenantId).all<{ id: string; graph_json: string }>();
+  const results: any[] = [];
+  for (const flow of flows.results) {
+    const graph: FlowGraph = JSON.parse(flow.graph_json);
+    const result = executeFlow(graph, eventType, payload || {});
+    if (result.matched) {
+      const { stmts } = await executeActions(result.actions, userId || "", String(tenantId), c.env, payload);
+      await c.env.FLOW_DB.batch([
+        c.env.FLOW_DB.prepare("INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at) VALUES (?, ?, ?, ?, 1, ?)")
+          .bind(crypto.randomUUID(), flow.id, userId || "", tenantId, now),
+        ...stmts,
+      ]);
+      results.push({ flowId: flow.id, actions: result.actions.length, matched: true });
+    }
+  }
+  return c.json({ triggered: results.length, results });
+});
 
 // Auth proxy
 app.get("/api/auth/me", async (c) => {
@@ -565,8 +637,13 @@ export default {
     if (accept.includes("text/html") && !url.pathname.startsWith("/api")) {
       const sessionCookie = getCookieValue(request, "session");
       if (!sessionCookie) {
-        const webUrl = env.WEB_URL;
-        return Response.redirect(`${webUrl}/login`, 302);
+        return Response.redirect(`${env.WEB_URL}/login`, 302);
+      }
+      const authRes = await fetch(`${env.WEB_URL}/api/auth/me`, {
+        headers: { Cookie: `session=${sessionCookie}` },
+      });
+      if (!authRes.ok) {
+        return Response.redirect(`${env.WEB_URL}/login`, 302);
       }
     }
 
@@ -698,6 +775,35 @@ export default {
 
   async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
     const now = new Date().toISOString();
+
+    // Cron trigger: check published flows with cronTrigger nodes
+    const cronFlows = await env.FLOW_DB.prepare(
+      `SELECT id, graph_json, tenant_id FROM flows WHERE status = 'published' AND graph_json LIKE '%cronTrigger%'`
+    ).all<{ id: string; graph_json: string; tenant_id: string }>();
+
+    for (const flow of cronFlows.results) {
+      try {
+        const graph: FlowGraph = JSON.parse(flow.graph_json);
+        const cronNodes = graph.nodes.filter(n => n.type === "cronTrigger");
+        for (const node of cronNodes) {
+          if (shouldCronFire(node.data, new Date())) {
+            const result = executeFlow(graph, "cron.trigger", {});
+            if (result.matched && result.actions.length > 0) {
+              const { stmts } = await executeActions(result.actions, "", flow.tenant_id, env, {});
+              await env.FLOW_DB.batch([
+                env.FLOW_DB.prepare("INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at) VALUES (?, ?, '', ?, 1, ?)")
+                  .bind(crypto.randomUUID(), flow.id, flow.tenant_id, now),
+                ...stmts,
+              ]);
+              console.log(JSON.stringify({ event: "cron_trigger_fired", flowId: flow.id, actions: result.actions.length }));
+            }
+          }
+        }
+      } catch (e) {
+        console.error(JSON.stringify({ event: "cron_trigger_error", flowId: flow.id, error: String(e) }));
+      }
+    }
+
     const pending = await env.FLOW_DB.prepare(
       `SELECT id, flow_id, node_id, user_id, tenant_id, payload, awaiting_event, retry_action, retry_count FROM flow_pending WHERE execute_at <= ?`
     )

@@ -282,6 +282,9 @@ async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<void> {
   let resultsJson: string;
   if (type === "interval") {
     resultsJson = JSON.stringify({ sql, ...processIntervalResults(result.data) });
+  } else if (type === "funnel") {
+    const steps = ((params as any).steps || []) as string[];
+    resultsJson = JSON.stringify({ sql, ...processFunnelResults(result.data, steps) });
   } else {
     resultsJson = JSON.stringify({ sql, data: result.data });
   }
@@ -368,7 +371,119 @@ FROM ordered
 WHERE event_type = '${event_type_a}' AND next_type = '${event_type_b}'`;
   }
 
+  if (type === "user") {
+    const { measure, measure_field, dimension, buckets, filters } = params as {
+      measure: string; measure_field?: string; dimension?: string;
+      buckets?: number[];
+      filters?: { field: string; operator: string; value: string; value2?: string }[];
+    };
+
+    const filterClauses = (filters || []).filter(f => f.field && f.operator).map(f => {
+      if (f.operator === "has value") return `AND ${f.field} IS NOT NULL`;
+      if (f.operator === "no value") return `AND ${f.field} IS NULL`;
+      if (f.operator === "between") return `AND ${f.field} BETWEEN ${f.value} AND ${f.value2 || f.value}`;
+      const op = f.operator === "≠" ? "!=" : f.operator;
+      const val = isNaN(Number(f.value)) ? `'${f.value}'` : f.value;
+      return `AND ${f.field} ${op} ${val}`;
+    }).join(" ");
+
+    let dimExpr = "";
+    let dimGroup = "";
+    if (dimension) {
+      if (buckets && buckets.length > 0) {
+        const cases = buckets.map((b, i) => {
+          const prev = i === 0 ? 0 : buckets[i - 1];
+          return `WHEN ${dimension} < ${b} THEN '${prev}-${b}'`;
+        });
+        cases.push(`ELSE '${buckets[buckets.length - 1]}+'`);
+        dimExpr = `, CASE ${cases.join(" ")} END as dimension`;
+        dimGroup = " GROUP BY dimension ORDER BY dimension";
+      } else {
+        dimExpr = `, ${dimension} as dimension`;
+        dimGroup = ` GROUP BY ${dimension} ORDER BY value DESC`;
+      }
+    }
+
+    const agg = measure === "avg" && measure_field ? `AVG(CAST(${measure_field} AS DOUBLE))`
+      : measure === "sum" && measure_field ? `SUM(CAST(${measure_field} AS DOUBLE))`
+      : "COUNT(*)";
+
+    return `SELECT ${agg} as value${dimExpr}
+FROM uniscrm.user
+WHERE tenant_id = ${tenantId} ${filterClauses}${dimGroup}`;
+  }
+
+  if (type === "funnel") {
+    const { steps, window_value, window_unit, time_range_start, time_range_end, filters } = params as {
+      steps: string[]; window_value?: number; window_unit?: string;
+      time_range_start?: string; time_range_end?: string;
+      filters?: { field: string; operator: string; value: string; value2?: string }[];
+    };
+
+    if (!steps || steps.length < 2) return "SELECT 'error' as step, 0 as count";
+
+    const winVal = window_value || 7;
+    const winUnit = window_unit === "hour" ? "HOUR" : "DAY";
+
+    const filterClauses = (filters || []).filter(f => f.field && f.operator).map(f => {
+      if (f.operator === "has value") return `AND ${f.field} IS NOT NULL`;
+      if (f.operator === "no value") return `AND ${f.field} IS NULL`;
+      if (f.operator === "between") return `AND ${f.field} BETWEEN ${f.value} AND ${f.value2 || f.value}`;
+      const op = f.operator === "≠" ? "!=" : f.operator;
+      const val = isNaN(Number(f.value)) ? `'${f.value}'` : f.value;
+      return `AND ${f.field} ${op} ${val}`;
+    }).join(" ");
+
+    const timeFilter = [
+      time_range_start ? `AND event_time >= '${time_range_start}'` : "",
+      time_range_end ? `AND event_time <= '${time_range_end}'` : "",
+    ].join(" ");
+
+    const ctes: string[] = [];
+    ctes.push(`step1 AS (
+  SELECT user_id, MIN(event_time) as t1
+  FROM uniscrm.event
+  WHERE tenant_id = ${tenantId} AND event_type = '${steps[0]}' ${timeFilter} ${filterClauses}
+  GROUP BY user_id
+)`);
+
+    for (let i = 1; i < steps.length; i++) {
+      const prevStep = `step${i}`;
+      const curStep = `step${i + 1}`;
+      ctes.push(`${curStep} AS (
+  SELECT ${prevStep}.user_id
+  FROM ${prevStep}
+  JOIN uniscrm.event e ON e.user_id = ${prevStep}.user_id
+    AND e.tenant_id = ${tenantId} AND e.event_type = '${steps[i]}'
+    AND e.event_time > ${i === 1 ? `${prevStep}.t1` : `(SELECT MIN(ev.event_time) FROM uniscrm.event ev WHERE ev.user_id = ${prevStep}.user_id AND ev.tenant_id = ${tenantId} AND ev.event_type = '${steps[i - 1]}')`}
+    AND e.event_time <= DATE_ADD(step1.t1, INTERVAL ${winVal} ${winUnit})
+  ${i > 1 ? `JOIN step1 ON step1.user_id = ${prevStep}.user_id` : ""}
+  GROUP BY ${prevStep}.user_id
+)`);
+    }
+
+    const selects = steps.map((_, i) => `SELECT 'step${i + 1}' as step, COUNT(*) as count FROM step${i + 1}`);
+
+    return `WITH ${ctes.join(",\n")}\n${selects.join("\nUNION ALL ")}`;
+  }
+
   return "SELECT 1";
+}
+
+function processFunnelResults(rows: unknown[], steps: string[]): { steps: { step: string; eventType: string; count: number; conversionRate: number; totalRate: number }[] } {
+  const stepData = (rows as { step: string; count: number }[]).map((r, i) => ({
+    step: r.step,
+    eventType: steps[i] || "",
+    count: Number(r.count) || 0,
+    conversionRate: 0,
+    totalRate: 0,
+  }));
+  const first = stepData[0]?.count || 0;
+  for (let i = 0; i < stepData.length; i++) {
+    stepData[i].totalRate = first > 0 ? Math.round(stepData[i].count / first * 1000) / 10 : 0;
+    stepData[i].conversionRate = i === 0 ? 100 : (stepData[i - 1].count > 0 ? Math.round(stepData[i].count / stepData[i - 1].count * 1000) / 10 : 0);
+  }
+  return { steps: stepData };
 }
 
 function processIntervalResults(rows: unknown[]): IntervalResults {
@@ -400,8 +515,13 @@ export default {
     if (accept.includes("text/html") && !url.pathname.startsWith("/api")) {
       const sessionCookie = getCookieValue(request, "session");
       if (!sessionCookie) {
-        const webUrl = env.WEB_URL;
-        return Response.redirect(`${webUrl}/login`, 302);
+        return Response.redirect(`${env.WEB_URL}/login`, 302);
+      }
+      const authRes = await fetch(`${env.WEB_URL}/api/auth/me`, {
+        headers: { Cookie: `session=${sessionCookie}` },
+      });
+      if (!authRes.ok) {
+        return Response.redirect(`${env.WEB_URL}/login`, 302);
       }
     }
 

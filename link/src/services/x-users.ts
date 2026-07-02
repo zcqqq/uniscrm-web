@@ -79,9 +79,10 @@ export class XUsersService {
         updated_at: now,
       };
       for (const prop of INSIGHT_PROPS) {
+        const pm = (user as Record<string, unknown>).public_metrics as Record<string, unknown> | undefined;
         const val = prop.propId.includes("_count")
-          ? user.public_metrics?.[prop.propId as keyof typeof user.public_metrics] ?? 0
-          : (user as Record<string, unknown>)[prop.propId] ?? 0;
+          ? pm?.[prop.propId] ?? 0
+          : (user as Record<string, unknown>)[prop.propId] ?? null;
         record[prop.propId] = val;
       }
       await this.pipelineUser.send([record]).catch((err) => {

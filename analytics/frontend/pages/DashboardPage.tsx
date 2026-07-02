@@ -1,7 +1,10 @@
-import { useState, useEffect } from "react";
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
+import { useState, useEffect, useRef } from "react";
+import { toPng } from "html-to-image";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { listDashboards, createDashboard, getDashboard, deleteDashboard, updateDashboardItem, deleteDashboardItem, type Dashboard, type DashboardItem } from "../lib/api";
 import { useLocale } from "../hooks/useLocale";
+import { useToast } from "../../../shared/frontend/hooks/use-toast";
+import { fillTimeSeries } from "../lib/fill-time-series";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
@@ -22,7 +25,9 @@ const SIZES = [
 
 export function DashboardPage() {
   const { locale } = useLocale();
+  const { toast } = useToast();
   const s = UI[locale];
+  const dashContentRef = useRef<HTMLDivElement>(null);
 
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const [activeDashId, setActiveDashId] = useState<string | null>(null);
@@ -30,6 +35,7 @@ export function DashboardPage() {
   const [activeDashboard, setActiveDashboard] = useState<Dashboard | null>(null);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     listDashboards().then((d) => {
@@ -71,6 +77,27 @@ export function DashboardPage() {
   const handleRemoveItem = async (itemId: string) => {
     await deleteDashboardItem(itemId);
     setItems((prev) => prev.filter((i) => i.id !== itemId));
+  };
+
+  const handleExport = async () => {
+    if (!dashContentRef.current) return;
+    setExporting(true);
+    try {
+      const dataUrl = await toPng(dashContentRef.current, {
+        backgroundColor: "#ffffff",
+        pixelRatio: 2,
+        filter: (node) => !(node as HTMLElement)?.classList?.contains("export-exclude"),
+      });
+      const link = document.createElement("a");
+      link.download = `${activeDashboard?.name || "dashboard"}-${new Date().toISOString().slice(0, 10)}.png`;
+      link.href = dataUrl;
+      link.click();
+      toast({ description: locale === "zh" ? "图片已下载" : "Image downloaded" });
+    } catch {
+      toast({ variant: "destructive", description: locale === "zh" ? "导出失败" : "Export failed" });
+    } finally {
+      setExporting(false);
+    }
   };
 
   const filtered = dashboards.filter((d) => d.name.toLowerCase().includes(search.toLowerCase()));
@@ -118,16 +145,24 @@ export function DashboardPage() {
           <div className="p-6">
             <div className="flex items-center justify-between mb-6">
               <h1 className="text-xl font-bold text-foreground">{activeDashboard.name}</h1>
-              <Button variant="destructive" size="sm" onClick={handleDelete}>{s.delete}</Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || items.length === 0}>
+                  {exporting ? "..." : (locale === "zh" ? "保存为图片" : "Export Image")}
+                </Button>
+                <Button variant="destructive" size="sm" onClick={handleDelete}>{s.delete}</Button>
+              </div>
             </div>
 
             {items.length === 0 ? (
               <EmptyState title={s.noItems} />
             ) : (
-              <div className="grid grid-cols-4 gap-4">
-                {items.map((item) => (
-                  <DashboardCard key={item.id} item={item} locale={locale} onSizeChange={(sz) => handleSizeChange(item, sz)} onRemove={() => handleRemoveItem(item.id)} />
-                ))}
+              <div ref={dashContentRef}>
+                <h2 className="text-lg font-semibold mb-4 export-only hidden">{activeDashboard.name}</h2>
+                <div className="grid grid-cols-4 gap-4">
+                  {items.map((item) => (
+                    <DashboardCard key={item.id} item={item} locale={locale} onSizeChange={(sz) => handleSizeChange(item, sz)} onRemove={() => handleRemoveItem(item.id)} />
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -141,24 +176,41 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
   const [menuOpen, setMenuOpen] = useState(false);
   const s = UI[locale as "en" | "zh"];
   const colSpan = item.size === "large" ? "col-span-4" : item.size === "small" ? "col-span-1" : "col-span-2";
+  const chartHeight = item.size === "large" ? 240 : item.size === "small" ? 80 : 140;
 
-  const chartData = item.results && "data" in item.results
-    ? ((item.results as any).data || []).map((d: any) => ({ period: d.period, value: d.value }))
+  const rawData = item.results && "data" in item.results
+    ? ((item.results as any).data || []).filter((d: any) => d?.period)
     : [];
+  const timeRange = (item.params as any)?.time_range_start
+    ? String(Math.round((Date.now() - new Date((item.params as any).time_range_start).getTime()) / 86400000))
+    : "7";
+  const granularity = (item.params as any)?.granularity || "day";
+  const chartData = fillTimeSeries(
+    rawData.map((d: any) => ({ period: d.period, value: d.value || 0 })),
+    timeRange,
+    granularity
+  );
+  const total = chartData.reduce((s: number, d: any) => s + d.value, 0);
+
+  const formatTick = (p: unknown) => {
+    if (!p || typeof p !== "string") return "";
+    const cleaned = p.replace(/(\.\d{3})\d+Z$/, "$1Z");
+    const d = new Date(cleaned);
+    if (isNaN(d.getTime())) return p.slice(0, 5);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  };
 
   return (
-    <Card className={`${colSpan} relative`}>
+    <Card className={`${colSpan}`}>
       <CardContent className="p-4">
-        <div className="flex items-start justify-between mb-2">
-          <div>
-            <div className="text-sm font-medium text-foreground">{item.report_name || `${item.type} #${item.report_id.slice(0, 8)}`}</div>
-            {item.params && (item.params as any).time_range_start && (
-              <div className="text-xs text-muted-foreground mt-0.5">{(item.params as any).time_range_start} ~ {(item.params as any).time_range_end || "now"}</div>
-            )}
+        <div className="flex items-start justify-between mb-1">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-foreground truncate">{item.report_name || `${item.type} #${item.report_id.slice(0, 8)}`}</div>
+            {total > 0 && <div className="text-2xl font-bold tracking-tight mt-0.5">{total.toLocaleString()}</div>}
           </div>
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6">⋯</Button>
+              <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 export-exclude">⋯</Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border">
@@ -182,17 +234,19 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
         </div>
 
         {chartData.length > 0 ? (
-          <ResponsiveContainer width="100%" height={item.size === "small" ? 80 : 140}>
-            <AreaChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.4} />
-              <XAxis dataKey="period" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fontSize: 9 }} tickLine={false} axisLine={false} width={28} />
-              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11 }} />
-              <Area type="monotone" dataKey="value" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.1} strokeWidth={2} dot={{ r: 2 }} />
-            </AreaChart>
+          <ResponsiveContainer width="100%" height={chartHeight}>
+            <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.3} />
+              <XAxis dataKey="period" tickFormatter={formatTick} tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={28} />
+              <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }} labelFormatter={formatTick} />
+              <Line type="natural" dataKey="value" stroke="#7c3aed" strokeWidth={2} dot={false} activeDot={{ r: 3, fill: "#7c3aed", stroke: "#fff", strokeWidth: 2 }} />
+            </LineChart>
           </ResponsiveContainer>
         ) : (
-          <div className="flex items-center justify-center h-20 text-muted-foreground text-xs">{s.noData}</div>
+          <div className="flex items-center justify-center text-muted-foreground text-xs" style={{ height: chartHeight }}>
+            {s.noData}
+          </div>
         )}
       </CardContent>
     </Card>

@@ -304,8 +304,13 @@ export default {
     if (accept.includes("text/html") && !url.pathname.startsWith("/api")) {
       const sessionCookie = getCookieValue(request, "session");
       if (!sessionCookie) {
-        const webUrl = env.WEB_URL;
-        return Response.redirect(`${webUrl}/login`, 302);
+        return Response.redirect(`${env.WEB_URL}/login`, 302);
+      }
+      const authRes = await fetch(`${env.WEB_URL}/api/auth/me`, {
+        headers: { Cookie: `session=${sessionCookie}` },
+      });
+      if (!authRes.ok) {
+        return Response.redirect(`${env.WEB_URL}/login`, 302);
       }
     }
 

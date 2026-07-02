@@ -10,6 +10,8 @@ import {
   exchangeShopifyCode,
   fetchShopifyProducts,
 } from "./channels/shopify";
+import { encrypt } from "./services/crypto";
+import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 
 export function channelsRoutes() {
   const router = new Hono<{ Bindings: Env }>();
@@ -41,6 +43,80 @@ export function channelsRoutes() {
   router.delete("/x", async (c) => {
     await c.env.LINK_DB
       .prepare("UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1")
+      .run();
+    return c.json({ ok: true });
+  });
+
+  // --- X BYOK ---
+  router.post("/x/byok", async (c) => {
+    const tenantId = c.get("tenantId" as never) as number;
+    const memberId = c.get("memberId" as never) as string;
+    const { channel_id, client_id, client_secret, consumer_secret } = await c.req.json<{
+      channel_id?: string; client_id: string; client_secret: string; consumer_secret: string;
+    }>();
+
+    if (!client_id || !client_secret || !consumer_secret) {
+      return c.json({ error: "Missing credentials" }, 400);
+    }
+
+    const masterKey = await c.env.ENCRYPTION_KEY.get();
+    const [encClientId, encClientSecret, encConsumerSecret] = await Promise.all([
+      encrypt(client_id, masterKey),
+      encrypt(client_secret, masterKey),
+      encrypt(consumer_secret, masterKey),
+    ]);
+
+    const channelId = channel_id || crypto.randomUUID();
+    const config = JSON.stringify({
+      is_byok: true,
+      app_client_id: encClientId,
+      app_client_secret: encClientSecret,
+      app_consumer_secret: encConsumerSecret,
+    });
+
+    await c.env.LINK_DB
+      .prepare(`INSERT INTO channels (id, channel_type, config, tenant_id, member_id, created_at, updated_at)
+         VALUES (?, 'X', ?, ?, ?, datetime('now'), datetime('now'))`)
+      .bind(channelId, config, tenantId, memberId)
+      .run();
+
+    const url = new URL(c.req.url);
+    return c.json({
+      channel_id: channelId,
+      webhook_url: `${url.origin}/x/webhook/${channelId}`,
+      redirect_url: `${url.origin}/api/auth/x/callback`,
+    });
+  });
+
+  router.get("/x/byok", async (c) => {
+    const tenantId = c.get("tenantId" as never) as number;
+    const rows = await c.env.LINK_DB
+      .prepare("SELECT id, config FROM channels WHERE tenant_id = ? AND channel_type = 'X' AND is_active = 1")
+      .bind(tenantId)
+      .all<{ id: string; config: string }>();
+
+    const byokChannels = rows.results
+      .map((r) => {
+        const cfg = JSON.parse(r.config) as ByokConfig & { x_username?: string; x_user_id?: string };
+        if (!cfg.is_byok) return null;
+        return {
+          id: r.id,
+          username: cfg.x_username || null,
+          x_user_id: cfg.x_user_id || null,
+          authorized: !!cfg.x_user_id,
+        };
+      })
+      .filter(Boolean);
+
+    return c.json(byokChannels);
+  });
+
+  router.delete("/x/byok/:channelId", async (c) => {
+    const channelId = c.req.param("channelId");
+    const tenantId = c.get("tenantId" as never) as number;
+    await c.env.LINK_DB
+      .prepare("UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE id = ? AND tenant_id = ?")
+      .bind(channelId, tenantId)
       .run();
     return c.json({ ok: true });
   });

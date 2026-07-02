@@ -1,7 +1,9 @@
+import { authFetch } from "../../../shared/frontend/lib/auth-fetch";
+
 const BASE = "/api";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await authFetch(`${BASE}${path}`, {
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     ...options,
@@ -116,6 +118,15 @@ export const api = {
       request<{ connected: boolean; username?: string; channel_id?: string }>("/channels/x/status"),
     disconnectX: () =>
       request<{ ok: boolean }>("/channels/x", { method: "DELETE" }),
+    byokCreate: (credentials: { channel_id?: string; client_id: string; client_secret: string; consumer_secret: string }) =>
+      request<{ channel_id: string; webhook_url: string; redirect_url: string }>("/channels/x/byok", {
+        method: "POST",
+        body: JSON.stringify(credentials),
+      }),
+    byokList: () =>
+      request<Array<{ id: string; username: string | null; x_user_id: string | null; authorized: boolean }>>("/channels/x/byok"),
+    byokDelete: (channelId: string) =>
+      request<{ ok: boolean }>(`/channels/x/byok/${channelId}`, { method: "DELETE" }),
     tiktokStatus: () =>
       request<{ connected: boolean; displayName?: string; channel_id?: string }>("/channels/tiktok/status"),
     disconnectTiktok: () =>
@@ -129,8 +140,8 @@ export const api = {
       }),
   },
   users: {
-    list: (page = 1, limit = 20) =>
-      request<{ users: XUser[]; total: number; page: number; totalPages: number }>(`/users?page=${page}&limit=${limit}`),
+    list: () =>
+      request<{ users: XUser[] }>(`/users`),
     get: (id: string) =>
       request<{ user: XUser }>(`/users/${id}`),
     events: (id: string, offset = 0, limit = 100) =>

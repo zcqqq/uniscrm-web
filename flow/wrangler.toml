@@ -56,9 +56,9 @@ max_batch_timeout = 10
 binding = "FLOW_LOG_QUEUE"
 queue = "uniscrm-flow-log-dev"
 
-[[env.dev.pipelines]]
-binding = "PIPELINE_FLOW_LOG"
-pipeline = "d3d880e6c0ab44ef947d0d3d63d6a01d"
+# [[env.dev.pipelines]]
+# binding = "PIPELINE_FLOW_LOG"
+# pipeline = "d3d880e6c0ab44ef947d0d3d63d6a01d"
 
 [env.dev.ai]
 binding = "AI"

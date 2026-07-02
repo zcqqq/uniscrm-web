@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { XConnect } from "../components/XConnect";
+import { XByokConnect } from "../components/XByokConnect";
 import { TikTokConnect } from "../components/TikTokConnect";
 
 export function Social() {
@@ -9,6 +10,7 @@ export function Social() {
       <h1 className="text-lg font-semibold mb-6">Social Channels</h1>
       <div className="grid gap-4 max-w-sm">
         <XConnect />
+        <XByokConnect />
         <TikTokConnect />
       </div>
     </main>

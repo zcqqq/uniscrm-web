@@ -39,9 +39,9 @@ function isValidConnection(source: Node | undefined, target: Node | undefined): 
   if (!source || !target) return false;
   const targetType = target.type;
   const sourceType = source.type;
-  if (targetType === "xTrigger") return false;
-  const validTargets = ["action", "wait", "waitForEvent"];
-  const validSources = ["xTrigger", "wait", "waitForEvent", "action"];
+  if (targetType === "xTrigger" || targetType === "cronTrigger") return false;
+  const validTargets = ["action", "wait", "waitForEvent", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps"];
+  const validSources = ["xTrigger", "cronTrigger", "wait", "waitForEvent", "action", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps"];
   if (validSources.includes(sourceType!) && validTargets.includes(targetType!)) return true;
   return false;
 }
@@ -82,12 +82,30 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
     if (type === "xTrigger") {
       nodeType = "xTrigger";
       data = { channelType: "X", eventType: "", channelId: "" };
+    } else if (type === "cronTrigger") {
+      nodeType = "cronTrigger";
+      data = { scheduleType: "", dailyTime: "09:00", cronExpr: "", intervalValue: 60, intervalUnit: "minutes" };
     } else if (type === "wait") {
       nodeType = "wait";
       data = { duration: 0, unit: "minutes" };
     } else if (type === "waitForEvent") {
       nodeType = "waitForEvent";
       data = { eventType: "", channelId: "", duration: 1, unit: "days", conditions: [] };
+    } else if (type === "timeCondition") {
+      nodeType = "timeCondition";
+      data = { timeFrom: "", timeTo: "", daysOfWeek: [] };
+    } else if (type === "userPropsCondition") {
+      nodeType = "userPropsCondition";
+      data = { conditions: [] };
+    } else if (type === "abSplit") {
+      nodeType = "abSplit";
+      data = { mode: "random", percentA: 50, conditions: [] };
+    } else if (type === "webhook") {
+      nodeType = "webhook";
+      data = { url: "", method: "POST", headers: {}, body: "" };
+    } else if (type === "changeUserProps") {
+      nodeType = "changeUserProps";
+      data = { updates: [] };
     } else if (ACTION_TYPES.includes(type)) {
       nodeType = "action";
       if (type === "addToList") {

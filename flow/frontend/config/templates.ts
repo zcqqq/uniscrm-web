@@ -40,7 +40,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
   {
     id: "tpl-dm-not-followed-back",
     name: "DM if not followed back",
-    description: "After following someone, if they don't follow back in 1 day, send a DM; if still no response, unfollow and mute",
+    description: "After following someone, if they don't follow back in 1 day, send a Direct Message; if still no response, unfollow and mute",
     graph: {
       nodes: [
         { id: "t1", type: "xTrigger", position: { x: 0, y: 80 }, data: { channelType: "X", eventType: "follow.follow", channelId: "", conditions: [] } },

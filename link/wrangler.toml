@@ -61,13 +61,18 @@ queue = "uniscrm-maigret-dev"
 binding = "FLOW_QUEUE"
 queue = "uniscrm-event-dev"
 
-[[env.dev.pipelines]]
-binding = "PIPELINE_EVENT"
-pipeline = "e2f817de66a44955b7a921ab4caafbef"
+# [[env.dev.pipelines]]
+# binding = "PIPELINE_EVENT"
+# pipeline = "TODO_REBUILD_EVENT_STREAM"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_USER"
-pipeline = "aaca3fdd3c4f4ab4a2622125c57db1d9"
+pipeline = "b7275097961b4056b50f938eb7159ee8"
+
+[[env.dev.secrets_store_secrets]]
+binding = "ENCRYPTION_KEY"
+store_id = "358a0014b2254c2eafb877e4182fd977"
+secret_name = "uniscrm-encryption-key-dev"
 
 [env.dev.triggers]
 crons = ["0 * * * *"]
@@ -120,6 +125,11 @@ stream = "a0ee570cbd4842b0b11e30af75abb779"
 [[env.production.pipelines]]
 binding = "PIPELINE_USER"
 stream = "c62a940e5b6b45b4aa865ea808caa3b0"
+
+[[env.production.secrets_store_secrets]]
+binding = "ENCRYPTION_KEY"
+store_id = "358a0014b2254c2eafb877e4182fd977"
+secret_name = "uniscrm-encryption-key"
 
 [env.production.triggers]
 crons = ["0 * * * *"]

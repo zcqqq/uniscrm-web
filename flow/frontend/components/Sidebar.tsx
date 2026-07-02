@@ -44,6 +44,13 @@ export default function Sidebar() {
             icon={ct.icon}
           />
         ))}
+        <DraggableItem
+          type="cronTrigger"
+          label="Cron Trigger"
+          description="Trigger on a schedule"
+          color="border-primary/30 bg-primary/5"
+          icon="⏰"
+        />
       </div>
 
       <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Flow Control</h3>
@@ -62,6 +69,27 @@ export default function Sidebar() {
           color="border-secondary bg-secondary/30"
           icon="⏳"
         />
+        <DraggableItem
+          type="timeCondition"
+          label="Time Condition"
+          description="Gate by time-of-day / day-of-week"
+          color="border-secondary bg-secondary/30"
+          icon="🕐"
+        />
+        <DraggableItem
+          type="userPropsCondition"
+          label="User Props"
+          description="Branch by user properties"
+          color="border-secondary bg-secondary/30"
+          icon="👤"
+        />
+        <DraggableItem
+          type="abSplit"
+          label="A/B Split"
+          description="Split traffic by % or condition"
+          color="border-secondary bg-secondary/30"
+          icon="⚡"
+        />
       </div>
 
       <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Actions</h3>
@@ -79,6 +107,20 @@ export default function Sidebar() {
           description="Follow or unfollow user on X"
           color="border-accent bg-accent/50"
           icon="𝕏"
+        />
+        <DraggableItem
+          type="webhook"
+          label="Webhook"
+          description="Send HTTP request"
+          color="border-accent bg-accent/50"
+          icon="🔗"
+        />
+        <DraggableItem
+          type="changeUserProps"
+          label="Change User Props"
+          description="Update user properties"
+          color="border-accent bg-accent/50"
+          icon="✏️"
         />
       </div>
     </aside>

@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
 import { XWebhookService } from "./services/x-webhook";
-import { XUsersService } from "./services/x-users";
+import { XUsersService, type XUserData } from "./services/x-users";
 import { TenantDataDB } from "../../shared/tenant-data-db";
+import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 
 function flattenUserPayload(userData?: Record<string, unknown>): Record<string, unknown> {
   if (!userData) return {};
@@ -76,44 +77,64 @@ async function findChannelByXUserId(linkDb: D1Database, mainDb: D1Database, xUse
   return { channelId: channel.id, tenantId: channel.tenant_id, d1DatabaseId };
 }
 
-async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Promise<void> {
-  console.log(JSON.stringify({ event: "xaa_webhook_received", body }));
+async function handleXActivityEventByChannel(body: Record<string, unknown>, env: Env, channelId: string): Promise<void> {
+  console.log(JSON.stringify({ event: "xaa_byok_webhook_received", channelId, body }));
+
+  const channel = await env.LINK_DB
+    .prepare("SELECT tenant_id FROM channels WHERE id = ? AND is_active = 1")
+    .bind(channelId)
+    .first<{ tenant_id: number | null }>();
+  if (!channel) {
+    console.log(JSON.stringify({ event: "xaa_byok_channel_not_found", channelId }));
+    return;
+  }
+
+  let d1DatabaseId: string | null = null;
+  if (channel.tenant_id) {
+    const tenant = await env.WEB_DB
+      .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+      .bind(channel.tenant_id)
+      .first<{ d1_database_id: string | null }>();
+    d1DatabaseId = tenant?.d1_database_id || null;
+  }
+  if (!d1DatabaseId) {
+    console.log(JSON.stringify({ event: "xaa_byok_no_tenant_db", channelId }));
+    return;
+  }
 
   const data = (body["data"] || body) as {
     event_type?: string;
     filter?: { user_id?: string };
     payload?: Record<string, unknown>;
-    tag?: string;
   };
-
   const eventType = data.event_type;
   const filterUserId = data.filter?.user_id;
   const payload = data.payload || {};
 
-  if (!eventType || !filterUserId) {
-    console.log(JSON.stringify({ event: "xaa_webhook_no_match", eventType, filterUserId, keys: Object.keys(body) }));
-    return;
-  }
-
-  const channelInfo = await findChannelByXUserId(env.LINK_DB, env.WEB_DB, filterUserId);
-  if (!channelInfo) {
-    console.log(JSON.stringify({ event: "xaa_webhook_no_channel", filterUserId }));
-    return;
-  }
-  const { channelId, tenantId, d1DatabaseId } = channelInfo;
-
-  if (!d1DatabaseId) {
-    console.log(JSON.stringify({ event: "xaa_webhook_no_tenant_db", filterUserId, tenantId }));
-    return;
-  }
+  if (!eventType) return;
 
   const tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, d1DatabaseId);
   const usersService = new XUsersService(tenantDb, {
     queue: env.MAIGRET_QUEUE,
     pipelineEvent: env.PIPELINE_EVENT,
     pipelineUser: env.PIPELINE_USER,
-    tenantId: tenantId ?? undefined,
+    tenantId: channel.tenant_id ?? undefined,
   });
+
+  // Reuse the same event processing logic
+  const fakeChannelInfo: ChannelInfo = { channelId, tenantId: channel.tenant_id, d1DatabaseId };
+  await processXEvent(eventType, filterUserId || "", payload, fakeChannelInfo, usersService, env);
+}
+
+async function processXEvent(
+  eventType: string,
+  filterUserId: string,
+  payload: Record<string, unknown>,
+  channelInfo: ChannelInfo,
+  usersService: XUsersService,
+  env: Env,
+): Promise<void> {
+  const { channelId, tenantId } = channelInfo;
 
   if (eventType === "follow.follow" || eventType === "follow.unfollow") {
     const source = payload.source as { data?: Record<string, unknown> } | undefined;
@@ -123,12 +144,7 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
 
     if (sourceId === filterUserId && target?.data) {
       const userData = target.data;
-      await usersService.upsertUser({
-        id: userData.id as string,
-        name: userData.name as string | undefined,
-        username: userData.username as string | undefined,
-        profile_image_url: userData.profile_image_url as string | undefined,
-      }, channelId, "X");
+      await usersService.upsertUser(userData as XUserData, channelId, "X");
       const isFollow = eventType === "follow.follow";
       const resolvedEventType = isFollow ? "follow.follow" : "follow.unfollow";
       await usersService.setFollowState(userData.id as string, channelId, "is_follow", isFollow ? 1 : 0);
@@ -151,12 +167,7 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
       }
     } else if (targetId === filterUserId && source?.data) {
       const userData = source.data;
-      await usersService.upsertUser({
-        id: userData.id as string,
-        name: userData.name as string | undefined,
-        username: userData.username as string | undefined,
-        profile_image_url: userData.profile_image_url as string | undefined,
-      }, channelId, "X");
+      await usersService.upsertUser(userData as XUserData, channelId, "X");
       const isFollow = eventType === "follow.follow";
       const resolvedEventType = isFollow ? "follow.followed" : "follow.unfollowed";
       await usersService.setFollowState(userData.id as string, channelId, "is_followed", isFollow ? 1 : 0);
@@ -205,13 +216,7 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
         }
 
         if (tenantId) {
-          await env.FLOW_QUEUE.send({
-            tenantId,
-            eventType,
-            userId,
-            channelId,
-            payload: flatPayload,
-          });
+          await env.FLOW_QUEUE.send({ tenantId, eventType, userId, channelId, payload: flatPayload });
         }
       }
     }
@@ -228,30 +233,6 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
         name: payload.sender_name as string | undefined || payload.name as string | undefined,
         profile_image_url: payload.sender_profile_image_url as string | undefined || payload.profile_image_url as string | undefined,
       }, channelId, "X");
-    }
-  }
-
-  if (eventType === "post.create") {
-    const tweetId = payload.id as string;
-    const text = payload.text as string || "";
-    if (tweetId) {
-      const shareUrl = `https://x.com/i/web/status/${tweetId}`;
-      await tenantDb.run(
-        `INSERT INTO content (id, channel_type, source_content_id, title, summary, status, source_url, raw_data, created_at, updated_at)
-         VALUES (?, 'X', ?, ?, NULL, 'new', ?, ?, datetime('now'), datetime('now'))
-         ON CONFLICT(channel_type, source_content_id) DO UPDATE SET title = excluded.title, raw_data = excluded.raw_data, updated_at = datetime('now')`,
-        [crypto.randomUUID(), tweetId, text.slice(0, 200), shareUrl, JSON.stringify(payload)]
-      );
-    }
-  }
-
-  if (eventType === "post.delete") {
-    const tweetId = payload.id as string || payload.tweet_id as string;
-    if (tweetId) {
-      await tenantDb.run(
-        `UPDATE content SET status = 'deleted', updated_at = datetime('now') WHERE channel_type = 'X' AND source_content_id = ?`,
-        [tweetId]
-      );
     }
   }
 
@@ -282,6 +263,73 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
   console.log(JSON.stringify({ event: "xaa_event_processed", eventType, userId: eventUserId }));
 }
 
+async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Promise<void> {
+  console.log(JSON.stringify({ event: "xaa_webhook_received", body }));
+
+  const data = (body["data"] || body) as {
+    event_type?: string;
+    filter?: { user_id?: string };
+    payload?: Record<string, unknown>;
+    tag?: string;
+  };
+
+  const eventType = data.event_type;
+  const filterUserId = data.filter?.user_id;
+  const payload = data.payload || {};
+
+  if (!eventType || !filterUserId) {
+    console.log(JSON.stringify({ event: "xaa_webhook_no_match", eventType, filterUserId, keys: Object.keys(body) }));
+    return;
+  }
+
+  const channelInfo = await findChannelByXUserId(env.LINK_DB, env.WEB_DB, filterUserId);
+  if (!channelInfo) {
+    console.log(JSON.stringify({ event: "xaa_webhook_no_channel", filterUserId }));
+    return;
+  }
+  const { channelId, tenantId, d1DatabaseId } = channelInfo;
+
+  if (!d1DatabaseId) {
+    console.log(JSON.stringify({ event: "xaa_webhook_no_tenant_db", filterUserId, tenantId }));
+    return;
+  }
+
+  const tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, d1DatabaseId);
+  const usersService = new XUsersService(tenantDb, {
+    queue: env.MAIGRET_QUEUE,
+    pipelineEvent: env.PIPELINE_EVENT,
+    pipelineUser: env.PIPELINE_USER,
+    tenantId: tenantId ?? undefined,
+  });
+
+  // Handle content events (post.create/delete) which need tenantDb directly
+  if (eventType === "post.create") {
+    const tweetId = payload.id as string;
+    const text = payload.text as string || "";
+    if (tweetId) {
+      const shareUrl = `https://x.com/i/web/status/${tweetId}`;
+      await tenantDb.run(
+        `INSERT INTO content (id, channel_type, source_content_id, title, summary, status, source_url, raw_data, created_at, updated_at)
+         VALUES (?, 'X', ?, ?, NULL, 'new', ?, ?, datetime('now'), datetime('now'))
+         ON CONFLICT(channel_type, source_content_id) DO UPDATE SET title = excluded.title, raw_data = excluded.raw_data, updated_at = datetime('now')`,
+        [crypto.randomUUID(), tweetId, text.slice(0, 200), shareUrl, JSON.stringify(payload)]
+      );
+    }
+  }
+
+  if (eventType === "post.delete") {
+    const tweetId = payload.id as string || payload.tweet_id as string;
+    if (tweetId) {
+      await tenantDb.run(
+        `UPDATE content SET status = 'deleted', updated_at = datetime('now') WHERE channel_type = 'X' AND source_content_id = ?`,
+        [tweetId]
+      );
+    }
+  }
+
+  await processXEvent(eventType, filterUserId, payload, channelInfo, usersService, env);
+}
+
 export function webhookRoutes() {
   const router = new Hono<{ Bindings: Env }>();
 
@@ -297,6 +345,38 @@ export function webhookRoutes() {
     try {
       const body = await c.req.json<Record<string, unknown>>();
       await handleXActivityEvent(body, c.env);
+      return c.json({ ok: true });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return c.json({ status: "error", message: msg }, 500);
+    }
+  });
+
+  // BYOK per-channel webhook: CRC challenge
+  router.get("/webhook/:channelId", async (c) => {
+    const crcToken = c.req.query("crc_token");
+    if (!crcToken) return c.json({ error: "Missing crc_token" }, 400);
+
+    const channelId = c.req.param("channelId");
+    const row = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE id = ? AND is_active = 1")
+      .bind(channelId)
+      .first<{ config: string }>();
+    if (!row) return c.json({ error: "Channel not found" }, 404);
+
+    const config = JSON.parse(row.config) as ByokConfig;
+    const creds = await getAppCredentials(c.env, config);
+    const webhookService = new XWebhookService(creds.consumerSecret);
+    const responseToken = await webhookService.computeCrcResponse(crcToken);
+    return c.json({ response_token: responseToken });
+  });
+
+  // BYOK per-channel webhook: event reception
+  router.post("/webhook/:channelId", async (c) => {
+    try {
+      const channelId = c.req.param("channelId");
+      const body = await c.req.json<Record<string, unknown>>();
+      await handleXActivityEventByChannel(body, c.env, channelId);
       return c.json({ ok: true });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

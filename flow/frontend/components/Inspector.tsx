@@ -433,6 +433,206 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
   );
 }
 
+function CronTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">Cron Trigger</h4>
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Schedule Type</Label>
+          <Select value={data.scheduleType || ""} onChange={(e: SelectChange) => updateNodeData(nodeId, { scheduleType: e.target.value })} className="w-full text-sm">
+            <option value="">Select...</option>
+            <option value="daily">Daily at time</option>
+            <option value="interval">Every N minutes/hours</option>
+            <option value="cron">Cron expression</option>
+          </Select>
+        </div>
+        {data.scheduleType === "daily" && (
+          <div>
+            <Label className="text-xs block mb-1">Time (UTC)</Label>
+            <Input type="time" value={data.dailyTime || "09:00"} onChange={(e: InputChange) => updateNodeData(nodeId, { dailyTime: e.target.value })} className="w-full text-sm" />
+          </div>
+        )}
+        {data.scheduleType === "interval" && (
+          <div className="flex gap-2">
+            <Input type="number" value={data.intervalValue || 60} onChange={(e: InputChange) => updateNodeData(nodeId, { intervalValue: parseInt(e.target.value) })} className="w-20 text-sm" />
+            <Select value={data.intervalUnit || "minutes"} onChange={(e: SelectChange) => updateNodeData(nodeId, { intervalUnit: e.target.value })} className="flex-1 text-sm">
+              <option value="minutes">minutes</option>
+              <option value="hours">hours</option>
+              <option value="days">days</option>
+            </Select>
+          </div>
+        )}
+        {data.scheduleType === "cron" && (
+          <div>
+            <Label className="text-xs block mb-1">Cron Expression</Label>
+            <Input value={data.cronExpr || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { cronExpr: e.target.value })} placeholder="*/30 * * * *" className="w-full text-sm font-mono" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TimeConditionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+  const days = (data.daysOfWeek as number[]) || [];
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const toggleDay = (d: number) => {
+    const next = days.includes(d) ? days.filter(x => x !== d) : [...days, d].sort();
+    updateNodeData(nodeId, { daysOfWeek: next });
+  };
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">Time Condition</h4>
+      <div className="space-y-3">
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <Label className="text-xs block mb-1">From</Label>
+            <Input type="time" value={data.timeFrom || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { timeFrom: e.target.value })} className="w-full text-sm" />
+          </div>
+          <div className="flex-1">
+            <Label className="text-xs block mb-1">To</Label>
+            <Input type="time" value={data.timeTo || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { timeTo: e.target.value })} className="w-full text-sm" />
+          </div>
+        </div>
+        <div>
+          <Label className="text-xs block mb-1">Days of Week</Label>
+          <div className="flex gap-1 flex-wrap">
+            {dayNames.map((name, i) => (
+              <button key={i} type="button" onClick={() => toggleDay(i)} className={`px-2 py-0.5 text-xs rounded border ${days.includes(i) ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"}`}>{name}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UserPropsConditionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+  const conditions: { field: string; operator: string; value: string }[] = data.conditions || [];
+  const addCondition = () => updateNodeData(nodeId, { conditions: [...conditions, { field: "", operator: "==", value: "" }] });
+  const updateCond = (idx: number, patch: Record<string, string>) => {
+    const next = conditions.map((c, i) => i === idx ? { ...c, ...patch } : c);
+    updateNodeData(nodeId, { conditions: next });
+  };
+  const removeCond = (idx: number) => updateNodeData(nodeId, { conditions: conditions.filter((_, i) => i !== idx) });
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">User Props Condition</h4>
+      <div className="flex items-center justify-between mb-2">
+        <Label className="text-xs">Conditions (all must pass → Yes)</Label>
+        <button type="button" onClick={addCondition} className="text-xs text-primary hover:underline">+ Add</button>
+      </div>
+      {conditions.map((cond, idx) => (
+        <div key={idx} className="flex gap-1 items-center mb-2">
+          <Input value={cond.field} onChange={(e: InputChange) => updateCond(idx, { field: e.target.value })} placeholder="field" className="flex-1 text-xs" />
+          <Select value={cond.operator} onChange={(e: SelectChange) => updateCond(idx, { operator: e.target.value })} className="w-14 text-xs">
+            <option value="==">==</option>
+            <option value="!=">!=</option>
+            <option value=">">&gt;</option>
+            <option value="<">&lt;</option>
+          </Select>
+          <Input value={cond.value} onChange={(e: InputChange) => updateCond(idx, { value: e.target.value })} placeholder="value" className="flex-1 text-xs" />
+          <button type="button" onClick={() => removeCond(idx)} className="text-xs text-destructive">×</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AbSplitInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">A/B Split</h4>
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Mode</Label>
+          <Select value={data.mode || "random"} onChange={(e: SelectChange) => updateNodeData(nodeId, { mode: e.target.value })} className="w-full text-sm">
+            <option value="random">Random %</option>
+            <option value="condition">Condition</option>
+          </Select>
+        </div>
+        {data.mode === "random" && (
+          <div>
+            <Label className="text-xs block mb-1">Branch A: {data.percentA || 50}%</Label>
+            <input type="range" min="0" max="100" value={data.percentA || 50} onChange={(e) => updateNodeData(nodeId, { percentA: parseInt(e.target.value) })} className="w-full" />
+            <p className="text-xs text-muted-foreground">B: {100 - (data.percentA || 50)}%</p>
+          </div>
+        )}
+        {data.mode === "condition" && (
+          <div>
+            <Label className="text-xs block mb-1">Condition (A if true, B if false)</Label>
+            <Input value={(data.conditions as any[])?.[0]?.field || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { conditions: [{ field: e.target.value, operator: "==", value: (data.conditions as any[])?.[0]?.value || "" }] })} placeholder="field" className="w-full text-xs mb-1" />
+            <Input value={(data.conditions as any[])?.[0]?.value || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { conditions: [{ field: (data.conditions as any[])?.[0]?.field || "", operator: "==", value: e.target.value }] })} placeholder="value" className="w-full text-xs" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WebhookInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">Webhook</h4>
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Method</Label>
+          <Select value={data.method || "POST"} onChange={(e: SelectChange) => updateNodeData(nodeId, { method: e.target.value })} className="w-full text-sm">
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs block mb-1">URL</Label>
+          <Input value={data.url || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { url: e.target.value })} placeholder="https://..." className="w-full text-sm" />
+        </div>
+        <div>
+          <Label className="text-xs block mb-1">Body</Label>
+          <Textarea value={data.body || ""} onChange={(e: TextareaChange) => updateNodeData(nodeId, { body: e.target.value })} placeholder='{"userId": "$user.id"}' rows={3} className="w-full text-xs font-mono" />
+          <p className="text-xs text-muted-foreground mt-1">Use $user.name, $event.field etc.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChangeUserPropsInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+  const updates: { field: string; value: string }[] = data.updates || [];
+  const addUpdate = () => updateNodeData(nodeId, { updates: [...updates, { field: "", value: "" }] });
+  const updateItem = (idx: number, patch: Record<string, string>) => {
+    const next = updates.map((u, i) => i === idx ? { ...u, ...patch } : u);
+    updateNodeData(nodeId, { updates: next });
+  };
+  const removeItem = (idx: number) => updateNodeData(nodeId, { updates: updates.filter((_, i) => i !== idx) });
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">Change User Props</h4>
+      <div className="flex items-center justify-between mb-2">
+        <Label className="text-xs">Fields to update</Label>
+        <button type="button" onClick={addUpdate} className="text-xs text-primary hover:underline">+ Add</button>
+      </div>
+      {updates.map((u, idx) => (
+        <div key={idx} className="flex gap-1 items-center mb-2">
+          <Input value={u.field} onChange={(e: InputChange) => updateItem(idx, { field: e.target.value })} placeholder="field" className="flex-1 text-xs" />
+          <span className="text-xs text-muted-foreground">=</span>
+          <Input value={u.value} onChange={(e: InputChange) => updateItem(idx, { value: e.target.value })} placeholder="value" className="flex-1 text-xs" />
+          <button type="button" onClick={() => removeItem(idx)} className="text-xs text-destructive">×</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Inspector() {
   const { selectedNodeId, nodes, deleteSelectedNode } = useFlowEditor();
 
@@ -458,14 +658,32 @@ export default function Inspector() {
       {node.type === "xTrigger" && (
         <XTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />
       )}
+      {node.type === "cronTrigger" && (
+        <CronTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />
+      )}
       {node.type === "waitForEvent" && (
         <WaitForEventInspector nodeId={node.id} data={node.data as Record<string, any>} />
       )}
       {node.type === "wait" && (
         <WaitInspector nodeId={node.id} data={node.data as Record<string, any>} />
       )}
+      {node.type === "timeCondition" && (
+        <TimeConditionInspector nodeId={node.id} data={node.data as Record<string, any>} />
+      )}
+      {node.type === "userPropsCondition" && (
+        <UserPropsConditionInspector nodeId={node.id} data={node.data as Record<string, any>} />
+      )}
+      {node.type === "abSplit" && (
+        <AbSplitInspector nodeId={node.id} data={node.data as Record<string, any>} />
+      )}
       {node.type === "action" && (
         <ActionInspector nodeId={node.id} data={node.data as Record<string, any>} />
+      )}
+      {node.type === "webhook" && (
+        <WebhookInspector nodeId={node.id} data={node.data as Record<string, any>} />
+      )}
+      {node.type === "changeUserProps" && (
+        <ChangeUserPropsInspector nodeId={node.id} data={node.data as Record<string, any>} />
       )}
     </aside>
   );

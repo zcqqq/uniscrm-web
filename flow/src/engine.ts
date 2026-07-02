@@ -161,7 +161,8 @@ export function executeFlow(
   payload: Record<string, unknown>
 ): ExecutionResult {
   const triggerNodes = graph.nodes.filter(
-    (n) => n.type === "xTrigger" && (n.data.eventType === eventType || n.data.triggerType === eventType)
+    (n) => (n.type === "xTrigger" && (n.data.eventType === eventType || n.data.triggerType === eventType))
+      || (n.type === "cronTrigger" && eventType === "cron.trigger")
   );
 
   if (triggerNodes.length === 0) return { matched: false, actions: [], pendingWaits: [], nodeLogs: [] };
@@ -298,6 +299,36 @@ function collectActions(
         nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
         collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
       }
+      continue;
+    }
+
+    if (targetNode.type === "timeCondition") {
+      pendingWaits.push({ nodeId: targetNode.id, durationMs: 0, timeCondition: true } as any);
+      continue;
+    }
+
+    if (targetNode.type === "userPropsCondition") {
+      actions.push({ type: "userPropsCondition", nodeId: targetNode.id, conditions: targetNode.data.conditions, hasBranches: true });
+      nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+      continue;
+    }
+
+    if (targetNode.type === "abSplit") {
+      actions.push({ type: "abSplit", nodeId: targetNode.id, mode: targetNode.data.mode, percentA: targetNode.data.percentA, conditions: targetNode.data.conditions, hasBranches: true });
+      nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+      continue;
+    }
+
+    if (targetNode.type === "webhook") {
+      actions.push({ type: "webhook", nodeId: targetNode.id, hasBranches: true, url: targetNode.data.url, method: targetNode.data.method, headers: targetNode.data.headers, body: targetNode.data.body });
+      nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+      continue;
+    }
+
+    if (targetNode.type === "changeUserProps") {
+      actions.push({ type: "changeUserProps", nodeId: targetNode.id, updates: targetNode.data.updates });
+      nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+      collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
       continue;
     }
   }

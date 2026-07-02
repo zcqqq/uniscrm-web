@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { TIERS } from "../plans";
 import type { Tier } from "../plans";
 import { UpgradeIcon } from "./UpgradeIcon";
+import { authFetch } from "./lib/auth-fetch";
 
 export interface SidebarUrls {
   web: string;
@@ -72,7 +73,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
   const [fetchedTier] = useState<Tier | undefined>(tierProp ?? getTierFromCookie());
 
   useEffect(() => {
-    fetch("/api/auth/me", { credentials: "include" })
+    authFetch("/api/auth/me")
       .then((r) => r.ok ? r.json() : null)
       .then((d: any) => { if (d?.member?.email) setEmail(d.member.email); })
       .catch(() => {});
@@ -306,12 +307,18 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
       </nav>
 
       <div className="border-t border-border py-3 w-full flex flex-col items-center gap-2">
-        <button onClick={() => setCollapsed(false)} className="flex items-center justify-center w-10 h-10 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer transition-colors" title="Expand">
-          <Icons.Expand />
-        </button>
-        <button onClick={handleLogout} className="flex items-center justify-center w-10 h-10 rounded-md text-muted-foreground hover:text-destructive cursor-pointer transition-colors" title="Logout">
-          <Icons.LogOut />
-        </button>
+        <div className="relative group/expand flex justify-center">
+          <button onClick={() => setCollapsed(false)} className="flex items-center justify-center w-10 h-10 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer transition-colors">
+            <Icons.Expand />
+          </button>
+          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 hidden group-hover/expand:block z-50 bg-popover border border-border rounded-md shadow-md px-2 py-1 text-xs text-foreground whitespace-nowrap">Expand</div>
+        </div>
+        <div className="relative group/logout flex justify-center">
+          <button onClick={handleLogout} className="flex items-center justify-center w-10 h-10 rounded-md text-muted-foreground hover:text-destructive cursor-pointer transition-colors">
+            <Icons.LogOut />
+          </button>
+          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 hidden group-hover/logout:block z-50 bg-popover border border-border rounded-md shadow-md px-2 py-1 text-xs text-foreground whitespace-nowrap">Logout</div>
+        </div>
       </div>
     </div>
   );

@@ -1,7 +1,8 @@
+import { authFetch } from "../../../shared/frontend/lib/auth-fetch";
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  const res = await authFetch(path, {
     ...options,
-    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...options?.headers,

@@ -9,6 +9,7 @@ import { TrendCache } from "./trend/storage/cache";
 import { TrendVectorStore } from "./trend/storage/vectorize";
 import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
+import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 
 export async function handleCron(env: Env): Promise<void> {
   await Promise.allSettled([
@@ -70,38 +71,53 @@ async function handleTrendAggregation(env: Env): Promise<void> {
 }
 
 async function handleTokenRefresh(env: Env): Promise<void> {
-  // X token refresh
-  const tokenService = new XTokenService(env.LINK_DB, env.X_CLIENT_ID, env.X_CLIENT_SECRET);
-  const channels = await tokenService.getAllTwitterChannels();
+  // X token refresh (system app + BYOK)
+  const rows = await env.LINK_DB
+    .prepare("SELECT id, config FROM channels WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1")
+    .all<{ id: string; config: string }>();
 
-  for (const channel of channels) {
-    const { config } = channel;
+  for (const row of rows.results) {
+    const config = JSON.parse(row.config) as ByokConfig & {
+      access_token?: string; refresh_token?: string; expires_at?: string;
+      x_user_id?: string; x_username?: string; subscription_ids?: string[];
+    };
+    if (!config.refresh_token) continue;
+
     const shouldRefresh = !config.expires_at ||
       Date.now() > new Date(config.expires_at).getTime() - 30 * 60 * 1000;
     if (!shouldRefresh) continue;
 
     try {
-      const newToken = await tokenService.refreshAccessToken(channel.id);
-      console.log(JSON.stringify({ event: "token_refreshed", channel_id: channel.id, x_username: config.x_username }));
+      const creds = await getAppCredentials(env, config);
+      const tokenService = new XTokenService(env.LINK_DB, creds.clientId, creds.clientSecret);
+      const newToken = await tokenService.refreshAccessToken(row.id);
+      console.log(JSON.stringify({ event: "token_refreshed", channel_id: row.id, x_username: config.x_username, is_byok: !!config.is_byok }));
 
-      if (!config.subscription_ids?.length) {
+      if (!config.subscription_ids?.length && config.x_user_id) {
         try {
-          const webhookUrl = `${env.LINK_URL}/x/webhook`;
-          const bearerService = new XActivityService(env.X_BEARER_TOKEN);
-          let webhook = await bearerService.getWebhook();
-          if (!webhook || webhook.url !== webhookUrl) {
-            const whId = await bearerService.createWebhook(webhookUrl);
-            webhook = { webhook_id: whId, url: webhookUrl };
+          if (config.is_byok) {
+            const webhookUrl = `${env.LINK_URL}/x/webhook/${row.id}`;
+            const userService = new XActivityService(newToken);
+            const ids = await userService.setupAllSubscriptions(config.x_user_id, webhookUrl);
+            await tokenService.updateConfig(row.id, { subscription_ids: ids });
+          } else {
+            const webhookUrl = `${env.LINK_URL}/x/webhook`;
+            const bearerService = new XActivityService(env.X_BEARER_TOKEN);
+            let webhook = await bearerService.getWebhook();
+            if (!webhook || webhook.url !== webhookUrl) {
+              const whId = await bearerService.createWebhook(webhookUrl);
+              webhook = { webhook_id: whId, url: webhookUrl };
+            }
+            const userService = new XActivityService(newToken);
+            const ids = await userService.setupAllSubscriptions(config.x_user_id, webhookUrl, webhook.webhook_id);
+            await tokenService.updateConfig(row.id, { subscription_ids: ids });
           }
-          const userService = new XActivityService(newToken);
-          const ids = await userService.setupAllSubscriptions(config.x_user_id, webhookUrl, webhook.webhook_id);
-          await tokenService.updateConfig(channel.id, { subscription_ids: ids });
         } catch (e) {
           console.error("XAA subscription setup failed:", e);
         }
       }
     } catch (e) {
-      console.error(`Token refresh failed for channel ${channel.id}:`, e);
+      console.error(`Token refresh failed for channel ${row.id}:`, e);
     }
   }
 

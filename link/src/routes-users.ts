@@ -6,22 +6,25 @@ export function usersRoutes() {
   const router = new Hono<{ Bindings: Env }>();
 
   router.get("/", async (c) => {
-    const tdb = c.get("tenantDataDb" as never) as TenantDataDB;
-    if (!tdb) return c.json({ users: [], total: 0, page: 1, totalPages: 0 });
+    const tenantId = c.get("tenantId" as never) as number;
+    if (!tenantId) return c.json({ users: [] });
 
-    const page = Math.max(1, parseInt(c.req.query("page") || "1", 10));
-    const limit = Math.min(100, Math.max(1, parseInt(c.req.query("limit") || "10", 10)));
-    const offset = (page - 1) * limit;
-
-    const countRows = await tdb.query<{ total: number }>("SELECT COUNT(*) as total FROM user");
-    const total = countRows[0]?.total || 0;
-
-    const rows = await tdb.query<{ id: string; name: string; username: string; profile_image_url: string; updated_at: string }>(
-      "SELECT id, name, username, profile_image_url, updated_at FROM user ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-      [limit, offset]
+    const res = await fetch(
+      `https://api.sql.cloudflarestorage.com/api/v1/accounts/${c.env.CF_ACCOUNT_ID}/r2-sql/query/${c.env.R2_BUCKET}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${c.env.R2_SQL_TOKEN}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          warehouse: c.env.R2_WAREHOUSE,
+          query: `SELECT id, channel_type, name, username, is_follow, is_followed, followers_count, following_count, updated_at FROM uniscrm.user WHERE tenant_id = ${tenantId} LIMIT 1000`,
+        }),
+      }
     );
+    const data = await res.json() as { result?: { rows: Record<string, unknown>[] }; success: boolean };
+    if (!data.success) return c.json({ users: [] });
 
-    return c.json({ users: rows, total, page, totalPages: Math.ceil(total / limit) });
+    const rows = data.result?.rows || [];
+    return c.json({ users: rows });
   });
 
   router.get("/:id", async (c) => {

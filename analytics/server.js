@@ -43,28 +43,24 @@ const server = http.createServer(async (req, res) => {
 
 function parseWranglerOutput(output) {
   const lines = output.trim().split("\n");
-  const dataLines = lines.filter((l) => l.includes("│"));
-  if (dataLines.length < 2) return [];
+  // Table rows have │ on both sides: "│ value │"
+  const tableLines = lines.filter((l) => {
+    const stripped = l.replace(/\x1b\[[0-9;]*m/g, "").trim();
+    return stripped.startsWith("│") && stripped.endsWith("│") && stripped.split("│").length >= 3;
+  });
+  if (tableLines.length < 2) return [];
 
-  const headerLine = dataLines[0];
-  const headers = headerLine
-    .split("│")
-    .map((h) => h.trim())
-    .filter(Boolean);
+  const parse = (line) => line.replace(/\x1b\[[0-9;]*m/g, "").split("│").slice(1, -1).map((c) => c.trim());
 
+  const headers = parse(tableLines[0]);
   const rows = [];
-  for (let i = 1; i < dataLines.length; i++) {
-    const line = dataLines[i];
-    if (line.includes("├") || line.includes("┌") || line.includes("└")) continue;
-    const cells = line
-      .split("│")
-      .map((c) => c.trim())
-      .filter((_, idx) => idx > 0 && idx <= headers.length);
+  for (let i = 1; i < tableLines.length; i++) {
+    const cells = parse(tableLines[i]);
     if (cells.length === headers.length) {
       const row = {};
       headers.forEach((h, idx) => {
         const val = cells[idx];
-        row[h] = isNaN(val) || val === "" ? val : Number(val);
+        row[h] = val === "" || val === "null" ? null : isNaN(val) ? val : Number(val);
       });
       rows.push(row);
     }

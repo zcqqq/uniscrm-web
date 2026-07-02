@@ -1,57 +1,76 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useUsers } from "../hooks/useUsers";
-import { Skeleton } from "../../../shared/frontend/ui/skeleton";
-import { Avatar, AvatarImage, AvatarFallback } from "../../../shared/frontend/ui/avatar";
-import { PageHeader } from "../../../shared/frontend/components/PageHeader";
-import { EmptyState } from "../../../shared/frontend/components/EmptyState";
-import { Pagination } from "../../../shared/frontend/components/DataTable";
+import { DataTable, type Column } from "../../../shared/frontend/components/DataTable";
+import { api } from "../lib/api";
+
+interface UserRow {
+  id: string;
+  channel_type: string;
+  name: string;
+  username: string;
+  is_follow: number;
+  is_followed: number;
+  followers_count: number;
+  following_count: number;
+  updated_at: string;
+}
+
+const columns: Column<UserRow>[] = [
+  {
+    key: "name",
+    label: "User",
+    sortable: true,
+    render: (r) => (
+      <div>
+        <div className="font-medium text-sm">{r.name || "—"}</div>
+        <div className="text-xs text-muted-foreground">@{r.username}</div>
+      </div>
+    ),
+  },
+  { key: "channel_type", label: "Channel", sortable: true },
+  {
+    key: "is_followed",
+    label: "Followed",
+    sortable: true,
+    render: (r) => r.is_followed ? "✓" : "",
+  },
+  {
+    key: "is_follow",
+    label: "Following",
+    sortable: true,
+    render: (r) => r.is_follow ? "✓" : "",
+  },
+  { key: "followers_count", label: "Followers", sortable: true },
+  { key: "following_count", label: "Following#", sortable: true },
+  {
+    key: "updated_at",
+    label: "Updated",
+    sortable: true,
+    render: (r) => r.updated_at ? new Date(r.updated_at).toLocaleDateString() : "",
+  },
+];
 
 export function Users() {
-  useEffect(() => { document.title = "Users — UniSCRM" }, []);
-  const { users, page, totalPages, total, loading, nextPage, prevPage } = useUsers();
+  useEffect(() => { document.title = "Users — UniSCRM"; }, []);
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  if (loading) {
-    return (
-      <main className="max-w-4xl mx-auto px-8 py-8">
-        <PageHeader title="Users" />
-        <div className="space-y-3">
-          {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12" />)}
-        </div>
-      </main>
-    );
-  }
+  useEffect(() => {
+    api.users.list().then((d) => setUsers(d.users as UserRow[])).finally(() => setLoading(false));
+  }, []);
 
   return (
-    <main className="max-w-4xl mx-auto px-8 py-8">
-      <PageHeader title={`Users (${total})`} />
-
-      {users.length === 0 ? (
-        <EmptyState title="No users synced yet" />
-      ) : (
-        <div className="bg-card rounded-lg border border-border divide-y divide-border">
-          {users.map((user) => (
-            <div
-              key={user.id}
-              onClick={() => navigate(`/users/${user.id}`)}
-              className="flex items-center gap-3 px-4 py-3 hover:bg-accent/50 cursor-pointer transition-colors"
-            >
-              <Avatar className="h-8 w-8">
-                {user.profile_image_url && <AvatarImage src={user.profile_image_url} alt="" />}
-                <AvatarFallback>{user.name?.charAt(0) ?? "?"}</AvatarFallback>
-              </Avatar>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-foreground truncate">{user.name}</div>
-                <div className="text-xs text-muted-foreground">@{user.username}</div>
-              </div>
-              <div className="text-xs text-muted-foreground">{new Date(user.updated_at).toLocaleDateString()}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <Pagination total={total} page={page} totalPages={totalPages} onPageChange={(p) => p > page ? nextPage() : prevPage()} />
+    <main className="max-w-6xl mx-auto px-8 py-8">
+      <h1 className="text-lg font-semibold mb-4">Users ({users.length})</h1>
+      <DataTable
+        columns={columns}
+        data={users}
+        pageSize={10}
+        searchKeys={["name", "username"]}
+        onRowClick={(r) => navigate(`/users/${r.id}`)}
+        loading={loading}
+      />
     </main>
   );
 }

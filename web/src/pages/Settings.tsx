@@ -74,7 +74,7 @@ export function Settings() {
           <CardTitle className="text-lg">Appearance</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
+          <div className="space-y-3">
             <Label>Theme</Label>
             <Select
               value={theme}
@@ -88,7 +88,7 @@ export function Settings() {
 
           <Separator />
 
-          <div className="space-y-2">
+          <div className="space-y-3">
             <Label>{t("settings.language")}</Label>
             <Select
               value={member?.language || "en"}
@@ -101,7 +101,7 @@ export function Settings() {
 
           <Separator />
 
-          <div className="space-y-2">
+          <div className="space-y-3">
             <Label>{t("settings.timezone")}</Label>
             <Select
               value={member?.timezone || "UTC"}

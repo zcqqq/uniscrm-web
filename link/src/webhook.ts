@@ -359,7 +359,7 @@ export function webhookRoutes() {
 
     const channelId = c.req.param("channelId");
     const row = await c.env.LINK_DB
-      .prepare("SELECT config FROM channels WHERE id = ? AND is_active = 1")
+      .prepare("SELECT config FROM channels WHERE id = ? AND is_byok = 1 AND is_active = 1")
       .bind(channelId)
       .first<{ config: string }>();
     if (!row) return c.json({ error: "Channel not found" }, 404);

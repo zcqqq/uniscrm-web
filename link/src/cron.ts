@@ -73,11 +73,11 @@ async function handleTrendAggregation(env: Env): Promise<void> {
 async function handleTokenRefresh(env: Env): Promise<void> {
   // X token refresh (system app + BYOK)
   const rows = await env.LINK_DB
-    .prepare("SELECT id, config FROM channels WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1")
-    .all<{ id: string; config: string }>();
+    .prepare("SELECT id, is_byok, config FROM channels WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1")
+    .all<{ id: string; is_byok: number; config: string }>();
 
   for (const row of rows.results) {
-    const config = JSON.parse(row.config) as ByokConfig & {
+    const config = JSON.parse(row.config) as {
       access_token?: string; refresh_token?: string; expires_at?: string;
       x_user_id?: string; x_username?: string; subscription_ids?: string[];
     };
@@ -88,14 +88,15 @@ async function handleTokenRefresh(env: Env): Promise<void> {
     if (!shouldRefresh) continue;
 
     try {
-      const creds = await getAppCredentials(env, config);
+      const isByok = row.is_byok === 1;
+      const creds = await getAppCredentials(env, isByok ? (config as ByokConfig) : {});
       const tokenService = new XTokenService(env.LINK_DB, creds.clientId, creds.clientSecret);
       const newToken = await tokenService.refreshAccessToken(row.id);
-      console.log(JSON.stringify({ event: "token_refreshed", channel_id: row.id, x_username: config.x_username, is_byok: !!config.is_byok }));
+      console.log(JSON.stringify({ event: "token_refreshed", channel_id: row.id, x_username: config.x_username, is_byok: isByok }));
 
       if (!config.subscription_ids?.length && config.x_user_id) {
         try {
-          if (config.is_byok) {
+          if (isByok) {
             const webhookUrl = `${env.LINK_URL}/x/webhook/${row.id}`;
             const userService = new XActivityService(newToken);
             const ids = await userService.setupAllSubscriptions(config.x_user_id, webhookUrl);

@@ -195,9 +195,10 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
   const formatTick = (p: unknown) => {
     if (!p || typeof p !== "string") return "";
     const cleaned = p.replace(/(\.\d{3})\d+Z$/, "$1Z");
-    const d = new Date(cleaned);
+    const dateStr = cleaned.includes("T") ? cleaned : `${cleaned}T00:00:00Z`;
+    const d = new Date(dateStr);
     if (isNaN(d.getTime())) return p.slice(0, 5);
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return d.toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric" });
   };
 
   return (

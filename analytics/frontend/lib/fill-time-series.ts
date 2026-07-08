@@ -10,8 +10,9 @@ export function fillTimeSeries(
   const days = parseTimeRangeDays(timeRange);
   if (!days) return data;
 
-  const end = new Date();
-  end.setHours(0, 0, 0, 0);
+  // Use UTC dates throughout — API periods are UTC midnight timestamps
+  const now = new Date();
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const start = new Date(end.getTime() - days * 86400000);
 
   const dataMap = new Map<string, number>();
@@ -29,11 +30,11 @@ export function fillTimeSeries(
     filled.push({ period: key, value: dataMap.get(key) || 0 });
 
     if (granularity === "week") {
-      current.setDate(current.getDate() + 7);
+      current.setUTCDate(current.getUTCDate() + 7);
     } else if (granularity === "month") {
-      current.setMonth(current.getMonth() + 1);
+      current.setUTCMonth(current.getUTCMonth() + 1);
     } else {
-      current.setDate(current.getDate() + 1);
+      current.setUTCDate(current.getUTCDate() + 1);
     }
   }
 

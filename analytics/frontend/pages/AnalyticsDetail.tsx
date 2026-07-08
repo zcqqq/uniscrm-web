@@ -222,8 +222,22 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     if (!p || typeof p !== "string") return String(p ?? "");
     try {
       const normalized = p.replace(/(\.\d{3})\d+Z$/, "$1Z");
-      const d = new Date(normalized);
+      // Bare date strings (YYYY-MM-DD) must be parsed as UTC midnight
+      const dateStr = normalized.includes("T") ? normalized : `${normalized}T00:00:00Z`;
+      const d = new Date(dateStr);
       if (isNaN(d.getTime())) return p.slice(0, 10);
+
+      if (config.granularity === "week") {
+        const weekEnd = new Date(d.getTime() + 6 * 86400000);
+        const fmt = (dt: Date) =>
+          dt.toLocaleDateString(locale === "zh" ? "zh-CN" : "en-US", {
+            timeZone: "UTC",
+            month: "short",
+            day: "numeric",
+          });
+        return `${fmt(d)} – ${fmt(weekEnd)}`;
+      }
+
       return d.toLocaleDateString(locale === "zh" ? "zh-CN" : "en-US", { timeZone: timezone, month: "short", day: "numeric" });
     } catch { return p.slice(0, 10); }
   };

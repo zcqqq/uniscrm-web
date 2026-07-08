@@ -9,6 +9,8 @@ import { fillTimeSeries } from "../lib/fill-time-series";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
+import { Progress } from "../../../shared/frontend/ui/progress";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
 import { DIMENSION_COLORS } from "../../../shared/frontend/lib/colors";
 
@@ -352,26 +354,36 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
 
         {hasStats && results.buckets?.length > 0 && (
           <Card className="mb-4">
-            <CardContent className="p-0">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "区间" : "Bucket"}</th>
-                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "数量" : "Count"}</th>
-                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.buckets.map((b: any, i: number) => (
-                    <tr key={i} className="border-b last:border-0">
-                      <td className="px-4 py-2">{b.label}</td>
-                      <td className="text-right px-4 py-2 font-medium">{Number(b.count).toLocaleString()}</td>
-                      <td className="text-right px-4 py-2 text-muted-foreground">{typeof b.percentage === "number" ? `${b.percentage.toFixed(1)}%` : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <CardContent className="p-6 pt-4 pb-0">
+              <p className="text-sm font-medium text-foreground mb-2">{locale === "zh" ? "分布数据" : "Distribution Data"}</p>
             </CardContent>
+            <div className="border-t border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{locale === "zh" ? "区间" : "Bucket"}</TableHead>
+                    <TableHead className="text-right w-24">{locale === "zh" ? "数量" : "Count"}</TableHead>
+                    <TableHead className="w-48">{locale === "zh" ? "占比" : "Share"}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {results.buckets.map((b: any, i: number) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-medium">{b.label}</TableCell>
+                      <TableCell className="text-right tabular-nums">{Number(b.count).toLocaleString()}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Progress value={typeof b.percentage === "number" ? b.percentage : 0} className="h-1.5 flex-1" />
+                          <span className="text-xs text-muted-foreground w-10 text-right tabular-nums">
+                            {typeof b.percentage === "number" ? `${b.percentage.toFixed(1)}%` : "—"}
+                          </span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </Card>
         )}
 
@@ -423,26 +435,29 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               const hasDim = results.data.some((d: any) => d.dimension != null);
               return (
                 <Card className="mb-4">
-                  <CardContent className="p-0">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "时间" : "Period"}</th>
-                          {hasDim && <th className="text-left px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "维度" : "Dimension"}</th>}
-                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "值" : "Value"}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {results.data.map((d: any, i: number) => (
-                          <tr key={i} className="border-b last:border-0">
-                            <td className="px-4 py-2 text-muted-foreground">{formatPeriod(d.period)}</td>
-                            {hasDim && <td className="px-4 py-2">{String(d.dimension ?? "—")}</td>}
-                            <td className="text-right px-4 py-2 font-medium">{Number(d.value).toLocaleString()}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <CardContent className="p-6 pt-4 pb-0">
+                    <p className="text-sm font-medium text-foreground mb-2">{locale === "zh" ? "明细数据" : "Data"}</p>
                   </CardContent>
+                  <div className="border-t border-border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>{locale === "zh" ? "时间" : "Period"}</TableHead>
+                          {hasDim && <TableHead>{locale === "zh" ? "维度" : "Dimension"}</TableHead>}
+                          <TableHead className="text-right">{locale === "zh" ? "值" : "Value"}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {results.data.map((d: any, i: number) => (
+                          <TableRow key={i}>
+                            <TableCell className="text-muted-foreground">{formatPeriod(d.period)}</TableCell>
+                            {hasDim && <TableCell>{String(d.dimension ?? "—")}</TableCell>}
+                            <TableCell className="text-right font-medium tabular-nums">{Number(d.value).toLocaleString()}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </Card>
               );
             })()}

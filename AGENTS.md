@@ -22,3 +22,4 @@ git分dev和main分支，提交到main分支时自动通过github部署dev环境
 # Technical
 大数据存储基于R2 data catalog.
 各模块间尽量减少逻辑耦合，通过数据（Cloudflare各组件）耦合。所以在Cloudflare组件的配置文件中，尽量用模块名做前后缀，如DB_WEB，而不是通用的DB、以减少各个模块间的歧义。比较特殊的是tenantdb，各个模块可能都有数据量大的表，要按租户分库放到tenantdb。
+UI：所有icons都要加上tooltip文字便于区分。

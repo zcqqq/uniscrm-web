@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFlows } from "../hooks/useFlows";
+import { api } from "../lib/api";
 import { FLOW_TEMPLATES, type FlowTemplate } from "../config/templates";
 import { Nav } from "../components/Nav";
 import { DateCell } from "../../../shared/frontend/components/CellDate";
@@ -42,7 +43,7 @@ type SortDir = "asc" | "desc";
 
 export default function FlowsPage() {
   useEffect(() => { document.title = "Flow — UniSCRM"; }, []);
-  const { flows, loading, page, total, totalPages, setPage, createFlow, deleteFlow } = useFlows();
+  const { flows, loading, page, total, totalPages, setPage, createFlow, deleteFlow, refresh } = useFlows();
   const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<SortKey>("updated_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -171,13 +172,13 @@ export default function FlowsPage() {
                             status={flow.status}
                             operations={{
                               published: {
-                                primary: { icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg>, title: "Duplicate", onClick: () => {} },
-                                menu: [{ label: "Stop", onClick: () => fetch(`/api/flows/${flow.id}/unpublish`, { method: "POST", credentials: "include" }).then(() => window.location.reload()), destructive: true }],
+                                primary: { icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg>, title: "Duplicate", onClick: () => {} },
+                                menu: [{ label: "Stop", onClick: () => api.flows.unpublish(flow.id).then(() => refresh()), destructive: true }],
                               },
                               draft: {
-                                primary: { icon: <EditIcon />, title: "Edit", onClick: () => navigate(`/flows/${flow.id}`) },
+                                primary: { icon: <EditIcon className="w-5 h-5" />, title: "Edit", onClick: () => navigate(`/flows/${flow.id}`) },
                                 menu: [
-                                  { label: "Publish", onClick: () => fetch(`/api/flows/${flow.id}/publish`, { method: "POST", credentials: "include" }).then(() => window.location.reload()) },
+                                  { label: "Publish", onClick: () => api.flows.publish(flow.id).then(() => refresh()) },
                                   { label: "Delete", onClick: () => { if (confirm("Delete this flow?")) deleteFlow(flow.id); }, destructive: true },
                                 ],
                               },

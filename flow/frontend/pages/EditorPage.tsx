@@ -96,9 +96,10 @@ function EditorToolbar() {
         size="sm"
         onClick={async () => {
           await handleSave();
-          if (flowId) {
-            await api.flows.publish(flowId);
-            navigate(`/flows/${flowId}/analytics`);
+          const id = useFlowEditor.getState().flowId;
+          if (id) {
+            await api.flows.publish(id);
+            navigate(`/flows/${id}/analytics`);
           }
         }}
       >

@@ -87,6 +87,18 @@ export function deleteReport(id: string) {
   return request<{ ok: boolean }>(`${BASE}/${id}`, { method: "DELETE" });
 }
 
+export function updateReport(id: string, body: {
+  name?: string | null;
+  type?: string;
+  params?: Record<string, unknown>;
+}) {
+  return request<{ ok: boolean }>(`${BASE}/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 // ============ Dashboards ============
 
 export interface Dashboard {

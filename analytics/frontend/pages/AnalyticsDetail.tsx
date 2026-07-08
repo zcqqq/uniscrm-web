@@ -30,6 +30,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   const [name, setName] = useState(() => (paramId ? "" : `Untitled ${MODE_TITLES[mode]?.en || "Analysis"}`));
   const [chartType, setChartType] = useState<"pie" | "bar">("pie");
   const [eventChartType, setEventChartType] = useState<"line" | "bar">("line");
+  const [intervalChartType, setIntervalChartType] = useState<"bar" | "line">("bar");
   const [config, setConfig] = useState<ReportConfigValues>({
     mode,
     eventType: "",
@@ -365,21 +366,45 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         {hasStats && results.buckets?.length > 0 && (
           <Card className="mb-4">
             <CardContent className="p-6 pt-4">
-              <p className="text-sm font-medium text-foreground mb-4">{locale === "zh" ? "分布" : "Distribution"}</p>
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-sm font-medium text-foreground">{locale === "zh" ? "分布" : "Distribution"}</p>
+                <div className="flex items-center gap-0.5 border border-border rounded-md p-0.5 bg-muted/30">
+                  {(["bar", "line"] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setIntervalChartType(t)}
+                      className={`px-3 py-1 text-xs rounded font-medium transition-colors ${intervalChartType === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                    >
+                      {t === "line" ? (locale === "zh" ? "折线" : "Line") : (locale === "zh" ? "柱状" : "Bar")}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <ResponsiveContainer width="100%" height={280}>
-                <AreaChart data={results.buckets} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                  <defs>
-                    <linearGradient id="gradBucket" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.2} />
-                      <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={36} />
-                  <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
-                  <Area type="natural" dataKey="count" stroke="hsl(var(--primary))" fill="url(#gradBucket)" strokeWidth={2} dot={false} />
-                </AreaChart>
+                {intervalChartType === "bar" ? (
+                  <BarChart data={results.buckets} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={36} />
+                    <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
+                    <Bar dataKey="count" fill="hsl(var(--primary))" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                ) : (
+                  <LineChart data={results.buckets} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={36} />
+                    <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
+                    <Line
+                      type="linear"
+                      dataKey="count"
+                      stroke="hsl(var(--primary))"
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: "#fff", stroke: "hsl(var(--primary))", strokeWidth: 2 }}
+                      activeDot={{ r: 5, fill: "#fff", stroke: "hsl(var(--primary))", strokeWidth: 2 }}
+                    />
+                  </LineChart>
+                )}
               </ResponsiveContainer>
             </CardContent>
           </Card>

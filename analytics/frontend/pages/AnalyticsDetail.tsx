@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, BarChart, Bar } from "recharts";
-import { createReport, getReport, listDashboards, createDashboard, addDashboardItem, type Dashboard } from "../lib/api";
+import { createReport, getReport, updateReport, listDashboards, createDashboard, addDashboardItem, type Dashboard } from "../lib/api";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { useLocale } from "../hooks/useLocale";
 import { ReportConfig, type ReportConfigValues } from "../components/ReportConfig";
@@ -25,7 +25,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   const { toast } = useToast();
 
   const [mode, setMode] = useState<"event" | "interval" | "user" | "funnel">(modeProp || "event");
-  const [name, setName] = useState(`Untitled ${MODE_TITLES[mode]?.en || "Analysis"}`);
+  const [name, setName] = useState(() => (paramId ? "" : `Untitled ${MODE_TITLES[mode]?.en || "Analysis"}`));
   const [chartType, setChartType] = useState<"pie" | "bar">("pie");
   const [config, setConfig] = useState<ReportConfigValues>({
     mode,
@@ -45,6 +45,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const [dashDropOpen, setDashDropOpen] = useState(false);
   const [initialized, setInitialized] = useState(!paramId);
+  const [saving, setSaving] = useState(false);
 
   const title = MODE_TITLES[mode]?.[locale] || MODE_TITLES[mode]?.en || mode;
   useEffect(() => { document.title = `${title} — UniSCRM`; }, [title]);
@@ -56,18 +57,25 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
       const r = d.report;
       setReportId(r.id);
       setMode((r.type as any) || "event");
-      setName((r.params as any).name || `${r.type} #${r.id.slice(0, 8)}`);
+      setName(r.name || (r.params as any).name || `${r.type} #${r.id.slice(0, 8)}`);
       const p = r.params as any;
       setConfig({
         mode: (r.type as any) || "event",
         eventType: p.event_type || "",
         measure: p.measure || "count",
+        measureField: p.measure_field || undefined,
         eventTypeA: p.event_type_a || "",
         eventTypeB: p.event_type_b || "",
         dimension: p.dimension || "",
-        timeRange: inferTimeRange(p.time_range_start || ""),
+        buckets: Array.isArray(p.buckets) ? p.buckets.join(",") : (p.buckets || ""),
+        timeRange: typeof p.time_range === "string" && p.time_range ? p.time_range : inferTimeRange(p.time_range_start || ""),
         granularity: p.granularity || "day",
+        compareEnabled: !!p.compare_enabled,
+        compareTimeRange: p.compare_time_range || "7",
         filters: p.filters,
+        funnelSteps: Array.isArray(p.steps) ? p.steps : undefined,
+        windowValue: p.window_value || undefined,
+        windowUnit: p.window_unit || undefined,
       });
       if (r.results) setResults(r.results);
       setLoading(r.status === "pending" || r.status === "computing");
@@ -78,6 +86,66 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
 
   useEffect(() => { listDashboards().then((d) => setDashboards(d.dashboards)); }, []);
 
+  const buildReportParams = useCallback((): Record<string, unknown> => {
+    const numericDays = Number.parseInt(config.timeRange, 10);
+    const start = Number.isFinite(numericDays)
+      ? new Date(Date.now() - numericDays * 86400000).toISOString().slice(0, 10)
+      : undefined;
+    const reportName = name.trim();
+
+    if (mode === "funnel") {
+      return {
+        steps: (config.funnelSteps || []).filter(Boolean),
+        window_value: config.windowValue || 7,
+        window_unit: config.windowUnit || "day",
+        time_range: config.timeRange,
+        time_range_start: start,
+        compare_enabled: !!config.compareEnabled,
+        compare_time_range: config.compareTimeRange || undefined,
+        filters: config.filters,
+        name: reportName || undefined,
+      };
+    }
+    if (mode === "user") {
+      const buckets = config.buckets ? config.buckets.split(",").map(Number).filter(n => !isNaN(n) && n > 0) : undefined;
+      return {
+        measure: config.measure,
+        measure_field: config.measureField || undefined,
+        dimension: config.dimension || undefined,
+        buckets: buckets?.length ? buckets : undefined,
+        filters: config.filters,
+        name: reportName || undefined,
+      };
+    }
+    if (mode === "interval") {
+      return {
+        event_type_a: config.eventTypeA,
+        event_type_b: config.eventTypeB,
+        dimension: config.dimension || undefined,
+        granularity: config.granularity,
+        time_range: config.timeRange,
+        time_range_start: start,
+        compare_enabled: !!config.compareEnabled,
+        compare_time_range: config.compareTimeRange || undefined,
+        filters: config.filters,
+        name: reportName || undefined,
+      };
+    }
+
+    return {
+      event_type: config.eventType,
+      measure: config.measure,
+      dimension: config.dimension || undefined,
+      granularity: config.granularity,
+      time_range: config.timeRange,
+      time_range_start: start,
+      compare_enabled: !!config.compareEnabled,
+      compare_time_range: config.compareTimeRange || undefined,
+      filters: config.filters,
+      name: reportName || undefined,
+    };
+  }, [config, mode, name]);
+
   const runQuery = useCallback(async () => {
     if (mode === "interval" && (!config.eventTypeA || !config.eventTypeB)) return;
     if (mode === "event" && !config.eventType) return;
@@ -86,31 +154,20 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     setError("");
     setResults(null);
 
-    const start = new Date(Date.now() - parseInt(config.timeRange) * 86400000).toISOString().slice(0, 10);
-
     try {
-      let params: Record<string, unknown>;
-      if (mode === "funnel") {
-        params = { steps: (config.funnelSteps || []).filter(Boolean), window_value: config.windowValue || 7, window_unit: config.windowUnit || "day", time_range_start: start, filters: config.filters };
-      } else if (mode === "user") {
-        const buckets = config.buckets ? config.buckets.split(",").map(Number).filter(n => !isNaN(n) && n > 0) : undefined;
-        params = { measure: config.measure, measure_field: config.measureField || undefined, dimension: config.dimension || undefined, buckets: buckets?.length ? buckets : undefined, filters: config.filters };
-      } else if (mode === "interval") {
-        params = { event_type_a: config.eventTypeA, event_type_b: config.eventTypeB, dimension: config.dimension || undefined, granularity: config.granularity, time_range_start: start, filters: config.filters };
-      } else {
-        params = { event_type: config.eventType, measure: config.measure, dimension: config.dimension || undefined, granularity: config.granularity, time_range_start: start, filters: config.filters };
-      }
-
+      const params = buildReportParams();
       const res = await createReport({ type: mode, params });
       setReportId(res.report.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
       setLoading(false);
     }
-  }, [config]);
+  }, [buildReportParams, config, mode]);
 
   useEffect(() => {
-    if (!reportId || !loading) return;
+    if (!reportId) return;
+    
+    // Poll regardless of loading state - polling continues until results available or error occurs
     const poll = setInterval(async () => {
       try {
         const res = await getReport(reportId);
@@ -122,17 +179,42 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           setError(res.report.error_message || "Query failed");
           setLoading(false);
           clearInterval(poll);
+        } else if (res.report.status === "pending" || res.report.status === "computing") {
+          // Keep polling
+          setLoading(true);
         }
       } catch {}
     }, 2000);
+    
     return () => clearInterval(poll);
-  }, [reportId, loading]);
+  }, [reportId]);
 
   useEffect(() => {
     if (!initialized) return;
-    if (paramId && results) return; // don't auto-re-run for loaded reports
+    if (paramId) return; // existing reports: always poll, never auto-create a new report
     runQuery();
   }, [runQuery, initialized]);
+
+  const handleSave = async () => {
+    if (!reportId) {
+      navigate("/analytics");
+      return;
+    }
+
+    const normalizedName = name.trim();
+    setSaving(true);
+    try {
+      const params = buildReportParams();
+      await updateReport(reportId, { name: normalizedName || null, type: mode, params });
+      toast({ description: locale === "zh" ? "已保存" : "Saved" });
+      navigate("/analytics");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : (locale === "zh" ? "保存失败" : "Save failed");
+      toast({ variant: "destructive", description: message });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const formatPeriod = (p: unknown) => {
     if (!p || typeof p !== "string") return String(p ?? "");
@@ -186,7 +268,9 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button size="sm" onClick={() => navigate("/analytics")}>Save</Button>
+        <Button size="sm" onClick={handleSave} disabled={saving || !reportId}>
+          {saving ? (locale === "zh" ? "保存中..." : "Saving...") : "Save"}
+        </Button>
       </div>
 
       <div className="flex-1 overflow-auto p-6">
@@ -266,6 +350,31 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           </Card>
         )}
 
+        {hasStats && results.buckets?.length > 0 && (
+          <Card className="mb-4">
+            <CardContent className="p-0">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "区间" : "Bucket"}</th>
+                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "数量" : "Count"}</th>
+                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {results.buckets.map((b: any, i: number) => (
+                    <tr key={i} className="border-b last:border-0">
+                      <td className="px-4 py-2">{b.label}</td>
+                      <td className="text-right px-4 py-2 font-medium">{Number(b.count).toLocaleString()}</td>
+                      <td className="text-right px-4 py-2 text-muted-foreground">{typeof b.percentage === "number" ? `${b.percentage.toFixed(1)}%` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Event results — KPI + time series chart */}
         {hasData && mode !== "user" && chartData.length > 0 && (
           <>
@@ -309,6 +418,34 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                 </ResponsiveContainer>
               </CardContent>
             </Card>
+
+            {results.data?.length > 0 && (() => {
+              const hasDim = results.data.some((d: any) => d.dimension != null);
+              return (
+                <Card className="mb-4">
+                  <CardContent className="p-0">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "时间" : "Period"}</th>
+                          {hasDim && <th className="text-left px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "维度" : "Dimension"}</th>}
+                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "值" : "Value"}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {results.data.map((d: any, i: number) => (
+                          <tr key={i} className="border-b last:border-0">
+                            <td className="px-4 py-2 text-muted-foreground">{formatPeriod(d.period)}</td>
+                            {hasDim && <td className="px-4 py-2">{String(d.dimension ?? "—")}</td>}
+                            <td className="text-right px-4 py-2 font-medium">{Number(d.value).toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </CardContent>
+                </Card>
+              );
+            })()}
           </>
         )}
 
@@ -482,20 +619,6 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           );
         })()}
 
-        {/* SQL */}
-        {results?.sql && (
-          <Card>
-            <details className="group">
-              <summary className="px-6 py-4 text-sm font-medium text-foreground cursor-pointer flex items-center gap-2">
-                <span className="transition-transform group-open:rotate-90">▶</span>
-                SQL Query
-              </summary>
-              <CardContent className="px-6 pb-4 pt-0">
-                <pre className="p-4 bg-muted rounded-md text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed">{results.sql}</pre>
-              </CardContent>
-            </details>
-          </Card>
-        )}
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, BarChart, Bar } from "recharts";
+import { ResponsiveContainer, LineChart, Line, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, BarChart, Bar, Legend } from "recharts";
 import { createReport, getReport, updateReport, listDashboards, createDashboard, addDashboardItem, type Dashboard } from "../lib/api";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { useLocale } from "../hooks/useLocale";
@@ -29,6 +29,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   const [mode, setMode] = useState<"event" | "interval" | "user" | "funnel">(modeProp || "event");
   const [name, setName] = useState(() => (paramId ? "" : `Untitled ${MODE_TITLES[mode]?.en || "Analysis"}`));
   const [chartType, setChartType] = useState<"pie" | "bar">("pie");
+  const [eventChartType, setEventChartType] = useState<"line" | "bar">("line");
   const [config, setConfig] = useState<ReportConfigValues>({
     mode,
     eventType: "",
@@ -245,6 +246,24 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   const hasStats = results && "stats" in results;
   const hasData = results && "data" in results;
   const chartData = hasData ? fillTimeSeries(results.data, config.timeRange, config.granularity) : [];
+  const hasDimension = hasData && results.data?.some((d: any) => d.dimension != null);
+  const dimensions: string[] = hasDimension
+    ? Array.from(new Set(results.data.map((d: any) => String(d.dimension ?? "null"))))
+    : [];
+  // For multi-dimension pivot data by period; for single dimension use filled time series
+  const eventData: any[] = hasDimension
+    ? (() => {
+        const byPeriod = new Map<string, Record<string, any>>();
+        for (const d of results.data) {
+          const cleaned = String(d.period || "").replace(/(\.\d{3})\d+Z$/, "$1Z");
+          const dateStr = cleaned.includes("T") ? cleaned : `${cleaned}T00:00:00Z`;
+          const key = new Date(dateStr).toISOString().slice(0, 10);
+          if (!byPeriod.has(key)) byPeriod.set(key, { period: key });
+          (byPeriod.get(key) as Record<string, any>)[String(d.dimension ?? "null")] = d.value || 0;
+        }
+        return Array.from(byPeriod.values()).sort((a, b) => a.period.localeCompare(b.period));
+      })()
+    : chartData;
 
   return (
     <div className="flex flex-col h-full">
@@ -402,45 +421,97 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         )}
 
         {/* Event results — KPI + time series chart */}
-        {hasData && mode !== "user" && chartData.length > 0 && (
+        {hasData && mode !== "user" && eventData.length > 0 && (
           <>
             <div className="grid gap-4 grid-cols-3 mb-4">
               <Card>
                 <CardContent className="p-4">
                   <p className="text-xs font-medium text-muted-foreground">{locale === "zh" ? "总计" : "Total"}</p>
-                  <p className="text-2xl font-bold tracking-tight mt-1">{chartData.reduce((s: number, d: any) => s + (d.value || 0), 0).toLocaleString()}</p>
+                  <p className="text-2xl font-bold tracking-tight mt-1">{results.data.reduce((s: number, d: any) => s + (d.value || 0), 0).toLocaleString()}</p>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="p-4">
                   <p className="text-xs font-medium text-muted-foreground">{locale === "zh" ? "数据点" : "Data Points"}</p>
-                  <p className="text-2xl font-bold tracking-tight mt-1">{chartData.length}</p>
+                  <p className="text-2xl font-bold tracking-tight mt-1">{eventData.length}</p>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="p-4">
                   <p className="text-xs font-medium text-muted-foreground">{locale === "zh" ? "峰值" : "Peak"}</p>
-                  <p className="text-2xl font-bold tracking-tight mt-1">{Math.max(...chartData.map((d: any) => d.value || 0)).toLocaleString()}</p>
+                  <p className="text-2xl font-bold tracking-tight mt-1">{Math.max(0, ...results.data.map((d: any) => d.value || 0)).toLocaleString()}</p>
                 </CardContent>
               </Card>
             </div>
             <Card className="mb-4">
               <CardContent className="p-6 pt-4">
-                <p className="text-sm font-medium text-foreground mb-4">{locale === "zh" ? "趋势" : "Trend"}</p>
+                <div className="flex items-center justify-end mb-4">
+                  <div className="flex items-center gap-0.5 border border-border rounded-md p-0.5 bg-muted/30">
+                    {(["line", "bar"] as const).map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setEventChartType(t)}
+                        className={`px-3 py-1 text-xs rounded font-medium transition-colors ${eventChartType === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                      >
+                        {t === "line" ? (locale === "zh" ? "折线" : "Line") : (locale === "zh" ? "柱状" : "Bar")}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <ResponsiveContainer width="100%" height={320}>
-                  <AreaChart data={chartData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
-                    <defs>
-                      <linearGradient id="gradEvent" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.2} />
-                        <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0.01} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
-                    <XAxis dataKey="period" tickFormatter={formatPeriod} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={40} />
-                    <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} labelFormatter={formatPeriod} />
-                    <Area type="natural" dataKey="value" stroke="hsl(var(--primary))" fill="url(#gradEvent)" strokeWidth={2.5} dot={false} activeDot={{ r: 4, fill: "hsl(var(--primary))", stroke: "hsl(var(--background))", strokeWidth: 2 }} />
-                  </AreaChart>
+                  {eventChartType === "bar" ? (
+                    <BarChart data={eventData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
+                      <XAxis dataKey="period" tickFormatter={formatPeriod} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={40} />
+                      <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} labelFormatter={formatPeriod} />
+                      {hasDimension ? (
+                        <>
+                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                          {dimensions.map((dim, i) => (
+                            <Bar key={dim} dataKey={dim} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} radius={[3, 3, 0, 0]} />
+                          ))}
+                        </>
+                      ) : (
+                        <Bar dataKey="value" fill="hsl(var(--primary))" radius={[3, 3, 0, 0]} />
+                      )}
+                    </BarChart>
+                  ) : (
+                    <LineChart data={eventData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
+                      <XAxis dataKey="period" tickFormatter={formatPeriod} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={40} />
+                      <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} labelFormatter={formatPeriod} />
+                      {hasDimension ? (
+                        <>
+                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                          {dimensions.map((dim, i) => {
+                            const color = DIMENSION_COLORS[i % DIMENSION_COLORS.length];
+                            return (
+                              <Line
+                                key={dim}
+                                type="linear"
+                                dataKey={dim}
+                                stroke={color}
+                                strokeWidth={2}
+                                dot={{ r: 3, fill: "#fff", stroke: color, strokeWidth: 2 }}
+                                activeDot={{ r: 5, fill: "#fff", stroke: color, strokeWidth: 2 }}
+                              />
+                            );
+                          })}
+                        </>
+                      ) : (
+                        <Line
+                          type="linear"
+                          dataKey="value"
+                          stroke="hsl(var(--primary))"
+                          strokeWidth={2.5}
+                          dot={{ r: 3, fill: "#fff", stroke: "hsl(var(--primary))", strokeWidth: 2 }}
+                          activeDot={{ r: 5, fill: "#fff", stroke: "hsl(var(--primary))", strokeWidth: 2 }}
+                        />
+                      )}
+                    </LineChart>
+                  )}
                 </ResponsiveContainer>
               </CardContent>
             </Card>

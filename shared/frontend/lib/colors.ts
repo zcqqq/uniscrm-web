@@ -9,4 +9,6 @@ export const DIMENSION_COLORS = [
   "#ea580c",
   "#4f46e5",
   "#059669",
+  "#be185d",
+  "#0f766e",
 ];

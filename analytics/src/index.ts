@@ -127,13 +127,15 @@ app.get("/api/reports/:id", async (c) => {
   return c.json({ report: { ...row, results, results_json: undefined, params: JSON.parse(row.params_json), params_json: undefined } });
 });
 
-// Params fields that are purely display preferences — changing only these
-// must never re-trigger computation (editing a report's name, or its chart
-// type toggle, doesn't change what data the query returns). `name` is kept
-// here even though new params no longer embed it, purely so reports saved
-// before that change (which still carry a stale params.name) don't get a
-// false-positive diff the next time they're edited.
-const COSMETIC_PARAM_FIELDS = ["chart_type", "name"] as const;
+// Params fields that must be excluded when deciding whether to re-queue
+// computation:
+// - "chart_type"/"name": purely display preferences, never affect the query.
+// - "time_range_start": derived fresh from "time_range" (the relative
+//   selector, e.g. "30" days) as `now - N days` every time params are built,
+//   so it naturally drifts forward with real time even when the user
+//   changes nothing. The relative "time_range" value itself is what
+//   reflects real user intent and is NOT excluded.
+const COSMETIC_PARAM_FIELDS = ["chart_type", "name", "time_range_start"] as const;
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);

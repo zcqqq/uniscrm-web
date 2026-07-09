@@ -6,7 +6,7 @@ import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { useLocale } from "../hooks/useLocale";
 import { ReportConfig, type ReportConfigValues } from "../components/ReportConfig";
 import { IntervalDistributionChart } from "../components/IntervalDistributionChart";
-import { fillTimeSeries } from "../lib/fill-time-series";
+import { fillTimeSeries, generatePeriodKeys, normalizeDate } from "../lib/fill-time-series";
 import { fillIntervalPeriods } from "../lib/fill-interval-periods";
 import { fmtDuration } from "../lib/format";
 import { Button } from "../../../shared/frontend/ui/button";
@@ -30,12 +30,14 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
 
   const [mode, setMode] = useState<"event" | "interval" | "user" | "funnel">(modeProp || "event");
   const [name, setName] = useState(() => (paramId ? "" : `Untitled ${MODE_TITLES[mode]?.en || "Analysis"}`));
-  const [chartType, setChartType] = useState<"pie" | "bar">("pie");
-  const [eventChartType, setEventChartType] = useState<"line" | "bar">("line");
-  // Not yet user-toggleable (histogram view was dropped), but persisted in
-  // report params for forward-compatibility / structural parity with Event
-  // Analysis, which may reintroduce alternate chart types later.
-  const distributionChartType = "boxplot" as const;
+  // Unified chart-type preference, persisted to report params as `chart_type`
+  // for every mode (event: line/bar, user: pie/bar, interval: boxplot only —
+  // no user-facing toggle yet, funnel: unused). Editing this never triggers
+  // recomputation (see backend PATCH diff logic).
+  const [chartType, setChartType] = useState<string>(() => {
+    const m = modeProp || "event";
+    return m === "user" ? "pie" : m === "interval" ? "boxplot" : "line";
+  });
   const [config, setConfig] = useState<ReportConfigValues>({
     mode,
     eventType: "",
@@ -53,6 +55,11 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   // otherwise cause it to re-fire immediately after every creation).
   const reportIdRef = useRef<string | null>(paramId || null);
   useEffect(() => { reportIdRef.current = reportId; }, [reportId]);
+  // Same idea for `name`: it must never be part of runQuery's own deps
+  // (editing the display name must never re-trigger computation), but the
+  // very first auto-created draft should still start with a sensible name.
+  const nameRef = useRef(name);
+  useEffect(() => { nameRef.current = name; }, [name]);
   const [results, setResults] = useState<any>(null);
   const [loading, setLoading] = useState(!!paramId);
   const [error, setError] = useState("");
@@ -70,11 +77,12 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     getReport(paramId).then((d) => {
       const r = d.report;
       setReportId(r.id);
-      setMode((r.type as any) || "event");
-      setName(r.name || (r.params as any).name || `${r.type} #${r.id.slice(0, 8)}`);
+      const resolvedMode = (r.type as any) || "event";
+      setMode(resolvedMode);
+      setName(r.name || `${r.type} #${r.id.slice(0, 8)}`);
       const p = r.params as any;
       setConfig({
-        mode: (r.type as any) || "event",
+        mode: resolvedMode,
         eventType: p.event_type || "",
         measure: p.measure || "count",
         measureField: p.measure_field || undefined,
@@ -91,6 +99,11 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         windowValue: p.window_value || undefined,
         windowUnit: p.window_unit || undefined,
       });
+      if (typeof p.chart_type === "string") {
+        setChartType(p.chart_type);
+      } else {
+        setChartType(resolvedMode === "user" ? "pie" : resolvedMode === "interval" ? "boxplot" : "line");
+      }
       if (r.results) setResults(r.results);
       setLoading(r.status === "pending" || r.status === "computing");
       if (r.status === "error") setError(r.error_message || "Error");
@@ -105,7 +118,6 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     const start = Number.isFinite(numericDays)
       ? new Date(Date.now() - numericDays * 86400000).toISOString().slice(0, 10)
       : undefined;
-    const reportName = name.trim();
 
     if (mode === "funnel") {
       return {
@@ -117,7 +129,6 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         compare_enabled: !!config.compareEnabled,
         compare_time_range: config.compareTimeRange || undefined,
         filters: config.filters,
-        name: reportName || undefined,
       };
     }
     if (mode === "user") {
@@ -128,7 +139,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         dimension: config.dimension || undefined,
         buckets: buckets?.length ? buckets : undefined,
         filters: config.filters,
-        name: reportName || undefined,
+        chart_type: chartType,
       };
     }
     if (mode === "interval") {
@@ -142,8 +153,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         compare_enabled: !!config.compareEnabled,
         compare_time_range: config.compareTimeRange || undefined,
         filters: config.filters,
-        distribution_chart_type: distributionChartType,
-        name: reportName || undefined,
+        chart_type: chartType,
       };
     }
 
@@ -157,9 +167,9 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
       compare_enabled: !!config.compareEnabled,
       compare_time_range: config.compareTimeRange || undefined,
       filters: config.filters,
-      name: reportName || undefined,
+      chart_type: chartType,
     };
-  }, [config, mode, name, distributionChartType]);
+  }, [config, mode, chartType]);
 
   // Increments every time runQuery (re)triggers computation on the *same*
   // reportId (i.e. an update, not a fresh creation), so the polling effect
@@ -185,7 +195,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         await updateReport(reportIdRef.current, { type: mode, params });
         setPollNonce((n) => n + 1);
       } else {
-        const res = await createReport({ type: mode, params });
+        const res = await createReport({ name: nameRef.current.trim() || undefined, type: mode, params });
         setReportId(res.report.id);
       }
     } catch (err) {
@@ -283,11 +293,27 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     ? (() => {
         const byPeriod = new Map<string, Record<string, any>>();
         for (const d of results.data) {
-          const cleaned = String(d.period || "").replace(/(\.\d{3})\d+Z$/, "$1Z");
-          const dateStr = cleaned.includes("T") ? cleaned : `${cleaned}T00:00:00Z`;
-          const key = new Date(dateStr).toISOString().slice(0, 10);
+          const key = normalizeDate(String(d.period || ""));
           if (!byPeriod.has(key)) byPeriod.set(key, { period: key });
           (byPeriod.get(key) as Record<string, any>)[String(d.dimension ?? "null")] = d.value || 0;
+        }
+        // Zero-fill periods with no data at all for any dimension, matching
+        // the same complete period axis fillTimeSeries produces for the
+        // non-dimension case — otherwise the chart/table silently drop
+        // periods where every dimension happened to be zero.
+        const keys = generatePeriodKeys(config.timeRange, config.granularity);
+        if (keys) {
+          for (const key of keys) {
+            if (!byPeriod.has(key)) byPeriod.set(key, { period: key });
+          }
+        }
+        // Every period row must carry every dimension key (0 default) so
+        // lines/bars render continuously and the table always lists the
+        // full dimension set per period.
+        for (const row of byPeriod.values()) {
+          for (const dim of dimensions) {
+            if (!(dim in row)) row[dim] = 0;
+          }
         }
         return Array.from(byPeriod.values()).sort((a, b) => a.period.localeCompare(b.period));
       })()
@@ -429,8 +455,8 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                     {(["line", "bar"] as const).map((t) => (
                       <button
                         key={t}
-                        onClick={() => setEventChartType(t)}
-                        className={`px-3 py-1 text-xs rounded font-medium transition-colors ${eventChartType === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                        onClick={() => setChartType(t)}
+                        className={`px-3 py-1 text-xs rounded font-medium transition-colors ${chartType === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                       >
                         {t === "line" ? (locale === "zh" ? "折线" : "Line") : (locale === "zh" ? "柱状" : "Bar")}
                       </button>
@@ -438,7 +464,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                   </div>
                 </div>
                 <ResponsiveContainer width="100%" height={320}>
-                  {eventChartType === "bar" ? (
+                  {chartType === "bar" ? (
                     <BarChart data={eventData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
                       <XAxis dataKey="period" tickFormatter={formatPeriod} tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
@@ -495,8 +521,10 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               </CardContent>
             </Card>
 
-            {results.data?.length > 0 && (() => {
-              const hasDim = results.data.some((d: any) => d.dimension != null);
+            {eventData.length > 0 && (() => {
+              const tableRows: { period: string; dimension?: string; value: number }[] = hasDimension
+                ? eventData.flatMap((row: any) => dimensions.map((dim) => ({ period: row.period, dimension: dim, value: Number(row[dim]) || 0 })))
+                : eventData.map((d: any) => ({ period: d.period, value: Number(d.value) || 0 }));
               return (
                 <Card className="mb-4">
                   <CardContent className="p-6 pt-4 pb-0">
@@ -507,16 +535,16 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                       <TableHeader>
                         <TableRow>
                           <TableHead>{locale === "zh" ? "时间" : "Period"}</TableHead>
-                          {hasDim && <TableHead>{locale === "zh" ? "维度" : "Dimension"}</TableHead>}
+                          {hasDimension && <TableHead>{locale === "zh" ? "维度" : "Dimension"}</TableHead>}
                           <TableHead className="text-right">{locale === "zh" ? "值" : "Value"}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {results.data.map((d: any, i: number) => (
+                        {tableRows.map((d, i) => (
                           <TableRow key={i}>
                             <TableCell className="text-muted-foreground">{formatPeriod(d.period)}</TableCell>
-                            {hasDim && <TableCell>{String(d.dimension ?? "—")}</TableCell>}
-                            <TableCell className="text-right font-medium tabular-nums">{Number(d.value).toLocaleString()}</TableCell>
+                            {hasDimension && <TableCell>{String(d.dimension ?? "—")}</TableCell>}
+                            <TableCell className="text-right font-medium tabular-nums">{d.value.toLocaleString()}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

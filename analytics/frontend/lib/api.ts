@@ -69,6 +69,7 @@ export function getReport(id: string) {
 }
 
 export function createReport(body: {
+  name?: string | null;
   type: string;
   params: Record<string, unknown>;
 }) {

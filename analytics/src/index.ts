@@ -88,7 +88,7 @@ app.get("/api/reports", async (c) => {
 app.post("/api/reports", async (c) => {
   const tenantId = c.get("tenantId");
   const memberId = c.get("memberId");
-  const body = await c.req.json<{ type: string; params: Record<string, unknown> }>();
+  const body = await c.req.json<{ name?: string | null; type: string; params: Record<string, unknown> }>();
 
   if (!body.type || !body.params) {
     return c.json({ error: "type and params are required" }, 400);
@@ -98,9 +98,9 @@ app.post("/api/reports", async (c) => {
   const now = new Date().toISOString();
 
   await c.env.ANALYTICS_DB.prepare(
-    `INSERT INTO analytics_reports (id, tenant_id, member_id, type, params_json, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`
-  ).bind(id, tenantId, memberId, body.type, JSON.stringify(body.params), now, now).run();
+    `INSERT INTO analytics_reports (id, tenant_id, member_id, name, type, params_json, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+  ).bind(id, tenantId, memberId, body.name || null, body.type, JSON.stringify(body.params), now, now).run();
 
   await c.env.ANALYTICS_QUEUE.send({
     report_id: id,
@@ -127,21 +127,46 @@ app.get("/api/reports/:id", async (c) => {
   return c.json({ report: { ...row, results, results_json: undefined, params: JSON.parse(row.params_json), params_json: undefined } });
 });
 
+// Params fields that are purely display preferences — changing only these
+// must never re-trigger computation (editing a report's name, or its chart
+// type toggle, doesn't change what data the query returns).
+const COSMETIC_PARAM_FIELDS = ["chart_type"] as const;
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const keys = Object.keys(value as Record<string, unknown>).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`).join(",")}}`;
+}
+
+function queryParamsChanged(oldParams: Record<string, unknown>, newParams: Record<string, unknown>): boolean {
+  const strip = (p: Record<string, unknown>) => {
+    const copy = { ...p };
+    for (const field of COSMETIC_PARAM_FIELDS) delete copy[field];
+    return copy;
+  };
+  return stableStringify(strip(oldParams)) !== stableStringify(strip(newParams));
+}
+
 app.patch("/api/reports/:id", async (c) => {
   const tenantId = c.get("tenantId");
   const reportId = c.req.param("id");
   const body = await c.req.json<{ name?: string | null; type?: string; params?: Record<string, unknown> }>();
 
   const existing = await c.env.ANALYTICS_DB.prepare(
-    "SELECT type FROM analytics_reports WHERE id = ? AND tenant_id = ?"
-  ).bind(reportId, tenantId).first<{ type: string }>();
+    "SELECT type, params_json FROM analytics_reports WHERE id = ? AND tenant_id = ?"
+  ).bind(reportId, tenantId).first<{ type: string; params_json: string }>();
   if (!existing) return c.json({ error: "Not found" }, 404);
 
-  // Editing the query params means the previously computed results no longer
-  // reflect the current config — re-queue computation instead of leaving a
-  // stale "ready" report with mismatched params/results.
-  const paramsChanged = body.params !== undefined;
+  // Only re-queue computation if a *query-relevant* param actually changed —
+  // editing the name or a cosmetic chart-type preference must not touch the
+  // previously computed results.
   const resolvedType = body.type !== undefined ? body.type : existing.type;
+  let paramsChanged = false;
+  if (body.params !== undefined) {
+    const oldParams = existing.params_json ? JSON.parse(existing.params_json) : {};
+    paramsChanged = queryParamsChanged(oldParams, body.params);
+  }
 
   const sets: string[] = [];
   const values: unknown[] = [];

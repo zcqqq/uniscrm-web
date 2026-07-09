@@ -133,15 +133,25 @@ app.patch("/api/reports/:id", async (c) => {
   const body = await c.req.json<{ name?: string | null; type?: string; params?: Record<string, unknown> }>();
 
   const existing = await c.env.ANALYTICS_DB.prepare(
-    "SELECT id FROM analytics_reports WHERE id = ? AND tenant_id = ?"
-  ).bind(reportId, tenantId).first();
+    "SELECT type FROM analytics_reports WHERE id = ? AND tenant_id = ?"
+  ).bind(reportId, tenantId).first<{ type: string }>();
   if (!existing) return c.json({ error: "Not found" }, 404);
+
+  // Editing the query params means the previously computed results no longer
+  // reflect the current config — re-queue computation instead of leaving a
+  // stale "ready" report with mismatched params/results.
+  const paramsChanged = body.params !== undefined;
+  const resolvedType = body.type !== undefined ? body.type : existing.type;
 
   const sets: string[] = [];
   const values: unknown[] = [];
   if (body.name !== undefined) { sets.push("name = ?"); values.push(body.name); }
   if (body.type !== undefined) { sets.push("type = ?"); values.push(body.type); }
   if (body.params !== undefined) { sets.push("params_json = ?"); values.push(JSON.stringify(body.params)); }
+  if (paramsChanged) {
+    sets.push("status = ?", "results_json = ?", "error_message = ?");
+    values.push("pending", null, null);
+  }
   sets.push("updated_at = ?");
   values.push(new Date().toISOString());
 
@@ -149,7 +159,17 @@ app.patch("/api/reports/:id", async (c) => {
     `UPDATE analytics_reports SET ${sets.join(", ")} WHERE id = ? AND tenant_id = ?`
   ).bind(...values, reportId, tenantId).run();
 
-  return c.json({ ok: true });
+  if (paramsChanged) {
+    await c.env.ANALYTICS_QUEUE.send({
+      report_id: reportId,
+      type: resolvedType,
+      params: body.params,
+      tenant_id: tenantId,
+      warehouse: c.env.R2_WAREHOUSE,
+    });
+  }
+
+  return c.json({ ok: true, requeued: paramsChanged });
 });
 
 app.delete("/api/reports/:id", async (c) => {

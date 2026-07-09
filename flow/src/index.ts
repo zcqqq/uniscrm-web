@@ -19,15 +19,15 @@ function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenan
       direction: log.direction,
       created_at: timestamp,
     }));
-    env.PIPELINE_FLOW_LOG.send(records).catch(() => {});
+    env.PIPELINE_FLOW_LOG?.send(records).catch(() => {});
 
-    env.FLOW_LOG_QUEUE.send({
+    env.FLOW_LOG_QUEUE?.send({
       flowId,
       userId,
       tenantId,
       timestamp,
       logs: nodeLogs,
-    });
+    }).catch(() => {});
   }
 }
 

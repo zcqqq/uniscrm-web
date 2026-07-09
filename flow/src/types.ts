@@ -10,8 +10,8 @@ export interface Env {
   AI: Ai;
   WEB_URL: string;
   FLOW_QUEUE: Queue;
-  FLOW_LOG_QUEUE: Queue;
-  PIPELINE_FLOW_LOG: Pipeline;
+  FLOW_LOG_QUEUE?: Queue;
+  PIPELINE_FLOW_LOG?: Pipeline;
   LINK_URL: string;
   INTERNAL_SECRET: string;
   CF_ACCOUNT_ID: string;

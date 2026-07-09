@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, BarChart, Bar, Legend } from "recharts";
 import { createReport, getReport, updateReport, listDashboards, createDashboard, addDashboardItem, type Dashboard } from "../lib/api";
@@ -48,6 +48,11 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   });
 
   const [reportId, setReportId] = useState<string | null>(paramId || null);
+  // Tracked separately from state so `runQuery` can read the latest value
+  // without needing `reportId` in its own dependency array (which would
+  // otherwise cause it to re-fire immediately after every creation).
+  const reportIdRef = useRef<string | null>(paramId || null);
+  useEffect(() => { reportIdRef.current = reportId; }, [reportId]);
   const [results, setResults] = useState<any>(null);
   const [loading, setLoading] = useState(!!paramId);
   const [error, setError] = useState("");
@@ -156,6 +161,11 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     };
   }, [config, mode, name, distributionChartType]);
 
+  // Increments every time runQuery (re)triggers computation on the *same*
+  // reportId (i.e. an update, not a fresh creation), so the polling effect
+  // below restarts even though `reportId` itself didn't change.
+  const [pollNonce, setPollNonce] = useState(0);
+
   const runQuery = useCallback(async () => {
     if (mode === "interval" && (!config.eventTypeA || !config.eventTypeB)) return;
     if (mode === "event" && !config.eventType) return;
@@ -166,8 +176,18 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
 
     try {
       const params = buildReportParams();
-      const res = await createReport({ type: mode, params });
-      setReportId(res.report.id);
+      // Only create a new report row the first time; every subsequent config
+      // change while still drafting a new (unsaved) report must update that
+      // same row instead of creating another one — otherwise every dropdown
+      // edit before the user clicks Save leaves behind an orphaned duplicate
+      // report.
+      if (reportIdRef.current) {
+        await updateReport(reportIdRef.current, { type: mode, params });
+        setPollNonce((n) => n + 1);
+      } else {
+        const res = await createReport({ type: mode, params });
+        setReportId(res.report.id);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
       setLoading(false);
@@ -197,7 +217,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     }, 2000);
     
     return () => clearInterval(poll);
-  }, [reportId]);
+  }, [reportId, pollNonce]);
 
   useEffect(() => {
     if (!initialized) return;

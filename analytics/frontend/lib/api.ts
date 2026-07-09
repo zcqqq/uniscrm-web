@@ -9,14 +9,6 @@ async function request<T>(url: string, opts?: RequestInit): Promise<T> {
   return data as T;
 }
 
-export interface BucketItem {
-  label: string;
-  rangeStart: number;
-  rangeEnd: number;
-  count: number;
-  percentage: number;
-}
-
 export interface IntervalStats {
   count: number;
   min: number;
@@ -28,10 +20,13 @@ export interface IntervalStats {
   p90: number;
 }
 
+export interface IntervalPeriodStats extends IntervalStats {
+  period: string;
+}
+
 export interface IntervalResults {
   sql?: string;
-  stats: IntervalStats;
-  buckets: BucketItem[];
+  periods: IntervalPeriodStats[];
   total_profiles: number;
   total_pairs: number;
 }

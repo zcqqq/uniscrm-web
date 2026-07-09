@@ -5,14 +5,14 @@ import { createReport, getReport, updateReport, listDashboards, createDashboard,
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { useLocale } from "../hooks/useLocale";
 import { ReportConfig, type ReportConfigValues } from "../components/ReportConfig";
-import { IntervalDistributionChart, type DistributionChartType } from "../components/IntervalDistributionChart";
+import { IntervalDistributionChart } from "../components/IntervalDistributionChart";
 import { fillTimeSeries } from "../lib/fill-time-series";
+import { fillIntervalPeriods } from "../lib/fill-interval-periods";
 import { fmtDuration } from "../lib/format";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
-import { Progress } from "../../../shared/frontend/ui/progress";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
 import { DIMENSION_COLORS } from "../../../shared/frontend/lib/colors";
 
@@ -32,7 +32,10 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   const [name, setName] = useState(() => (paramId ? "" : `Untitled ${MODE_TITLES[mode]?.en || "Analysis"}`));
   const [chartType, setChartType] = useState<"pie" | "bar">("pie");
   const [eventChartType, setEventChartType] = useState<"line" | "bar">("line");
-  const [distributionChartType, setDistributionChartType] = useState<DistributionChartType>("boxplot");
+  // Not yet user-toggleable (histogram view was dropped), but persisted in
+  // report params for forward-compatibility / structural parity with Event
+  // Analysis, which may reintroduce alternate chart types later.
+  const distributionChartType = "boxplot" as const;
   const [config, setConfig] = useState<ReportConfigValues>({
     mode,
     eventType: "",
@@ -83,9 +86,6 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         windowValue: p.window_value || undefined,
         windowUnit: p.window_unit || undefined,
       });
-      if (p.distribution_chart_type === "histogram" || p.distribution_chart_type === "boxplot") {
-        setDistributionChartType(p.distribution_chart_type);
-      }
       if (r.results) setResults(r.results);
       setLoading(r.status === "pending" || r.status === "computing");
       if (r.status === "error") setError(r.error_message || "Error");
@@ -250,7 +250,8 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     } catch { return p.slice(0, 10); }
   };
 
-  const hasStats = results && "stats" in results;
+  const hasStats = results && "periods" in results;
+  const intervalSlots = hasStats ? fillIntervalPeriods(results.periods, config.timeRange, config.granularity) : [];
   const hasData = results && "data" in results;
   const chartData = hasData ? fillTimeSeries(results.data, config.timeRange, config.granularity) : [];
   const hasDimension = hasData && results.data?.some((d: any) => d.dimension != null);
@@ -332,98 +333,50 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           </Card>
         )}
 
-        {/* Interval results — KPI cards + distribution chart */}
+        {/* Interval results — per-period box plot + matching table */}
         {hasStats && (
           <>
-            <div className="grid gap-4 grid-cols-2 sm:grid-cols-4 mb-4">
-              {[
-                { label: "Pairs", value: results.stats.count.toLocaleString() },
-                { label: "Profiles", value: results.total_profiles.toLocaleString() },
-                { label: "Median", value: fmtDuration(results.stats.median) },
-                { label: "Average", value: fmtDuration(results.stats.avg) },
-              ].map((item) => (
-                <Card key={item.label}>
-                  <CardContent className="p-4">
-                    <p className="text-xs font-medium text-muted-foreground">{item.label}</p>
-                    <p className="text-2xl font-bold tracking-tight mt-1">{item.value}</p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-            <div className="grid gap-4 grid-cols-5 mb-4">
-              {[
-                { label: "P25", value: fmtDuration(results.stats.p25) },
-                { label: "P75", value: fmtDuration(results.stats.p75) },
-                { label: "P90", value: fmtDuration(results.stats.p90) },
-                { label: "Min", value: fmtDuration(results.stats.min) },
-                { label: "Max", value: fmtDuration(results.stats.max) },
-              ].map((item) => (
-                <Card key={item.label}>
-                  <CardContent className="p-3">
-                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{item.label}</p>
-                    <p className="text-lg font-semibold mt-0.5">{item.value}</p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </>
-        )}
+            <Card className="mb-4">
+              <CardContent className="p-6 pt-4">
+                <p className="text-sm font-medium text-foreground mb-4">{locale === "zh" ? "分布" : "Distribution"}</p>
+                <IntervalDistributionChart slots={intervalSlots} locale={locale} tickFormatter={formatPeriod} />
+              </CardContent>
+            </Card>
 
-        {hasStats && results.buckets?.length > 0 && (
-          <Card className="mb-4">
-            <CardContent className="p-6 pt-4">
-              <div className="flex items-center justify-between mb-4">
-                <p className="text-sm font-medium text-foreground">{locale === "zh" ? "分布" : "Distribution"}</p>
-                <div className="flex items-center gap-0.5 border border-border rounded-md p-0.5 bg-muted/30">
-                  {(["boxplot", "histogram"] as const).map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => setDistributionChartType(t)}
-                      className={`px-3 py-1 text-xs rounded font-medium transition-colors ${distributionChartType === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                    >
-                      {t === "boxplot" ? (locale === "zh" ? "箱线图" : "Box Plot") : (locale === "zh" ? "直方图" : "Histogram")}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <IntervalDistributionChart stats={results.stats} buckets={results.buckets} chartType={distributionChartType} locale={locale} />
-            </CardContent>
-          </Card>
-        )}
-
-        {hasStats && results.buckets?.length > 0 && (
-          <Card className="mb-4">
-            <CardContent className="p-6 pt-4 pb-0">
-              <p className="text-sm font-medium text-foreground mb-2">{locale === "zh" ? "分布数据" : "Distribution Data"}</p>
-            </CardContent>
-            <div className="border-t border-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{locale === "zh" ? "区间" : "Bucket"}</TableHead>
-                    <TableHead className="text-right w-24">{locale === "zh" ? "数量" : "Count"}</TableHead>
-                    <TableHead className="w-48">{locale === "zh" ? "占比" : "Share"}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {results.buckets.map((b: any, i: number) => (
-                    <TableRow key={i}>
-                      <TableCell className="font-medium">{b.label}</TableCell>
-                      <TableCell className="text-right tabular-nums">{Number(b.count).toLocaleString()}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Progress value={typeof b.percentage === "number" ? b.percentage : 0} className="h-1.5 flex-1" />
-                          <span className="text-xs text-muted-foreground w-10 text-right tabular-nums">
-                            {typeof b.percentage === "number" ? `${b.percentage.toFixed(1)}%` : "—"}
-                          </span>
-                        </div>
-                      </TableCell>
+            <Card className="mb-4">
+              <CardContent className="p-6 pt-4 pb-0">
+                <p className="text-sm font-medium text-foreground mb-2">{locale === "zh" ? "分布数据" : "Distribution Data"}</p>
+              </CardContent>
+              <div className="border-t border-border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{locale === "zh" ? "时间" : "Period"}</TableHead>
+                      <TableHead className="text-right">{locale === "zh" ? "配对数" : "Count"}</TableHead>
+                      <TableHead className="text-right">{locale === "zh" ? "最小值" : "Min"}</TableHead>
+                      <TableHead className="text-right">P25</TableHead>
+                      <TableHead className="text-right">{locale === "zh" ? "中位数" : "Median"}</TableHead>
+                      <TableHead className="text-right">P75</TableHead>
+                      <TableHead className="text-right">{locale === "zh" ? "最大值" : "Max"}</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {intervalSlots.map((s, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="text-muted-foreground">{formatPeriod(s.period)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s.stats ? s.stats.count.toLocaleString() : "—"}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s.stats ? fmtDuration(s.stats.min) : "—"}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s.stats ? fmtDuration(s.stats.p25) : "—"}</TableCell>
+                        <TableCell className="text-right font-medium tabular-nums">{s.stats ? fmtDuration(s.stats.median) : "—"}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s.stats ? fmtDuration(s.stats.p75) : "—"}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s.stats ? fmtDuration(s.stats.max) : "—"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </Card>
+          </>
         )}
 
         {/* Event results — KPI + time series chart */}

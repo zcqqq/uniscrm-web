@@ -5,8 +5,8 @@ import { listDashboards, createDashboard, getDashboard, deleteDashboard, updateD
 import { useLocale } from "../hooks/useLocale";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { fillTimeSeries } from "../lib/fill-time-series";
-import { fmtDuration } from "../lib/format";
-import { IntervalDistributionChart, type DistributionChartType } from "../components/IntervalDistributionChart";
+import { fillIntervalPeriods } from "../lib/fill-interval-periods";
+import { IntervalDistributionChart } from "../components/IntervalDistributionChart";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
@@ -182,23 +182,22 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
   const isInterval = item.type === "interval";
 
   const intervalResults = isInterval ? (item.results as IntervalResults | null) : null;
-  const distributionChartType: DistributionChartType =
-    (item.params as any)?.distribution_chart_type === "histogram" ? "histogram" : "boxplot";
-
-  const rawData = !isInterval && item.results && "data" in item.results
-    ? ((item.results as any).data || []).filter((d: any) => d?.period)
-    : [];
   const timeRange = (item.params as any)?.time_range_start
     ? String(Math.round((Date.now() - new Date((item.params as any).time_range_start).getTime()) / 86400000))
     : "7";
   const granularity = (item.params as any)?.granularity || "day";
+  const intervalSlots = intervalResults?.periods ? fillIntervalPeriods(intervalResults.periods, timeRange, granularity) : [];
+  const totalPairs = intervalResults?.periods?.reduce((sum, p) => sum + p.count, 0) || 0;
+
+  const rawData = !isInterval && item.results && "data" in item.results
+    ? ((item.results as any).data || []).filter((d: any) => d?.period)
+    : [];
   const chartData = fillTimeSeries(
     rawData.map((d: any) => ({ period: d.period, value: d.value || 0 })),
     timeRange,
     granularity
   );
   const total = chartData.reduce((s: number, d: any) => s + d.value, 0);
-  const hasIntervalData = !!intervalResults?.stats?.count;
 
   const formatTick = (p: unknown) => {
     if (!p || typeof p !== "string") return "";
@@ -216,7 +215,7 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-foreground truncate">{item.report_name || `${item.type} #${item.report_id.slice(0, 8)}`}</div>
             {isInterval
-              ? hasIntervalData && <div className="text-2xl font-bold tracking-tight mt-0.5">{fmtDuration(intervalResults!.stats.median)}</div>
+              ? totalPairs > 0 && <div className="text-2xl font-bold tracking-tight mt-0.5">{totalPairs.toLocaleString()}</div>
               : total > 0 && <div className="text-2xl font-bold tracking-tight mt-0.5">{total.toLocaleString()}</div>}
           </div>
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -245,20 +244,13 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
         </div>
 
         {isInterval ? (
-          hasIntervalData ? (
-            <IntervalDistributionChart
-              stats={intervalResults!.stats}
-              buckets={intervalResults!.buckets}
-              chartType={distributionChartType}
-              locale={locale as "en" | "zh"}
-              height={chartHeight}
-              compact
-            />
-          ) : (
-            <div className="flex items-center justify-center text-muted-foreground text-xs" style={{ height: chartHeight }}>
-              {s.noData}
-            </div>
-          )
+          <IntervalDistributionChart
+            slots={intervalSlots}
+            locale={locale as "en" | "zh"}
+            height={chartHeight}
+            tickFormatter={formatTick}
+            compact
+          />
         ) : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={chartHeight}>
             <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>

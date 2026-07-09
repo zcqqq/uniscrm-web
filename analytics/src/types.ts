@@ -33,9 +33,12 @@ export interface AnalyticsReport {
 }
 
 
+export interface IntervalPeriodStats extends IntervalStats {
+  period: string;
+}
+
 export interface IntervalResults {
-  stats: IntervalStats;
-  buckets: BucketItem[];
+  periods: IntervalPeriodStats[];
   total_profiles: number;
   total_pairs: number;
 }
@@ -49,12 +52,4 @@ export interface IntervalStats {
   p25: number;
   p75: number;
   p90: number;
-}
-
-export interface BucketItem {
-  label: string;
-  rangeStart: number;
-  rangeEnd: number;
-  count: number;
-  percentage: number;
 }

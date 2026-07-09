@@ -1,14 +1,10 @@
-export function fillTimeSeries(
-  data: { period: string; value: number }[],
-  timeRange: string,
-  granularity: string
-): { period: string; value: number }[] {
+export function generatePeriodKeys(timeRange: string, granularity: string): string[] | null {
   if (granularity === "total" || granularity === "hour" || granularity === "weekday") {
-    return data;
+    return null;
   }
 
   const days = parseTimeRangeDays(timeRange);
-  if (!days) return data;
+  if (!days) return null;
 
   // Use UTC dates throughout — API periods are UTC midnight timestamps
   const now = new Date();
@@ -25,19 +21,11 @@ export function fillTimeSeries(
     start = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
   }
 
-  const dataMap = new Map<string, number>();
-  for (const d of data) {
-    if (!d?.period) continue;
-    const key = normalizeDate(d.period);
-    if (key) dataMap.set(key, (dataMap.get(key) || 0) + (d.value || 0));
-  }
-
-  const filled: { period: string; value: number }[] = [];
+  const keys: string[] = [];
   const current = new Date(start);
 
   while (current <= end) {
-    const key = current.toISOString().slice(0, 10);
-    filled.push({ period: key, value: dataMap.get(key) || 0 });
+    keys.push(current.toISOString().slice(0, 10));
 
     if (granularity === "week") {
       current.setUTCDate(current.getUTCDate() + 7);
@@ -48,10 +36,28 @@ export function fillTimeSeries(
     }
   }
 
-  return filled;
+  return keys;
 }
 
-function normalizeDate(period: string): string {
+export function fillTimeSeries(
+  data: { period: string; value: number }[],
+  timeRange: string,
+  granularity: string
+): { period: string; value: number }[] {
+  const keys = generatePeriodKeys(timeRange, granularity);
+  if (!keys) return data;
+
+  const dataMap = new Map<string, number>();
+  for (const d of data) {
+    if (!d?.period) continue;
+    const key = normalizeDate(d.period);
+    if (key) dataMap.set(key, (dataMap.get(key) || 0) + (d.value || 0));
+  }
+
+  return keys.map((key) => ({ period: key, value: dataMap.get(key) || 0 }));
+}
+
+export function normalizeDate(period: string): string {
   if (!period) return "";
   const cleaned = period.replace(/(\.\d{3})\d+Z$/, "$1Z");
   const d = new Date(cleaned);

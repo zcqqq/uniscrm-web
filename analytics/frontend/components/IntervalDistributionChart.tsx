@@ -1,81 +1,71 @@
-import { ResponsiveContainer, ComposedChart, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
-import type { IntervalStats, BucketItem } from "../lib/api";
+import { ResponsiveContainer, ComposedChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
+import type { IntervalPeriodStats } from "../lib/api";
 import { fmtDuration } from "../lib/format";
 
-export type DistributionChartType = "histogram" | "boxplot";
-
 const UI = {
-  en: { min: "Min", p25: "P25", median: "Median", p75: "P75", max: "Max" },
-  zh: { min: "最小值", p25: "P25", median: "中位数", p75: "P75", max: "最大值" },
+  en: { min: "Min", p25: "P25", median: "Median", p75: "P75", max: "Max", count: "Pairs", noData: "No data" },
+  zh: { min: "最小值", p25: "P25", median: "中位数", p75: "P75", max: "最大值", count: "配对数", noData: "无数据" },
 };
 
 /**
- * Renders the Interval Analysis "Distribution" chart as either a histogram
- * (bucket counts) or a box plot (min/p25/median/p75/max), sharing the exact
- * same visual language (axis, grid, tooltip) between the full Analytics
- * Detail page and the compact Dashboard widget.
+ * Renders the Interval Analysis "Distribution" chart as a multi-period box
+ * plot — one vertical box per time period (day/week/month, matching the
+ * report's granularity), sharing a single recharts Y-axis so the visual
+ * language (axis, grid, tooltip) stays consistent with Event Analysis.
+ *
+ * Implementation note: recharts has no built-in box plot. Rather than
+ * computing our own Y domain and manually mapping values to pixels (which
+ * previously broke whenever backend rounding made min/max inconsistent with
+ * the padded domain), we let the Y-axis auto-compute its domain exactly like
+ * Event Analysis does (no explicit `domain` prop). We then derive pixel
+ * positions for min/p25/median/p75 by reading the *actual rendered geometry*
+ * of an invisible reference Bar (dataKey = max), which recharts positions
+ * using the real resolved scale regardless of what "nice" domain it picked.
+ * Since the scale is linear and passes through (0, baseline) and
+ * (max, barTop), any other value in [0, max] can be interpolated from those
+ * two known pixel references — no manual domain math required.
  */
 export function IntervalDistributionChart({
-  stats,
-  buckets,
-  chartType,
+  slots,
   locale,
   height = 280,
   compact = false,
+  tickFormatter,
 }: {
-  stats: IntervalStats;
-  buckets: BucketItem[];
-  chartType: DistributionChartType;
+  slots: { period: string; stats: IntervalPeriodStats | null }[];
   locale: "en" | "zh";
   height?: number;
   compact?: boolean;
+  tickFormatter?: (period: string) => string;
 }) {
   const t = UI[locale] || UI.en;
-  const tickFontSize = compact ? 9 : 10;
-  const axisWidth = compact ? 28 : 36;
+  const tickFontSize = compact ? 9 : 11;
+  const axisWidth = compact ? 28 : 40;
+  const barSize = compact ? 20 : 40;
 
-  if (chartType === "histogram") {
+  const data = slots.map((s) => ({ period: s.period, stats: s.stats, __max: s.stats?.max ?? 0 }));
+  const hasAnyData = slots.some((s) => s.stats);
+
+  if (!hasAnyData) {
     return (
-      <ResponsiveContainer width="100%" height={height}>
-        <BarChart data={buckets} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
-          <XAxis dataKey="label" tick={compact ? false : { fontSize: tickFontSize, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
-          <YAxis tick={compact ? false : { fontSize: tickFontSize, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={compact ? 0 : axisWidth} />
-          {!compact && (
-            <Tooltip
-              contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
-              formatter={(value: any, _name: any, ctx: any) => [`${Number(value).toLocaleString()} (${ctx?.payload?.percentage ?? 0}%)`, locale === "zh" ? "数量" : "Count"]}
-            />
-          )}
-          <Bar dataKey="count" fill="var(--color-primary)" radius={[3, 3, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
+      <div className="flex items-center justify-center text-muted-foreground text-xs" style={{ height }}>
+        {t.noData}
+      </div>
     );
   }
-
-  // Box plot: single vertical box (min/p25/median/p75/max), Y-axis auto-fits
-  // to the data range rather than starting at 0, so the box stays readable
-  // even though interval durations can span seconds to weeks.
-  // even though interval durations can span seconds to weeks. Derive the
-  // range from every stat field (not just min/max) so a rounding mismatch
-  // between backend-computed percentiles can never push the box outside
-  // the visible domain.
-  const allValues = [stats.min, stats.p25, stats.median, stats.p75, stats.max];
-  const rawMin = Math.min(...allValues);
-  const rawMax = Math.max(...allValues);
-  const span = Math.max(rawMax - rawMin, 1);
-  const pad = span * 0.15;
-  const domainMin = Math.max(0, rawMin - pad);
-  const domainMax = rawMax + pad;
-  const data = [{ name: "value", ...stats }];
 
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
-        <XAxis dataKey="name" tick={false} axisLine={false} tickLine={false} />
+        <XAxis
+          dataKey="period"
+          tickFormatter={tickFormatter}
+          tick={compact ? false : { fontSize: tickFontSize, fill: "var(--color-muted-foreground)" }}
+          tickLine={false}
+          axisLine={false}
+        />
         <YAxis
-          domain={[domainMin, domainMax]}
           tickFormatter={fmtDuration}
           tick={compact ? false : { fontSize: tickFontSize, fill: "var(--color-muted-foreground)" }}
           tickLine={false}
@@ -84,53 +74,72 @@ export function IntervalDistributionChart({
         />
         {!compact && (
           <Tooltip
-            cursor={false}
-            content={({ active }) =>
-              active ? (
+            cursor={{ fill: "var(--color-muted)", opacity: 0.3 }}
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const slot = payload[0]?.payload as { period: string; stats: IntervalPeriodStats | null };
+              const stats = slot?.stats;
+              return (
                 <div
                   style={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
                   className="px-3 py-2 space-y-0.5"
                 >
-                  {[
-                    [t.max, stats.max],
-                    [t.p75, stats.p75],
-                    [t.median, stats.median],
-                    [t.p25, stats.p25],
-                    [t.min, stats.min],
-                  ].map(([label, val]) => (
-                    <div key={label as string} className="flex items-center justify-between gap-4">
-                      <span className="text-muted-foreground">{label}</span>
-                      <span className="font-medium tabular-nums">{fmtDuration(val as number)}</span>
-                    </div>
-                  ))}
+                  <div className="font-medium text-foreground pb-1 mb-1 border-b border-border">{tickFormatter ? tickFormatter(slot.period) : slot.period}</div>
+                  {stats ? (
+                    [
+                      [t.count, stats.count.toLocaleString()],
+                      [t.max, fmtDuration(stats.max)],
+                      [t.p75, fmtDuration(stats.p75)],
+                      [t.median, fmtDuration(stats.median)],
+                      [t.p25, fmtDuration(stats.p25)],
+                      [t.min, fmtDuration(stats.min)],
+                    ].map(([label, val]) => (
+                      <div key={label} className="flex items-center justify-between gap-4">
+                        <span className="text-muted-foreground">{label}</span>
+                        <span className="font-medium tabular-nums">{val}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <span className="text-muted-foreground">{t.noData}</span>
+                  )}
                 </div>
-              ) : null
-            }
+              );
+            }}
           />
         )}
-        <Bar dataKey="max" barSize={compact ? 24 : 40} fill="transparent" background={{ fill: "transparent" }} isAnimationActive={false} shape={(props: any) => (
-          <BoxPlotShape {...props} stats={stats} domainMin={domainMin} domainMax={domainMax} compact={compact} />
-        )} />
+        <Bar
+          dataKey="__max"
+          barSize={barSize}
+          fill="transparent"
+          isAnimationActive={false}
+          shape={(props: any) => <BoxPlotShape {...props} compact={compact} />}
+        />
       </ComposedChart>
     </ResponsiveContainer>
   );
 }
 
-function BoxPlotShape({ background, stats, domainMin, domainMax, compact }: {
-  background?: { x: number; y: number; width: number; height: number };
-  stats: IntervalStats;
-  domainMin: number;
-  domainMax: number;
+function BoxPlotShape({ x, y, width, height, payload, compact }: {
+  x: number; y: number; width: number; height: number;
+  payload?: { stats: IntervalPeriodStats | null };
   compact?: boolean;
 }) {
-  if (!background) return null;
-  const { x, y, width, height } = background;
-  const scaleY = (v: number) => y + ((domainMax - v) / (domainMax - domainMin)) * height;
+  const stats = payload?.stats;
+  if (!stats || !stats.max) return null;
 
-  const boxWidth = width * 0.4;
+  // (x, y, width, height) is THIS bar's own rendered rectangle for value
+  // "max", using whatever Y-scale recharts resolved. Its bottom edge is the
+  // pixel for value 0; its top edge is the pixel for value `max`. Both are
+  // exact regardless of the axis's auto-computed domain, so every other
+  // stat can be interpolated linearly between them.
+  const yZero = y + height;
+  const pxPerUnit = height / stats.max;
+  const scaleY = (v: number) => yZero - v * pxPerUnit;
+
+  const boxWidth = width * 0.55;
   const cx = x + width / 2;
   const boxX = cx - boxWidth / 2;
-  const capHalf = boxWidth / 4;
+  const capHalf = boxWidth / 3;
 
   const yMin = scaleY(stats.min);
   const yP25 = scaleY(stats.p25);
@@ -150,9 +159,9 @@ function BoxPlotShape({ background, stats, domainMin, domainMax, compact }: {
       {/* Max cap */}
       <line x1={cx - capHalf} y1={yMax} x2={cx + capHalf} y2={yMax} stroke={color} strokeWidth={strokeWidth} />
       {/* Box: p25–p75 */}
-      <rect x={boxX} y={yP75} width={boxWidth} height={Math.max(1, yP25 - yP75)} fill={color} fillOpacity={0.15} stroke={color} strokeWidth={strokeWidth + 0.5} />
+      <rect x={boxX} y={yP75} width={boxWidth} height={Math.max(2, yP25 - yP75)} fill={color} fillOpacity={0.35} stroke={color} strokeWidth={strokeWidth + 1} />
       {/* Median line */}
-      <line x1={boxX} y1={yMedian} x2={boxX + boxWidth} y2={yMedian} stroke={color} strokeWidth={strokeWidth + 0.5} />
+      <line x1={boxX} y1={yMedian} x2={boxX + boxWidth} y2={yMedian} stroke={color} strokeWidth={strokeWidth + 1} />
     </g>
   );
 }

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { Container } from "@cloudflare/containers";
 import type { Env, IntervalResults, AnalyticsReport } from "./types";
-import { computeStats, computeDistribution } from "./services/stats";
+import { computeStats } from "./services/stats";
 
 export class AnalyticsContainer extends Container {
   defaultPort = 8080;
@@ -281,7 +281,8 @@ async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<void> {
 
   let resultsJson: string;
   if (type === "interval") {
-    resultsJson = JSON.stringify({ sql, ...processIntervalResults(result.data) });
+    const granularity = ((params as any).granularity as string) || "day";
+    resultsJson = JSON.stringify({ sql, ...processIntervalResults(result.data, granularity) });
   } else if (type === "funnel") {
     const steps = ((params as any).steps || []) as string[];
     resultsJson = JSON.stringify({ sql, ...processFunnelResults(result.data, steps) });
@@ -486,23 +487,50 @@ function processFunnelResults(rows: unknown[], steps: string[]): { steps: { step
   return { steps: stepData };
 }
 
-function processIntervalResults(rows: unknown[]): IntervalResults {
-  const intervals: number[] = [];
-  const userIds = new Set<string>();
+function truncatePeriod(dateMs: number, granularity: string): string {
+  const d = new Date(dateMs);
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  const day = d.getUTCDate();
+
+  if (granularity === "month") {
+    return new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+  }
+  if (granularity === "week") {
+    // Align to Monday (ISO week), matching DATE_TRUNC('week', ...) used for event analysis.
+    const dow = d.getUTCDay(); // 0=Sun..6=Sat
+    const daysSinceMonday = (dow + 6) % 7;
+    return new Date(Date.UTC(y, m, day - daysSinceMonday)).toISOString().slice(0, 10);
+  }
+  // day (default)
+  return new Date(Date.UTC(y, m, day)).toISOString().slice(0, 10);
+}
+
+function processIntervalResults(rows: unknown[], granularity: string): IntervalResults {
+  const byPeriod = new Map<string, number[]>();
+  let totalPairs = 0;
+  const allUserIds = new Set<string>();
 
   for (const row of rows as { user_id: string; event_time: string; next_time: string }[]) {
     const start = new Date(row.event_time).getTime();
     const end = new Date(row.next_time).getTime();
-    if (!isNaN(start) && !isNaN(end) && end > start) {
-      intervals.push((end - start) / 1000);
-      userIds.add(row.user_id);
-    }
+    if (isNaN(start) || isNaN(end) || end <= start) continue;
+
+    // Period is anchored on the first event's time (event_time), matching how
+    // Event Analysis buckets by event occurrence time.
+    const period = truncatePeriod(start, granularity);
+    if (!byPeriod.has(period)) byPeriod.set(period, []);
+    byPeriod.get(period)!.push((end - start) / 1000);
+
+    totalPairs++;
+    allUserIds.add(row.user_id);
   }
 
-  const stats = computeStats(intervals);
-  const buckets = computeDistribution(intervals);
+  const periods = Array.from(byPeriod.entries())
+    .map(([period, intervals]) => ({ period, ...computeStats(intervals) }))
+    .sort((a, b) => a.period.localeCompare(b.period));
 
-  return { stats, buckets, total_profiles: userIds.size, total_pairs: intervals.length };
+  return { periods, total_profiles: allUserIds.size, total_pairs: totalPairs };
 }
 
 // ============ Export ============

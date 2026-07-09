@@ -20,6 +20,9 @@ invocation_logs = true
 name = "analytics-dev"
 routes = [{ pattern = "analytics-dev.uni-scrm.com", custom_domain = true }]
 
+[env.dev.triggers]
+crons = ["0 2 * * *"]
+
 [env.dev.vars]
 WEB_URL = "https://web-dev.uni-scrm.com"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
@@ -62,6 +65,9 @@ new_sqlite_classes = ["AnalyticsContainer"]
 [env.production]
 name = "analytics"
 routes = [{ pattern = "analytics.uni-scrm.com", custom_domain = true }]
+
+[env.production.triggers]
+crons = ["0 2 * * *"]
 
 [env.production.vars]
 WEB_URL = "https://web.uni-scrm.com"

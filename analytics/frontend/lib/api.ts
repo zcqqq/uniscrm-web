@@ -53,6 +53,7 @@ export interface ReportSummary {
   status: string;
   results: IntervalResults | EventAnalysisResults | null;
   error_message: string | null;
+  computed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -89,11 +90,15 @@ export function updateReport(id: string, body: {
   type?: string;
   params?: Record<string, unknown>;
 }) {
-  return request<{ ok: boolean }>(`${BASE}/${id}`, {
+  return request<{ ok: boolean; requeued?: boolean }>(`${BASE}/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+export function recomputeReport(id: string) {
+  return request<{ ok: boolean }>(`${BASE}/${id}/recompute`, { method: "POST" });
 }
 
 // ============ Dashboards ============

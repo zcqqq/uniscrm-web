@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, BarChart, Bar, Legend } from "recharts";
-import { createReport, getReport, updateReport, listDashboards, createDashboard, addDashboardItem, type Dashboard } from "../lib/api";
+import { createReport, getReport, updateReport, recomputeReport, listDashboards, createDashboard, addDashboardItem, type Dashboard } from "../lib/api";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { useLocale } from "../hooks/useLocale";
 import { ReportConfig, type ReportConfigValues } from "../components/ReportConfig";
@@ -13,6 +13,7 @@ import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
+import { Tooltip as UiTooltip, TooltipTrigger as UiTooltipTrigger, TooltipContent as UiTooltipContent } from "../../../shared/frontend/ui/tooltip";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
 import { DIMENSION_COLORS } from "../../../shared/frontend/lib/colors";
 
@@ -67,6 +68,8 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   const [dashDropOpen, setDashDropOpen] = useState(false);
   const [initialized, setInitialized] = useState(!paramId);
   const [saving, setSaving] = useState(false);
+  const [computedAt, setComputedAt] = useState<string | null>(null);
+  const [recomputing, setRecomputing] = useState(false);
 
   const title = MODE_TITLES[mode]?.[locale] || MODE_TITLES[mode]?.en || mode;
   useEffect(() => { document.title = `${title} — UniSCRM`; }, [title]);
@@ -105,6 +108,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         setChartType(resolvedMode === "user" ? "pie" : resolvedMode === "interval" ? "boxplot" : "line");
       }
       if (r.results) setResults(r.results);
+      setComputedAt(r.computed_at || null);
       setLoading(r.status === "pending" || r.status === "computing");
       if (r.status === "error") setError(r.error_message || "Error");
       setInitialized(true);
@@ -213,6 +217,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         const res = await getReport(reportId);
         if (res.report.status === "ready" && res.report.results) {
           setResults(res.report.results);
+          setComputedAt(res.report.computed_at || null);
           setLoading(false);
           clearInterval(poll);
         } else if (res.report.status === "error") {
@@ -254,6 +259,37 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleRecompute = async () => {
+    if (!reportId) return;
+    setRecomputing(true);
+    try {
+      await recomputeReport(reportId);
+      setLoading(true);
+      setPollNonce((n) => n + 1);
+      toast({ description: locale === "zh" ? "已重新计算" : "Recompute queued" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : (locale === "zh" ? "重新计算失败" : "Recompute failed");
+      toast({ variant: "destructive", description: message });
+    } finally {
+      setRecomputing(false);
+    }
+  };
+
+  const formatComputedAt = (iso: string | null) => {
+    if (!iso) return locale === "zh" ? "尚未计算" : "Not computed yet";
+    const d = new Date(iso.includes("T") || iso.endsWith("Z") ? iso : `${iso.replace(" ", "T")}Z`);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString(locale === "zh" ? "zh-CN" : "en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
   };
 
   const formatPeriod = (p: unknown) => {
@@ -331,6 +367,16 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           className="h-8 w-52 min-w-0 border-none bg-transparent font-medium"
         />
         <div className="flex-1" />
+        <UiTooltip>
+          <UiTooltipTrigger asChild>
+            <Button variant="outline" size="sm" disabled={!reportId || recomputing} onClick={handleRecompute}>
+              {recomputing ? (locale === "zh" ? "计算中..." : "Recomputing...") : (locale === "zh" ? "重新计算" : "Re-compute")}
+            </Button>
+          </UiTooltipTrigger>
+          <UiTooltipContent>
+            {locale === "zh" ? "数据更新时间：" : "Data updated: "}{formatComputedAt(computedAt)}
+          </UiTooltipContent>
+        </UiTooltip>
         <DropdownMenu open={dashDropOpen} onOpenChange={setDashDropOpen}>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" disabled={!reportId}>Add to Dashboard</Button>

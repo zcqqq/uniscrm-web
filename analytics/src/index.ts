@@ -202,6 +202,35 @@ app.patch("/api/reports/:id", async (c) => {
   return c.json({ ok: true, requeued: paramsChanged });
 });
 
+// Manual "Re-compute" — unlike PATCH, always re-queues regardless of whether
+// params changed (e.g. to refresh a relative "Last N days" report whose
+// underlying data has simply moved forward in time).
+app.post("/api/reports/:id/recompute", async (c) => {
+  const tenantId = c.get("tenantId");
+  const reportId = c.req.param("id");
+
+  const existing = await c.env.ANALYTICS_DB.prepare(
+    "SELECT type, params_json FROM analytics_reports WHERE id = ? AND tenant_id = ?"
+  ).bind(reportId, tenantId).first<{ type: string; params_json: string }>();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  const params = existing.params_json ? JSON.parse(existing.params_json) : {};
+
+  await c.env.ANALYTICS_DB.prepare(
+    "UPDATE analytics_reports SET status = 'pending', results_json = NULL, error_message = NULL, updated_at = datetime('now') WHERE id = ? AND tenant_id = ?"
+  ).bind(reportId, tenantId).run();
+
+  await c.env.ANALYTICS_QUEUE.send({
+    report_id: reportId,
+    type: existing.type,
+    params,
+    tenant_id: tenantId,
+    warehouse: c.env.R2_WAREHOUSE,
+  });
+
+  return c.json({ ok: true });
+});
+
 app.delete("/api/reports/:id", async (c) => {
   const tenantId = c.get("tenantId");
   const reportId = c.req.param("id");
@@ -366,7 +395,7 @@ async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<void> {
   }
 
   await env.ANALYTICS_DB.prepare(
-    "UPDATE analytics_reports SET status = 'ready', results_json = ?, updated_at = datetime('now') WHERE id = ?"
+    "UPDATE analytics_reports SET status = 'ready', results_json = ?, computed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
   ).bind(resultsJson, report_id).run();
 }
 
@@ -652,6 +681,34 @@ export default {
         ).bind(errMsg, msg.body.report_id).run();
         msg.ack();
       }
+    }
+  },
+
+  // Daily refresh (see [triggers] in wrangler.toml) for every report pinned
+  // to a dashboard — their "Last N days" style time ranges silently go stale
+  // as real time passes, even with no user edits. Scoped to dashboard-pinned
+  // reports only to keep load predictable; reports already mid-computation
+  // are left alone so we don't clobber an in-flight manual edit/recompute.
+  async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
+    const { results } = await env.ANALYTICS_DB.prepare(
+      `SELECT DISTINCT ar.id, ar.tenant_id, ar.type, ar.params_json
+       FROM analytics_reports ar
+       JOIN dashboard_items di ON di.report_id = ar.id
+       WHERE ar.status NOT IN ('pending', 'computing')`
+    ).all<{ id: string; tenant_id: number; type: string; params_json: string }>();
+
+    for (const row of results) {
+      const params = row.params_json ? JSON.parse(row.params_json) : {};
+      await env.ANALYTICS_DB.prepare(
+        "UPDATE analytics_reports SET status = 'pending', updated_at = datetime('now') WHERE id = ?"
+      ).bind(row.id).run();
+      await env.ANALYTICS_QUEUE.send({
+        report_id: row.id,
+        type: row.type,
+        params,
+        tenant_id: String(row.tenant_id),
+        warehouse: env.R2_WAREHOUSE,
+      });
     }
   },
 };

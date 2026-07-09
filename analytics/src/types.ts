@@ -29,6 +29,7 @@ export interface AnalyticsReport {
   status: string;
   results_json: string | null;
   error_message: string | null;
+  computed_at: string | null;
   created_at: string;
   updated_at: string;
 }

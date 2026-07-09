@@ -129,8 +129,11 @@ app.get("/api/reports/:id", async (c) => {
 
 // Params fields that are purely display preferences — changing only these
 // must never re-trigger computation (editing a report's name, or its chart
-// type toggle, doesn't change what data the query returns).
-const COSMETIC_PARAM_FIELDS = ["chart_type"] as const;
+// type toggle, doesn't change what data the query returns). `name` is kept
+// here even though new params no longer embed it, purely so reports saved
+// before that change (which still carry a stale params.name) don't get a
+// false-positive diff the next time they're edited.
+const COSMETIC_PARAM_FIELDS = ["chart_type", "name"] as const;
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);

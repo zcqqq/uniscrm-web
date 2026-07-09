@@ -13,7 +13,7 @@ import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
-import { Tooltip as UiTooltip, TooltipTrigger as UiTooltipTrigger, TooltipContent as UiTooltipContent } from "../../../shared/frontend/ui/tooltip";
+import { Tooltip as UiTooltip, TooltipTrigger as UiTooltipTrigger, TooltipContent as UiTooltipContent, TooltipProvider as UiTooltipProvider } from "../../../shared/frontend/ui/tooltip";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
 import { DIMENSION_COLORS } from "../../../shared/frontend/lib/colors";
 
@@ -367,16 +367,18 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           className="h-8 w-52 min-w-0 border-none bg-transparent font-medium"
         />
         <div className="flex-1" />
-        <UiTooltip>
-          <UiTooltipTrigger asChild>
-            <Button variant="outline" size="sm" disabled={!reportId || recomputing} onClick={handleRecompute}>
-              {recomputing ? (locale === "zh" ? "计算中..." : "Recomputing...") : (locale === "zh" ? "重新计算" : "Re-compute")}
-            </Button>
-          </UiTooltipTrigger>
-          <UiTooltipContent>
-            {locale === "zh" ? "数据更新时间：" : "Data updated: "}{formatComputedAt(computedAt)}
-          </UiTooltipContent>
-        </UiTooltip>
+        <UiTooltipProvider>
+          <UiTooltip>
+            <UiTooltipTrigger asChild>
+              <Button variant="outline" size="sm" disabled={!reportId || recomputing} onClick={handleRecompute}>
+                {recomputing ? (locale === "zh" ? "计算中..." : "Recomputing...") : (locale === "zh" ? "重新计算" : "Re-compute")}
+              </Button>
+            </UiTooltipTrigger>
+            <UiTooltipContent>
+              {locale === "zh" ? "数据更新时间：" : "Data updated: "}{formatComputedAt(computedAt)}
+            </UiTooltipContent>
+          </UiTooltip>
+        </UiTooltipProvider>
         <DropdownMenu open={dashDropOpen} onOpenChange={setDashDropOpen}>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" disabled={!reportId}>Add to Dashboard</Button>

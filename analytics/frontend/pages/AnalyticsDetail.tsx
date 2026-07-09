@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ResponsiveContainer, LineChart, Line, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, BarChart, Bar, Legend } from "recharts";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, BarChart, Bar, Legend } from "recharts";
 import { createReport, getReport, updateReport, listDashboards, createDashboard, addDashboardItem, type Dashboard } from "../lib/api";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { useLocale } from "../hooks/useLocale";
 import { ReportConfig, type ReportConfigValues } from "../components/ReportConfig";
+import { IntervalDistributionChart, type DistributionChartType } from "../components/IntervalDistributionChart";
 import { fillTimeSeries } from "../lib/fill-time-series";
+import { fmtDuration } from "../lib/format";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
@@ -30,7 +32,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   const [name, setName] = useState(() => (paramId ? "" : `Untitled ${MODE_TITLES[mode]?.en || "Analysis"}`));
   const [chartType, setChartType] = useState<"pie" | "bar">("pie");
   const [eventChartType, setEventChartType] = useState<"line" | "bar">("line");
-  const [intervalChartType, setIntervalChartType] = useState<"bar" | "line">("bar");
+  const [distributionChartType, setDistributionChartType] = useState<DistributionChartType>("boxplot");
   const [config, setConfig] = useState<ReportConfigValues>({
     mode,
     eventType: "",
@@ -81,6 +83,9 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         windowValue: p.window_value || undefined,
         windowUnit: p.window_unit || undefined,
       });
+      if (p.distribution_chart_type === "histogram" || p.distribution_chart_type === "boxplot") {
+        setDistributionChartType(p.distribution_chart_type);
+      }
       if (r.results) setResults(r.results);
       setLoading(r.status === "pending" || r.status === "computing");
       if (r.status === "error") setError(r.error_message || "Error");
@@ -132,6 +137,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         compare_enabled: !!config.compareEnabled,
         compare_time_range: config.compareTimeRange || undefined,
         filters: config.filters,
+        distribution_chart_type: distributionChartType,
         name: reportName || undefined,
       };
     }
@@ -148,7 +154,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
       filters: config.filters,
       name: reportName || undefined,
     };
-  }, [config, mode, name]);
+  }, [config, mode, name, distributionChartType]);
 
   const runQuery = useCallback(async () => {
     if (mode === "interval" && (!config.eventTypeA || !config.eventTypeB)) return;
@@ -333,8 +339,8 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               {[
                 { label: "Pairs", value: results.stats.count.toLocaleString() },
                 { label: "Profiles", value: results.total_profiles.toLocaleString() },
-                { label: "Median", value: fmt(results.stats.median) },
-                { label: "Average", value: fmt(results.stats.avg) },
+                { label: "Median", value: fmtDuration(results.stats.median) },
+                { label: "Average", value: fmtDuration(results.stats.avg) },
               ].map((item) => (
                 <Card key={item.label}>
                   <CardContent className="p-4">
@@ -346,11 +352,11 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
             </div>
             <div className="grid gap-4 grid-cols-5 mb-4">
               {[
-                { label: "P25", value: fmt(results.stats.p25) },
-                { label: "P75", value: fmt(results.stats.p75) },
-                { label: "P90", value: fmt(results.stats.p90) },
-                { label: "Min", value: fmt(results.stats.min) },
-                { label: "Max", value: fmt(results.stats.max) },
+                { label: "P25", value: fmtDuration(results.stats.p25) },
+                { label: "P75", value: fmtDuration(results.stats.p75) },
+                { label: "P90", value: fmtDuration(results.stats.p90) },
+                { label: "Min", value: fmtDuration(results.stats.min) },
+                { label: "Max", value: fmtDuration(results.stats.max) },
               ].map((item) => (
                 <Card key={item.label}>
                   <CardContent className="p-3">
@@ -369,43 +375,18 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm font-medium text-foreground">{locale === "zh" ? "分布" : "Distribution"}</p>
                 <div className="flex items-center gap-0.5 border border-border rounded-md p-0.5 bg-muted/30">
-                  {(["bar", "line"] as const).map((t) => (
+                  {(["boxplot", "histogram"] as const).map((t) => (
                     <button
                       key={t}
-                      onClick={() => setIntervalChartType(t)}
-                      className={`px-3 py-1 text-xs rounded font-medium transition-colors ${intervalChartType === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                      onClick={() => setDistributionChartType(t)}
+                      className={`px-3 py-1 text-xs rounded font-medium transition-colors ${distributionChartType === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                     >
-                      {t === "line" ? (locale === "zh" ? "折线" : "Line") : (locale === "zh" ? "柱状" : "Bar")}
+                      {t === "boxplot" ? (locale === "zh" ? "箱线图" : "Box Plot") : (locale === "zh" ? "直方图" : "Histogram")}
                     </button>
                   ))}
                 </div>
               </div>
-              <ResponsiveContainer width="100%" height={280}>
-                {intervalChartType === "bar" ? (
-                  <BarChart data={results.buckets} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
-                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={36} />
-                    <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
-                    <Bar dataKey="count" fill="var(--color-primary)" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                ) : (
-                  <LineChart data={results.buckets} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
-                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={36} />
-                    <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
-                    <Line
-                      type="linear"
-                      dataKey="count"
-                      stroke="var(--color-primary)"
-                      strokeWidth={2}
-                      dot={{ r: 3, fill: "#fff", stroke: "var(--color-primary)", strokeWidth: 2 }}
-                      activeDot={{ r: 5, fill: "#fff", stroke: "var(--color-primary)", strokeWidth: 2 }}
-                    />
-                  </LineChart>
-                )}
-              </ResponsiveContainer>
+              <IntervalDistributionChart stats={results.stats} buckets={results.buckets} chartType={distributionChartType} locale={locale} />
             </CardContent>
           </Card>
         )}
@@ -747,14 +728,6 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
       </div>
     </div>
   );
-}
-
-function fmt(seconds: number): string {
-  if (!seconds) return "0s";
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-  if (seconds < 86400) return `${(seconds / 3600).toFixed(1)}h`;
-  return `${(seconds / 86400).toFixed(1)}d`;
 }
 
 function inferTimeRange(startDate: string): string {

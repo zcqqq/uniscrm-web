@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { toPng } from "html-to-image";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
-import { listDashboards, createDashboard, getDashboard, deleteDashboard, updateDashboardItem, deleteDashboardItem, type Dashboard, type DashboardItem } from "../lib/api";
+import { listDashboards, createDashboard, getDashboard, deleteDashboard, updateDashboardItem, deleteDashboardItem, type Dashboard, type DashboardItem, type IntervalResults } from "../lib/api";
 import { useLocale } from "../hooks/useLocale";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { fillTimeSeries } from "../lib/fill-time-series";
+import { fmtDuration } from "../lib/format";
+import { IntervalDistributionChart, type DistributionChartType } from "../components/IntervalDistributionChart";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
@@ -177,8 +179,13 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
   const s = UI[locale as "en" | "zh"];
   const colSpan = item.size === "large" ? "col-span-4" : item.size === "small" ? "col-span-1" : "col-span-2";
   const chartHeight = item.size === "large" ? 240 : item.size === "small" ? 80 : 140;
+  const isInterval = item.type === "interval";
 
-  const rawData = item.results && "data" in item.results
+  const intervalResults = isInterval ? (item.results as IntervalResults | null) : null;
+  const distributionChartType: DistributionChartType =
+    (item.params as any)?.distribution_chart_type === "histogram" ? "histogram" : "boxplot";
+
+  const rawData = !isInterval && item.results && "data" in item.results
     ? ((item.results as any).data || []).filter((d: any) => d?.period)
     : [];
   const timeRange = (item.params as any)?.time_range_start
@@ -191,6 +198,7 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
     granularity
   );
   const total = chartData.reduce((s: number, d: any) => s + d.value, 0);
+  const hasIntervalData = !!intervalResults?.stats?.count;
 
   const formatTick = (p: unknown) => {
     if (!p || typeof p !== "string") return "";
@@ -207,7 +215,9 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
         <div className="flex items-start justify-between mb-1">
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-foreground truncate">{item.report_name || `${item.type} #${item.report_id.slice(0, 8)}`}</div>
-            {total > 0 && <div className="text-2xl font-bold tracking-tight mt-0.5">{total.toLocaleString()}</div>}
+            {isInterval
+              ? hasIntervalData && <div className="text-2xl font-bold tracking-tight mt-0.5">{fmtDuration(intervalResults!.stats.median)}</div>
+              : total > 0 && <div className="text-2xl font-bold tracking-tight mt-0.5">{total.toLocaleString()}</div>}
           </div>
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
             <DropdownMenuTrigger asChild>
@@ -234,7 +244,22 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
           </DropdownMenu>
         </div>
 
-        {chartData.length > 0 ? (
+        {isInterval ? (
+          hasIntervalData ? (
+            <IntervalDistributionChart
+              stats={intervalResults!.stats}
+              buckets={intervalResults!.buckets}
+              chartType={distributionChartType}
+              locale={locale as "en" | "zh"}
+              height={chartHeight}
+              compact
+            />
+          ) : (
+            <div className="flex items-center justify-center text-muted-foreground text-xs" style={{ height: chartHeight }}>
+              {s.noData}
+            </div>
+          )
+        ) : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={chartHeight}>
             <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.3} />

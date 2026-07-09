@@ -7,7 +7,7 @@ import { checkLimit } from "../../shared/plan-guard";
 import type { Tier } from "../../shared/plans";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 
-function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenantId: number, env: Env) {
+async function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenantId: number, env: Env): Promise<void> {
   const timestamp = new Date().toISOString();
   if (nodeLogs.length > 0) {
     const records = nodeLogs.map((log) => ({
@@ -19,15 +19,16 @@ function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenan
       direction: log.direction,
       created_at: timestamp,
     }));
-    env.PIPELINE_FLOW_LOG?.send(records).catch(() => {});
-
-    env.FLOW_LOG_QUEUE?.send({
-      flowId,
-      userId,
-      tenantId,
-      timestamp,
-      logs: nodeLogs,
-    }).catch(() => {});
+    await Promise.all([
+      env.PIPELINE_FLOW_LOG?.send(records).catch(() => {}),
+      env.FLOW_LOG_QUEUE?.send({
+        flowId,
+        userId,
+        tenantId,
+        timestamp,
+        logs: nodeLogs,
+      }).catch(() => {}),
+    ]);
   }
 }
 
@@ -661,7 +662,7 @@ export default {
 
   async queue(batch: MessageBatch<any>, env: Env): Promise<void> {
     // Route by queue name
-    if (batch.queue === "flow-log-dev" || batch.queue === "flow-log") {
+    if (batch.queue === "uniscrm-flow-log-dev" || batch.queue === "uniscrm-flow-log") {
       await handleLogQueue(batch, env);
       return;
     }
@@ -679,7 +680,7 @@ export default {
         for (const flow of rows.results) {
           const graph: FlowGraph = JSON.parse(flow.graph_json);
           const result = executeFlow(graph, eventType, payload);
-          if (result.nodeLogs.length > 0) emitNodeLogs(result.nodeLogs, flow.id, userId, Number(tenantId), env);
+          if (result.nodeLogs.length > 0) await emitNodeLogs(result.nodeLogs, flow.id, userId, Number(tenantId), env);
 
           if (result.actions.length > 0) {
             const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, userId, tenantId, env, payload);
@@ -742,6 +743,7 @@ export default {
           const graph: FlowGraph = JSON.parse(flow.graph_json);
           const pendingPayload = JSON.parse(pending.payload);
           const result = resumeFromNode(graph, pending.node_id, pendingPayload, "yes");
+          if (result.nodeLogs.length > 0) await emitNodeLogs(result.nodeLogs, pending.flow_id, pending.user_id, Number(pending.tenant_id), env);
 
           const stmts: D1PreparedStatement[] = [
             env.FLOW_DB.prepare(`DELETE FROM flow_pending WHERE id = ?`).bind(pending.id),
@@ -849,6 +851,7 @@ export default {
 
         const branch = row.awaiting_event ? "no" : undefined;
         const result = resumeFromNode(graph, row.node_id, payload, branch);
+        if (result.nodeLogs.length > 0) await emitNodeLogs(result.nodeLogs, row.flow_id, row.user_id, Number(row.tenant_id), env);
 
         const stmts: D1PreparedStatement[] = [
           env.FLOW_DB.prepare(`DELETE FROM flow_pending WHERE id = ?`).bind(row.id),

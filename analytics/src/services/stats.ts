@@ -25,8 +25,8 @@ export function computeStats(intervals: number[]): IntervalStats {
 
   return {
     count: n,
-    min: sorted[0],
-    max: sorted[n - 1],
+    min: Math.round(sorted[0]),
+    max: Math.round(sorted[n - 1]),
     avg: Math.round(sum / n),
     median: percentile(sorted, 0.5),
     p25: percentile(sorted, 0.25),

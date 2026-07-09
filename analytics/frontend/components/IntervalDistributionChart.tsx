@@ -56,10 +56,17 @@ export function IntervalDistributionChart({
   // Box plot: single vertical box (min/p25/median/p75/max), Y-axis auto-fits
   // to the data range rather than starting at 0, so the box stays readable
   // even though interval durations can span seconds to weeks.
-  const span = Math.max(stats.max - stats.min, 1);
+  // even though interval durations can span seconds to weeks. Derive the
+  // range from every stat field (not just min/max) so a rounding mismatch
+  // between backend-computed percentiles can never push the box outside
+  // the visible domain.
+  const allValues = [stats.min, stats.p25, stats.median, stats.p75, stats.max];
+  const rawMin = Math.min(...allValues);
+  const rawMax = Math.max(...allValues);
+  const span = Math.max(rawMax - rawMin, 1);
   const pad = span * 0.15;
-  const domainMin = Math.max(0, stats.min - pad);
-  const domainMax = stats.max + pad;
+  const domainMin = Math.max(0, rawMin - pad);
+  const domainMax = rawMax + pad;
   const data = [{ name: "value", ...stats }];
 
   return (

@@ -237,10 +237,10 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={chartHeight}>
             <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.3} />
-              <XAxis dataKey="period" tickFormatter={formatTick} tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={28} />
-              <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }} labelFormatter={formatTick} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.3} />
+              <XAxis dataKey="period" tickFormatter={formatTick} tick={{ fontSize: 9, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontSize: 9, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={28} />
+              <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 11, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }} labelFormatter={formatTick} />
               <Line type="linear" dataKey="value" stroke="#7c3aed" strokeWidth={2} dot={{ r: 3, fill: "#fff", stroke: "#7c3aed", strokeWidth: 2 }} activeDot={{ r: 5, fill: "#fff", stroke: "#7c3aed", strokeWidth: 2 }} />
             </LineChart>
           </ResponsiveContainer>

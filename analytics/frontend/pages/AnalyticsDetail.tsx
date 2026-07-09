@@ -383,25 +383,25 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               <ResponsiveContainer width="100%" height={280}>
                 {intervalChartType === "bar" ? (
                   <BarChart data={results.buckets} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
-                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={36} />
-                    <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
-                    <Bar dataKey="count" fill="hsl(var(--primary))" radius={[3, 3, 0, 0]} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={36} />
+                    <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
+                    <Bar dataKey="count" fill="var(--color-primary)" radius={[3, 3, 0, 0]} />
                   </BarChart>
                 ) : (
                   <LineChart data={results.buckets} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
-                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={36} />
-                    <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={36} />
+                    <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
                     <Line
                       type="linear"
                       dataKey="count"
-                      stroke="hsl(var(--primary))"
+                      stroke="var(--color-primary)"
                       strokeWidth={2}
-                      dot={{ r: 3, fill: "#fff", stroke: "hsl(var(--primary))", strokeWidth: 2 }}
-                      activeDot={{ r: 5, fill: "#fff", stroke: "hsl(var(--primary))", strokeWidth: 2 }}
+                      dot={{ r: 3, fill: "#fff", stroke: "var(--color-primary)", strokeWidth: 2 }}
+                      activeDot={{ r: 5, fill: "#fff", stroke: "var(--color-primary)", strokeWidth: 2 }}
                     />
                   </LineChart>
                 )}
@@ -486,10 +486,10 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                 <ResponsiveContainer width="100%" height={320}>
                   {eventChartType === "bar" ? (
                     <BarChart data={eventData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
-                      <XAxis dataKey="period" tickFormatter={formatPeriod} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={40} />
-                      <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} labelFormatter={formatPeriod} />
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
+                      <XAxis dataKey="period" tickFormatter={formatPeriod} tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={40} />
+                      <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} labelFormatter={formatPeriod} />
                       {hasDimension ? (
                         <>
                           <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -498,15 +498,15 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                           ))}
                         </>
                       ) : (
-                        <Bar dataKey="value" fill="hsl(var(--primary))" radius={[3, 3, 0, 0]} />
+                        <Bar dataKey="value" fill="var(--color-primary)" radius={[3, 3, 0, 0]} />
                       )}
                     </BarChart>
                   ) : (
                     <LineChart data={eventData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
-                      <XAxis dataKey="period" tickFormatter={formatPeriod} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={40} />
-                      <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} labelFormatter={formatPeriod} />
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
+                      <XAxis dataKey="period" tickFormatter={formatPeriod} tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={40} />
+                      <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} labelFormatter={formatPeriod} />
                       {hasDimension ? (
                         <>
                           <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -529,10 +529,10 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                         <Line
                           type="linear"
                           dataKey="value"
-                          stroke="hsl(var(--primary))"
+                          stroke="var(--color-primary)"
                           strokeWidth={2.5}
-                          dot={{ r: 3, fill: "#fff", stroke: "hsl(var(--primary))", strokeWidth: 2 }}
-                          activeDot={{ r: 5, fill: "#fff", stroke: "hsl(var(--primary))", strokeWidth: 2 }}
+                          dot={{ r: 3, fill: "#fff", stroke: "var(--color-primary)", strokeWidth: 2 }}
+                          activeDot={{ r: 5, fill: "#fff", stroke: "var(--color-primary)", strokeWidth: 2 }}
                         />
                       )}
                     </LineChart>
@@ -685,7 +685,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                               <Pie data={data} dataKey="value" nameKey="dimension" cx="50%" cy="50%" outerRadius={100} innerRadius={50} paddingAngle={2}>
                                 {data.map((_: any, i: number) => <Cell key={i} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} />)}
                               </Pie>
-                              <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
+                              <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
                             </PieChart>
                           </ResponsiveContainer>
                           <div className="flex-1 space-y-2">
@@ -702,10 +702,10 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                       ) : (
                         <ResponsiveContainer width="100%" height={280}>
                           <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.5} />
-                            <XAxis dataKey="dimension" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
-                            <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={40} />
-                            <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
+                            <XAxis dataKey="dimension" tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
+                            <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={40} />
+                            <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
                             <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                               {data.map((_: any, i: number) => <Cell key={i} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} />)}
                             </Bar>

@@ -23,6 +23,7 @@ export interface AnalyticsReport {
   id: string;
   tenant_id: number;
   member_id: string;
+  name: string | null;
   type: string;
   params_json: string;
   status: string;

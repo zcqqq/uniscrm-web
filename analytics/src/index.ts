@@ -127,6 +127,31 @@ app.get("/api/reports/:id", async (c) => {
   return c.json({ report: { ...row, results, results_json: undefined, params: JSON.parse(row.params_json), params_json: undefined } });
 });
 
+app.patch("/api/reports/:id", async (c) => {
+  const tenantId = c.get("tenantId");
+  const reportId = c.req.param("id");
+  const body = await c.req.json<{ name?: string | null; type?: string; params?: Record<string, unknown> }>();
+
+  const existing = await c.env.ANALYTICS_DB.prepare(
+    "SELECT id FROM analytics_reports WHERE id = ? AND tenant_id = ?"
+  ).bind(reportId, tenantId).first();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  if (body.name !== undefined) { sets.push("name = ?"); values.push(body.name); }
+  if (body.type !== undefined) { sets.push("type = ?"); values.push(body.type); }
+  if (body.params !== undefined) { sets.push("params_json = ?"); values.push(JSON.stringify(body.params)); }
+  sets.push("updated_at = ?");
+  values.push(new Date().toISOString());
+
+  await c.env.ANALYTICS_DB.prepare(
+    `UPDATE analytics_reports SET ${sets.join(", ")} WHERE id = ? AND tenant_id = ?`
+  ).bind(...values, reportId, tenantId).run();
+
+  return c.json({ ok: true });
+});
+
 app.delete("/api/reports/:id", async (c) => {
   const tenantId = c.get("tenantId");
   const reportId = c.req.param("id");

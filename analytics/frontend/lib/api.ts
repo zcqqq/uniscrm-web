@@ -47,6 +47,7 @@ export interface EventAnalysisResults {
 
 export interface ReportSummary {
   id: string;
+  name: string | null;
   type: string;
   params: Record<string, unknown>;
   status: string;

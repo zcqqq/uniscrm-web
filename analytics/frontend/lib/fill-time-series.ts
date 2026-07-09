@@ -13,7 +13,17 @@ export function fillTimeSeries(
   // Use UTC dates throughout — API periods are UTC midnight timestamps
   const now = new Date();
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const start = new Date(end.getTime() - days * 86400000);
+  let start = new Date(end.getTime() - days * 86400000);
+
+  // Backend uses DATE_TRUNC('week', ...) which aligns to Monday (ISO week).
+  // Align our fill start to the same Monday boundary so generated keys match API periods.
+  if (granularity === "week") {
+    const dow = start.getUTCDay(); // 0=Sun..6=Sat
+    const daysSinceMonday = (dow + 6) % 7;
+    start = new Date(start.getTime() - daysSinceMonday * 86400000);
+  } else if (granularity === "month") {
+    start = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+  }
 
   const dataMap = new Map<string, number>();
   for (const d of data) {

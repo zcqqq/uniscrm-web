@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { toPng } from "html-to-image";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { listDashboards, createDashboard, getDashboard, deleteDashboard, updateDashboardItem, deleteDashboardItem, type Dashboard, type DashboardItem, type IntervalResults } from "../lib/api";
@@ -15,8 +16,8 @@ import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
 
 const UI = {
-  en: { allDashboards: "All Dashboards", search: "Search", delete: "Delete", noData: "No data", remove: "Remove", empty: "Select or create a dashboard", noItems: "No charts yet. Add reports from Analytics." },
-  zh: { allDashboards: "所有仪表盘", search: "搜索", delete: "删除", noData: "暂无数据", remove: "移除", empty: "选择或新建一个仪表盘", noItems: "暂无图表，从分析中添加报表。" },
+  en: { allDashboards: "All Dashboards", search: "Search", delete: "Delete", noData: "No data", remove: "Remove", edit: "Edit", empty: "Select or create a dashboard", noItems: "No charts yet. Add reports from Analytics." },
+  zh: { allDashboards: "所有仪表盘", search: "搜索", delete: "删除", noData: "暂无数据", remove: "移除", edit: "编辑", empty: "选择或新建一个仪表盘", noItems: "暂无图表，从分析中添加报表。" },
 };
 
 const SIZES = [
@@ -175,6 +176,7 @@ export function DashboardPage() {
 }
 
 function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: DashboardItem; locale: string; onSizeChange: (size: string) => void; onRemove: () => void }) {
+  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const s = UI[locale as "en" | "zh"];
   const colSpan = item.size === "large" ? "col-span-4" : item.size === "small" ? "col-span-1" : "col-span-2";
@@ -236,6 +238,9 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
                   </Button>
                 ))}
               </div>
+              <DropdownMenuItem onClick={() => navigate(`/analytics/${item.report_id}`)}>
+                {s.edit}
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={onRemove} className="text-destructive focus:text-destructive">
                 {s.remove}
               </DropdownMenuItem>

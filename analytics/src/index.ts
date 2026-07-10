@@ -383,15 +383,23 @@ async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<void> {
 
   const result = await response.json() as { data: unknown[] };
 
+  // A single `summary` number is computed once here and stored alongside
+  // each report's results, so every consumer (Dashboard widgets, Analytics
+  // Detail headline) reads the same pre-computed value instead of each
+  // re-aggregating the raw data client-side.
   let resultsJson: string;
   if (type === "interval") {
     const granularity = ((params as any).granularity as string) || "day";
-    resultsJson = JSON.stringify({ sql, ...processIntervalResults(result.data, granularity) });
+    const intervalResults = processIntervalResults(result.data, granularity);
+    resultsJson = JSON.stringify({ sql, ...intervalResults, summary: intervalResults.total_pairs });
   } else if (type === "funnel") {
     const steps = ((params as any).steps || []) as string[];
-    resultsJson = JSON.stringify({ sql, ...processFunnelResults(result.data, steps) });
+    const funnelResults = processFunnelResults(result.data, steps);
+    resultsJson = JSON.stringify({ sql, ...funnelResults, summary: funnelResults.steps[0]?.count || 0 });
   } else {
-    resultsJson = JSON.stringify({ sql, data: result.data });
+    const data = result.data as { value?: number }[];
+    const summary = data.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
+    resultsJson = JSON.stringify({ sql, data: result.data, summary });
   }
 
   await env.ANALYTICS_DB.prepare(

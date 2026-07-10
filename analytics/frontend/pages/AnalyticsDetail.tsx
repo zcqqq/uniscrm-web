@@ -16,6 +16,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from ".
 import { Tooltip as UiTooltip, TooltipTrigger as UiTooltipTrigger, TooltipContent as UiTooltipContent, TooltipProvider as UiTooltipProvider } from "../../../shared/frontend/ui/tooltip";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
 import { DIMENSION_COLORS } from "../../../shared/frontend/lib/colors";
+import { formatPeriod as sharedFormatPeriod } from "../lib/format-period";
 
 const MODE_TITLES: Record<string, { en: string; zh: string }> = {
   event: { en: "Event Analysis", zh: "事件分析" },
@@ -292,29 +293,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     });
   };
 
-  const formatPeriod = (p: unknown) => {
-    if (!p || typeof p !== "string") return String(p ?? "");
-    try {
-      const normalized = p.replace(/(\.\d{3})\d+Z$/, "$1Z");
-      // Bare date strings (YYYY-MM-DD) must be parsed as UTC midnight
-      const dateStr = normalized.includes("T") ? normalized : `${normalized}T00:00:00Z`;
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return p.slice(0, 10);
-
-      if (config.granularity === "week") {
-        const weekEnd = new Date(d.getTime() + 6 * 86400000);
-        const fmt = (dt: Date) =>
-          dt.toLocaleDateString(locale === "zh" ? "zh-CN" : "en-US", {
-            timeZone: "UTC",
-            month: "short",
-            day: "numeric",
-          });
-        return `${fmt(d)} – ${fmt(weekEnd)}`;
-      }
-
-      return d.toLocaleDateString(locale === "zh" ? "zh-CN" : "en-US", { timeZone: timezone, month: "short", day: "numeric" });
-    } catch { return p.slice(0, 10); }
-  };
+  const formatPeriod = (p: unknown) => sharedFormatPeriod(p, config.granularity, locale, timezone);
 
   const hasStats = results && "periods" in results;
   const intervalSlots = hasStats ? fillIntervalPeriods(results.periods, config.timeRange, config.granularity) : [];
@@ -473,29 +452,9 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           </>
         )}
 
-        {/* Event results — KPI + time series chart */}
+        {/* Event results — time series chart */}
         {hasData && mode !== "user" && eventData.length > 0 && (
           <>
-            <div className="grid gap-4 grid-cols-3 mb-4">
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-xs font-medium text-muted-foreground">{locale === "zh" ? "总计" : "Total"}</p>
-                  <p className="text-2xl font-bold tracking-tight mt-1">{results.data.reduce((s: number, d: any) => s + (d.value || 0), 0).toLocaleString()}</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-xs font-medium text-muted-foreground">{locale === "zh" ? "数据点" : "Data Points"}</p>
-                  <p className="text-2xl font-bold tracking-tight mt-1">{eventData.length}</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-xs font-medium text-muted-foreground">{locale === "zh" ? "峰值" : "Peak"}</p>
-                  <p className="text-2xl font-bold tracking-tight mt-1">{Math.max(0, ...results.data.map((d: any) => d.value || 0)).toLocaleString()}</p>
-                </CardContent>
-              </Card>
-            </div>
             <Card className="mb-4">
               <CardContent className="p-6 pt-4">
                 <div className="flex items-center justify-end mb-4">
@@ -688,17 +647,6 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                 </Card>
               ) : data.length > 0 && (
                 <>
-                  <div className="grid gap-4 grid-cols-2 mb-4">
-                    <Card><CardContent className="p-4">
-                      <p className="text-xs text-muted-foreground">{locale === "zh" ? "总计" : "Total"}</p>
-                      <p className="text-2xl font-bold tracking-tight mt-1">{total.toLocaleString()}</p>
-                    </CardContent></Card>
-                    <Card><CardContent className="p-4">
-                      <p className="text-xs text-muted-foreground">{locale === "zh" ? "分组数" : "Groups"}</p>
-                      <p className="text-2xl font-bold tracking-tight mt-1">{data.length}</p>
-                    </CardContent></Card>
-                  </div>
-
                   <Card className="mb-4">
                     <CardContent className="p-6 pt-4">
                       <div className="flex items-center justify-between mb-4">

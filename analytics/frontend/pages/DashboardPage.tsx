@@ -7,6 +7,7 @@ import { useLocale } from "../hooks/useLocale";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { fillTimeSeries } from "../lib/fill-time-series";
 import { fillIntervalPeriods } from "../lib/fill-interval-periods";
+import { formatPeriod } from "../lib/format-period";
 import { IntervalDistributionChart } from "../components/IntervalDistributionChart";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
@@ -189,7 +190,6 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
     : "7";
   const granularity = (item.params as any)?.granularity || "day";
   const intervalSlots = intervalResults?.periods ? fillIntervalPeriods(intervalResults.periods, timeRange, granularity) : [];
-  const totalPairs = intervalResults?.periods?.reduce((sum, p) => sum + p.count, 0) || 0;
 
   const rawData = !isInterval && item.results && "data" in item.results
     ? ((item.results as any).data || []).filter((d: any) => d?.period)
@@ -199,16 +199,24 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
     timeRange,
     granularity
   );
-  const total = chartData.reduce((s: number, d: any) => s + d.value, 0);
 
-  const formatTick = (p: unknown) => {
-    if (!p || typeof p !== "string") return "";
-    const cleaned = p.replace(/(\.\d{3})\d+Z$/, "$1Z");
-    const dateStr = cleaned.includes("T") ? cleaned : `${cleaned}T00:00:00Z`;
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return p.slice(0, 5);
-    return d.toLocaleDateString(undefined, { timeZone: "UTC", month: "short", day: "numeric" });
-  };
+  // Single source of truth: the backend computes and stores this once per
+  // report (see `summary` in results_json), so every widget just reads it
+  // instead of re-aggregating raw data client-side. Always shown, including
+  // zero — a report with genuinely zero events must not look like "no data
+  // yet computed".
+  const summary = (item.results as any)?.summary ?? 0;
+
+  // Event Analysis's Line/Bar chart_type restricts widget size to
+  // medium/large only (see SIZES filtering below) — narrower "small" widgets
+  // don't have room for a legible time-series axis. Deliberately keyed off
+  // the chart_type value itself (shared by Event and User Analysis), not the
+  // report's analytics type.
+  const chartType = (item.params as any)?.chart_type;
+  const restrictSmall = chartType === "line" || chartType === "bar";
+  const availableSizes = restrictSmall ? SIZES.filter((sz) => sz.value !== "small") : SIZES;
+
+  const formatTick = (p: unknown) => formatPeriod(p, granularity, locale, "UTC");
 
   return (
     <Card className={`${colSpan}`}>
@@ -216,9 +224,7 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
         <div className="flex items-start justify-between mb-1">
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-foreground truncate">{item.report_name || `${item.type} #${item.report_id.slice(0, 8)}`}</div>
-            {isInterval
-              ? totalPairs > 0 && <div className="text-2xl font-bold tracking-tight mt-0.5">{totalPairs.toLocaleString()}</div>
-              : total > 0 && <div className="text-2xl font-bold tracking-tight mt-0.5">{total.toLocaleString()}</div>}
+            <div className="text-2xl font-bold tracking-tight mt-0.5">{summary.toLocaleString()}</div>
           </div>
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
             <DropdownMenuTrigger asChild>
@@ -226,7 +232,7 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border">
-                {SIZES.map((sz) => (
+                {availableSizes.map((sz) => (
                   <Button
                     key={sz.value}
                     variant={item.size === sz.value ? "default" : "ghost"}
@@ -258,9 +264,18 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
           />
         ) : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={chartHeight}>
-            <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
+            <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: granularity === "week" ? 16 : 0, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.3} />
-              <XAxis dataKey="period" tickFormatter={formatTick} tick={{ fontSize: 9, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
+              <XAxis
+                dataKey="period"
+                tickFormatter={formatTick}
+                tick={{ fontSize: 9, fill: "var(--color-muted-foreground)" }}
+                tickLine={false}
+                axisLine={false}
+                angle={granularity === "week" ? -35 : 0}
+                textAnchor={granularity === "week" ? "end" : "middle"}
+                height={granularity === "week" ? 34 : 24}
+              />
               <YAxis tick={{ fontSize: 9, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={28} />
               <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 11, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }} labelFormatter={formatTick} />
               <Line type="linear" dataKey="value" stroke="#7c3aed" strokeWidth={2} dot={{ r: 3, fill: "#fff", stroke: "#7c3aed", strokeWidth: 2 }} activeDot={{ r: 5, fill: "#fff", stroke: "#7c3aed", strokeWidth: 2 }} />

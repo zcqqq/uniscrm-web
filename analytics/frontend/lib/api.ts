@@ -29,6 +29,7 @@ export interface IntervalResults {
   periods: IntervalPeriodStats[];
   total_profiles: number;
   total_pairs: number;
+  summary?: number;
 }
 
 export interface EventAnalysisParams {
@@ -43,6 +44,7 @@ export interface EventAnalysisParams {
 export interface EventAnalysisResults {
   sql: string;
   data: { period: string; value: number; dimension?: string }[];
+  summary?: number;
 }
 
 export interface ReportSummary {

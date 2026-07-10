@@ -3,26 +3,55 @@ import type { Env } from "./types";
 import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
 import { TenantDataDB } from "../../shared/tenant-data-db";
+import { CreditService, getActiveSubscriptionTier } from "../../shared/credit-service";
+import { EventMetadata_X } from "../../metadata/x";
+import { dollarsToMicros } from "../../shared/credit";
+
+const ACTION_TO_EVENT_TYPE: Record<string, string> = {
+  follow: "follow-user",
+  unfollow: "unfollow-user",
+  "create-dm": "create-dm",
+  "mute-user": "mute-user",
+};
 
 export function internalRoutes() {
   const router = new Hono<{ Bindings: Env }>();
 
   // X actions: follow/unfollow/create-dm/mute-user
   router.post("/x/action", async (c) => {
-    const { channelId, targetUserId, action, messageText } = await c.req.json<{
-      channelId: string; targetUserId: string; action: string; messageText?: string;
+    const { channelId, targetUserId, action, messageText, flowId } = await c.req.json<{
+      channelId: string; targetUserId: string; action: string; messageText?: string; flowId?: string | null;
     }>();
     if (!channelId || !targetUserId || !action) {
       return c.json({ error: "channelId, targetUserId, action required" }, 400);
     }
 
-    const channel = await c.env.LINK_DB.prepare("SELECT config FROM channels WHERE id = ?")
-      .bind(channelId).first<{ config: string }>();
+    const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id FROM channels WHERE id = ?")
+      .bind(channelId).first<{ config: string; tenant_id: number }>();
     if (!channel) return c.json({ error: "Channel not found" }, 404);
 
     const config = JSON.parse(channel.config);
     const sourceUserId = config.x_user_id;
     if (!sourceUserId) return c.json({ error: "Channel has no X user ID" }, 400);
+
+    // Credit only applies to non-BYOK channels; BYOK channels use the customer's own X API credentials.
+    const isByok = !!config.is_byok;
+    const eventType = ACTION_TO_EVENT_TYPE[action];
+    const priceUsd = EventMetadata_X.find((m) => m.eventType === eventType)?.price ?? 0;
+    const creditMicros = dollarsToMicros(priceUsd);
+
+    if (!isByok && creditMicros > 0) {
+      const sub = await getActiveSubscriptionTier(c.env.ADMIN_DB, channel.tenant_id);
+      if (!sub) {
+        return c.json({ ok: false, insufficientCredit: true, error: "No active paid subscription" }, 402);
+      }
+      const creditSvc = new CreditService(c.env.ADMIN_DB);
+      const balance = await creditSvc.getBalance(channel.tenant_id, sub.tier, sub.createdAt);
+      if (balance.balanceMicros <= 0) {
+        console.log(JSON.stringify({ event: "xaction_insufficient_credit", tenantId: channel.tenant_id, channelId, action, balanceMicros: balance.balanceMicros }));
+        return c.json({ ok: false, insufficientCredit: true }, 402);
+      }
+    }
 
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
     const accessToken = await tokenService.getValidToken(channelId);
@@ -62,6 +91,18 @@ export function internalRoutes() {
     const rateLimitReset = rateLimitResetUnix ? new Date(rateLimitResetUnix * 1000).toISOString() : "";
 
     console.log(JSON.stringify({ event: "x_action_executed", action, sourceUserId, targetUserId, status: xRes.status, rateLimitRemaining, rateLimitReset, response: xBody }));
+
+    // Deduct credit only after a successful (2xx) paid API call, and only for non-BYOK channels.
+    if (xRes.ok && !isByok && creditMicros > 0) {
+      const creditSvc = new CreditService(c.env.ADMIN_DB);
+      await creditSvc.logUsage({
+        tenantId: channel.tenant_id,
+        flowId: flowId ?? null,
+        channelId,
+        actionEventType: eventType,
+        creditMicros,
+      });
+    }
 
     return c.json({
       ok: xRes.ok,

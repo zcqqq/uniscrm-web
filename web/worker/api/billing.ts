@@ -18,6 +18,15 @@ export function createBillingRouter() {
     return c.json(sub);
   });
 
+  router.get("/credit-usage", async (c) => {
+    const tenantId = c.get("tenantId" as never) as string;
+    const limit = Math.min(parseInt(c.req.query("limit") || "50", 10) || 50, 200);
+    const offset = Math.max(parseInt(c.req.query("offset") || "0", 10) || 0, 0);
+    const svc = new BillingService(c.env.ADMIN_URL, c.env.INTERNAL_SECRET);
+    const usage = await svc.getCreditUsage(tenantId, limit, offset);
+    return c.json(usage);
+  });
+
   router.post("/subscribe", async (c) => {
     const tenantId = c.get("tenantId" as never) as string;
     const { tier } = await c.req.json<{ tier: string }>();

@@ -16,6 +16,27 @@ export interface SubscriptionInfo {
   } | null;
 }
 
+export interface CreditUsageEntry {
+  id: string;
+  tenant_id: number;
+  flow_id: string | null;
+  channel_id: string | null;
+  action_event_type: string;
+  credit_micros: number;
+  created_at: string;
+}
+
+export interface CreditUsageInfo {
+  tier: string;
+  monthlyCreditMicros: number;
+  usedMicros: number;
+  balanceMicros: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+  entries: CreditUsageEntry[];
+  total: number;
+}
+
 export class BillingService {
   constructor(
     private adminUrl: string,
@@ -73,6 +94,15 @@ export class BillingService {
       const err = (await res.json()) as { error: string };
       throw new Error(err.error);
     }
+  }
+
+  async getCreditUsage(tenantId: string, limit: number, offset: number): Promise<CreditUsageInfo> {
+    const res = await fetch(
+      `${this.adminUrl}/internal/credit-usage/${tenantId}?limit=${limit}&offset=${offset}`,
+      { headers: { "X-Internal-Secret": this.internalSecret } }
+    );
+    if (!res.ok) throw new Error("Failed to fetch credit usage");
+    return res.json() as Promise<CreditUsageInfo>;
   }
 
   async createPortalSession(tenantId: string, returnUrl: string): Promise<{ portal_url: string }> {

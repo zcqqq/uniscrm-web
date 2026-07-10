@@ -231,6 +231,7 @@ export const EventMetadata_X: EventMetadata[] = [
     eventType: "follow-user", // https://docs.x.com/x-api/users/follow-user
     sourceEventType: "follow-user",
     flowType: "action",
+    price: 0.015,
     label: { en: "Follow", zh: "关注" },
     userProps: [],
     userPropsFilter: [
@@ -242,6 +243,7 @@ export const EventMetadata_X: EventMetadata[] = [
     eventType: "unfollow-user", // https://docs.x.com/x-api/users/unfollow-user
     sourceEventType: "unfollow-user",
     flowType: "action",
+    price: 0.010,
     label: { en: "Unfollow", zh: "取关" },
     userProps: [],
     userPropsFilter: [
@@ -253,6 +255,7 @@ export const EventMetadata_X: EventMetadata[] = [
     eventType: "create-dm", // https://docs.x.com/x-api/direct-messages/create-dm-message-by-participant-id
     sourceEventType: "create-dm",
     flowType: "action",
+    price: 0.015,
     label: { en: "Direct message", zh: "发私信" },
     userProps: [
     ],
@@ -264,6 +267,7 @@ export const EventMetadata_X: EventMetadata[] = [
     eventType: "mute-user", // https://docs.x.com/x-api/users/mute-user
     sourceEventType: "mute-user",
     flowType: "action",
+    price: 0.010,
     label: { en: "Mute", zh: "隐藏" },
     userProps: [
     ],

@@ -136,6 +136,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
       items: [
         { id: "general", label: "General", href: `${urls.web}/settings` },
         { id: "billing", label: "Billing", href: `${urls.web}/billing` },
+        { id: "credit-usage", label: "Credit Usage", href: `${urls.web}/billing/credit-usage` },
       ],
     },
   ];

@@ -9,6 +9,8 @@ export interface TierConfig {
   tier: Tier;
   name: string;
   price_monthly: number;
+  /** Monthly X-action credit allowance, in micros (1,000,000 micros = $1). Resets on the subscription's monthly anniversary. */
+  monthly_credit_micros: number;
   modules: Record<string, ModuleEntry>;
   features: Record<string, FeatureEntry>;
   limits: Record<string, LimitEntry>;
@@ -19,6 +21,7 @@ export const TIERS: Record<Tier, TierConfig> = {
     tier: "basic",
     name: "Basic",
     price_monthly: 500,
+    monthly_credit_micros: 5_000_000, // $5.00/month of X action credit
     modules: {
       "social.channels": { enabled: true, description: "Connect to your Twitter, TikTok, ... accounts" },
       "social.flow": { enabled: true, description: "Automation flows in control" },
@@ -34,19 +37,18 @@ export const TIERS: Record<Tier, TierConfig> = {
       "link.tiktok": { enabled: false },
     },
     limits: {
-      "flow.execution.xaction.daily": { value: 100, description: "100 X flow actions/day" },
     },
   },
   pro: {
     tier: "pro",
     name: "Pro",
     price_monthly: 2000,
+    monthly_credit_micros: 20_000_000, // $20.00/month of X action credit
     modules: {
     },
     features: {
     },
     limits: {
-      "flow.execution.xaction.daily": { value: 1000, description: "1000 X flow actions/day" },
     },
   },
 };
@@ -81,6 +83,9 @@ export function getTierDescriptions(tier: Tier): string[] {
   }
   for (const entry of Object.values(config.limits)) {
     if (entry.description) descs.push(entry.description);
+  }
+  if (config.monthly_credit_micros > 0) {
+    descs.push(`$${(config.monthly_credit_micros / 1_000_000).toFixed(2)}/month of X action credit`);
   }
   return descs;
 }

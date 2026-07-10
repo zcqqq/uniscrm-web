@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import { useBilling } from "../hooks/useBilling";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "../../../shared/frontend/ui/card";
@@ -7,6 +7,7 @@ import { Badge } from "../../../shared/frontend/ui/badge";
 import { Alert, AlertDescription } from "../../../shared/frontend/ui/alert";
 import { PageHeader } from "../../../shared/frontend/components/PageHeader";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "../../../shared/frontend/ui/tabs";
 import { isActive, getTierDescriptions } from "../../../shared/plans";
 import type { SubStatus } from "../../../shared/plans";
 
@@ -87,6 +88,17 @@ export function Billing() {
   return (
     <div className="max-w-4xl mx-auto p-8">
       <PageHeader title="Billing" description="Manage your subscription plan" />
+
+      <Tabs value="plan" className="mb-6">
+        <TabsList>
+          <TabsTrigger value="plan" asChild>
+            <Link to="/billing">Plan</Link>
+          </TabsTrigger>
+          <TabsTrigger value="credit-usage" asChild>
+            <Link to="/billing/credit-usage">Credit Usage</Link>
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {success && (
         <Alert className="mb-6 border-primary/30 bg-primary/5 text-primary">

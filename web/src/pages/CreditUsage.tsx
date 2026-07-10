@@ -1,0 +1,138 @@
+import { useEffect } from "react";
+import { Link } from "react-router-dom";
+import { useCreditUsage } from "../hooks/useCreditUsage";
+import { Card, CardContent } from "../../../shared/frontend/ui/card";
+import { Button } from "../../../shared/frontend/ui/button";
+import { PageHeader } from "../../../shared/frontend/components/PageHeader";
+import { Skeleton } from "../../../shared/frontend/ui/skeleton";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "../../../shared/frontend/ui/tabs";
+import { EventMetadata_X } from "../../../metadata/x";
+
+function actionLabel(eventType: string): string {
+  return EventMetadata_X.find((m) => m.eventType === eventType)?.label.en ?? eventType;
+}
+
+function formatUsd(micros: number): string {
+  return `$${(micros / 1_000_000).toFixed(3)}`;
+}
+
+export function CreditUsage() {
+  useEffect(() => { document.title = "Credit Usage — UniSCRM" }, []);
+  const { usage, loading, page, setPage, pageSize } = useCreditUsage();
+
+  return (
+    <div className="max-w-4xl mx-auto p-8">
+      <PageHeader title="Billing" description="Manage your subscription plan" />
+
+      <Tabs value="credit-usage" className="mb-6">
+        <TabsList>
+          <TabsTrigger value="plan" asChild>
+            <Link to="/billing">Plan</Link>
+          </TabsTrigger>
+          <TabsTrigger value="credit-usage" asChild>
+            <Link to="/billing/credit-usage">Credit Usage</Link>
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {loading && !usage ? (
+        <div className="space-y-4">
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      ) : usage && usage.tier !== "basic" && usage.tier !== "pro" ? (
+        <Card>
+          <CardContent className="pt-6 text-muted-foreground">
+            Credit usage is only tracked for Basic and Pro plans.
+          </CardContent>
+        </Card>
+      ) : usage ? (
+        <>
+          <Card className="mb-6">
+            <CardContent className="pt-6">
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Remaining balance</p>
+                  <p className={`text-2xl font-bold ${usage.balanceMicros <= 0 ? "text-destructive" : "text-foreground"}`}>
+                    {formatUsd(usage.balanceMicros)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Used this period</p>
+                  <p className="text-2xl font-bold text-foreground">{formatUsd(usage.usedMicros)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Monthly allowance</p>
+                  <p className="text-2xl font-bold text-foreground">{formatUsd(usage.monthlyCreditMicros)}</p>
+                </div>
+              </div>
+              {usage.periodStart && usage.periodEnd && (
+                <p className="text-xs text-muted-foreground mt-4">
+                  Current period: {new Date(usage.periodStart).toLocaleDateString()} – {new Date(usage.periodEnd).toLocaleDateString()}
+                </p>
+              )}
+              {usage.balanceMicros <= 0 && (
+                <p className="text-sm text-destructive mt-2">
+                  Your credit balance is exhausted. X flow actions will fail until your next billing period, or upgrade your plan.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-6">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Action</TableHead>
+                    <TableHead>Flow</TableHead>
+                    <TableHead className="text-right">Cost</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {usage.entries.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-muted-foreground">
+                        No credit usage yet.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    usage.entries.map((e) => (
+                      <TableRow key={e.id}>
+                        <TableCell className="text-sm">{new Date(e.created_at).toLocaleString()}</TableCell>
+                        <TableCell className="text-sm">{actionLabel(e.action_event_type)}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{e.flow_id ?? "—"}</TableCell>
+                        <TableCell className="text-sm text-right">{formatUsd(e.credit_micros)}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+
+              {usage.total > pageSize && (
+                <div className="flex items-center justify-between mt-4">
+                  <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(page - 1)}>
+                    Previous
+                  </Button>
+                  <span className="text-sm text-muted-foreground">
+                    Page {page + 1} of {Math.ceil(usage.total / pageSize)}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={(page + 1) * pageSize >= usage.total}
+                    onClick={() => setPage(page + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      ) : null}
+    </div>
+  );
+}

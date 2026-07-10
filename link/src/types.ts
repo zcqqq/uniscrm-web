@@ -5,6 +5,7 @@ export interface Pipeline {
 export interface Env {
   LINK_DB: D1Database;
   WEB_DB: D1Database;
+  ADMIN_DB: D1Database; // admin DB (subscriptions, X-action credit ledger)
   KV: KVNamespace;
   VECTORIZE: VectorizeIndex;
   AI: Ai;

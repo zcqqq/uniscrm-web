@@ -12,6 +12,7 @@ import { Home } from "./pages/Home";
 import { CompleteProfile } from "./pages/CompleteProfile";
 import { Settings } from "./pages/Settings";
 import { Billing } from "./pages/Billing";
+import { CreditUsage } from "./pages/CreditUsage";
 
 import { URLS } from "../../shared/frontend/urls";
 
@@ -77,6 +78,14 @@ export function App() {
               element={
                 <ProtectedRoute>
                   <Billing />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/billing/credit-usage"
+              element={
+                <ProtectedRoute>
+                  <CreditUsage />
                 </ProtectedRoute>
               }
             />

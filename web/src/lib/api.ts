@@ -46,6 +46,17 @@ export const api = {
     subscribe: (tier: string) => request<{ approval_url: string }>("/billing/subscribe", { method: "POST", body: JSON.stringify({ tier }) }),
     cancel: () => request<{ ok: boolean }>("/billing/cancel", { method: "POST" }),
     portal: () => request<{ portal_url: string }>("/billing/portal", { method: "POST" }),
+    getCreditUsage: (limit = 50, offset = 0) =>
+      request<{
+        tier: string;
+        monthlyCreditMicros: number;
+        usedMicros: number;
+        balanceMicros: number;
+        periodStart: string | null;
+        periodEnd: string | null;
+        entries: Array<{ id: string; tenant_id: number; flow_id: string | null; channel_id: string | null; action_event_type: string; credit_micros: number; created_at: string }>;
+        total: number;
+      }>(`/billing/credit-usage?limit=${limit}&offset=${offset}`),
   },
   settings: {
     get: () => request<{ preferred_location: string }>("/settings"),

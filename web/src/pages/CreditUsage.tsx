@@ -1,12 +1,10 @@
 import { useEffect } from "react";
-import { Link } from "react-router-dom";
 import { useCreditUsage } from "../hooks/useCreditUsage";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
 import { Button } from "../../../shared/frontend/ui/button";
 import { PageHeader } from "../../../shared/frontend/components/PageHeader";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "../../../shared/frontend/ui/tabs";
 import { EventMetadata_X } from "../../../metadata/x";
 
 function actionLabel(eventType: string): string {
@@ -23,18 +21,7 @@ export function CreditUsage() {
 
   return (
     <div className="max-w-4xl mx-auto p-8">
-      <PageHeader title="Billing" description="Manage your subscription plan" />
-
-      <Tabs value="credit-usage" className="mb-6">
-        <TabsList>
-          <TabsTrigger value="plan" asChild>
-            <Link to="/billing">Plan</Link>
-          </TabsTrigger>
-          <TabsTrigger value="credit-usage" asChild>
-            <Link to="/billing/credit-usage">Credit Usage</Link>
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <PageHeader title="Credit Usage" description="X action credit balance and usage history" />
 
       {loading && !usage ? (
         <div className="space-y-4">

@@ -82,7 +82,7 @@ export function App() {
               }
             />
             <Route
-              path="/billing/credit-usage"
+              path="/credit-usage"
               element={
                 <ProtectedRoute>
                   <CreditUsage />

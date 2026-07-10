@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useFlowEditor } from "../store/flow-editor";
+import { useFlowEditor, ACTION_CHANNEL_TYPE } from "../store/flow-editor";
 import { CHANNEL_TYPES, type TriggerFieldDefinition } from "../config/trigger-fields";
 import { SelectPropsValue } from "../../../shared/frontend/components/SelectPropsValue";
 import { api } from "../lib/api";
@@ -373,12 +373,21 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
 function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
   const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
+  const channelType = ACTION_CHANNEL_TYPE[data.actionType as string] || "X";
 
   useEffect(() => {
-    api.channels.list("X")
-      .then(setChannels)
+    api.channels.listCached(channelType)
+      .then((chs) => {
+        setChannels(chs);
+        // Safety net: if only one account is connected and this node hasn't been assigned
+        // one yet (e.g. it existed before this auto-fill feature, or the bulk fill on flow
+        // load raced with this Inspector mounting), auto-select it here too.
+        if (chs.length === 1 && !data.channelId) {
+          updateNodeData(nodeId, { channelId: chs[0].id });
+        }
+      })
       .catch(() => setChannels([]));
-  }, []);
+  }, [channelType]);
 
   return (
     <div>

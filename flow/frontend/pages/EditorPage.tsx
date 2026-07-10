@@ -151,6 +151,7 @@ export default function EditorPage() {
       const nodes = tpl?.graph.nodes || [];
       const edges = tpl?.graph.edges || [];
       setFlow(null as any, name, false, nodes, edges);
+      void useFlowEditor.getState().autoFillChannelIds();
       setLoading(false);
       return;
     }
@@ -160,6 +161,7 @@ export default function EditorPage() {
       .then(({ flow }) => {
         const graph = JSON.parse(flow.graph_json || '{"nodes":[],"edges":[]}');
         setFlow(flow.id, flow.name, !!flow.enabled, graph.nodes || [], graph.edges || []);
+        void useFlowEditor.getState().autoFillChannelIds();
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));

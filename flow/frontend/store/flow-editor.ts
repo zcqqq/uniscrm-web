@@ -9,6 +9,7 @@ import {
   applyEdgeChanges,
   addEdge,
 } from "@xyflow/react";
+import { api } from "../lib/api";
 
 export interface FlowEditorState {
   flowId: string | null;
@@ -31,9 +32,21 @@ export interface FlowEditorState {
   setFlowEnabled: (enabled: boolean) => void;
   markClean: () => void;
   toGraphJson: () => string;
+  replaceGraph: (nodes: Node[], edges: Edge[]) => void;
+  // Auto-fills data.channelId on any action node whose actionType is in ACTION_CHANNEL_TYPE
+  // and still has no channelId, provided the tenant has exactly one connected account for
+  // that channelType. No-ops (and skips the API call) if nothing needs filling.
+  autoFillChannelIds: () => Promise<void>;
 }
 
 const ACTION_TYPES = ["addToList", "xAction"];
+
+// Action types that operate on a specific channel account (need `data.channelId`), mapped to
+// the channelType used to fetch that account list. Add an entry here whenever a new
+// channel-scoped action is introduced (e.g. a future "tiktokAction" -> "TIKTOK").
+export const ACTION_CHANNEL_TYPE: Record<string, string> = {
+  xAction: "X",
+};
 
 function isValidConnection(source: Node | undefined, target: Node | undefined): boolean {
   if (!source || !target) return false;
@@ -124,6 +137,10 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
       data,
     };
     set((state) => ({ nodes: [...state.nodes, node], isDirty: true }));
+
+    if (ACTION_CHANNEL_TYPE[type]) {
+      void get().autoFillChannelIds();
+    }
   },
 
   updateNodeData: (nodeId, data) =>
@@ -151,7 +168,38 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
 
   markClean: () => set({ isDirty: false }),
 
-  replaceGraph: (nodes: any[], edges: any[]) => set({ nodes, edges, isDirty: true }),
+  replaceGraph: (nodes: Node[], edges: Edge[]) => set({ nodes, edges, isDirty: true }),
+
+  autoFillChannelIds: async () => {
+    const neededTypes = new Set<string>();
+    for (const n of get().nodes) {
+      if (n.type !== "action") continue;
+      const actionType = (n.data as Record<string, unknown>).actionType as string;
+      const channelType = ACTION_CHANNEL_TYPE[actionType];
+      if (channelType && !(n.data as Record<string, unknown>).channelId) neededTypes.add(channelType);
+    }
+    if (neededTypes.size === 0) return;
+
+    const channelsByType: Record<string, { id: string; username: string }[]> = {};
+    await Promise.all(
+      Array.from(neededTypes).map(async (ct) => {
+        channelsByType[ct] = await api.channels.listCached(ct);
+      })
+    );
+
+    let changed = false;
+    const nodes = get().nodes.map((n) => {
+      if (n.type !== "action") return n;
+      const data = n.data as Record<string, unknown>;
+      const channelType = ACTION_CHANNEL_TYPE[data.actionType as string];
+      if (!channelType || data.channelId) return n;
+      const channels = channelsByType[channelType];
+      if (channels?.length !== 1) return n;
+      changed = true;
+      return { ...n, data: { ...data, channelId: channels[0].id } };
+    });
+    if (changed) set({ nodes, isDirty: true });
+  },
 
   toGraphJson: () => {
     const { nodes, edges } = get();

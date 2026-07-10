@@ -37,6 +37,10 @@ export interface ChannelOption {
   username: string;
 }
 
+// Per-channelType cache so the "auto-fill the only connected account" logic (template load,
+// manual node add, Inspector open) doesn't fire a redundant /api/channels request each time.
+const channelListCache: Record<string, Promise<ChannelOption[]>> = {};
+
 export const api = {
   flows: {
     list: (page = 1) =>
@@ -75,6 +79,12 @@ export const api = {
   channels: {
     list: (channelType: string) =>
       request<ChannelOption[]>(`/api/channels?type=${channelType}`),
+    listCached: (channelType: string) => {
+      if (!channelListCache[channelType]) {
+        channelListCache[channelType] = request<ChannelOption[]>(`/api/channels?type=${channelType}`).catch(() => []);
+      }
+      return channelListCache[channelType];
+    },
   },
   lists: {
     list: () =>

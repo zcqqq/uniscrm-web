@@ -111,7 +111,7 @@ export function AnalyticsList() {
                 className="cursor-pointer hover:bg-muted/50"
               >
                 <TableCell className="font-medium">
-                  {(r.params as any).name || `${r.type} #${r.id.slice(0, 8)}`}
+                  {r.name || (r.params as any).name || `${r.type} #${r.id.slice(0, 8)}`}
                 </TableCell>
                 <TableCell>
                   <Badge variant={r.type === "event" ? "default" : "secondary"}>

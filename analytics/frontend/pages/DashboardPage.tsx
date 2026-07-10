@@ -265,7 +265,7 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
           />
         ) : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={chartHeight}>
-            <LineChart data={chartData} margin={{ top: 8, right: granularity === "week" ? 14 : 4, bottom: granularity === "week" ? 16 : 0, left: granularity === "week" ? 8 : 0 }}>
+            <LineChart data={chartData} margin={{ top: 8, right: granularity === "week" ? 22 : 4, bottom: granularity === "week" ? 16 : 0, left: granularity === "week" ? 8 : 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.3} />
               <XAxis
                 dataKey="period"

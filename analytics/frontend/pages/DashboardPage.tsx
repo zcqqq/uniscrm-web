@@ -17,7 +17,7 @@ import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
 
 const UI = {
-  en: { allDashboards: "All Dashboards", search: "Search", delete: "Delete", noData: "No data", remove: "Remove", edit: "Edit", empty: "Select or create a dashboard", noItems: "No charts yet. Add reports from Analytics.", small: "Small", medium: "Medium", large: "Large" },
+  en: { allDashboards: "All Dashboards", search: "Search", delete: "Delete", noData: "No data", remove: "Remove", edit: "Edit", empty: "Select or create a dashboard", noItems: "No charts yet. Add reports from Analytics.", small: "S", medium: "M", large: "L" },
   zh: { allDashboards: "所有仪表盘", search: "搜索", delete: "删除", noData: "暂无数据", remove: "移除", edit: "编辑", empty: "选择或新建一个仪表盘", noItems: "暂无图表，从分析中添加报表。", small: "小", medium: "中", large: "大" },
 };
 
@@ -276,6 +276,7 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
                 angle={granularity === "week" ? -30 : 0}
                 textAnchor="middle"
                 height={granularity === "week" ? 34 : 24}
+                tickMargin={granularity === "week" ? 10 : 4}
               />
               <YAxis tick={{ fontSize: 9, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={28} />
               <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 11, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }} labelFormatter={formatTick} />

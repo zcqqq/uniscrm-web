@@ -21,12 +21,25 @@ export function formatPeriod(
 
     if (granularity === "week") {
       const weekEnd = new Date(d.getTime() + 6 * 86400000);
+      const localeTag = locale === "zh" ? "zh-CN" : "en-US";
       const fmt = (dt: Date) =>
-        dt.toLocaleDateString(locale === "zh" ? "zh-CN" : "en-US", {
+        dt.toLocaleDateString(localeTag, {
           timeZone: "UTC",
           month: "short",
           day: "numeric",
         });
+      const sameMonth = d.getUTCFullYear() === weekEnd.getUTCFullYear() && d.getUTCMonth() === weekEnd.getUTCMonth();
+      if (sameMonth) {
+        const startDay = d
+          .toLocaleDateString(localeTag, { timeZone: "UTC", day: "numeric" })
+          .replace(/\D/g, "");
+        const endStr = fmt(weekEnd);
+        // en-US: "Jun 14" -> take out "14" and prefix "Jun 8-"; zh-CN: "6月14日" -> insert "8-" before "14日"
+        if (locale === "zh") {
+          return endStr.replace(/(\d+)(?=日$)/, `${startDay}-$1`);
+        }
+        return endStr.replace(/(\d+)$/, `${startDay}-$1`);
+      }
       return `${fmt(d)} – ${fmt(weekEnd)}`;
     }
 

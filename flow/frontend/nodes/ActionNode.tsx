@@ -47,10 +47,10 @@ export default function ActionNode({ data, selected }: NodeProps) {
       </p>
       <AnalyticsBadges analytics={data._analytics as any} />
       {isExternalApi && (
-        <div className="absolute right-0 top-0 h-full flex flex-col justify-around pr-1 text-[10px]">
-          <span className="text-green-600">Success</span>
-          <span className="text-red-500">Failed</span>
-        </div>
+        <>
+          <span className="absolute right-1 text-[10px] text-green-600" style={{ top: "35%", transform: "translateY(-50%)" }}>Success</span>
+          <span className="absolute right-1 text-[10px] text-red-500" style={{ top: "65%", transform: "translateY(-50%)" }}>Failed</span>
+        </>
       )}
       {isExternalApi ? (
         <>

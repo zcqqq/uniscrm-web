@@ -15,10 +15,8 @@ export default function AbSplitNode({ data, selected }: NodeProps) {
       </div>
       <p className={`text-xs ${mode ? "text-gray-700" : "text-gray-400 italic"}`}>{summary}</p>
       <AnalyticsBadges analytics={data._analytics as any} />
-      <div className="absolute right-0 top-0 h-full flex flex-col justify-around pr-1 text-[10px]">
-        <span className="text-indigo-600">A</span>
-        <span className="text-indigo-400">B</span>
-      </div>
+      <span className="absolute right-1 text-[10px] text-indigo-600" style={{ top: "35%", transform: "translateY(-50%)" }}>A</span>
+      <span className="absolute right-1 text-[10px] text-indigo-400" style={{ top: "65%", transform: "translateY(-50%)" }}>B</span>
       <Handle type="source" position={Position.Right} id="a" className="!bg-indigo-600 !w-2.5 !h-2.5" style={{ top: "35%" }} />
       <Handle type="source" position={Position.Right} id="b" className="!bg-indigo-400 !w-2.5 !h-2.5" style={{ top: "65%" }} />
     </div>

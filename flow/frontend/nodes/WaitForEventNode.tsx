@@ -33,10 +33,8 @@ export default function EventHistoryNode({ data, selected }: NodeProps) {
         {summary}
       </p>
       <AnalyticsBadges analytics={data._analytics as any} />
-      <div className="absolute right-0 top-0 h-full flex flex-col justify-around pr-1 text-[10px]">
-        <span className="text-green-600">Yes</span>
-        <span className="text-red-500">No</span>
-      </div>
+      <span className="absolute right-1 text-[10px] text-green-600" style={{ top: "35%", transform: "translateY(-50%)" }}>Yes</span>
+      <span className="absolute right-1 text-[10px] text-red-500" style={{ top: "65%", transform: "translateY(-50%)" }}>No</span>
       <Handle
         type="source"
         position={Position.Right}

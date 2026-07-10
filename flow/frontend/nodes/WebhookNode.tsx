@@ -15,10 +15,8 @@ export default function WebhookNode({ data, selected }: NodeProps) {
       </div>
       <p className={`text-xs ${url ? "text-gray-700" : "text-gray-400 italic"}`}>{url ? summary : "Configure..."}</p>
       <AnalyticsBadges analytics={data._analytics as any} />
-      <div className="absolute right-0 top-0 h-full flex flex-col justify-around pr-1 text-[10px]">
-        <span className="text-green-600">Success</span>
-        <span className="text-red-500">Failed</span>
-      </div>
+      <span className="absolute right-1 text-[10px] text-green-600" style={{ top: "35%", transform: "translateY(-50%)" }}>Success</span>
+      <span className="absolute right-1 text-[10px] text-red-500" style={{ top: "65%", transform: "translateY(-50%)" }}>Failed</span>
       <Handle type="source" position={Position.Right} id="success" className="!bg-green-500 !w-2.5 !h-2.5" style={{ top: "35%" }} />
       <Handle type="source" position={Position.Right} id="failed" className="!bg-red-400 !w-2.5 !h-2.5" style={{ top: "65%" }} />
     </div>

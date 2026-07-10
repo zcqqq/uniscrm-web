@@ -14,10 +14,8 @@ export default function UserPropsConditionNode({ data, selected }: NodeProps) {
       </div>
       <p className={`text-xs ${conditions.length > 0 ? "text-gray-700" : "text-gray-400 italic"}`}>{summary}</p>
       <AnalyticsBadges analytics={data._analytics as any} />
-      <div className="absolute right-0 top-0 h-full flex flex-col justify-around pr-1 text-[10px]">
-        <span className="text-green-600">Yes</span>
-        <span className="text-red-500">No</span>
-      </div>
+      <span className="absolute right-1 text-[10px] text-green-600" style={{ top: "35%", transform: "translateY(-50%)" }}>Yes</span>
+      <span className="absolute right-1 text-[10px] text-red-500" style={{ top: "65%", transform: "translateY(-50%)" }}>No</span>
       <Handle type="source" position={Position.Right} id="yes" className="!bg-green-500 !w-2.5 !h-2.5" style={{ top: "35%" }} />
       <Handle type="source" position={Position.Right} id="no" className="!bg-red-400 !w-2.5 !h-2.5" style={{ top: "65%" }} />
     </div>

@@ -3,8 +3,6 @@ import { cors } from "hono/cors";
 import type { Env, FlowQueueMessage, FlowLogMessage } from "./types";
 import { executeFlow, resumeFromNode, evaluateCondition, type FlowGraph, type ActionResult, type NodeLog } from "./engine";
 import { EventMetadata_X } from "../../metadata/x";
-import { checkLimit } from "../../shared/plan-guard";
-import type { Tier } from "../../shared/plans";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 
 async function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenantId: number, env: Env): Promise<void> {
@@ -63,7 +61,7 @@ interface ActionExecResult {
   rateLimited: { action: ActionResult; retryAt: string }[];
 }
 
-async function executeActions(actions: ActionResult[], userId: string, tenantId: string, env: Env, payload?: Record<string, unknown>): Promise<ActionExecResult> {
+async function executeActions(actions: ActionResult[], userId: string, tenantId: string, env: Env, payload?: Record<string, unknown>, flowId?: string): Promise<ActionExecResult> {
   const stmts: D1PreparedStatement[] = [];
   const rateLimited: { action: ActionResult; retryAt: string }[] = [];
 
@@ -98,30 +96,6 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
         }
       }
 
-      // Daily plan limit check (resets at midnight in tenant's timezone)
-      const dailyKey = `daily:xaction:${tenantId}`;
-      const dailyRow = await env.FLOW_DB.prepare("SELECT remaining, reset_at FROM rate_limits WHERE key = ?")
-        .bind(dailyKey).first<{ remaining: number; reset_at: string }>();
-      const now = new Date();
-      const tenantTz = await env.WEB_DB.prepare("SELECT timezone FROM tenants WHERE tenant_id = ?")
-        .bind(Number(tenantId)).first<{ timezone: string }>();
-      const tz = tenantTz?.timezone || "UTC";
-      const localDateStr = now.toLocaleDateString("sv-SE", { timeZone: tz });
-      const nextDay = new Date(localDateStr + "T00:00:00Z");
-      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-      const tzOffsetMs = now.getTime() - new Date(now.toLocaleString("sv-SE", { timeZone: tz }).replace(" ", "T") + "Z").getTime();
-      const todayEnd = new Date(nextDay.getTime() + tzOffsetMs).toISOString();
-      let dailyCount = (dailyRow && dailyRow.reset_at > now.toISOString()) ? dailyRow.remaining : 0;
-
-      const sub = await env.ADMIN_DB.prepare("SELECT tier FROM subscriptions WHERE tenant_id = ? AND status = 'active'")
-        .bind(Number(tenantId)).first<{ tier: string }>();
-      const tier = (sub?.tier || "basic") as Tier;
-      const limitCheck = checkLimit(tier, "flow.execution.xaction.daily", dailyCount);
-      if (!limitCheck.allowed) {
-        console.log(JSON.stringify({ event: "xaction_daily_limit", tenantId, tier, count: dailyCount, limit: limitCheck.limit }));
-        continue;
-      }
-
       const rateLimitKey = `x:${action.xEvent}:${action.channelId}`;
 
       // Check stored rate limit
@@ -137,7 +111,7 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
       const xAction = xEvent === "follow-user" ? "follow"
         : xEvent === "unfollow-user" ? "unfollow"
         : xEvent;
-      const actionBody: Record<string, unknown> = { channelId: action.channelId, targetUserId: userId, action: xAction };
+      const actionBody: Record<string, unknown> = { channelId: action.channelId, targetUserId: userId, action: xAction, flowId: flowId || null };
       if (xAction === "create-dm" && action.messageText) {
         actionBody.messageText = String(action.messageText).replace(/\$(user|event)\.(\w+)/g, (_, _prefix, field) => {
           const val = payload?.[field];
@@ -153,7 +127,13 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
         body: JSON.stringify(actionBody),
       });
 
-      const body = await res.json() as { ok: boolean; rateLimited?: boolean; rateLimitRemaining?: number; rateLimitReset?: string };
+      const body = await res.json() as { ok: boolean; rateLimited?: boolean; rateLimitRemaining?: number; rateLimitReset?: string; insufficientCredit?: boolean };
+
+      // Credit exhausted: link declined to call the X API at all (non-BYOK channel, balance <= 0)
+      if (body.insufficientCredit) {
+        console.log(JSON.stringify({ event: "xaction_insufficient_credit", tenantId, xEvent: action.xEvent, channelId: action.channelId }));
+        continue;
+      }
 
       // Update rate limit tracking
       if (body.rateLimitReset) {
@@ -165,10 +145,6 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
 
       if (body.rateLimited) {
         rateLimited.push({ action: { ...action, userId }, retryAt: body.rateLimitReset || new Date(Date.now() + 15 * 60 * 1000).toISOString() });
-      } else {
-        await env.FLOW_DB.prepare(
-          "INSERT INTO rate_limits (key, remaining, reset_at) VALUES (?, 1, ?) ON CONFLICT(key) DO UPDATE SET remaining = remaining + 1, reset_at = excluded.reset_at"
-        ).bind(dailyKey, todayEnd).run();
       }
     } else if (action.type === "webhook" && action.url) {
       const method = (action.method as string) || "POST";
@@ -242,7 +218,7 @@ app.post("/internal/trigger", async (c) => {
     const graph: FlowGraph = JSON.parse(flow.graph_json);
     const result = executeFlow(graph, eventType, payload || {});
     if (result.matched) {
-      const { stmts } = await executeActions(result.actions, userId || "", String(tenantId), c.env, payload);
+      const { stmts } = await executeActions(result.actions, userId || "", String(tenantId), c.env, payload, flow.id);
       await c.env.FLOW_DB.batch([
         c.env.FLOW_DB.prepare("INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at) VALUES (?, ?, ?, ?, 1, ?)")
           .bind(crypto.randomUUID(), flow.id, userId || "", tenantId, now),
@@ -683,7 +659,7 @@ export default {
           if (result.nodeLogs.length > 0) await emitNodeLogs(result.nodeLogs, flow.id, userId, Number(tenantId), env);
 
           if (result.actions.length > 0) {
-            const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, userId, tenantId, env, payload);
+            const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, userId, tenantId, env, payload, flow.id);
             const stmts: D1PreparedStatement[] = [
               env.FLOW_DB.prepare(
                 `INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at)
@@ -733,10 +709,16 @@ export default {
             if (!allPass) continue; // Keep waiting — event doesn't match conditions
           }
 
+          // Atomically claim this pending row before doing any async work. A duplicate/redelivered
+          // event (e.g. X webhook at-least-once delivery) or an overlapping queue invocation could
+          // otherwise match the same row twice, resolving the wait more than once and inflating
+          // "exit" counts beyond "enter" counts in analytics.
+          const claim = await env.FLOW_DB.prepare(`DELETE FROM flow_pending WHERE id = ?`).bind(pending.id).run();
+          if (!claim.meta.changes) continue; // Already claimed/resolved by another invocation
+
           const flow = await env.FLOW_DB.prepare(`SELECT graph_json, status FROM flows WHERE id = ?`)
             .bind(pending.flow_id).first<{ graph_json: string; status: string }>();
           if (!flow || flow.status !== "published") {
-            await env.FLOW_DB.prepare(`DELETE FROM flow_pending WHERE id = ?`).bind(pending.id).run();
             continue;
           }
 
@@ -745,11 +727,9 @@ export default {
           const result = resumeFromNode(graph, pending.node_id, pendingPayload, "yes");
           if (result.nodeLogs.length > 0) await emitNodeLogs(result.nodeLogs, pending.flow_id, pending.user_id, Number(pending.tenant_id), env);
 
-          const stmts: D1PreparedStatement[] = [
-            env.FLOW_DB.prepare(`DELETE FROM flow_pending WHERE id = ?`).bind(pending.id),
-          ];
+          const stmts: D1PreparedStatement[] = [];
           if (result.actions.length > 0) {
-            const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, pending.user_id, pending.tenant_id, env);
+            const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, pending.user_id, pending.tenant_id, env, undefined, pending.flow_id);
             stmts.push(
               env.FLOW_DB.prepare(
                 `INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at) VALUES (?, ?, ?, ?, 1, ?)`
@@ -763,7 +743,7 @@ export default {
               ).bind(crypto.randomUUID(), pending.flow_id, pending.user_id, pending.tenant_id, pending.payload, r.retryAt, new Date().toISOString(), JSON.stringify(r.action)));
             }
           }
-          await env.FLOW_DB.batch(stmts);
+          if (stmts.length > 0) await env.FLOW_DB.batch(stmts);
           console.log(JSON.stringify({ event: "flow_pending_resolved_yes", flowId: pending.flow_id, userId: pending.user_id, eventType }));
         }
 
@@ -791,7 +771,7 @@ export default {
           if (shouldCronFire(node.data, new Date())) {
             const result = executeFlow(graph, "cron.trigger", {});
             if (result.matched && result.actions.length > 0) {
-              const { stmts } = await executeActions(result.actions, "", flow.tenant_id, env, {});
+              const { stmts } = await executeActions(result.actions, "", flow.tenant_id, env, {}, flow.id);
               await env.FLOW_DB.batch([
                 env.FLOW_DB.prepare("INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at) VALUES (?, ?, '', ?, 1, ?)")
                   .bind(crypto.randomUUID(), flow.id, flow.tenant_id, now),
@@ -820,7 +800,7 @@ export default {
         if (row.retry_action) {
           const action = JSON.parse(row.retry_action) as ActionResult & { userId?: string };
           const retryUserId = (action.userId as string) || row.user_id;
-          const { stmts: actionStmts, rateLimited: rl } = await executeActions([action], retryUserId, row.tenant_id, env);
+          const { stmts: actionStmts, rateLimited: rl } = await executeActions([action], retryUserId, row.tenant_id, env, undefined, row.flow_id);
 
           if (rl.length > 0 && row.retry_count < 5) {
             await env.FLOW_DB.prepare(
@@ -837,12 +817,17 @@ export default {
           continue;
         }
 
+        // Atomically claim this pending row before doing any async work, to avoid double-resolving
+        // it if a previous scheduled invocation is still running (long-running fetches can overrun
+        // the 1-minute cron interval), which would otherwise emit duplicate "exit" node logs.
+        const claim = await env.FLOW_DB.prepare(`DELETE FROM flow_pending WHERE id = ?`).bind(row.id).run();
+        if (!claim.meta.changes) continue;
+
         const flow = await env.FLOW_DB.prepare(`SELECT graph_json, status FROM flows WHERE id = ?`)
           .bind(row.flow_id)
           .first<{ graph_json: string; status: string }>();
 
         if (!flow || flow.status !== "published") {
-          await env.FLOW_DB.prepare(`DELETE FROM flow_pending WHERE id = ?`).bind(row.id).run();
           continue;
         }
 
@@ -853,12 +838,10 @@ export default {
         const result = resumeFromNode(graph, row.node_id, payload, branch);
         if (result.nodeLogs.length > 0) await emitNodeLogs(result.nodeLogs, row.flow_id, row.user_id, Number(row.tenant_id), env);
 
-        const stmts: D1PreparedStatement[] = [
-          env.FLOW_DB.prepare(`DELETE FROM flow_pending WHERE id = ?`).bind(row.id),
-        ];
+        const stmts: D1PreparedStatement[] = [];
 
         if (result.actions.length > 0) {
-          const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, row.user_id, row.tenant_id, env);
+          const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, row.user_id, row.tenant_id, env, undefined, row.flow_id);
           stmts.push(
             env.FLOW_DB.prepare(
               `INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at)
@@ -884,7 +867,7 @@ export default {
           );
         }
 
-        await env.FLOW_DB.batch(stmts);
+        if (stmts.length > 0) await env.FLOW_DB.batch(stmts);
         console.log(JSON.stringify({ event: "flow_pending_executed", flowId: row.flow_id, userId: row.user_id, branch: branch || "continue", actions: result.actions }));
       } catch (e) {
         console.error(JSON.stringify({ event: "flow_pending_error", id: row.id, error: String(e) }));

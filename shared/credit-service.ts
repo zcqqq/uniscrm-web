@@ -45,7 +45,9 @@ export class CreditService {
   constructor(private db: D1Database) {}
 
   async getBalance(tenantId: number, tier: Tier, subscriptionCreatedAt: string, now: Date = new Date()): Promise<CreditBalance> {
-    const monthlyCreditMicros = TIERS[tier]?.monthly_credit_micros ?? 0;
+    // NOTE: read directly from limits["credit"], not via the generic getLimit() helper — getLimit()
+    // defaults to -1 ("unlimited") for a missing key, which would be a dangerous default for money.
+    const monthlyCreditMicros = TIERS[tier]?.limits["credit"]?.value ?? 0;
     const { start, end } = getCreditPeriod(subscriptionCreatedAt, now);
     const row = await this.db
       .prepare(

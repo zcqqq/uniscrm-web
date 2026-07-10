@@ -17,15 +17,11 @@ import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
 
 const UI = {
-  en: { allDashboards: "All Dashboards", search: "Search", delete: "Delete", noData: "No data", remove: "Remove", edit: "Edit", empty: "Select or create a dashboard", noItems: "No charts yet. Add reports from Analytics." },
-  zh: { allDashboards: "所有仪表盘", search: "搜索", delete: "删除", noData: "暂无数据", remove: "移除", edit: "编辑", empty: "选择或新建一个仪表盘", noItems: "暂无图表，从分析中添加报表。" },
+  en: { allDashboards: "All Dashboards", search: "Search", delete: "Delete", noData: "No data", remove: "Remove", edit: "Edit", empty: "Select or create a dashboard", noItems: "No charts yet. Add reports from Analytics.", small: "Small", medium: "Medium", large: "Large" },
+  zh: { allDashboards: "所有仪表盘", search: "搜索", delete: "删除", noData: "暂无数据", remove: "移除", edit: "编辑", empty: "选择或新建一个仪表盘", noItems: "暂无图表，从分析中添加报表。", small: "小", medium: "中", large: "大" },
 };
 
-const SIZES = [
-  { value: "small", label: "小" },
-  { value: "medium", label: "中" },
-  { value: "large", label: "大" },
-];
+const SIZE_VALUES = ["small", "medium", "large"] as const;
 
 export function DashboardPage() {
   const { locale } = useLocale();
@@ -208,13 +204,14 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
   const summary = (item.results as any)?.summary ?? 0;
 
   // Event Analysis's Line/Bar chart_type restricts widget size to
-  // medium/large only (see SIZES filtering below) — narrower "small" widgets
-  // don't have room for a legible time-series axis. Deliberately keyed off
-  // the chart_type value itself (shared by Event and User Analysis), not the
-  // report's analytics type.
+  // medium/large only — narrower "small" widgets don't have room for a
+  // legible time-series axis. Deliberately keyed off the chart_type value
+  // itself (shared by Event and User Analysis), not the report's analytics
+  // type. The "Small" option stays visible but disabled/grayed out (rather
+  // than removed) so the restriction is an obvious, discoverable UI state
+  // instead of a silently missing option.
   const chartType = (item.params as any)?.chart_type;
   const restrictSmall = chartType === "line" || chartType === "bar";
-  const availableSizes = restrictSmall ? SIZES.filter((sz) => sz.value !== "small") : SIZES;
 
   const formatTick = (p: unknown) => formatPeriod(p, granularity, locale, "UTC");
 
@@ -232,17 +229,21 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border">
-                {availableSizes.map((sz) => (
-                  <Button
-                    key={sz.value}
-                    variant={item.size === sz.value ? "default" : "ghost"}
-                    size="sm"
-                    className="h-6 px-2 text-xs"
-                    onClick={() => { onSizeChange(sz.value); setMenuOpen(false); }}
-                  >
-                    {sz.label}
-                  </Button>
-                ))}
+                {SIZE_VALUES.map((value) => {
+                  const disabled = value === "small" && restrictSmall;
+                  return (
+                    <Button
+                      key={value}
+                      variant={item.size === value ? "default" : "ghost"}
+                      size="sm"
+                      className="h-6 px-2 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                      disabled={disabled}
+                      onClick={() => { onSizeChange(value); setMenuOpen(false); }}
+                    >
+                      {s[value]}
+                    </Button>
+                  );
+                })}
               </div>
               <DropdownMenuItem onClick={() => navigate(`/analytics/${item.report_id}`)}>
                 {s.edit}
@@ -264,7 +265,7 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
           />
         ) : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={chartHeight}>
-            <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: granularity === "week" ? 16 : 0, left: 0 }}>
+            <LineChart data={chartData} margin={{ top: 8, right: 4, bottom: granularity === "week" ? 16 : 0, left: granularity === "week" ? 8 : 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.3} />
               <XAxis
                 dataKey="period"
@@ -272,8 +273,8 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
                 tick={{ fontSize: 9, fill: "var(--color-muted-foreground)" }}
                 tickLine={false}
                 axisLine={false}
-                angle={granularity === "week" ? -35 : 0}
-                textAnchor={granularity === "week" ? "end" : "middle"}
+                angle={granularity === "week" ? -30 : 0}
+                textAnchor="middle"
                 height={granularity === "week" ? 34 : 24}
               />
               <YAxis tick={{ fontSize: 9, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={28} />

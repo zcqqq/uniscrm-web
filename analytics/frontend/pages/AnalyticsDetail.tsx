@@ -24,11 +24,87 @@ const MODE_TITLES: Record<string, { en: string; zh: string }> = {
   user: { en: "User Analysis", zh: "用户分析" },
 };
 
+const UI = {
+  en: {
+    saved: "Saved",
+    saveFailed: "Save failed",
+    recomputeQueued: "Recompute queued",
+    recomputeFailed: "Recompute failed",
+    notComputedYet: "Not computed yet",
+    recomputing: "Recomputing...",
+    recompute: "Re-compute",
+    dataUpdated: "Data updated: ",
+    dashboardNamePrompt: "Dashboard name",
+    addedTo: "Added to",
+    newDashboard: "New Dashboard",
+    saving: "Saving...",
+    save: "Save",
+    computing: "Computing...",
+    distribution: "Distribution",
+    distributionData: "Distribution Data",
+    period: "Period",
+    count: "Count",
+    min: "Min",
+    median: "Median",
+    max: "Max",
+    line: "Line",
+    bar: "Bar",
+    data: "Data",
+    dimension: "Dimension",
+    value: "Value",
+    step1Users: "Step 1 Users",
+    completionRate: "Completion Rate",
+    funnel: "Funnel",
+    event: "Event",
+    users: "Users",
+    conv: "Conv.",
+    overall: "Overall",
+    totalUsers: "Total Users",
+  },
+  zh: {
+    saved: "已保存",
+    saveFailed: "保存失败",
+    recomputeQueued: "已重新计算",
+    recomputeFailed: "重新计算失败",
+    notComputedYet: "尚未计算",
+    recomputing: "计算中...",
+    recompute: "重新计算",
+    dataUpdated: "数据更新时间：",
+    dashboardNamePrompt: "输入仪表盘名称",
+    addedTo: "已添加到",
+    newDashboard: "新建仪表盘",
+    saving: "保存中...",
+    save: "Save",
+    computing: "查询中...",
+    distribution: "分布",
+    distributionData: "分布数据",
+    period: "时间",
+    count: "配对数",
+    min: "最小值",
+    median: "中位数",
+    max: "最大值",
+    line: "折线",
+    bar: "柱状",
+    data: "明细数据",
+    dimension: "维度",
+    value: "值",
+    step1Users: "第1步用户数",
+    completionRate: "最终转化率",
+    funnel: "漏斗",
+    event: "事件",
+    users: "用户数",
+    conv: "转化率",
+    overall: "总转化",
+    totalUsers: "用户总数",
+  },
+} as const;
+
 export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval" | "user" | "funnel" }) {
   const { id: paramId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { locale, timezone } = useLocale();
   const { toast } = useToast();
+  const t = UI[locale as "en" | "zh"];
 
   const [mode, setMode] = useState<"event" | "interval" | "user" | "funnel">(modeProp || "event");
   const [name, setName] = useState(() => (paramId ? "" : `Untitled ${MODE_TITLES[mode]?.en || "Analysis"}`));
@@ -252,10 +328,10 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     try {
       const params = buildReportParams();
       await updateReport(reportId, { name: normalizedName || null, type: mode, params });
-      toast({ description: locale === "zh" ? "已保存" : "Saved" });
+      toast({ description: t.saved });
       navigate("/analytics");
     } catch (err) {
-      const message = err instanceof Error ? err.message : (locale === "zh" ? "保存失败" : "Save failed");
+      const message = err instanceof Error ? err.message : t.saveFailed;
       toast({ variant: "destructive", description: message });
     } finally {
       setSaving(false);
@@ -269,9 +345,9 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
       await recomputeReport(reportId);
       setLoading(true);
       setPollNonce((n) => n + 1);
-      toast({ description: locale === "zh" ? "已重新计算" : "Recompute queued" });
+      toast({ description: t.recomputeQueued });
     } catch (err) {
-      const message = err instanceof Error ? err.message : (locale === "zh" ? "重新计算失败" : "Recompute failed");
+      const message = err instanceof Error ? err.message : t.recomputeFailed;
       toast({ variant: "destructive", description: message });
     } finally {
       setRecomputing(false);
@@ -279,7 +355,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   };
 
   const formatComputedAt = (iso: string | null) => {
-    if (!iso) return locale === "zh" ? "尚未计算" : "Not computed yet";
+    if (!iso) return t.notComputedYet;
     const d = new Date(iso.includes("T") || iso.endsWith("Z") ? iso : `${iso.replace(" ", "T")}Z`);
     if (isNaN(d.getTime())) return iso;
     return d.toLocaleString(locale === "zh" ? "zh-CN" : "en-US", {
@@ -350,11 +426,11 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           <UiTooltip>
             <UiTooltipTrigger asChild>
               <Button variant="outline" size="sm" disabled={!reportId || recomputing} onClick={handleRecompute}>
-                {recomputing ? (locale === "zh" ? "计算中..." : "Recomputing...") : (locale === "zh" ? "重新计算" : "Re-compute")}
+                {recomputing ? t.recomputing : t.recompute}
               </Button>
             </UiTooltipTrigger>
             <UiTooltipContent>
-              {locale === "zh" ? "数据更新时间：" : "Data updated: "}{formatComputedAt(computedAt)}
+              {t.dataUpdated}{formatComputedAt(computedAt)}
             </UiTooltipContent>
           </UiTooltip>
         </UiTooltipProvider>
@@ -364,20 +440,20 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuItem onClick={async () => {
-              const name = prompt(locale === "zh" ? "输入仪表盘名称" : "Dashboard name");
+              const name = prompt(t.dashboardNamePrompt);
               if (!name || !reportId) return;
               const res = await createDashboard(name);
               await addDashboardItem(res.dashboard.id, reportId);
               setDashboards((prev) => [{ id: res.dashboard.id, name, created_at: "", updated_at: "" }, ...prev]);
-              toast({ description: `${locale === "zh" ? "已添加到" : "Added to"} ${name}` });
+              toast({ description: `${t.addedTo} ${name}` });
             }}>
-              <span className="text-primary font-medium">+ {locale === "zh" ? "新建仪表盘" : "New Dashboard"}</span>
+              <span className="text-primary font-medium">+ {t.newDashboard}</span>
             </DropdownMenuItem>
             {dashboards.map((d) => (
               <DropdownMenuItem key={d.id} onClick={async () => {
                 if (!reportId) return;
                 await addDashboardItem(d.id, reportId);
-                toast({ description: `${locale === "zh" ? "已添加到" : "Added to"} ${d.name}` });
+                toast({ description: `${t.addedTo} ${d.name}` });
               }}>
                 {d.name}
               </DropdownMenuItem>
@@ -385,7 +461,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           </DropdownMenuContent>
         </DropdownMenu>
         <Button size="sm" onClick={handleSave} disabled={saving || !reportId}>
-          {saving ? (locale === "zh" ? "保存中..." : "Saving...") : "Save"}
+          {saving ? t.saving : t.save}
         </Button>
       </div>
 
@@ -396,7 +472,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           <div className="flex items-center justify-center py-16">
             <div className="flex items-center gap-3 text-muted-foreground">
               <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              <span className="text-sm">{locale === "zh" ? "查询中..." : "Computing..."}</span>
+              <span className="text-sm">{t.computing}</span>
             </div>
           </div>
         )}
@@ -411,26 +487,26 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           <>
             <Card className="mb-4">
               <CardContent className="p-6 pt-4">
-                <p className="text-sm font-medium text-foreground mb-4">{locale === "zh" ? "分布" : "Distribution"}</p>
+                <p className="text-sm font-medium text-foreground mb-4">{t.distribution}</p>
                 <IntervalDistributionChart slots={intervalSlots} locale={locale} tickFormatter={formatPeriod} />
               </CardContent>
             </Card>
 
             <Card className="mb-4">
               <CardContent className="p-6 pt-4 pb-0">
-                <p className="text-sm font-medium text-foreground mb-2">{locale === "zh" ? "分布数据" : "Distribution Data"}</p>
+                <p className="text-sm font-medium text-foreground mb-2">{t.distributionData}</p>
               </CardContent>
               <div className="border-t border-border">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>{locale === "zh" ? "时间" : "Period"}</TableHead>
-                      <TableHead className="text-right">{locale === "zh" ? "配对数" : "Count"}</TableHead>
-                      <TableHead className="text-right">{locale === "zh" ? "最小值" : "Min"}</TableHead>
+                      <TableHead>{t.period}</TableHead>
+                      <TableHead className="text-right">{t.count}</TableHead>
+                      <TableHead className="text-right">{t.min}</TableHead>
                       <TableHead className="text-right">P25</TableHead>
-                      <TableHead className="text-right">{locale === "zh" ? "中位数" : "Median"}</TableHead>
+                      <TableHead className="text-right">{t.median}</TableHead>
                       <TableHead className="text-right">P75</TableHead>
-                      <TableHead className="text-right">{locale === "zh" ? "最大值" : "Max"}</TableHead>
+                      <TableHead className="text-right">{t.max}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -459,13 +535,13 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               <CardContent className="p-6 pt-4">
                 <div className="flex items-center justify-end mb-4">
                   <div className="flex items-center gap-0.5 border border-border rounded-md p-0.5 bg-muted/30">
-                    {(["line", "bar"] as const).map((t) => (
+                    {(["line", "bar"] as const).map((ct) => (
                       <button
-                        key={t}
-                        onClick={() => setChartType(t)}
-                        className={`px-3 py-1 text-xs rounded font-medium transition-colors ${chartType === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                        key={ct}
+                        onClick={() => setChartType(ct)}
+                        className={`px-3 py-1 text-xs rounded font-medium transition-colors ${chartType === ct ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                       >
-                        {t === "line" ? (locale === "zh" ? "折线" : "Line") : (locale === "zh" ? "柱状" : "Bar")}
+                        {ct === "line" ? t.line : t.bar}
                       </button>
                     ))}
                   </div>
@@ -535,15 +611,15 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               return (
                 <Card className="mb-4">
                   <CardContent className="p-6 pt-4 pb-0">
-                    <p className="text-sm font-medium text-foreground mb-2">{locale === "zh" ? "明细数据" : "Data"}</p>
+                    <p className="text-sm font-medium text-foreground mb-2">{t.data}</p>
                   </CardContent>
                   <div className="border-t border-border">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>{locale === "zh" ? "时间" : "Period"}</TableHead>
-                          {hasDimension && <TableHead>{locale === "zh" ? "维度" : "Dimension"}</TableHead>}
-                          <TableHead className="text-right">{locale === "zh" ? "值" : "Value"}</TableHead>
+                          <TableHead>{t.period}</TableHead>
+                          {hasDimension && <TableHead>{t.dimension}</TableHead>}
+                          <TableHead className="text-right">{t.value}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -571,18 +647,18 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
             <>
               <div className="grid gap-4 grid-cols-2 mb-4">
                 <Card><CardContent className="p-4">
-                  <p className="text-xs text-muted-foreground">{locale === "zh" ? "第1步用户数" : "Step 1 Users"}</p>
+                  <p className="text-xs text-muted-foreground">{t.step1Users}</p>
                   <p className="text-2xl font-bold tracking-tight mt-1">{steps[0].count.toLocaleString()}</p>
                 </CardContent></Card>
                 <Card><CardContent className="p-4">
-                  <p className="text-xs text-muted-foreground">{locale === "zh" ? "最终转化率" : "Completion Rate"}</p>
+                  <p className="text-xs text-muted-foreground">{t.completionRate}</p>
                   <p className="text-2xl font-bold tracking-tight mt-1">{steps[steps.length - 1].totalRate}%</p>
                 </CardContent></Card>
               </div>
 
               <Card className="mb-4">
                 <CardContent className="p-6">
-                  <p className="text-sm font-medium text-foreground mb-4">{locale === "zh" ? "漏斗" : "Funnel"}</p>
+                  <p className="text-sm font-medium text-foreground mb-4">{t.funnel}</p>
                   <div className="space-y-3">
                     {steps.map((s, i) => (
                       <div key={i} className="flex items-center gap-3">
@@ -608,10 +684,10 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                   <table className="w-full text-sm">
                     <thead><tr className="border-b">
                       <th className="text-left px-4 py-2 font-medium text-muted-foreground">#</th>
-                      <th className="text-left px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "事件" : "Event"}</th>
-                      <th className="text-right px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "用户数" : "Users"}</th>
-                      <th className="text-right px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "转化率" : "Conv."}</th>
-                      <th className="text-right px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "总转化" : "Overall"}</th>
+                      <th className="text-left px-4 py-2 font-medium text-muted-foreground">{t.event}</th>
+                      <th className="text-right px-4 py-2 font-medium text-muted-foreground">{t.users}</th>
+                      <th className="text-right px-4 py-2 font-medium text-muted-foreground">{t.conv}</th>
+                      <th className="text-right px-4 py-2 font-medium text-muted-foreground">{t.overall}</th>
                     </tr></thead>
                     <tbody>
                       {steps.map((s, i) => (
@@ -641,7 +717,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               {singleValue ? (
                 <Card className="mb-4">
                   <CardContent className="p-6 text-center">
-                    <p className="text-xs text-muted-foreground">{config.measure === "count" ? (locale === "zh" ? "用户总数" : "Total Users") : config.measureField}</p>
+                    <p className="text-xs text-muted-foreground">{config.measure === "count" ? t.totalUsers : config.measureField}</p>
                     <p className="text-4xl font-bold tracking-tight mt-2">{Number(results.data[0].value).toLocaleString()}</p>
                   </CardContent>
                 </Card>
@@ -650,7 +726,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                   <Card className="mb-4">
                     <CardContent className="p-6 pt-4">
                       <div className="flex items-center justify-between mb-4">
-                        <p className="text-sm font-medium text-foreground">{locale === "zh" ? "分布" : "Distribution"}</p>
+                        <p className="text-sm font-medium text-foreground">{t.distribution}</p>
                         <div className="flex items-center gap-1 border rounded-md p-0.5">
                           <button onClick={() => setChartType("pie")} className={`px-2 py-1 text-xs rounded ${chartType === "pie" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>◔</button>
                           <button onClick={() => setChartType("bar")} className={`px-2 py-1 text-xs rounded ${chartType === "bar" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>▥</button>
@@ -697,8 +773,8 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                     <CardContent className="p-0">
                       <table className="w-full text-sm">
                         <thead><tr className="border-b">
-                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "维度" : "Dimension"}</th>
-                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">{locale === "zh" ? "值" : "Value"}</th>
+                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">{t.dimension}</th>
+                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">{t.value}</th>
                           <th className="text-right px-4 py-2 font-medium text-muted-foreground">%</th>
                         </tr></thead>
                         <tbody>

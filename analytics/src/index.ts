@@ -70,7 +70,7 @@ app.get("/api/reports", async (c) => {
   const total = countRow?.total || 0;
 
   const rows = await c.env.ANALYTICS_DB.prepare(
-    `SELECT id, type, params_json, status, results_json, error_message, created_at, updated_at
+    `SELECT id, name, type, params_json, status, results_json, error_message, computed_at, created_at, updated_at
      FROM analytics_reports WHERE tenant_id = ?${whereType} ORDER BY created_at DESC LIMIT ? OFFSET ?`
   ).bind(...params).all();
 

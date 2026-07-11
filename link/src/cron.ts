@@ -10,11 +10,14 @@ import { TrendVectorStore } from "./trend/storage/vectorize";
 import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
+import { runFollowersPoller } from "./services/pollers/x-followers";
+import { TenantDataDB } from "../../shared/tenant-data-db";
 
 export async function handleCron(env: Env): Promise<void> {
   await Promise.allSettled([
     handleTrendAggregation(env),
     handleTokenRefresh(env),
+    handlePolling(env),
   ]);
 }
 
@@ -163,6 +166,61 @@ async function handleTokenRefresh(env: Env): Promise<void> {
       console.log(JSON.stringify({ event: "tiktok_token_refreshed", channel_id: row.id }));
     } catch (e) {
       console.error(`TikTok token refresh error for ${row.id}:`, e);
+    }
+  }
+}
+
+async function handlePolling(env: Env): Promise<void> {
+  const PER_CHANNEL_BUDGET_MS = 20_000;
+  const TOTAL_BUDGET_MS = 50_000;
+  const REPOLL_INTERVAL_MS = 55 * 60 * 1000; // just under an hour, guards overlapping cron runs
+  const runDeadline = Date.now() + TOTAL_BUDGET_MS;
+
+  const rows = await env.LINK_DB
+    .prepare("SELECT id, config, tenant_id FROM channels WHERE channel_type = 'X' AND is_active = 1 AND is_byok = 1")
+    .all<{ id: string; config: string; tenant_id: number | null }>();
+
+  for (const row of rows.results) {
+    if (Date.now() >= runDeadline) break;
+
+    const config = JSON.parse(row.config) as ByokConfig & { x_user_id?: string };
+    if (!config.x_user_id || !row.tenant_id) continue;
+
+    const state = await env.LINK_DB
+      .prepare("SELECT backfill_complete, last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = 'followers'")
+      .bind(row.id)
+      .first<{ backfill_complete: number; last_polled_at: string | null }>();
+    if (!state) continue;
+    if (state.backfill_complete && state.last_polled_at) {
+      const elapsedMs = Date.now() - new Date(state.last_polled_at).getTime();
+      if (elapsedMs < REPOLL_INTERVAL_MS) continue;
+    }
+
+    try {
+      const creds = await getAppCredentials(env, config);
+      const tokenService = new XTokenService(env.LINK_DB, creds.clientId, creds.clientSecret);
+      const accessToken = await tokenService.getValidToken(row.id);
+
+      const tenant = await env.WEB_DB
+        .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+        .bind(row.tenant_id)
+        .first<{ d1_database_id: string | null }>();
+      if (!tenant?.d1_database_id) continue;
+
+      const tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenant.d1_database_id);
+
+      await runFollowersPoller({
+        channelId: row.id,
+        xUserId: config.x_user_id,
+        accessToken,
+        linkDb: env.LINK_DB,
+        tenantDb,
+        tenantId: row.tenant_id,
+        pipelineUser: env.PIPELINE_USER,
+        deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
+      });
+    } catch (e) {
+      console.error(`Followers poll failed for channel ${row.id}:`, e);
     }
   }
 }

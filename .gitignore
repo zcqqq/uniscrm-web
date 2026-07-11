@@ -12,3 +12,4 @@ shared-state/
 !.dev.vars.example
 .env*
 !.env.example
+.worktrees/

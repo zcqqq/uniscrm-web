@@ -13,3 +13,4 @@ shared-state/
 .env*
 !.env.example
 .worktrees/
+.claude/

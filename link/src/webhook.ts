@@ -21,7 +21,7 @@ function flattenUserPayload(userData?: Record<string, unknown>): Record<string, 
   };
 }
 
-function navigatePath(obj: unknown, path: string): unknown {
+export function navigatePath(obj: unknown, path: string): unknown {
   const parts = path.split(".");
   let current = obj;
   for (const part of parts) {

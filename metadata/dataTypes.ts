@@ -21,6 +21,12 @@ export interface EventPropMapping {
   dataId: string;
 }
 
+export interface UserMetadata {
+  sourceUserType: string;
+  linkPrefix?: string; //返回body嵌套太复杂时使用，少点代码
+  userProps: UserPropMapping[];
+}
+
 export interface EventMetadata {
   eventType: string;
   sourceEventType: string;

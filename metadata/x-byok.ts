@@ -1,5 +1,5 @@
 // https://docs.x.com/x-api/activity/introduction
-import type { PropDefinition, UserMetadata, ContentMetadata } from "./dataTypes";
+import type { PropDefinition, UserMetadata } from "./dataTypes";
 
 export const PROPS_X: PropDefinition[] = [
   {

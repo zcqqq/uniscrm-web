@@ -180,21 +180,35 @@ export async function handlePolling(env: Env): Promise<void> {
     .prepare("SELECT id, config, tenant_id FROM channels WHERE channel_type = 'X' AND is_active = 1")
     .all<{ id: string; config: string; tenant_id: number | null }>();
 
+  console.log(JSON.stringify({ event: "polling_cron_started", candidateChannels: rows.results.length }));
+
   for (const row of rows.results) {
-    if (Date.now() >= runDeadline) break;
+    if (Date.now() >= runDeadline) {
+      console.log(JSON.stringify({ event: "polling_cron_budget_exhausted", channel_id: row.id }));
+      break;
+    }
 
     const config = JSON.parse(row.config) as ByokConfig & { x_user_id?: string };
     if (!config.is_byok) continue;
-    if (!config.x_user_id || !row.tenant_id) continue;
+    if (!config.x_user_id || !row.tenant_id) {
+      console.log(JSON.stringify({ event: "followers_poll_skipped_unauthorized", channel_id: row.id, hasXUserId: !!config.x_user_id, hasTenantId: !!row.tenant_id }));
+      continue;
+    }
 
     const state = await env.LINK_DB
       .prepare("SELECT backfill_complete, last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = 'followers'")
       .bind(row.id)
       .first<{ backfill_complete: number; last_polled_at: string | null }>();
-    if (!state) continue;
+    if (!state) {
+      console.log(JSON.stringify({ event: "followers_poll_skipped_no_state_row", channel_id: row.id }));
+      continue;
+    }
     if (state.backfill_complete && state.last_polled_at) {
       const elapsedMs = Date.now() - new Date(state.last_polled_at).getTime();
-      if (elapsedMs < REPOLL_INTERVAL_MS) continue;
+      if (elapsedMs < REPOLL_INTERVAL_MS) {
+        console.log(JSON.stringify({ event: "followers_poll_skipped_too_recent", channel_id: row.id, elapsedMs }));
+        continue;
+      }
     }
 
     try {
@@ -221,7 +235,7 @@ export async function handlePolling(env: Env): Promise<void> {
         deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
       });
     } catch (e) {
-      console.error(`Followers poll failed for channel ${row.id}:`, e);
+      console.error(JSON.stringify({ event: "followers_poll_error", channel_id: row.id, error: String(e) }));
     }
   }
 }

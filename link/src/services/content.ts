@@ -189,7 +189,7 @@ export class ContentService {
       metadata: {
         type: "content",
         content_id: item.id,
-        title: item.title,
+        title: item.title ?? "",
         timestamp_ms: Date.now(),
       },
     }));

@@ -2,7 +2,7 @@ import type { TenantDataDB } from "../../../../shared/tenant-data-db";
 import type { Pipeline } from "../../types";
 import { XUsersService } from "../x-users";
 import { fetchFollowersPage } from "../x-followers-api";
-import { resolveUserProps } from "./resolve-user-props";
+import { resolveProps } from "./resolve-props";
 import { UserMetadata_X } from "../../../../metadata/x-byok";
 
 const FOLLOWERS_METADATA = UserMetadata_X.find((m) => m.sourceUserType === "get-followers")!;
@@ -53,7 +53,7 @@ async function upsertPage(
 ): Promise<number> {
   let newCount = 0;
   for (const item of items) {
-    const props = resolveUserProps(item, FOLLOWERS_METADATA.userProps, FOLLOWERS_METADATA.linkPrefix);
+    const props = resolveProps(item, FOLLOWERS_METADATA.userProps, FOLLOWERS_METADATA.linkPrefix);
     const isNew = await usersService.upsertUserFromMetadata(item, props, channelId, "X");
     if (isNew) newCount++;
   }

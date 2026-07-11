@@ -1,13 +1,13 @@
 import { navigatePath } from "../../webhook";
-import type { UserPropMapping } from "../../../../metadata/dataTypes";
+import type { PropMapping } from "../../../../metadata/dataTypes";
 
-export function resolveUserProps(
+export function resolveProps(
   item: Record<string, unknown>,
-  userProps: UserPropMapping[],
+  props: PropMapping[],
   linkPrefix?: string
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
-  for (const mapping of userProps) {
+  for (const mapping of props) {
     if (mapping.value !== undefined) {
       result[mapping.propId] = mapping.value;
       continue;

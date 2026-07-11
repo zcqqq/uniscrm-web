@@ -89,6 +89,36 @@ describe("XUsersService.upsertUserFromMetadata", () => {
     );
   });
 
+  it("writes every userProps-resolved field to its matching D1 column, not just name/username/is_followed", async () => {
+    tenantDb.query.mockResolvedValue([]);
+    const rawItem = { id: "u1" };
+    const resolvedProps = {
+      source_user_id: "u1",
+      description: "bio text",
+      followers_count: 123,
+      tweet_count: 456,
+    };
+
+    await service.upsertUserFromMetadata(rawItem, resolvedProps, "chan1", "X");
+
+    const [sql, params] = tenantDb.run.mock.calls[0];
+    expect(sql).toContain("description");
+    expect(sql).toContain("followers_count");
+    expect(sql).toContain("tweet_count");
+    expect(params).toEqual(expect.arrayContaining(["bio text", 123, 456]));
+  });
+
+  it("omits an unresolved column-mapped field from the INSERT/UPDATE entirely, rather than writing null", async () => {
+    tenantDb.query.mockResolvedValue([]);
+    const rawItem = { id: "u1" };
+    const resolvedProps = { source_user_id: "u1" }; // no description resolved
+
+    await service.upsertUserFromMetadata(rawItem, resolvedProps, "chan1", "X");
+
+    const [sql] = tenantDb.run.mock.calls[0];
+    expect(sql).not.toContain("description");
+  });
+
   it("sends only isInsight-marked props to the pipeline record, never free-text fields like description", async () => {
     tenantDb.query.mockResolvedValue([]);
     const rawItem = { id: "u1" };

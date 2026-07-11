@@ -4,6 +4,14 @@ import type { Pipeline } from "../types";
 
 const INSIGHT_PROPS = PROPS_X.filter((p) => p.isInsight);
 
+// propIds that map 1:1 to a same-named column on `user`. A resolved prop not in this
+// list only ever lives in raw_data. Extend when a new column is added to the user table.
+const USER_TABLE_COLUMNS = [
+  "name", "username", "profile_image_url", "description",
+  "followers_count", "following_count", "tweet_count", "listed_count", "like_count", "media_count",
+  "is_follow", "is_followed",
+] as const;
+
 export interface XUserData {
   id: string;
   name?: string;
@@ -110,26 +118,35 @@ export class XUsersService {
     const id = isNew ? crypto.randomUUID() : existing[0].id;
     const now = new Date().toISOString();
     const rawData = JSON.stringify(rawItem);
-    const name = resolvedProps.name != null ? String(resolvedProps.name) : null;
-    const username = resolvedProps.username != null ? String(resolvedProps.username) : null;
-    const profileImageUrl = resolvedProps.profile_image_url != null ? String(resolvedProps.profile_image_url) : null;
-    const isFollowed = resolvedProps.is_followed !== undefined ? resolvedProps.is_followed : 0;
+
+    // Any userProps-resolved field with a same-named column on `user` is written there
+    // directly. Anything resolveUserProps couldn't map only lives in raw_data (the full,
+    // unfiltered raw item stored above) — never defaulted, only ever set when present.
+    const columnValues: Record<string, unknown> = {};
+    for (const col of USER_TABLE_COLUMNS) {
+      const val = resolvedProps[col];
+      if (val !== undefined && val !== null && val !== "") columnValues[col] = val;
+    }
+    const dynamicCols = Object.keys(columnValues);
 
     // Atomic upsert: INSERT ... ON CONFLICT DO UPDATE closes the TOCTOU race where two
     // concurrent writers (e.g. a backfill poll and a real-time webhook event) both see
     // "not found" and both attempt INSERT, colliding on idx_user_channel_source.
-    const updateSets: string[] = ["raw_data = json_patch(user.raw_data, excluded.raw_data)", "updated_at = datetime('now')"];
-    if (name) updateSets.push("name = excluded.name");
-    if (username) updateSets.push("username = excluded.username");
-    if (profileImageUrl) updateSets.push("profile_image_url = excluded.profile_image_url");
-    if (resolvedProps.is_followed !== undefined) updateSets.push("is_followed = excluded.is_followed");
+    const insertCols = ["id", "channel_id", "source_user_id", "channel_type", "raw_data", ...dynamicCols, "created_at", "updated_at"];
+    const insertPlaceholders = ["?", "?", "?", "?", "?", ...dynamicCols.map(() => "?"), "datetime('now')", "datetime('now')"];
+    const insertParams = [id, channelId, sourceUserId, channelType, rawData, ...dynamicCols.map((c) => columnValues[c])];
+    const updateSets = [
+      "raw_data = json_patch(user.raw_data, excluded.raw_data)",
+      "updated_at = datetime('now')",
+      ...dynamicCols.map((c) => `${c} = excluded.${c}`),
+    ];
 
     await this.tenantDb.run(
-      `INSERT INTO user (id, channel_id, source_user_id, channel_type, name, username, profile_image_url, raw_data, is_followed, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `INSERT INTO user (${insertCols.join(", ")})
+       VALUES (${insertPlaceholders.join(", ")})
        ON CONFLICT(channel_id, source_user_id) DO UPDATE SET
          ${updateSets.join(",\n         ")}`,
-      [id, channelId, sourceUserId, channelType, name, username, profileImageUrl, rawData, isFollowed]
+      insertParams
     );
 
     if (this.pipelineUser && this.tenantId) {

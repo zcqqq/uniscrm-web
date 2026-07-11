@@ -1,3 +1,4 @@
+import { ExternalLink } from "lucide-react";
 import { cn } from "../../../shared/frontend/lib/utils";
 import type { LocalizedString } from "../../../metadata/dataTypes";
 import { t, type Locale } from "../../../metadata/locale";
@@ -11,6 +12,8 @@ interface ChannelCardProps {
   tagline: string | LocalizedString;
   /** Resolves an object `tagline` to a string. Defaults to "en". */
   locale?: Locale;
+  /** Optional link to a help doc, rendered as a prominent "Read more" link below the tagline */
+  helpUrl?: string;
   status: ChannelStatus;
   statusLabel?: string;
   createdAt?: string;
@@ -48,6 +51,7 @@ export function ChannelCard({
   name,
   tagline,
   locale = "en",
+  helpUrl,
   status,
   statusLabel,
   createdAt,
@@ -91,7 +95,20 @@ export function ChannelCard({
         </div>
 
         {/* Tagline */}
-        <p className="text-sm text-muted-foreground leading-relaxed">{taglineText}</p>
+        <div className="space-y-1.5">
+          <p className="text-sm text-muted-foreground leading-relaxed">{taglineText}</p>
+          {helpUrl && (
+            <a
+              href={helpUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+            >
+              {locale === "zh" ? "查看详情" : "Read more"}
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          )}
+        </div>
 
         {/* Extra slot (e.g. BYOK channel list) */}
         {extra && <div className="w-full">{extra}</div>}

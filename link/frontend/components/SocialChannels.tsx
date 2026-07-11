@@ -54,6 +54,7 @@ function XChannelCard({ locale }: { locale: Locale }) {
           zh: "通过UniSCRM托管的X应用同步粉丝数据、接收实时事件和私信。",
         }}
         locale={locale}
+        helpUrl="https://cobalt-fountain-6cf.notion.site/X-39a7ddccdac980fdb22ecba12c7b64bc"
         status={status}
         statusLabel={connected && username ? `@${username}` : undefined}
         createdAt={connected ? createdAt : undefined}
@@ -171,10 +172,11 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
         logo={<XLogo />}
         name="X (BYOK)"
         tagline={{
-          en: "Use your own X developer app (Bring Your Own Key) for full control and an independent webhook.",
+          en: "More features, cost of your own. Use your own X developer app (Bring Your Own Key).",
           zh: "使用自己的 X 开发者应用（Bring Your Own Key）获得完整控制权和独立 Webhook。",
         }}
         locale={locale}
+        helpUrl="https://cobalt-fountain-6cf.notion.site/X-BYOK-39a7ddccdac98043be81e1dbf211c9b9"
         status={cardStatus}
         statusLabel={connectedChannel?.username ? `@${connectedChannel.username}` : undefined}
         createdAt={activeChannel?.created_at}
@@ -299,6 +301,7 @@ function SimpleChannelCard({ config, locale }: { config: SimpleChannelConfig; lo
       name={config.name}
       tagline={config.tagline}
       locale={locale}
+      helpUrl={config.helpUrl}
       status={status}
       statusLabel={connected && displayName ? displayName : undefined}
       createdAt={connected ? createdAt : undefined}

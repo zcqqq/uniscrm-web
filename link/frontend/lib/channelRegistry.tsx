@@ -12,6 +12,8 @@ export interface SimpleChannelConfig {
   displayField: string;
   /** OAuth kick-off URL, e.g. "/api/auth/tiktok/connect" */
   connectPath: string;
+  /** Optional help doc link, rendered as a "Read more" link on the card */
+  helpUrl?: string;
 }
 
 /**
@@ -32,5 +34,6 @@ export const SIMPLE_CHANNELS: SimpleChannelConfig[] = [
     logo: <TikTokLogo />,
     displayField: "display_name",
     connectPath: "/api/auth/tiktok/connect",
+    helpUrl: "https://cobalt-fountain-6cf.notion.site/TikTok-39a7ddccdac980fd9885cc262ab18dd6",
   },
 ];

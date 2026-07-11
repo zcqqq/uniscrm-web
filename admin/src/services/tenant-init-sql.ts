@@ -51,17 +51,21 @@ export const TENANT_DB_INIT_SQL = [
   )`,
   `CREATE TABLE IF NOT EXISTS content (
     id TEXT PRIMARY KEY,
+    channel_id TEXT,
     channel_type TEXT NOT NULL,
+    content_type TEXT,
     source_content_id TEXT NOT NULL,
-    title TEXT NOT NULL,
+    title TEXT,
+    content_text TEXT,
     summary TEXT,
     status TEXT DEFAULT 'new',
     source_url TEXT,
     source_updated_at TEXT,
+    source_created_at TEXT,
     raw_data TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_content_channel_source ON content(channel_type, source_content_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_content_channel_source ON content(channel_id, source_content_id)`,
   `CREATE INDEX IF NOT EXISTS idx_content_status ON content(status)`,
 ];

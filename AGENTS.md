@@ -23,3 +23,17 @@ git分dev和main分支，提交到main分支时自动通过github部署dev环境
 大数据存储基于R2 data catalog.
 各模块间尽量减少逻辑耦合，通过数据（Cloudflare各组件）耦合。所以在Cloudflare组件的配置文件中，尽量用模块名做前后缀，如DB_WEB，而不是通用的DB、以减少各个模块间的歧义。比较特殊的是tenantdb，各个模块可能都有数据量大的表，要按租户分库放到tenantdb。
 UI：所有icons都要加上tooltip文字便于区分。
+
+## 外部公开子仓库依赖
+`link` 模块的 BYOK 凭证加密逻辑（`src/services/crypto.ts`）依赖独立公开仓库
+`uniscrm-byok`（https://github.com/zcqqq/uniscrm-byok ，本地路径与 uniscrm-web
+同级：`../uniscrm-byok`），目的是让客户可独立审计加密实现。
+`link/package.json` 通过 `"uniscrm-byok": "github:zcqqq/uniscrm-byok#v1.0.0"`
+锁定 tag 依赖（非分支）。
+
+**改动 uniscrm-byok 后必须同步**：
+1. 在 `uniscrm-byok` 仓库打新 tag 并 push
+2. 更新 `uniscrm-web/link/package.json` 里的 tag 引用
+3. 在 `uniscrm-web/link` 目录运行 `npm install`
+
+否则生产环境构建（build 始终从 `uniscrm-web` 项目发起）不会用到新代码，导致公开仓库与实际部署代码不一致。

@@ -18,7 +18,7 @@ export const TIERS: Record<Tier, TierConfig> = {
   basic: {
     tier: "basic",
     name: "Basic",
-    price_monthly: 500,
+    price_monthly: 2000,
     modules: {
       "social.channels": { enabled: true, description: "Connect to your Twitter, TikTok, ... accounts" },
       "social.flow": { enabled: true, description: "Automation flows in control" },
@@ -36,19 +36,20 @@ export const TIERS: Record<Tier, TierConfig> = {
     limits: {
       // Monthly X-action credit allowance, in micros (1,000,000 micros = $1). Resets on the
       // subscription's monthly anniversary. See shared/credit.ts and shared/credit-service.ts.
-      credit: { value: 5_000_000, description: "$5.00/month of X action credit" },
+      // 用6位小数是业界标准
+      credit: { value: 20_000_000, description: "$5.00/month of credit (for X paid APIs)" },
     },
   },
   pro: {
     tier: "pro",
     name: "Pro",
-    price_monthly: 2000,
+    price_monthly: 10000,
     modules: {
     },
     features: {
     },
     limits: {
-      credit: { value: 20_000_000, description: "$20.00/month of X action credit" },
+      credit: { value: 100_000_000, description: "$20.00/month of credit (for X paid APIs)" },
     },
   },
 };

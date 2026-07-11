@@ -97,6 +97,7 @@ export const EventMetadata_X: EventMetadata[] = [
     sourceEventType: "follow.follow",
     linkPrefix: "target.data",
     flowType: "trigger",
+    price: 0.010,
     label: { en: "Follow", zh: "关注" },
     description: { en: "Triggered when the Account follows someone", zh: "当账号关注某人时触发" },
    userProps: [
@@ -116,6 +117,7 @@ export const EventMetadata_X: EventMetadata[] = [
     sourceEventType: "follow.follow",
     linkPrefix: "source.data",
     flowType: "trigger",
+    price: 0.010,
     label: { en: "Followed", zh: "被关注" },
     description: { en: "Triggered when someone follows the Account", zh: "当有人关注账号时触发" },
     userProps: [
@@ -135,6 +137,7 @@ export const EventMetadata_X: EventMetadata[] = [
     sourceEventType: "follow.unfollow",
     linkPrefix: "target.data",
     flowType: "trigger",
+    price: 0.010,
     label: { en: "Unfollow", zh: "取关" },
     description: { en: "Triggered when the Account unfollows someone", zh: "当账号取关某人时触发" },
     userProps: [
@@ -154,6 +157,7 @@ export const EventMetadata_X: EventMetadata[] = [
     sourceEventType: "follow.unfollow",
     linkPrefix: "source.data",
     flowType: "trigger",
+    price: 0.010,
     label: { en: "Unfollowed", zh: "被取关" },
     description: { en: "Triggered when someone unfollows the Account", zh: "当有人取关账号时触发" },
     userProps: [
@@ -195,6 +199,7 @@ export const EventMetadata_X: EventMetadata[] = [
     sourceEventType: "dm.received",
     linkPrefix: "users.{direct_message_events[].message_create.sender_id}.data",
     flowType: "trigger",
+    price: 0.010,
     label: { en: "Direct Message received", zh: "收到私信" },
     description: { en: "Triggered when received a Direct Message from someone", zh: "当收到某人的私信时触发" },
     userProps: [
@@ -216,6 +221,7 @@ export const EventMetadata_X: EventMetadata[] = [
   {
     eventType: "post.create",
     sourceEventType: "post.create",
+    price: 0.005,
     label: { en: "Created a post", zh: "发帖" },
     userProps: [],
     eventProps: [],

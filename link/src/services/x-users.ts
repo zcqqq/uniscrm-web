@@ -112,22 +112,23 @@ export class XUsersService {
     const rawData = JSON.stringify(rawItem);
     const name = resolvedProps.name != null ? String(resolvedProps.name) : null;
     const username = resolvedProps.username != null ? String(resolvedProps.username) : null;
+    const isFollowed = resolvedProps.is_followed !== undefined ? resolvedProps.is_followed : 0;
 
-    if (isNew) {
-      await this.tenantDb.run(
-        `INSERT INTO user (id, channel_id, source_user_id, channel_type, name, username, raw_data, is_followed, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-        [id, channelId, sourceUserId, channelType, name, username, rawData, resolvedProps.is_followed ?? 0]
-      );
-    } else {
-      const sets: string[] = ["raw_data = ?", "updated_at = datetime('now')"];
-      const params: unknown[] = [rawData];
-      if (name) { sets.push("name = ?"); params.push(name); }
-      if (username) { sets.push("username = ?"); params.push(username); }
-      if (resolvedProps.is_followed !== undefined) { sets.push("is_followed = ?"); params.push(resolvedProps.is_followed); }
-      params.push(id);
-      await this.tenantDb.run(`UPDATE user SET ${sets.join(", ")} WHERE id = ?`, params);
-    }
+    // Atomic upsert: INSERT ... ON CONFLICT DO UPDATE closes the TOCTOU race where two
+    // concurrent writers (e.g. a backfill poll and a real-time webhook event) both see
+    // "not found" and both attempt INSERT, colliding on idx_user_channel_source.
+    const updateSets: string[] = ["raw_data = json_patch(user.raw_data, excluded.raw_data)", "updated_at = datetime('now')"];
+    if (name) updateSets.push("name = excluded.name");
+    if (username) updateSets.push("username = excluded.username");
+    if (resolvedProps.is_followed !== undefined) updateSets.push("is_followed = excluded.is_followed");
+
+    await this.tenantDb.run(
+      `INSERT INTO user (id, channel_id, source_user_id, channel_type, name, username, raw_data, is_followed, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+       ON CONFLICT(channel_id, source_user_id) DO UPDATE SET
+         ${updateSets.join(",\n         ")}`,
+      [id, channelId, sourceUserId, channelType, name, username, rawData, isFollowed]
+    );
 
     if (this.pipelineUser && this.tenantId) {
       const record: Record<string, unknown> = {

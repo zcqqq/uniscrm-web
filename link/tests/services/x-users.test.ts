@@ -46,9 +46,21 @@ describe("XUsersService.upsertUserFromMetadata", () => {
 
     expect(isNew).toBe(false);
     expect(tenantDb.run).toHaveBeenCalledWith(
-      expect.stringContaining("UPDATE user"),
+      expect.stringContaining("ON CONFLICT(channel_id, source_user_id) DO UPDATE SET"),
       expect.arrayContaining(["existing-uuid"])
     );
+  });
+
+  it("uses an atomic ON CONFLICT upsert (collision-safe) rather than a bare INSERT that could throw on collision", async () => {
+    tenantDb.query.mockResolvedValue([]);
+    const rawItem = { id: "u1", name: "Ada" };
+    const resolvedProps = { source_user_id: "u1", name: "Ada" };
+
+    await service.upsertUserFromMetadata(rawItem, resolvedProps, "chan1", "X");
+
+    const sql = tenantDb.run.mock.calls[0][0] as string;
+    expect(sql).toContain("INSERT INTO user");
+    expect(sql).toContain("ON CONFLICT(channel_id, source_user_id) DO UPDATE SET");
   });
 
   it("omits unresolved fields from the pipeline record instead of defaulting them", async () => {

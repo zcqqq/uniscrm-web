@@ -23,10 +23,10 @@
 
 ## File Structure
 
-- `metadata/dataTypes.ts` — no signature change; `PropMapping` already covers both user and content prop mappings.
-- `metadata/index.ts` — fix broken re-exports (currently references nonexistent `UserPropMapping`/`EventPropMapping` types and a nonexistent `ContentMetadata_X` from `./x`).
-- `metadata/x.ts` — add `content_type` and `contentText` prop definitions to `PROPS_X`.
-- `metadata/x-byok.ts` — unchanged (`ContentMetadata_X` already correct).
+- `metadata/dataTypes.ts` — already committed (`1e37b06`): `PropMapping` covers both user and content prop mappings, `ContentMetadata` has the right shape.
+- `metadata/index.ts` — fix broken re-exports (currently references nonexistent `UserPropMapping`/`EventPropMapping` types and a nonexistent `ContentMetadata_X` from `./x`). Not touched by `1e37b06` — still broken.
+- `metadata/x.ts` — already committed (`1e37b06`): `content_type`, `contentText`, `source_created_at` prop definitions exist in `PROPS_X`. No change needed in this plan.
+- `metadata/x-byok.ts` — already committed (`1e37b06`): `ContentMetadata_X`'s `get-posts` entry uses propId `source_created_at` (not `posted_at`) for the tweet's `created_at` — a direct 1:1 name match with its D1 column, same pattern as `content_type`. No change needed in this plan.
 - `link/src/services/pollers/resolve-props.ts` — renamed from `resolve-user-props.ts`; same logic, generic naming, fixed type import.
 - `link/src/services/pollers/x-posts.ts` — new poller, mirrors `x-followers.ts`.
 - `link/src/services/x-posts-api.ts` — new X API client, mirrors `x-followers-api.ts`.
@@ -103,14 +103,14 @@ describe("resolveProps", () => {
     const item = { id: "t1", text: "hello world", created_at: "2026-07-11T00:00:00.000Z" };
     const props: PropMapping[] = [
       { propId: "content_type", value: "TWEET" },
-      { propId: "posted_at", dataId: "{linkPrefix}.created_at" },
+      { propId: "source_created_at", dataId: "{linkPrefix}.created_at" },
       { propId: "source_content_id", dataId: "{linkPrefix}.id" },
       { propId: "contentText", dataId: "{linkPrefix}.text" },
     ];
     const result = resolveProps(item, props, "data[]");
     expect(result).toEqual({
       content_type: "TWEET",
-      posted_at: "2026-07-11T00:00:00.000Z",
+      source_created_at: "2026-07-11T00:00:00.000Z",
       source_content_id: "t1",
       contentText: "hello world",
     });
@@ -206,39 +206,17 @@ git commit -m "refactor(link): rename resolveUserProps to resolveProps, fix brok
 
 ---
 
-### Task 2: `PROPS_X` additions + `types.ts` schema types
+### Task 2: `types.ts` schema types
+
+`PROPS_X`'s `content_type`/`contentText`/`source_created_at` entries already exist (committed in `1e37b06`) — nothing to add there. This task only extends `link/src/types.ts`.
 
 **Files:**
-- Modify: `metadata/x.ts`
 - Modify: `link/src/types.ts`
 
 **Interfaces:**
-- Produces: `PROPS_X` gains `content_type` (TEXT) and `contentText` (TEXT) entries. `ContentRow` and `ChannelType` gain the fields Task 4/6 write to.
+- Produces: `ContentRow` and `ChannelType` gain the fields Task 4/6 write to.
 
-- [ ] **Step 1: Add the two new prop definitions to `PROPS_X`**
-
-In `metadata/x.ts`, add after the existing `contentText` entry is where it already lives — actually `contentText` and `source_content_id` already exist in `PROPS_X` (lines 113-122); only `content_type` is missing. Add it right after `source_content_id`:
-
-```ts
-  {
-    propId: "source_content_id",
-    dataType: "TEXT",
-    label: { en: "Source Content ID", zh: "源 Content ID" },
-  },
-  {
-    propId: "content_type",
-    dataType: "TEXT",
-    label: { en: "Content Type", zh: "内容类型" },
-  },
-  {
-    propId: "contentText",
-    dataType: "TEXT",
-    label: { en: "Content Text", zh: "内容文本" },
-  },
-```
-(replacing the existing `source_content_id`/`contentText` pair with this three-entry block — `content_type` inserted between them).
-
-- [ ] **Step 2: Update `ChannelType` and `ContentRow` in `link/src/types.ts`**
+- [ ] **Step 1: Update `ChannelType` and `ContentRow` in `link/src/types.ts`**
 
 Change:
 ```ts
@@ -270,16 +248,16 @@ export interface ContentRow {
 }
 ```
 
-- [ ] **Step 3: Typecheck**
+- [ ] **Step 2: Typecheck**
 
 Run: `cd link && npx tsc --noEmit`
 Expected: no errors. (`ContentService.syncBatch`/`update` construct `ContentRow` object literals — since all new fields are optional-shaped as `| null` and TS structural typing requires them present, this step will surface any literal that's now missing a field; fix by adding `channel_id: null, content_type: null, content_text: null, source_created_at: null` to those literals in `link/src/services/content.ts`'s `syncBatch`/`update` — do this now if `tsc` reports it.)
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add metadata/x.ts link/src/types.ts link/src/services/content.ts
-git commit -m "feat(link): add content_type/contentText props and extend ContentRow for posts polling"
+git add link/src/types.ts link/src/services/content.ts
+git commit -m "feat(link): extend ChannelType/ContentRow for posts polling"
 ```
 
 ---
@@ -453,13 +431,13 @@ describe("ContentService.upsertContentFromMetadata", () => {
     );
   });
 
-  it("writes content_type/contentText/posted_at to their mapped columns (content_type, content_text, source_created_at)", async () => {
+  it("writes content_type/contentText/source_created_at to their mapped columns (content_type, content_text, source_created_at)", async () => {
     tenantDb.query.mockResolvedValue([]);
     const resolvedProps = {
       source_content_id: "t1",
       content_type: "TWEET",
       contentText: "hello world",
-      posted_at: "2026-07-11T00:00:00.000Z",
+      source_created_at: "2026-07-11T00:00:00.000Z",
     };
 
     await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X");
@@ -473,7 +451,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
   it("omits an unresolved column-mapped field from the SQL entirely, rather than writing null", async () => {
     tenantDb.query.mockResolvedValue([]);
-    const resolvedProps = { source_content_id: "t1" }; // no content_type/contentText/posted_at resolved
+    const resolvedProps = { source_content_id: "t1" }; // no content_type/contentText/source_created_at resolved
 
     await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X");
 
@@ -534,12 +512,13 @@ Expected: FAIL — `service.upsertContentFromMetadata is not a function`
 In `link/src/services/content.ts`, add near the top (after the `EMBEDDING_MODEL` constant):
 
 ```ts
-// propId -> content column, for fields where the names diverge (unlike the `user` table's
-// 1:1 name match). A resolved prop not in this map only ever lives in raw_data.
+// propId -> content column. content_type and source_created_at are already 1:1 name
+// matches; contentText (camelCase propId) is the one that diverges from its column
+// (content_text). A resolved prop not in this map only ever lives in raw_data.
 const CONTENT_COLUMN_MAP: Record<string, string> = {
   content_type: "content_type",
   contentText: "content_text",
-  posted_at: "source_created_at",
+  source_created_at: "source_created_at",
 };
 ```
 
@@ -1281,7 +1260,7 @@ git commit -m "feat(link): remove content row-count cap (no confirmation path fo
 **Spec coverage:**
 - Request shape (`exclude`, `tweet.fields`, no `expansions`) — Task 5. ✓
 - `content` table schema rebuild (channel_id, content_type, content_text, source_created_at, nullable title) — Task 3, `tenant-init-sql.ts` in Task 3 Step 1. ✓
-- Column mapping (`CONTENT_COLUMN_MAP`) — Task 4. ✓
+- Column mapping (`CONTENT_COLUMN_MAP`, using the actual committed propIds `content_type`/`contentText`/`source_created_at`) — Task 4. ✓
 - `ContentService.upsertContentFromMetadata` incl. atomic upsert, embedding trigger — Task 4. ✓
 - Poller backfill/incremental phases, cron wiring, oauth seeding — Tasks 6-7. ✓
 - `buildEmbeddingText` fix — Task 4 Step 4. ✓

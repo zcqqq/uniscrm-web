@@ -81,14 +81,71 @@ export class XUsersService {
       for (const prop of INSIGHT_PROPS) {
         const pm = (user as Record<string, unknown>).public_metrics as Record<string, unknown> | undefined;
         const val = prop.propId.includes("_count")
-          ? pm?.[prop.propId] ?? 0
-          : (user as Record<string, unknown>)[prop.propId] ?? null;
-        record[prop.propId] = val;
+          ? pm?.[prop.propId]
+          : (user as Record<string, unknown>)[prop.propId];
+        if (val !== undefined && val !== null) {
+          record[prop.propId] = val;
+        }
       }
       await this.pipelineUser.send([record]).catch((err) => {
         console.error(JSON.stringify({ event: "pipeline_user_error", error: String(err) }));
       });
     }
+  }
+
+  async upsertUserFromMetadata(
+    rawItem: Record<string, unknown>,
+    resolvedProps: Record<string, unknown>,
+    channelId: string,
+    channelType: string
+  ): Promise<boolean> {
+    const sourceUserId = String(resolvedProps.source_user_id ?? rawItem.id ?? "");
+    if (!sourceUserId) throw new Error("upsertUserFromMetadata: missing source_user_id");
+
+    const existing = await this.tenantDb.query<{ id: string }>(
+      "SELECT id FROM user WHERE channel_id = ? AND source_user_id = ?",
+      [channelId, sourceUserId]
+    );
+    const isNew = existing.length === 0;
+    const id = isNew ? crypto.randomUUID() : existing[0].id;
+    const now = new Date().toISOString();
+    const rawData = JSON.stringify(rawItem);
+    const name = resolvedProps.name != null ? String(resolvedProps.name) : null;
+    const username = resolvedProps.username != null ? String(resolvedProps.username) : null;
+
+    if (isNew) {
+      await this.tenantDb.run(
+        `INSERT INTO user (id, channel_id, source_user_id, channel_type, name, username, raw_data, is_followed, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+        [id, channelId, sourceUserId, channelType, name, username, rawData, resolvedProps.is_followed ?? 0]
+      );
+    } else {
+      const sets: string[] = ["raw_data = ?", "updated_at = datetime('now')"];
+      const params: unknown[] = [rawData];
+      if (name) { sets.push("name = ?"); params.push(name); }
+      if (username) { sets.push("username = ?"); params.push(username); }
+      if (resolvedProps.is_followed !== undefined) { sets.push("is_followed = ?"); params.push(resolvedProps.is_followed); }
+      params.push(id);
+      await this.tenantDb.run(`UPDATE user SET ${sets.join(", ")} WHERE id = ?`, params);
+    }
+
+    if (this.pipelineUser && this.tenantId) {
+      const record: Record<string, unknown> = {
+        tenant_id: this.tenantId,
+        id,
+        channel_id: channelId,
+        source_user_id: sourceUserId,
+        channel_type: channelType,
+        created_at: now,
+        updated_at: now,
+        ...resolvedProps,
+      };
+      await this.pipelineUser.send([record]).catch((err) => {
+        console.error(JSON.stringify({ event: "pipeline_user_error", error: String(err) }));
+      });
+    }
+
+    return isNew;
   }
 
   async setUserActive(userId: string, active: boolean): Promise<void> {

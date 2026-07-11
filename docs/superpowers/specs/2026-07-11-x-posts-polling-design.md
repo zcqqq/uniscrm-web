@@ -21,7 +21,7 @@ Some fields (`non_public_metrics`, `organic_metrics`, `promoted_metrics`) need e
 
 Current schema lacks `channel_id` (only `channel_type`), has no column matching `content_text`/`content_type`, and `title` is `NOT NULL` (tweets have no title). SQLite can't `ALTER COLUMN` to drop `NOT NULL`, so this is a table rebuild, not a plain `ALTER TABLE`.
 
-New migration `link/migrations/0005_content_posts_columns.sql`:
+`content`/`user` live in **per-tenant** D1 databases (provisioned once via `admin/src/services/tenant-init-sql.ts`, no migration runner) — not in `LINK_DB`, so this is not a `link/migrations/*.sql` file (that directory only applies to `LINK_DB`: `channels`, `channel_poll_state`, etc.). This is a one-off SQL script run directly against each tenant DB via `wrangler d1 execute --file`, same as the earlier `user`-table column additions:
 
 ```sql
 ALTER TABLE content RENAME TO content_old;

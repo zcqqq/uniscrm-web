@@ -1,0 +1,112 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const runFollowersPollerMock = vi.fn().mockResolvedValue(undefined);
+const getAppCredentialsMock = vi.fn().mockResolvedValue({ clientId: "cid", clientSecret: "csecret" });
+const getValidTokenMock = vi.fn().mockResolvedValue("tok");
+
+vi.mock("../../src/services/pollers/x-followers", () => ({
+  runFollowersPoller: (...args: unknown[]) => runFollowersPollerMock(...args),
+}));
+
+vi.mock("../../src/services/app-credentials", () => ({
+  getAppCredentials: (...args: unknown[]) => getAppCredentialsMock(...args),
+}));
+
+vi.mock("../../src/services/x-token", () => ({
+  XTokenService: class {
+    getValidToken(...args: unknown[]) {
+      return getValidTokenMock(...args);
+    }
+  },
+}));
+
+vi.mock("../../src/services/x-webhook", () => ({
+  XActivityService: class {},
+}));
+
+vi.mock("../../../shared/tenant-data-db", () => ({
+  TenantDataDB: class {},
+}));
+
+import { handlePolling } from "../../src/cron";
+
+// Two channel rows: one is BYOK only via config.is_byok (DB column absent/0), the other
+// has config.is_byok falsy. Only the first should reach runFollowersPoller.
+function createMockLinkDb() {
+  const channelRows = [
+    {
+      id: "chan-byok-config",
+      tenant_id: 1,
+      config: JSON.stringify({ is_byok: true, x_user_id: "xuser-1" }),
+    },
+    {
+      id: "chan-not-byok",
+      tenant_id: 2,
+      config: JSON.stringify({ is_byok: false, x_user_id: "xuser-2" }),
+    },
+  ];
+
+  const pollStateRow = { backfill_complete: 0, last_polled_at: null };
+
+  const prepare = vi.fn().mockImplementation((sql: string) => {
+    if (sql.includes("FROM channels")) {
+      return {
+        all: vi.fn().mockResolvedValue({ results: channelRows }),
+      };
+    }
+    if (sql.includes("channel_poll_state")) {
+      return {
+        bind: vi.fn().mockReturnValue({
+          first: vi.fn().mockResolvedValue(pollStateRow),
+        }),
+      };
+    }
+    throw new Error(`Unexpected SQL in test: ${sql}`);
+  });
+
+  return { prepare };
+}
+
+function createMockWebDb() {
+  return {
+    prepare: vi.fn().mockReturnValue({
+      bind: vi.fn().mockReturnValue({
+        first: vi.fn().mockResolvedValue({ d1_database_id: "tenant-db-id" }),
+      }),
+    }),
+  };
+}
+
+describe("handlePolling channel selection", () => {
+  beforeEach(() => {
+    runFollowersPollerMock.mockClear();
+    getAppCredentialsMock.mockClear();
+    getValidTokenMock.mockClear();
+  });
+
+  it("only polls channels that are BYOK per config.is_byok, not the DB is_byok column", async () => {
+    const linkDb = createMockLinkDb();
+    const webDb = createMockWebDb();
+
+    const env = {
+      LINK_DB: linkDb as unknown as D1Database,
+      WEB_DB: webDb as unknown as D1Database,
+      CF_ACCOUNT_ID: "acct",
+      CF_D1_API_TOKEN: "token",
+      PIPELINE_USER: undefined,
+    } as any;
+
+    await handlePolling(env);
+
+    // The query itself must not filter on the DB column is_byok.
+    const channelsCall = linkDb.prepare.mock.calls.find((c: unknown[]) => (c[0] as string).includes("FROM channels"));
+    expect(channelsCall![0]).not.toMatch(/is_byok\s*=\s*1/);
+
+    // Only the config.is_byok=true channel should reach the poller.
+    expect(runFollowersPollerMock).toHaveBeenCalledTimes(1);
+    expect(runFollowersPollerMock.mock.calls[0][0]).toMatchObject({
+      channelId: "chan-byok-config",
+      xUserId: "xuser-1",
+    });
+  });
+});

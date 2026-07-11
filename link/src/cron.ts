@@ -170,20 +170,21 @@ async function handleTokenRefresh(env: Env): Promise<void> {
   }
 }
 
-async function handlePolling(env: Env): Promise<void> {
+export async function handlePolling(env: Env): Promise<void> {
   const PER_CHANNEL_BUDGET_MS = 20_000;
   const TOTAL_BUDGET_MS = 50_000;
   const REPOLL_INTERVAL_MS = 55 * 60 * 1000; // just under an hour, guards overlapping cron runs
   const runDeadline = Date.now() + TOTAL_BUDGET_MS;
 
   const rows = await env.LINK_DB
-    .prepare("SELECT id, config, tenant_id FROM channels WHERE channel_type = 'X' AND is_active = 1 AND is_byok = 1")
+    .prepare("SELECT id, config, tenant_id FROM channels WHERE channel_type = 'X' AND is_active = 1")
     .all<{ id: string; config: string; tenant_id: number | null }>();
 
   for (const row of rows.results) {
     if (Date.now() >= runDeadline) break;
 
     const config = JSON.parse(row.config) as ByokConfig & { x_user_id?: string };
+    if (!config.is_byok) continue;
     if (!config.x_user_id || !row.tenant_id) continue;
 
     const state = await env.LINK_DB

@@ -18,7 +18,9 @@ This is the first of what will likely become several polling endpoints (for X an
 
 ## Metadata
 
-`metadata/x-byok.ts` (existing draft, kept as an intentionally self-contained file — no import from `metadata/x.ts`) gets one addition: a static `is_followed: 1` prop on the `get-followers` entry, since everyone returned by that endpoint is, by definition, a follower.
+`metadata/x-byok.ts` (existing draft) gets one addition: a static `is_followed: 1` prop on the `get-followers` entry, since everyone returned by that endpoint is, by definition, a follower.
+
+**Correction (2026-07-11, post-implementation):** an earlier revision of this spec described the file's duplicated `PROPS_X` block as "intentionally self-contained." That was wrong — the duplication was a copy-paste artifact from an earlier implementation task, not a deliberate choice. `PROPS_X` is maintained in `metadata/x.ts` only; `x-byok.ts` now holds just `UserMetadata_X`.
 
 ```ts
 export const UserMetadata_X_BYOK: UserMetadata[] = [

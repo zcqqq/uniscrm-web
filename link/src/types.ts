@@ -62,18 +62,22 @@ export interface Session {
 }
 
 // Content types
-export type ChannelType = "LOCAL" | "NOTION" | "TIKTOK";
+export type ChannelType = "LOCAL" | "NOTION" | "TIKTOK" | "X";
 export type ContentStatus = "new" | "pending" | "published" | "ignored";
 
 export interface ContentRow {
   id: string;
+  channel_id: string | null;
   channel_type: ChannelType;
+  content_type: string | null;
   source_content_id: string;
-  title: string;
+  title: string | null;
+  content_text: string | null;
   summary: string | null;
   status: ContentStatus;
   source_url: string | null;
   source_updated_at: string | null;
+  source_created_at: string | null;
   raw_data: string;
   created_at: string;
   updated_at: string;

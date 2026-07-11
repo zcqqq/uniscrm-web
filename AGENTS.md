@@ -37,3 +37,17 @@ UI：所有icons都要加上tooltip文字便于区分。
 3. 在 `uniscrm-web/link` 目录运行 `npm install`
 
 否则生产环境构建（build 始终从 `uniscrm-web` 项目发起）不会用到新代码，导致公开仓库与实际部署代码不一致。
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (zcqqq/uniscrm-web), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary, label strings identical to role names. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.

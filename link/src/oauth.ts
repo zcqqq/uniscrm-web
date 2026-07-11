@@ -143,6 +143,16 @@ export function oauthRoutes() {
         .bind(updatedConfig, xUser.id, tokens.accessToken(), byokChannelId)
         .run();
 
+      // Seed (or reset, on re-authorization) followers poll state — full backfill runs again
+      await c.env.LINK_DB
+        .prepare(
+          `INSERT INTO channel_poll_state (channel_id, poller_name, cursor, backfill_complete, last_polled_at, updated_at)
+           VALUES (?, 'followers', NULL, 0, NULL, datetime('now'))
+           ON CONFLICT(channel_id, poller_name) DO UPDATE SET cursor = NULL, backfill_complete = 0, last_polled_at = NULL, updated_at = datetime('now')`
+        )
+        .bind(byokChannelId)
+        .run();
+
       // Setup subscriptions using BYOK channel's own webhook URL
       const tokenService = new XTokenService(c.env.LINK_DB, clientId, clientSecret);
       try {

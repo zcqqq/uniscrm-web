@@ -115,7 +115,7 @@ export const api = {
   // Social
   channels: {
     xStatus: () =>
-      request<{ connected: boolean; username?: string; channel_id?: string }>("/channels/x/status"),
+      request<{ connected: boolean; username?: string; channel_id?: string; created_at?: string; has_byok?: boolean }>("/channels/x/status"),
     disconnectX: () =>
       request<{ ok: boolean }>("/channels/x", { method: "DELETE" }),
     byokCreate: (credentials: { channel_id?: string; client_id: string; client_secret: string; consumer_secret: string }) =>
@@ -124,13 +124,16 @@ export const api = {
         body: JSON.stringify(credentials),
       }),
     byokList: () =>
-      request<Array<{ id: string; username: string | null; x_user_id: string | null; authorized: boolean }>>("/channels/x/byok"),
+      request<Array<{ id: string; username: string | null; x_user_id: string | null; authorized: boolean; created_at: string }>>("/channels/x/byok"),
     byokDelete: (channelId: string) =>
       request<{ ok: boolean }>(`/channels/x/byok/${channelId}`, { method: "DELETE" }),
-    tiktokStatus: () =>
-      request<{ connected: boolean; displayName?: string; channel_id?: string }>("/channels/tiktok/status"),
-    disconnectTiktok: () =>
-      request<{ ok: boolean }>("/channels/tiktok", { method: "DELETE" }),
+    // Generic simple OAuth channel (single-connection): status/disconnect for any channel type
+    simpleStatus: (type: string, displayField: string) =>
+      request<{ connected: boolean; displayName?: string; channel_id?: string; created_at?: string }>(
+        `/channels/${type}/status?field=${displayField}`
+      ),
+    simpleDisconnect: (type: string) =>
+      request<{ ok: boolean }>(`/channels/${type}`, { method: "DELETE" }),
     getConfig: (type: string) =>
       request<{ config: Record<string, unknown> | null }>(`/channels/${type}/config`),
     saveConfig: (type: string, config: Record<string, unknown>) =>

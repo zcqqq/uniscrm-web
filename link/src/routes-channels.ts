@@ -32,12 +32,18 @@ export function channelsRoutes() {
 
   // --- X ---
   router.get("/x/status", async (c) => {
-    const row = await c.env.LINK_DB
-      .prepare("SELECT id, config FROM channels WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1 LIMIT 1")
-      .first<{ id: string; config: string }>();
-    if (!row) return c.json({ connected: false });
+    const [row, byokRow] = await Promise.all([
+      c.env.LINK_DB
+        .prepare("SELECT id, config, created_at FROM channels WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1 AND (is_byok = 0 OR is_byok IS NULL) LIMIT 1")
+        .first<{ id: string; config: string; created_at: string }>(),
+      c.env.LINK_DB
+        .prepare("SELECT id FROM channels WHERE channel_type = 'X' AND is_active = 1 AND is_byok = 1 LIMIT 1")
+        .first<{ id: string }>(),
+    ]);
+    const hasByok = !!byokRow;
+    if (!row) return c.json({ connected: false, has_byok: hasByok });
     const config = JSON.parse(row.config) as { x_username?: string };
-    return c.json({ connected: true, username: config.x_username, channel_id: row.id });
+    return c.json({ connected: true, username: config.x_username, channel_id: row.id, created_at: row.created_at, has_byok: hasByok });
   });
 
   router.delete("/x", async (c) => {
@@ -91,22 +97,20 @@ export function channelsRoutes() {
   router.get("/x/byok", async (c) => {
     const tenantId = c.get("tenantId" as never) as number;
     const rows = await c.env.LINK_DB
-      .prepare("SELECT id, config FROM channels WHERE tenant_id = ? AND channel_type = 'X' AND is_active = 1")
+      .prepare("SELECT id, config, created_at FROM channels WHERE tenant_id = ? AND channel_type = 'X' AND is_active = 1 AND is_byok = 1")
       .bind(tenantId)
-      .all<{ id: string; config: string }>();
+      .all<{ id: string; config: string; created_at: string }>();
 
-    const byokChannels = rows.results
-      .map((r) => {
-        const cfg = JSON.parse(r.config) as ByokConfig & { x_username?: string; x_user_id?: string };
-        if (!cfg.is_byok) return null;
-        return {
-          id: r.id,
-          username: cfg.x_username || null,
-          x_user_id: cfg.x_user_id || null,
-          authorized: !!cfg.x_user_id,
-        };
-      })
-      .filter(Boolean);
+    const byokChannels = rows.results.map((r) => {
+      const cfg = JSON.parse(r.config) as ByokConfig & { x_username?: string; x_user_id?: string };
+      return {
+        id: r.id,
+        username: cfg.x_username || null,
+        x_user_id: cfg.x_user_id || null,
+        authorized: !!cfg.x_user_id,
+        created_at: r.created_at,
+      };
+    });
 
     return c.json(byokChannels);
   });
@@ -122,22 +126,6 @@ export function channelsRoutes() {
   });
 
   // --- TikTok ---
-  router.get("/tiktok/status", async (c) => {
-    const row = await c.env.LINK_DB
-      .prepare("SELECT id, config FROM channels WHERE channel_type = 'TIKTOK' AND is_active = 1 LIMIT 1")
-      .first<{ id: string; config: string }>();
-    if (!row) return c.json({ connected: false });
-    const config = JSON.parse(row.config) as { display_name?: string };
-    return c.json({ connected: true, displayName: config.display_name, channel_id: row.id });
-  });
-
-  router.delete("/tiktok", async (c) => {
-    await c.env.LINK_DB
-      .prepare("UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE channel_type = 'TIKTOK' AND is_active = 1")
-      .run();
-    return c.json({ ok: true });
-  });
-
   router.post("/tiktok/sync", async (c) => {
     const tenantDataDb = c.get("tenantDataDb" as never) as TenantDataDB;
     const tenantId = c.get("tenantId" as never) as number;
@@ -266,6 +254,37 @@ export function channelsRoutes() {
     const service = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);
     const result = await service.syncBatch("NOTION", items);
     return c.json(result);
+  });
+
+  // --- Generic simple OAuth channel (single-connection, connect/disconnect only) ---
+  // Used by any channel that just needs: is it connected? what's the display name? disconnect.
+  // Channel-specific OAuth connect/callback still live under /api/auth/:type/*.
+  router.get("/:type/status", async (c) => {
+    const tenantId = c.get("tenantId" as never) as number;
+    const channelType = c.req.param("type").toUpperCase();
+    const displayField = c.req.query("field") || "display_name";
+    const row = await c.env.LINK_DB
+      .prepare("SELECT id, config, created_at FROM channels WHERE tenant_id = ? AND channel_type = ? AND is_active = 1 LIMIT 1")
+      .bind(tenantId, channelType)
+      .first<{ id: string; config: string; created_at: string }>();
+    if (!row) return c.json({ connected: false });
+    const config = JSON.parse(row.config) as Record<string, unknown>;
+    return c.json({
+      connected: true,
+      displayName: config[displayField] as string | undefined,
+      channel_id: row.id,
+      created_at: row.created_at,
+    });
+  });
+
+  router.delete("/:type", async (c) => {
+    const tenantId = c.get("tenantId" as never) as number;
+    const channelType = c.req.param("type").toUpperCase();
+    await c.env.LINK_DB
+      .prepare("UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE tenant_id = ? AND channel_type = ? AND is_active = 1")
+      .bind(tenantId, channelType)
+      .run();
+    return c.json({ ok: true });
   });
 
   router.get("/:type/config", async (c) => {

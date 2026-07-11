@@ -112,6 +112,7 @@ export class XUsersService {
     const rawData = JSON.stringify(rawItem);
     const name = resolvedProps.name != null ? String(resolvedProps.name) : null;
     const username = resolvedProps.username != null ? String(resolvedProps.username) : null;
+    const profileImageUrl = resolvedProps.profile_image_url != null ? String(resolvedProps.profile_image_url) : null;
     const isFollowed = resolvedProps.is_followed !== undefined ? resolvedProps.is_followed : 0;
 
     // Atomic upsert: INSERT ... ON CONFLICT DO UPDATE closes the TOCTOU race where two
@@ -120,14 +121,15 @@ export class XUsersService {
     const updateSets: string[] = ["raw_data = json_patch(user.raw_data, excluded.raw_data)", "updated_at = datetime('now')"];
     if (name) updateSets.push("name = excluded.name");
     if (username) updateSets.push("username = excluded.username");
+    if (profileImageUrl) updateSets.push("profile_image_url = excluded.profile_image_url");
     if (resolvedProps.is_followed !== undefined) updateSets.push("is_followed = excluded.is_followed");
 
     await this.tenantDb.run(
-      `INSERT INTO user (id, channel_id, source_user_id, channel_type, name, username, raw_data, is_followed, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `INSERT INTO user (id, channel_id, source_user_id, channel_type, name, username, profile_image_url, raw_data, is_followed, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
        ON CONFLICT(channel_id, source_user_id) DO UPDATE SET
          ${updateSets.join(",\n         ")}`,
-      [id, channelId, sourceUserId, channelType, name, username, rawData, isFollowed]
+      [id, channelId, sourceUserId, channelType, name, username, profileImageUrl, rawData, isFollowed]
     );
 
     if (this.pipelineUser && this.tenantId) {
@@ -139,8 +141,13 @@ export class XUsersService {
         channel_type: channelType,
         created_at: now,
         updated_at: now,
-        ...resolvedProps,
       };
+      // Only isInsight-marked props are dynamic columns on the R2 pipeline's user
+      // table (docs/superpowers/specs/2026-06-26-r2-data-catalog-migration-design.md) —
+      // free-text fields like description stay D1-only (raw_data), never reach R2.
+      for (const prop of INSIGHT_PROPS) {
+        if (prop.propId in resolvedProps) record[prop.propId] = resolvedProps[prop.propId];
+      }
       await this.pipelineUser.send([record]).catch((err) => {
         console.error(JSON.stringify({ event: "pipeline_user_error", error: String(err) }));
       });

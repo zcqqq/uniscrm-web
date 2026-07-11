@@ -75,6 +75,39 @@ describe("XUsersService.upsertUserFromMetadata", () => {
     expect(record).not.toHaveProperty("is_followed");
     expect(record.source_user_id).toBe("u1");
   });
+
+  it("writes profile_image_url to its dedicated D1 column", async () => {
+    tenantDb.query.mockResolvedValue([]);
+    const rawItem = { id: "u1" };
+    const resolvedProps = { source_user_id: "u1", profile_image_url: "https://example.com/pic.jpg" };
+
+    await service.upsertUserFromMetadata(rawItem, resolvedProps, "chan1", "X");
+
+    expect(tenantDb.run).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining(["https://example.com/pic.jpg"])
+    );
+  });
+
+  it("sends only isInsight-marked props to the pipeline record, never free-text fields like description", async () => {
+    tenantDb.query.mockResolvedValue([]);
+    const rawItem = { id: "u1" };
+    const resolvedProps = {
+      source_user_id: "u1",
+      description: "some free-text bio that should never reach R2",
+      profile_image_url: "https://example.com/pic.jpg",
+      followers_count: 42, // isInsight: true in PROPS_X
+      is_followed: 1, // isInsight: true in PROPS_X
+    };
+
+    await service.upsertUserFromMetadata(rawItem, resolvedProps, "chan1", "X");
+
+    const record = pipelineUser.send.mock.calls[0][0][0];
+    expect(record.followers_count).toBe(42);
+    expect(record.is_followed).toBe(1);
+    expect(record).not.toHaveProperty("description");
+    expect(record).not.toHaveProperty("profile_image_url");
+  });
 });
 
 describe("XUsersService.upsertUser (regression: no more zero-defaulting)", () => {

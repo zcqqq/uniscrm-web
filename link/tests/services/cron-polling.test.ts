@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { XUnauthorizedError } from "../../src/services/x-errors";
 
 const runFollowersPollerMock = vi.fn().mockResolvedValue(undefined);
@@ -96,6 +96,10 @@ describe("handlePolling channel selection", () => {
     refreshAccessTokenMock.mockClear();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("only polls channels that are BYOK per config.is_byok, not the DB is_byok column", async () => {
     const linkDb = createMockLinkDb();
     const webDb = createMockWebDb();
@@ -175,5 +179,34 @@ describe("handlePolling channel selection", () => {
     expect(runFollowersPollerMock).toHaveBeenCalledTimes(2);
     expect(runFollowersPollerMock.mock.calls[0][0]).toMatchObject({ accessToken: "tok" });
     expect(runFollowersPollerMock.mock.calls[1][0]).toMatchObject({ accessToken: "refreshed-tok" });
+  });
+
+  it("gives the posts poller its own fresh budget even if followers consumed most of the tick (starvation fix)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+
+    // Simulate a long-running followers backfill that eats nearly the whole
+    // 50s TOTAL_BUDGET_MS before posts even starts.
+    runFollowersPollerMock.mockImplementationOnce(async () => {
+      vi.advanceTimersByTime(45_000);
+    });
+
+    const linkDb = createMockLinkDb();
+    const webDb = createMockWebDb();
+    const env = {
+      LINK_DB: linkDb as unknown as D1Database,
+      WEB_DB: webDb as unknown as D1Database,
+      CF_ACCOUNT_ID: "acct",
+      CF_D1_API_TOKEN: "token",
+      PIPELINE_USER: undefined,
+    } as any;
+
+    await handlePolling(env);
+
+    expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
+    const postsDeadline = runPostsPollerMock.mock.calls[0][0].deadline as number;
+    // Under the old shared-runDeadline logic, posts would get at most ~5s
+    // (runDeadline - elapsed). The fix grants a fresh ~20s PER_CHANNEL_BUDGET_MS.
+    expect(postsDeadline - Date.now()).toBeGreaterThan(15_000);
   });
 });

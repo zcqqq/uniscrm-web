@@ -243,6 +243,14 @@ export async function handlePolling(env: Env): Promise<void> {
     // Each poller gets its own try/catch: a failure in one (e.g. a transient X API
     // error) must not prevent the other from running for the same channel/tick.
     //
+    // Each poller also gets its own PER_CHANNEL_BUDGET_MS window, computed fresh
+    // right before it starts — NOT capped by the shared runDeadline. Capping against
+    // runDeadline previously meant a slow/large followers backfill could consume the
+    // whole tick's budget, leaving posts a deadline already in the past and starving
+    // it indefinitely (observed: posts_poll_deadline_reached with pagesFetched=0 on
+    // every tick). runDeadline still bounds the outer loop (see the check above) so
+    // a channel with a stuck poller can't block the rest of the channel list forever.
+    //
     // A 401 mid-poll means the access token was rejected even though getValidToken
     // thought it was still fresh (early revocation, clock skew, concurrent refresh
     // elsewhere). Force one refresh (which persists the new token to channels.config
@@ -258,7 +266,7 @@ export async function handlePolling(env: Env): Promise<void> {
             tenantDb,
             tenantId: row.tenant_id,
             pipelineUser: env.PIPELINE_USER,
-            deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
+            deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
           });
         } catch (e) {
           if (!(e instanceof XUnauthorizedError)) throw e;
@@ -272,7 +280,7 @@ export async function handlePolling(env: Env): Promise<void> {
             tenantDb,
             tenantId: row.tenant_id,
             pipelineUser: env.PIPELINE_USER,
-            deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
+            deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
           });
         }
       } catch (e) {
@@ -292,7 +300,7 @@ export async function handlePolling(env: Env): Promise<void> {
             tenantId: row.tenant_id,
             ai: env.AI,
             vectorize: env.VECTORIZE,
-            deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
+            deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
           });
         } catch (e) {
           if (!(e instanceof XUnauthorizedError)) throw e;
@@ -307,7 +315,7 @@ export async function handlePolling(env: Env): Promise<void> {
             tenantId: row.tenant_id,
             ai: env.AI,
             vectorize: env.VECTORIZE,
-            deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
+            deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
           });
         }
       } catch (e) {

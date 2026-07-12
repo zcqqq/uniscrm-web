@@ -10,6 +10,26 @@ export interface PropDefinition {
   enums?: { value: string | number; label: LocalizedString }[];
 }
 
+// propId 是这个 registry 里的主键，语义上不允许重复（下游按 propId 关联/upsert）。
+// 用 const 类型参数保留数组字面量里每个 propId 的字符串字面量类型，递归比对；
+// 一旦有重复，参数类型退化为一个提示重复值的模板字面量字符串，
+// 数组字面量传进去会直接类型不匹配——在 x.ts 编辑处就能看到编译错误，不用等测试跑起来。
+type DuplicatePropId<T extends readonly PropDefinition[], Seen extends string = never> =
+  T extends readonly [infer Head extends PropDefinition, ...infer Rest extends readonly PropDefinition[]]
+    ? Head["propId"] extends Seen
+      ? Head["propId"]
+      : DuplicatePropId<Rest, Seen | Head["propId"]>
+    : never;
+
+// 返回类型固定为 readonly PropDefinition[]（而不是推断出的 T），
+// 否则消费方访问某个字面量元素没显式写的可选字段（如 isInsight/enums）时会报错——
+// 那是字面量类型精确导致的噪音，不是真正的重复检测。
+export function definePropDefinitions<const T extends readonly PropDefinition[]>(
+  defs: DuplicatePropId<T> extends never ? T : `Duplicate propId: ${DuplicatePropId<T> & string}`
+): readonly PropDefinition[] {
+  return defs as unknown as readonly PropDefinition[];
+}
+
 export interface PropMapping {
   propId: string;
   dataId?: string;

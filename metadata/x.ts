@@ -1,7 +1,8 @@
 // https://docs.x.com/x-api/activity/introduction
-import type { PropDefinition, EventMetadata, ContentMetadata } from "./dataTypes";
+import type { EventMetadata, ContentMetadata } from "./dataTypes";
+import { definePropDefinitions } from "./dataTypes";
 
-export const PROPS_X: PropDefinition[] = [
+export const PROPS_X = definePropDefinitions([
   {
     propId: "user_id", //用于content commerce等与USER表关联
     dataType: "TEXT",
@@ -116,11 +117,24 @@ export const PROPS_X: PropDefinition[] = [
     label: { en: "Source Content ID", zh: "源 Content ID" },
   },
   {
-    propId: "contentText",
+    propId: "content_text",
     dataType: "TEXT",
     label: { en: "Content Text", zh: "内容文本" },
   },
-];
+  {
+    propId: "bookmark_count",
+    isInsight: true,
+    dataType: "INT",
+    label: { en: "Bookmarks", zh: "收藏数" },
+  },
+  {
+    propId: "impression_count",
+    isInsight: true,
+    dataType: "INT",
+    label: { en: "Impressions", zh: "曝光数" },
+  },
+  
+]);
 
 export const EventMetadata_X: EventMetadata[] = [
   {

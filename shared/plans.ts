@@ -25,7 +25,7 @@ export const TIERS: Record<Tier, TierConfig> = {
       "social.users": { enabled: true, description: "Unlimited tracked users" },
       "social.lists": { enabled: false },
       profile: { enabled: false },
-      content: { enabled: false },
+      content: { enabled: true },
       commerce: { enabled: false },
       insight: { enabled: true, description: "Unlimited analytics and dashboards" },
       settings: { enabled: true },

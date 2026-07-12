@@ -121,4 +121,28 @@ describe("handlePolling channel selection", () => {
       xUserId: "xuser-1",
     });
   });
+
+  it("still runs the posts poller when the followers poller throws (independent failure isolation)", async () => {
+    runFollowersPollerMock.mockRejectedValueOnce(new Error("X get-followers failed: 503 Service Unavailable"));
+
+    const linkDb = createMockLinkDb();
+    const webDb = createMockWebDb();
+
+    const env = {
+      LINK_DB: linkDb as unknown as D1Database,
+      WEB_DB: webDb as unknown as D1Database,
+      CF_ACCOUNT_ID: "acct",
+      CF_D1_API_TOKEN: "token",
+      PIPELINE_USER: undefined,
+    } as any;
+
+    await expect(handlePolling(env)).resolves.not.toThrow();
+
+    expect(runFollowersPollerMock).toHaveBeenCalledTimes(1);
+    expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
+    expect(runPostsPollerMock.mock.calls[0][0]).toMatchObject({
+      channelId: "chan-byok-config",
+      xUserId: "xuser-1",
+    });
+  });
 });

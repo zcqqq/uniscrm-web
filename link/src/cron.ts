@@ -196,26 +196,35 @@ export async function handlePolling(env: Env): Promise<void> {
       continue;
     }
 
-    const state = await env.LINK_DB
-      .prepare("SELECT backfill_complete, last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = 'followers'")
-      .bind(row.id)
-      .first<{ backfill_complete: number; last_polled_at: string | null }>();
-    if (!state) {
-      console.log(JSON.stringify({ event: "followers_poll_skipped_no_state_row", channel_id: row.id }));
-      continue;
-    }
-    if (state.backfill_complete && state.last_polled_at) {
-      const elapsedMs = Date.now() - new Date(state.last_polled_at).getTime();
-      if (elapsedMs < REPOLL_INTERVAL_MS) {
-        console.log(JSON.stringify({ event: "followers_poll_skipped_too_recent", channel_id: row.id, elapsedMs }));
-        continue;
+    const shouldPoll = async (pollerName: "followers" | "posts"): Promise<boolean> => {
+      const state = await env.LINK_DB
+        .prepare("SELECT backfill_complete, last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = ?")
+        .bind(row.id, pollerName)
+        .first<{ backfill_complete: number; last_polled_at: string | null }>();
+      if (!state) {
+        console.log(JSON.stringify({ event: `${pollerName}_poll_skipped_no_state_row`, channel_id: row.id }));
+        return false;
       }
-    }
+      if (state.backfill_complete && state.last_polled_at) {
+        const elapsedMs = Date.now() - new Date(state.last_polled_at).getTime();
+        if (elapsedMs < REPOLL_INTERVAL_MS) {
+          console.log(JSON.stringify({ event: `${pollerName}_poll_skipped_too_recent`, channel_id: row.id, elapsedMs }));
+          return false;
+        }
+      }
+      return true;
+    };
 
+    const pollFollowers = await shouldPoll("followers");
+    const pollPosts = await shouldPoll("posts");
+    if (!pollFollowers && !pollPosts) continue;
+
+    let accessToken: string;
+    let tenantDb: TenantDataDB;
     try {
       const creds = await getAppCredentials(env, config);
       const tokenService = new XTokenService(env.LINK_DB, creds.clientId, creds.clientSecret);
-      const accessToken = await tokenService.getValidToken(row.id);
+      accessToken = await tokenService.getValidToken(row.id);
 
       const tenant = await env.WEB_DB
         .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
@@ -223,32 +232,47 @@ export async function handlePolling(env: Env): Promise<void> {
         .first<{ d1_database_id: string | null }>();
       if (!tenant?.d1_database_id) continue;
 
-      const tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenant.d1_database_id);
-
-      await runFollowersPoller({
-        channelId: row.id,
-        xUserId: config.x_user_id,
-        accessToken,
-        linkDb: env.LINK_DB,
-        tenantDb,
-        tenantId: row.tenant_id,
-        pipelineUser: env.PIPELINE_USER,
-        deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
-      });
-
-      await runPostsPoller({
-        channelId: row.id,
-        xUserId: config.x_user_id,
-        accessToken,
-        linkDb: env.LINK_DB,
-        tenantDb,
-        tenantId: row.tenant_id,
-        ai: env.AI,
-        vectorize: env.VECTORIZE,
-        deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
-      });
+      tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenant.d1_database_id);
     } catch (e) {
-      console.error(JSON.stringify({ event: "followers_poll_error", channel_id: row.id, error: String(e) }));
+      console.error(JSON.stringify({ event: "poll_setup_error", channel_id: row.id, error: String(e) }));
+      continue;
+    }
+
+    // Each poller gets its own try/catch: a failure in one (e.g. a transient X API
+    // error) must not prevent the other from running for the same channel/tick.
+    if (pollFollowers) {
+      try {
+        await runFollowersPoller({
+          channelId: row.id,
+          xUserId: config.x_user_id,
+          accessToken,
+          linkDb: env.LINK_DB,
+          tenantDb,
+          tenantId: row.tenant_id,
+          pipelineUser: env.PIPELINE_USER,
+          deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
+        });
+      } catch (e) {
+        console.error(JSON.stringify({ event: "followers_poll_error", channel_id: row.id, error: String(e) }));
+      }
+    }
+
+    if (pollPosts) {
+      try {
+        await runPostsPoller({
+          channelId: row.id,
+          xUserId: config.x_user_id,
+          accessToken,
+          linkDb: env.LINK_DB,
+          tenantDb,
+          tenantId: row.tenant_id,
+          ai: env.AI,
+          vectorize: env.VECTORIZE,
+          deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
+        });
+      } catch (e) {
+        console.error(JSON.stringify({ event: "posts_poll_error", channel_id: row.id, error: String(e) }));
+      }
     }
   }
 }

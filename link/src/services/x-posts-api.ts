@@ -1,3 +1,5 @@
+import { XUnauthorizedError } from "./x-errors";
+
 // Full set of tweet.fields the get-posts endpoint supports — requested in full so
 // raw_data (see ContentService.upsertContentFromMetadata) captures everything X returns.
 // https://docs.x.com/x-api/users/get-posts
@@ -53,6 +55,9 @@ export async function fetchPostsPage(
 
   if (res.status === 429) {
     return { page: { data: [] }, rateLimited: true };
+  }
+  if (res.status === 401) {
+    throw new XUnauthorizedError(`X get-posts failed: ${res.status} ${await res.text()}`);
   }
   if (!res.ok) {
     throw new Error(`X get-posts failed: ${res.status} ${await res.text()}`);

@@ -12,6 +12,7 @@ import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { runFollowersPoller } from "./services/pollers/x-followers";
 import { runPostsPoller } from "./services/pollers/x-posts";
+import { XUnauthorizedError } from "./services/x-errors";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 
 export async function handleCron(env: Env): Promise<void> {
@@ -221,9 +222,10 @@ export async function handlePolling(env: Env): Promise<void> {
 
     let accessToken: string;
     let tenantDb: TenantDataDB;
+    let tokenService: XTokenService;
     try {
       const creds = await getAppCredentials(env, config);
-      const tokenService = new XTokenService(env.LINK_DB, creds.clientId, creds.clientSecret);
+      tokenService = new XTokenService(env.LINK_DB, creds.clientId, creds.clientSecret);
       accessToken = await tokenService.getValidToken(row.id);
 
       const tenant = await env.WEB_DB
@@ -240,18 +242,39 @@ export async function handlePolling(env: Env): Promise<void> {
 
     // Each poller gets its own try/catch: a failure in one (e.g. a transient X API
     // error) must not prevent the other from running for the same channel/tick.
+    //
+    // A 401 mid-poll means the access token was rejected even though getValidToken
+    // thought it was still fresh (early revocation, clock skew, concurrent refresh
+    // elsewhere). Force one refresh (which persists the new token to channels.config
+    // via XTokenService.refreshAccessToken) and retry the poller once before giving up.
     if (pollFollowers) {
       try {
-        await runFollowersPoller({
-          channelId: row.id,
-          xUserId: config.x_user_id,
-          accessToken,
-          linkDb: env.LINK_DB,
-          tenantDb,
-          tenantId: row.tenant_id,
-          pipelineUser: env.PIPELINE_USER,
-          deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
-        });
+        try {
+          await runFollowersPoller({
+            channelId: row.id,
+            xUserId: config.x_user_id,
+            accessToken,
+            linkDb: env.LINK_DB,
+            tenantDb,
+            tenantId: row.tenant_id,
+            pipelineUser: env.PIPELINE_USER,
+            deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
+          });
+        } catch (e) {
+          if (!(e instanceof XUnauthorizedError)) throw e;
+          console.log(JSON.stringify({ event: "followers_poll_token_refresh_retry", channel_id: row.id }));
+          accessToken = await tokenService.refreshAccessToken(row.id);
+          await runFollowersPoller({
+            channelId: row.id,
+            xUserId: config.x_user_id,
+            accessToken,
+            linkDb: env.LINK_DB,
+            tenantDb,
+            tenantId: row.tenant_id,
+            pipelineUser: env.PIPELINE_USER,
+            deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
+          });
+        }
       } catch (e) {
         console.error(JSON.stringify({ event: "followers_poll_error", channel_id: row.id, error: String(e) }));
       }
@@ -259,17 +282,34 @@ export async function handlePolling(env: Env): Promise<void> {
 
     if (pollPosts) {
       try {
-        await runPostsPoller({
-          channelId: row.id,
-          xUserId: config.x_user_id,
-          accessToken,
-          linkDb: env.LINK_DB,
-          tenantDb,
-          tenantId: row.tenant_id,
-          ai: env.AI,
-          vectorize: env.VECTORIZE,
-          deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
-        });
+        try {
+          await runPostsPoller({
+            channelId: row.id,
+            xUserId: config.x_user_id,
+            accessToken,
+            linkDb: env.LINK_DB,
+            tenantDb,
+            tenantId: row.tenant_id,
+            ai: env.AI,
+            vectorize: env.VECTORIZE,
+            deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
+          });
+        } catch (e) {
+          if (!(e instanceof XUnauthorizedError)) throw e;
+          console.log(JSON.stringify({ event: "posts_poll_token_refresh_retry", channel_id: row.id }));
+          accessToken = await tokenService.refreshAccessToken(row.id);
+          await runPostsPoller({
+            channelId: row.id,
+            xUserId: config.x_user_id,
+            accessToken,
+            linkDb: env.LINK_DB,
+            tenantDb,
+            tenantId: row.tenant_id,
+            ai: env.AI,
+            vectorize: env.VECTORIZE,
+            deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
+          });
+        }
       } catch (e) {
         console.error(JSON.stringify({ event: "posts_poll_error", channel_id: row.id, error: String(e) }));
       }

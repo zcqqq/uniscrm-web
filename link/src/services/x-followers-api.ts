@@ -1,3 +1,5 @@
+import { XUnauthorizedError } from "./x-errors";
+
 // Full set of user.fields the get-followers endpoint supports — requested in full so
 // raw_data (see XUsersService.upsertUserFromMetadata) captures everything X returns,
 // not just the subset UserMetadata_X happens to map into structured columns.
@@ -57,6 +59,9 @@ export async function fetchFollowersPage(
 
   if (res.status === 429) {
     return { page: { data: [] }, rateLimited: true };
+  }
+  if (res.status === 401) {
+    throw new XUnauthorizedError(`X get-followers failed: ${res.status} ${await res.text()}`);
   }
   if (!res.ok) {
     throw new Error(`X get-followers failed: ${res.status} ${await res.text()}`);

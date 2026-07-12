@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { XUnauthorizedError } from "../../src/services/x-errors";
 
 const runFollowersPollerMock = vi.fn().mockResolvedValue(undefined);
 const runPostsPollerMock = vi.fn().mockResolvedValue(undefined);
 const getAppCredentialsMock = vi.fn().mockResolvedValue({ clientId: "cid", clientSecret: "csecret" });
 const getValidTokenMock = vi.fn().mockResolvedValue("tok");
+const refreshAccessTokenMock = vi.fn().mockResolvedValue("refreshed-tok");
 
 vi.mock("../../src/services/pollers/x-followers", () => ({
   runFollowersPoller: (...args: unknown[]) => runFollowersPollerMock(...args),
@@ -21,6 +23,9 @@ vi.mock("../../src/services/x-token", () => ({
   XTokenService: class {
     getValidToken(...args: unknown[]) {
       return getValidTokenMock(...args);
+    }
+    refreshAccessToken(...args: unknown[]) {
+      return refreshAccessTokenMock(...args);
     }
   },
 }));
@@ -88,6 +93,7 @@ describe("handlePolling channel selection", () => {
     runPostsPollerMock.mockClear();
     getAppCredentialsMock.mockClear();
     getValidTokenMock.mockClear();
+    refreshAccessTokenMock.mockClear();
   });
 
   it("only polls channels that are BYOK per config.is_byok, not the DB is_byok column", async () => {
@@ -144,5 +150,30 @@ describe("handlePolling channel selection", () => {
       channelId: "chan-byok-config",
       xUserId: "xuser-1",
     });
+  });
+
+  it("force-refreshes the token and retries once when a poller throws XUnauthorizedError", async () => {
+    runFollowersPollerMock
+      .mockRejectedValueOnce(new XUnauthorizedError("X get-followers failed: 401 Unauthorized"))
+      .mockResolvedValueOnce(undefined);
+
+    const linkDb = createMockLinkDb();
+    const webDb = createMockWebDb();
+
+    const env = {
+      LINK_DB: linkDb as unknown as D1Database,
+      WEB_DB: webDb as unknown as D1Database,
+      CF_ACCOUNT_ID: "acct",
+      CF_D1_API_TOKEN: "token",
+      PIPELINE_USER: undefined,
+    } as any;
+
+    await expect(handlePolling(env)).resolves.not.toThrow();
+
+    expect(refreshAccessTokenMock).toHaveBeenCalledTimes(1);
+    expect(refreshAccessTokenMock).toHaveBeenCalledWith("chan-byok-config");
+    expect(runFollowersPollerMock).toHaveBeenCalledTimes(2);
+    expect(runFollowersPollerMock.mock.calls[0][0]).toMatchObject({ accessToken: "tok" });
+    expect(runFollowersPollerMock.mock.calls[1][0]).toMatchObject({ accessToken: "refreshed-tok" });
   });
 });

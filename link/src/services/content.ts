@@ -4,6 +4,15 @@ import type { ChannelItem } from "../channels/interface";
 
 const EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5";
 
+// propId -> content column. content_type and source_created_at are already 1:1 name
+// matches; contentText (camelCase propId) is the one that diverges from its column
+// (content_text). A resolved prop not in this map only ever lives in raw_data.
+const CONTENT_COLUMN_MAP: Record<string, string> = {
+  content_type: "content_type",
+  contentText: "content_text",
+  source_created_at: "source_created_at",
+};
+
 export interface SyncResult {
   added: number;
   updated: number;
@@ -110,6 +119,69 @@ export class ContentService {
     return { added, updated, skipped };
   }
 
+  async upsertContentFromMetadata(
+    rawItem: Record<string, unknown>,
+    resolvedProps: Record<string, unknown>,
+    channelId: string,
+    channelType: ChannelType
+  ): Promise<boolean> {
+    const sourceContentId = String(resolvedProps.source_content_id ?? "");
+    if (!sourceContentId) throw new Error("upsertContentFromMetadata: missing source_content_id");
+
+    const existing = await this.tenantDb.query<{ id: string }>(
+      "SELECT id FROM content WHERE channel_id = ? AND source_content_id = ?",
+      [channelId, sourceContentId]
+    );
+    const isNew = existing.length === 0;
+    const id = isNew ? crypto.randomUUID() : existing[0].id;
+    const now = new Date().toISOString();
+    const rawData = JSON.stringify(rawItem);
+
+    const columnValues: Record<string, unknown> = {};
+    for (const [propId, column] of Object.entries(CONTENT_COLUMN_MAP)) {
+      const val = resolvedProps[propId];
+      if (val !== undefined && val !== null && val !== "") columnValues[column] = val;
+    }
+    const dynamicCols = Object.keys(columnValues);
+
+    const insertCols = ["id", "channel_id", "channel_type", "source_content_id", "raw_data", ...dynamicCols, "created_at", "updated_at"];
+    const insertPlaceholders = ["?", "?", "?", "?", "?", ...dynamicCols.map(() => "?"), "?", "?"];
+    const insertParams = [id, channelId, channelType, sourceContentId, rawData, ...dynamicCols.map((c) => columnValues[c]), now, now];
+    const updateSets = [
+      "raw_data = json_patch(content.raw_data, excluded.raw_data)",
+      "updated_at = excluded.updated_at",
+      ...dynamicCols.map((c) => `${c} = excluded.${c}`),
+    ];
+
+    await this.tenantDb.run(
+      `INSERT INTO content (${insertCols.join(", ")})
+       VALUES (${insertPlaceholders.join(", ")})
+       ON CONFLICT(channel_id, source_content_id) DO UPDATE SET
+         ${updateSets.join(",\n         ")}`,
+      insertParams
+    );
+
+    await this.embedContents([{
+      id,
+      channel_id: channelId,
+      channel_type: channelType,
+      content_type: (columnValues.content_type as string) ?? null,
+      source_content_id: sourceContentId,
+      title: null,
+      content_text: (columnValues.content_text as string) ?? null,
+      summary: null,
+      status: "new",
+      source_url: null,
+      source_updated_at: null,
+      source_created_at: (columnValues.source_created_at as string) ?? null,
+      raw_data: rawData,
+      created_at: now,
+      updated_at: now,
+    }]);
+
+    return isNew;
+  }
+
   async list(channelType?: ChannelType): Promise<ContentRow[]> {
     if (channelType) {
       return this.tenantDb.query<ContentRow>(
@@ -169,7 +241,7 @@ export class ContentService {
   }
 
   private buildEmbeddingText(item: ContentRow): string {
-    const parts = [item.title];
+    const parts = [item.title || item.content_text || ""];
     if (item.summary) parts.push(item.summary);
     return parts.join(" | ");
   }

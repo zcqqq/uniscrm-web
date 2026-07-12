@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const runFollowersPollerMock = vi.fn().mockResolvedValue(undefined);
+const runPostsPollerMock = vi.fn().mockResolvedValue(undefined);
 const getAppCredentialsMock = vi.fn().mockResolvedValue({ clientId: "cid", clientSecret: "csecret" });
 const getValidTokenMock = vi.fn().mockResolvedValue("tok");
 
 vi.mock("../../src/services/pollers/x-followers", () => ({
   runFollowersPoller: (...args: unknown[]) => runFollowersPollerMock(...args),
+}));
+
+vi.mock("../../src/services/pollers/x-posts", () => ({
+  runPostsPoller: (...args: unknown[]) => runPostsPollerMock(...args),
 }));
 
 vi.mock("../../src/services/app-credentials", () => ({
@@ -80,6 +85,7 @@ function createMockWebDb() {
 describe("handlePolling channel selection", () => {
   beforeEach(() => {
     runFollowersPollerMock.mockClear();
+    runPostsPollerMock.mockClear();
     getAppCredentialsMock.mockClear();
     getValidTokenMock.mockClear();
   });
@@ -105,6 +111,12 @@ describe("handlePolling channel selection", () => {
     // Only the config.is_byok=true channel should reach the poller.
     expect(runFollowersPollerMock).toHaveBeenCalledTimes(1);
     expect(runFollowersPollerMock.mock.calls[0][0]).toMatchObject({
+      channelId: "chan-byok-config",
+      xUserId: "xuser-1",
+    });
+
+    expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
+    expect(runPostsPollerMock.mock.calls[0][0]).toMatchObject({
       channelId: "chan-byok-config",
       xUserId: "xuser-1",
     });

@@ -11,6 +11,7 @@ import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { runFollowersPoller } from "./services/pollers/x-followers";
+import { runPostsPoller } from "./services/pollers/x-posts";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 
 export async function handleCron(env: Env): Promise<void> {
@@ -232,6 +233,18 @@ export async function handlePolling(env: Env): Promise<void> {
         tenantDb,
         tenantId: row.tenant_id,
         pipelineUser: env.PIPELINE_USER,
+        deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
+      });
+
+      await runPostsPoller({
+        channelId: row.id,
+        xUserId: config.x_user_id,
+        accessToken,
+        linkDb: env.LINK_DB,
+        tenantDb,
+        tenantId: row.tenant_id,
+        ai: env.AI,
+        vectorize: env.VECTORIZE,
         deadline: Math.min(Date.now() + PER_CHANNEL_BUDGET_MS, runDeadline),
       });
     } catch (e) {

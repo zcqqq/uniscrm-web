@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import type { Env } from "./types";
 import type { TenantDataDB } from "../../shared/tenant-data-db";
 import { ContentService } from "./services/content";
-import { LimitService } from "./services/limit";
 import { NotionChannel } from "./channels/notion";
 import { TikTokChannel } from "./channels/tiktok";
 import {
@@ -142,9 +141,7 @@ export function channelsRoutes() {
     const tiktok = new TikTokChannel(config.access_token);
     const items = await tiktok.fetchItems({});
 
-    const limitService = new LimitService(tenantDataDb, c.env.VECTORIZE);
     const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);
-    await limitService.enforceContentLimit(items.length);
     const result = await contentService.syncBatch("TIKTOK", items);
     return c.json({ status: "ok", ...result });
   });
@@ -224,7 +221,6 @@ export function channelsRoutes() {
     const memberId = c.get("memberId" as never) as string;
     const tenantDataDb = c.get("tenantDataDb" as never) as TenantDataDB;
     const tenantId = c.get("tenantId" as never) as number;
-    const { confirmed } = await c.req.json<{ confirmed?: boolean }>().catch(() => ({ confirmed: undefined }));
 
     const ch = await c.env.LINK_DB
       .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND member_id = ? AND is_active = 1")
@@ -241,15 +237,6 @@ export function channelsRoutes() {
     const folderConfig = JSON.parse(configRow.config) as { folder_ids?: string[]; access_token?: string };
     const channel = new NotionChannel(notionConfig.access_token);
     const items = await channel.fetchItems(folderConfig);
-
-    const limitService = new LimitService(tenantDataDb, c.env.VECTORIZE);
-    const check = await limitService.checkContentLimit(items.length);
-    if (!check.allowed && !confirmed) {
-      return c.json({ needsConfirmation: true, overflow: check.overflow, wouldDelete: check.wouldDelete });
-    }
-    if (!check.allowed && confirmed) {
-      await limitService.enforceContentLimit(check.overflow);
-    }
 
     const service = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);
     const result = await service.syncBatch("NOTION", items);
@@ -323,11 +310,6 @@ export function channelsRoutes() {
         const notionConfig = JSON.parse(ch.config) as { access_token: string };
         const channel = new NotionChannel(notionConfig.access_token);
         const items = await channel.fetchItems(config);
-        const limitService = new LimitService(tenantDataDb, c.env.VECTORIZE);
-        const check = await limitService.checkContentLimit(items.length);
-        if (!check.allowed) {
-          return c.json({ ok: true, needsConfirmation: true, overflow: check.overflow, wouldDelete: check.wouldDelete });
-        }
         const service = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);
         const result = await service.syncBatch("NOTION", items);
         return c.json({ ok: true, sync: result });

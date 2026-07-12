@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import type { Env } from "./types";
 import type { TenantDataDB } from "../../shared/tenant-data-db";
 import { ContentService } from "./services/content";
-import { LimitService } from "./services/limit";
 
 type ChannelType = "LOCAL" | "NOTION" | "TIKTOK";
 const VALID_CHANNELS: ChannelType[] = ["LOCAL", "NOTION", "TIKTOK"];
@@ -13,7 +12,7 @@ export function contentsRoutes() {
   router.post("/items/sync", async (c) => {
     const tenantDataDb = c.get("tenantDataDb" as never) as TenantDataDB;
     const tenantId = c.get("tenantId" as never) as number;
-    const { channel_type, items, confirmed } = await c.req.json<{
+    const { channel_type, items } = await c.req.json<{
       channel_type: string;
       items: {
         source_content_id: string;
@@ -23,7 +22,6 @@ export function contentsRoutes() {
         source_updated_at: string | null;
         raw_data?: Record<string, unknown>;
       }[];
-      confirmed?: boolean;
     }>();
 
     if (!VALID_CHANNELS.includes(channel_type as ChannelType)) {
@@ -36,15 +34,6 @@ export function contentsRoutes() {
       if (!item.source_content_id || !item.title) {
         return c.json({ error: "Each item must have source_content_id and title" }, 400);
       }
-    }
-
-    const limitService = new LimitService(tenantDataDb, c.env.VECTORIZE);
-    const check = await limitService.checkContentLimit(items.length);
-    if (!check.allowed && !confirmed) {
-      return c.json({ needsConfirmation: true, overflow: check.overflow, wouldDelete: check.wouldDelete });
-    }
-    if (!check.allowed && confirmed) {
-      await limitService.enforceContentLimit(check.overflow);
     }
 
     const service = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);

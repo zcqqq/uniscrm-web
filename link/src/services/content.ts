@@ -1,16 +1,27 @@
 import type { TenantDataDB } from "../../../shared/tenant-data-db";
-import type { ContentRow, ChannelType } from "../types";
+import type { ContentRow, ChannelType, Pipeline } from "../types";
 import type { ChannelItem } from "../channels/interface";
+import { PROPS_X } from "../../../metadata/x";
 
 const EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5";
 
-// propId -> content column. content_type and source_created_at are already 1:1 name
-// matches; contentText (camelCase propId) is the one that diverges from its column
-// (content_text). A resolved prop not in this map only ever lives in raw_data.
+// Same isInsight registry x-users.ts uses for the user/event pipelines — only
+// props marked isInsight:true become dynamic columns on the R2 Iceberg tables.
+const INSIGHT_PROPS = PROPS_X.filter((p) => p.isInsight);
+
+// propId -> content column. All propIds here are 1:1 name matches with their column.
+// A resolved prop not in this map only ever lives in raw_data.
 const CONTENT_COLUMN_MAP: Record<string, string> = {
   content_type: "content_type",
-  contentText: "content_text",
+  content_text: "content_text",
+  title: "title",
   source_created_at: "source_created_at",
+  bookmark_count: "bookmark_count",
+  impression_count: "impression_count",
+  like_count: "like_count",
+  quote_count: "quote_count",
+  reply_count: "reply_count",
+  repost_count: "repost_count",
 };
 
 export interface SyncResult {
@@ -26,7 +37,8 @@ export class ContentService {
     private tenantDb: TenantDataDB,
     private vectorize: VectorizeIndex,
     private ai: Ai,
-    private tenantId: number
+    private tenantId: number,
+    private pipelineContent?: Pipeline
   ) {
     this.namespace = `tenant-${tenantId}`;
   }
@@ -178,6 +190,26 @@ export class ContentService {
       created_at: now,
       updated_at: now,
     }]);
+
+    if (this.pipelineContent && this.tenantId) {
+      const record: Record<string, unknown> = {
+        tenant_id: this.tenantId,
+        id,
+        channel_id: channelId,
+        channel_type: channelType,
+        source_content_id: sourceContentId,
+        created_at: now,
+        updated_at: now,
+      };
+      // Only isInsight-marked props reach R2 — free-text fields like title/content_text
+      // stay D1-only (raw_data), same rule x-users.ts follows for the user pipeline.
+      for (const prop of INSIGHT_PROPS) {
+        if (prop.propId in resolvedProps) record[prop.propId] = resolvedProps[prop.propId];
+      }
+      await this.pipelineContent.send([record]).catch((err) => {
+        console.error(JSON.stringify({ event: "pipeline_content_error", error: String(err) }));
+      });
+    }
 
     return isNew;
   }

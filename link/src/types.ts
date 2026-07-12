@@ -14,6 +14,7 @@ export interface Env {
   FLOW_QUEUE: Queue;
   PIPELINE_EVENT: Pipeline;
   PIPELINE_USER: Pipeline;
+  PIPELINE_CONTENT: Pipeline;
 
   // Config
   TREND_RETENTION_DAYS: string;

@@ -102,6 +102,30 @@ describe("runPostsPoller", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("sets content_type=ARTICLE when the tweet has an article structure, TWEET otherwise", async () => {
+    const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null });
+    const tenantDb = createMockTenantDb();
+
+    fetchMock.mockImplementationOnce(() =>
+      jsonResponse({
+        data: [
+          { id: "t1", text: "plain tweet" },
+          { id: "t2", text: "https://t.co/x", article: { title: "Free Skill - some article" } },
+        ],
+        meta: {},
+      })
+    );
+
+    await runPostsPoller(baseCtx(linkDb, tenantDb));
+
+    const inserts = tenantDb.run.mock.calls;
+    const tweetInsert = inserts.find((c: unknown[]) => (c[1] as unknown[]).includes("t1"));
+    const articleInsert = inserts.find((c: unknown[]) => (c[1] as unknown[]).includes("t2"));
+    expect(tweetInsert![1]).toContain("TWEET");
+    expect(articleInsert![1]).toContain("ARTICLE");
+    expect(articleInsert![1]).toContain("Free Skill - some article");
+  });
+
   it("post-backfill: stops after a page with zero new tweets", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
     const tenantDb = createMockTenantDb();

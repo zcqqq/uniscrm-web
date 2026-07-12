@@ -1,4 +1,5 @@
 import type { TenantDataDB } from "../../../../shared/tenant-data-db";
+import type { Pipeline } from "../../types";
 import { ContentService } from "../content";
 import { fetchPostsPage } from "../x-posts-api";
 import { resolveProps } from "./resolve-props";
@@ -15,6 +16,7 @@ export interface PostsPollerContext {
   tenantId: number;
   ai: Ai;
   vectorize: VectorizeIndex;
+  pipelineContent?: Pipeline;
   deadline: number;
 }
 
@@ -35,7 +37,7 @@ export async function runPostsPoller(ctx: PostsPollerContext): Promise<void> {
     return;
   }
 
-  const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId);
+  const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent);
   const phase = state.backfill_complete ? "incremental" : "backfill";
   console.log(JSON.stringify({ event: "posts_poll_started", channel_id: ctx.channelId, phase, cursor: state.cursor }));
 
@@ -54,6 +56,12 @@ async function upsertPage(
   let newCount = 0;
   for (const item of items) {
     const props = resolveProps(item, POSTS_METADATA.contentProps, POSTS_METADATA.linkPrefix);
+    // X Articles come back as a tweet with an extra `article` object (see
+    // _reference/x/post.json); PropMapping only supports fixed value/dataId extraction,
+    // so this presence check stays here rather than in the declarative metadata.
+    if (item.article) {
+      props.content_type = "ARTICLE";
+    }
     const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "X");
     if (isNew) newCount++;
   }

@@ -74,6 +74,10 @@ queue = "uniscrm-event-dev"
 binding = "PIPELINE_USER"
 pipeline = "b7275097961b4056b50f938eb7159ee8"
 
+[[env.dev.pipelines]]
+binding = "PIPELINE_CONTENT"
+pipeline = "137cceb43d1b4ce7be1b57c1f0c46660"
+
 [[env.dev.secrets_store_secrets]]
 binding = "ENCRYPTION_KEY"
 store_id = "358a0014b2254c2eafb877e4182fd977"

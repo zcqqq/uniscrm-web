@@ -117,6 +117,21 @@ export const PROPS_X = definePropDefinitions([
     label: { en: "Source Content ID", zh: "源 Content ID" },
   },
   {
+    propId: "content_type",
+    isInsight: true,
+    dataType: "ENUM_TEXT",
+    label: { en: "Content Type", zh: "内容类型" },
+    enums: [
+      { value: "TWEET", label: { en: "Tweet", zh: "推文" } },
+      { value: "ARTICLE", label: { en: "Article", zh: "文章" } },
+    ],
+  },
+  {
+    propId: "title",
+    dataType: "TEXT",
+    label: { en: "Title", zh: "标题" },
+  },
+  {
     propId: "content_text",
     dataType: "TEXT",
     label: { en: "Content Text", zh: "内容文本" },
@@ -133,7 +148,24 @@ export const PROPS_X = definePropDefinitions([
     dataType: "INT",
     label: { en: "Impressions", zh: "曝光数" },
   },
-  
+  {
+    propId: "quote_count",
+    isInsight: true,
+    dataType: "INT",
+    label: { en: "Quotes", zh: "Quotes" },
+  },
+  {
+    propId: "reply_count",
+    isInsight: true,
+    dataType: "INT",
+    label: { en: "Replies", zh: "回复数" },
+  },
+  {
+    propId: "repost_count",
+    isInsight: true,
+    dataType: "INT",
+    label: { en: "Reposts", zh: "转发数" },
+  },
 ]);
 
 export const EventMetadata_X: EventMetadata[] = [

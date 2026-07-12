@@ -62,6 +62,12 @@ export const TENANT_DB_INIT_SQL = [
     source_url TEXT,
     source_updated_at TEXT,
     source_created_at TEXT,
+    bookmark_count INTEGER,
+    impression_count INTEGER,
+    like_count INTEGER,
+    quote_count INTEGER,
+    reply_count INTEGER,
+    repost_count INTEGER,
     raw_data TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL

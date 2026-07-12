@@ -27,10 +27,17 @@ export const ContentMetadata_X: ContentMetadata[] = [
     sourceContentType: "get-posts", // https://docs.x.com/x-api/users/get-posts author_id=source_channel_id
     linkPrefix: "data[]",
     contentProps: [
-      { propId: "content_type", value: "TWEET" },
+      { propId: "content_type", value: "TWEET" },  //ARTICLE，参见uniscrm-web/_reference/x/post.json
       { propId: "source_created_at", dataId: "{linkPrefix}.created_at" },
       { propId: "source_content_id", dataId: "{linkPrefix}.id" },
-      { propId: "contentText", dataId: "{linkPrefix}.text" },
+      { propId: "title", dataId: "{linkPrefix}.article.title" },
+      { propId: "content_text", dataId: "{linkPrefix}.text" },
+      { propId: "bookmark_count", dataId: "{linkPrefix}.public_metrics.bookmark_count" },
+      { propId: "impression_count", dataId: "{linkPrefix}.public_metrics.impression_count" },
+      { propId: "like_count", dataId: "{linkPrefix}.public_metrics.like_count" },
+      { propId: "quote_count", dataId: "{linkPrefix}.public_metrics.quote_count" },
+      { propId: "reply_count", dataId: "{linkPrefix}.public_metrics.reply_count" },
+      { propId: "repost_count", dataId: "{linkPrefix}.public_metrics.retweet_count" },
     ],
   },
 ];

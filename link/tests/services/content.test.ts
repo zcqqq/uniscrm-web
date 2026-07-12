@@ -34,7 +34,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
   it("inserts a new content row and returns true when none exists for channel+source_content_id", async () => {
     tenantDb.query.mockResolvedValue([]);
     const rawItem = { id: "t1", text: "hello world" };
-    const resolvedProps = { source_content_id: "t1", content_type: "TWEET", contentText: "hello world" };
+    const resolvedProps = { source_content_id: "t1", content_type: "TWEET", content_text: "hello world" };
 
     const isNew = await service.upsertContentFromMetadata(rawItem, resolvedProps, "chan1", "X");
 
@@ -47,7 +47,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
   it("updates and returns false when a content row already exists", async () => {
     tenantDb.query.mockResolvedValue([{ id: "existing-uuid" }]);
-    const resolvedProps = { source_content_id: "t1", contentText: "updated text" };
+    const resolvedProps = { source_content_id: "t1", content_text: "updated text" };
 
     const isNew = await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X");
 
@@ -58,12 +58,12 @@ describe("ContentService.upsertContentFromMetadata", () => {
     );
   });
 
-  it("writes content_type/contentText/source_created_at to their mapped columns (content_type, content_text, source_created_at)", async () => {
+  it("writes content_type/content_text/source_created_at to their mapped columns (content_type, content_text, source_created_at)", async () => {
     tenantDb.query.mockResolvedValue([]);
     const resolvedProps = {
       source_content_id: "t1",
       content_type: "TWEET",
-      contentText: "hello world",
+      content_text: "hello world",
       source_created_at: "2026-07-11T00:00:00.000Z",
     };
 
@@ -76,9 +76,61 @@ describe("ContentService.upsertContentFromMetadata", () => {
     expect(params).toEqual(expect.arrayContaining(["TWEET", "hello world", "2026-07-11T00:00:00.000Z"]));
   });
 
+  it("writes title and the engagement metric props to their mapped columns", async () => {
+    tenantDb.query.mockResolvedValue([]);
+    const resolvedProps = {
+      source_content_id: "t1",
+      title: "Free Skill - some article",
+      bookmark_count: 3,
+      impression_count: 37,
+      like_count: 1,
+      quote_count: 0,
+      reply_count: 2,
+      repost_count: 5,
+    };
+
+    await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X");
+
+    const [sql, params] = tenantDb.run.mock.calls[0];
+    for (const col of ["title", "bookmark_count", "impression_count", "like_count", "quote_count", "reply_count", "repost_count"]) {
+      expect(sql).toContain(col);
+    }
+    expect(params).toEqual(expect.arrayContaining(["Free Skill - some article", 3, 37, 1, 0, 2, 5]));
+  });
+
+  it("sends only isInsight props to the content pipeline, keyed by tenant_id/id/source_content_id", async () => {
+    tenantDb.query.mockResolvedValue([]);
+    const pipelineContent = { send: vi.fn().mockResolvedValue(undefined) };
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipelineContent as any);
+    const resolvedProps = {
+      source_content_id: "t1",
+      content_type: "TWEET",
+      title: "not sent to R2 (free text)",
+      content_text: "not sent to R2 (free text)",
+      impression_count: 37,
+      like_count: 1,
+    };
+
+    await svc.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X");
+
+    expect(pipelineContent.send).toHaveBeenCalledTimes(1);
+    const [record] = pipelineContent.send.mock.calls[0][0];
+    expect(record).toMatchObject({
+      tenant_id: 42,
+      channel_id: "chan1",
+      channel_type: "X",
+      source_content_id: "t1",
+      content_type: "TWEET",
+      impression_count: 37,
+      like_count: 1,
+    });
+    expect(record.title).toBeUndefined();
+    expect(record.content_text).toBeUndefined();
+  });
+
   it("omits an unresolved column-mapped field from the SQL entirely, rather than writing null", async () => {
     tenantDb.query.mockResolvedValue([]);
-    const resolvedProps = { source_content_id: "t1" }; // no content_type/contentText/source_created_at resolved
+    const resolvedProps = { source_content_id: "t1" }; // no content_type/content_text/source_created_at resolved
 
     await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X");
 
@@ -101,7 +153,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
   it("triggers Vectorize embedding on insert", async () => {
     tenantDb.query.mockResolvedValue([]);
-    await service.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1", contentText: "hello" }, "chan1", "X");
+    await service.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1", content_text: "hello" }, "chan1", "X");
 
     expect(ai.run).toHaveBeenCalled();
     expect(vectorize.upsert).toHaveBeenCalledTimes(1);
@@ -118,12 +170,12 @@ describe("ContentService.buildEmbeddingText fallback (via embedContents through 
 
     await service.upsertContentFromMetadata(
       { id: "t1", text: "tweet body text" },
-      { source_content_id: "t1", contentText: "tweet body text" },
+      { source_content_id: "t1", content_text: "tweet body text" },
       "chan1",
       "X"
     );
 
-    // title is never set by upsertContentFromMetadata, so the embedded text must come from content_text
+    // no title resolved here, so the embedded text must fall back to content_text
     expect(ai.run).toHaveBeenCalledWith(expect.any(String), { text: ["tweet body text"] });
   });
 });

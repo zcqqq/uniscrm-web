@@ -300,6 +300,7 @@ export async function handlePolling(env: Env): Promise<void> {
             tenantId: row.tenant_id,
             ai: env.AI,
             vectorize: env.VECTORIZE,
+            pipelineContent: env.PIPELINE_CONTENT,
             deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
           });
         } catch (e) {
@@ -315,6 +316,7 @@ export async function handlePolling(env: Env): Promise<void> {
             tenantId: row.tenant_id,
             ai: env.AI,
             vectorize: env.VECTORIZE,
+            pipelineContent: env.PIPELINE_CONTENT,
             deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
           });
         }

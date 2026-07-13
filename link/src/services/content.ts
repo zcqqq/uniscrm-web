@@ -23,6 +23,7 @@ const CONTENT_COLUMN_MAP: Record<string, string> = {
   reply_count: "reply_count",
   repost_count: "repost_count",
 };
+const CONTENT_TABLE_COLUMNS = Object.values(CONTENT_COLUMN_MAP);
 
 export interface SyncResult {
   added: number;
@@ -140,8 +141,8 @@ export class ContentService {
     const sourceContentId = String(resolvedProps.source_content_id ?? "");
     if (!sourceContentId) throw new Error("upsertContentFromMetadata: missing source_content_id");
 
-    const existing = await this.tenantDb.query<{ id: string }>(
-      "SELECT id FROM content WHERE channel_id = ? AND source_content_id = ?",
+    const existing = await this.tenantDb.query<Record<string, unknown> & { id: string }>(
+      `SELECT id, ${CONTENT_TABLE_COLUMNS.join(", ")} FROM content WHERE channel_id = ? AND source_content_id = ?`,
       [channelId, sourceContentId]
     );
     const isNew = existing.length === 0;
@@ -155,6 +156,11 @@ export class ContentService {
       if (val !== undefined && val !== null && val !== "") columnValues[column] = val;
     }
     const dynamicCols = Object.keys(columnValues);
+    // Incremental poller re-walks recently-seen posts every cron tick (see
+    // pollers/x-posts.ts's runIncrementalPoll) — without this check, every visit resends
+    // an unchanged content row to the R2 pipeline, which has no dedup on write (append-only
+    // Iceberg sink; see docs/adr/0002-r2-data-catalog-dedup-via-periodic-compaction.md).
+    const unchanged = !isNew && dynamicCols.every((c) => String(columnValues[c]) === String(existing[0][c] ?? ""));
 
     const insertCols = ["id", "channel_id", "channel_type", "source_content_id", "raw_data", ...dynamicCols, "created_at", "updated_at"];
     const insertPlaceholders = ["?", "?", "?", "?", "?", ...dynamicCols.map(() => "?"), "?", "?"];
@@ -191,7 +197,7 @@ export class ContentService {
       updated_at: now,
     }]);
 
-    if (this.pipelineContent && this.tenantId) {
+    if (this.pipelineContent && this.tenantId && !unchanged) {
       const record: Record<string, unknown> = {
         tenant_id: this.tenantId,
         id,

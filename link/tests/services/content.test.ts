@@ -128,6 +128,48 @@ describe("ContentService.upsertContentFromMetadata", () => {
     expect(record.content_text).toBeUndefined();
   });
 
+  it("does not send to the pipeline when the resolved values exactly match the existing row", async () => {
+    tenantDb.query.mockResolvedValue([{
+      id: "existing-uuid",
+      content_type: "TWEET",
+      impression_count: 37,
+      like_count: 1,
+    }]);
+    const pipelineContent = { send: vi.fn().mockResolvedValue(undefined) };
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipelineContent as any);
+    const resolvedProps = {
+      source_content_id: "t1",
+      content_type: "TWEET",
+      impression_count: 37,
+      like_count: 1,
+    };
+
+    await svc.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X");
+
+    expect(pipelineContent.send).not.toHaveBeenCalled();
+  });
+
+  it("still sends to the pipeline when a resolved value differs from the existing row", async () => {
+    tenantDb.query.mockResolvedValue([{
+      id: "existing-uuid",
+      content_type: "TWEET",
+      impression_count: 37,
+      like_count: 1,
+    }]);
+    const pipelineContent = { send: vi.fn().mockResolvedValue(undefined) };
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipelineContent as any);
+    const resolvedProps = {
+      source_content_id: "t1",
+      content_type: "TWEET",
+      impression_count: 37,
+      like_count: 2, // changed from 1
+    };
+
+    await svc.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X");
+
+    expect(pipelineContent.send).toHaveBeenCalledTimes(1);
+  });
+
   it("omits an unresolved column-mapped field from the SQL entirely, rather than writing null", async () => {
     tenantDb.query.mockResolvedValue([]);
     const resolvedProps = { source_content_id: "t1" }; // no content_type/content_text/source_created_at resolved

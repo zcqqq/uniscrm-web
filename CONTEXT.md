@@ -19,3 +19,7 @@ _Avoid_: analytics prop, tracked field.
 **content_type**:
 Distinguishes the kind of a `content` row from the same channel. For X: `TWEET` (default) vs `ARTICLE` (X Articles arrive as a tweet payload with an extra `article.title` structure — see `_reference/x/post.json`). Detected by presence-checking the raw payload in poller code, not by metadata.
 _Avoid_: post type, media type.
+
+**Compaction**:
+The periodic job (in `analytics/compactor`, run daily from the `analytics` Worker's cron) that rewrites an R2 Data Catalog table down to one row per business key (e.g. `tenant_id`+`channel_id`+`source_user_id` for `uniscrm.user`, `tenant_id`+`channel_id`+`source_content_id` for `uniscrm.content`), keeping the latest by `updated_at`. Exists because R2 Pipelines sinks are append-only (no upsert/merge on write) — every poller/webhook write that resends an unchanged row becomes a duplicate row in the Iceberg table, so periodic compaction is the only place dedup actually happens for these tables.
+_Avoid_: dedup job, cleanup job. Also distinct from Cloudflare's native R2 Data Catalog "compaction" feature (`wrangler r2 bucket catalog compaction enable`), which only merges small Parquet files for query performance and does not do row-level dedup.

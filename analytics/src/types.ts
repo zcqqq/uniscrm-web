@@ -15,7 +15,10 @@ export interface Env {
   CF_ACCOUNT_ID: string;
   CF_D1_API_TOKEN: string;
   R2_WAREHOUSE: string;
+  R2_CATALOG_URI: string;
+  R2_CATALOG_TOKEN: string;
   ANALYTICS_CONTAINER: ContainerNamespace;
+  COMPACTOR_CONTAINER: ContainerNamespace;
   ANALYTICS_QUEUE: Queue;
 }
 

@@ -27,6 +27,7 @@ crons = ["0 2 * * *"]
 WEB_URL = "https://web-dev.uni-scrm.com"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 R2_WAREHOUSE = "b34f3ff4aec4c36584672d5bf1320757_uniscrm-dev"
+R2_CATALOG_URI = "https://catalog.cloudflarestorage.com/b34f3ff4aec4c36584672d5bf1320757/uniscrm-dev"
 
 [[env.dev.d1_databases]]
 binding = "WEB_DB"
@@ -54,13 +55,27 @@ image = "./Dockerfile"
 instance_type = "basic"
 max_instances = 1
 
+[[env.dev.containers]]
+class_name = "CompactorContainer"
+image = "./compactor/Dockerfile"
+instance_type = "basic"
+max_instances = 1
+
 [[env.dev.durable_objects.bindings]]
 name = "ANALYTICS_CONTAINER"
 class_name = "AnalyticsContainer"
 
+[[env.dev.durable_objects.bindings]]
+name = "COMPACTOR_CONTAINER"
+class_name = "CompactorContainer"
+
 [[env.dev.migrations]]
 tag = "v1"
 new_sqlite_classes = ["AnalyticsContainer"]
+
+[[env.dev.migrations]]
+tag = "v2"
+new_sqlite_classes = ["CompactorContainer"]
 
 [env.production]
 name = "analytics"
@@ -73,6 +88,9 @@ crons = ["0 2 * * *"]
 WEB_URL = "https://web.uni-scrm.com"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 R2_WAREHOUSE = "b34f3ff4aec4c36584672d5bf1320757_uniscrm"
+# R2 Data Catalog isn't provisioned for the prod bucket yet (see link/wrangler.toml note
+# next to PIPELINE_USER) — set this once `wrangler r2 bucket catalog enable uniscrm` has run.
+R2_CATALOG_URI = "https://catalog.cloudflarestorage.com/b34f3ff4aec4c36584672d5bf1320757/uniscrm"
 
 [[env.production.d1_databases]]
 binding = "WEB_DB"
@@ -100,10 +118,24 @@ image = "./Dockerfile"
 instance_type = "basic"
 max_instances = 3
 
+[[env.production.containers]]
+class_name = "CompactorContainer"
+image = "./compactor/Dockerfile"
+instance_type = "basic"
+max_instances = 1
+
 [[env.production.durable_objects.bindings]]
 name = "ANALYTICS_CONTAINER"
 class_name = "AnalyticsContainer"
 
+[[env.production.durable_objects.bindings]]
+name = "COMPACTOR_CONTAINER"
+class_name = "CompactorContainer"
+
 [[env.production.migrations]]
 tag = "v1"
 new_sqlite_classes = ["AnalyticsContainer"]
+
+[[env.production.migrations]]
+tag = "v2"
+new_sqlite_classes = ["CompactorContainer"]

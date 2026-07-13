@@ -2,6 +2,8 @@
   "fields": [
     { "name": "tenant_id", "type": "int32", "required": true },
     { "name": "id", "type": "string", "required": true },
+    { "name": "channel_id", "type": "string", "required": true },
+    { "name": "source_user_id", "type": "string", "required": true },
     { "name": "channel_type", "type": "string", "required": false },
     { "name": "name", "type": "string", "required": false },
     { "name": "username", "type": "string", "required": false },

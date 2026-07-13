@@ -407,7 +407,7 @@ async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<void> {
   ).bind(resultsJson, report_id).run();
 }
 
-function buildSQL(type: string, params: Record<string, unknown>, tenantId: string): string {
+export function buildSQL(type: string, params: Record<string, unknown>, tenantId: string): string {
   if (type === "event") {
     const { event_type, measure, dimension, granularity, time_range_start, time_range_end, filters } = params as {
       event_type: string; measure: string; dimension?: string; granularity?: string;
@@ -485,45 +485,11 @@ WHERE event_type = '${event_type_a}' AND next_type = '${event_type_b}'`;
   }
 
   if (type === "user") {
-    const { measure, measure_field, dimension, buckets, filters } = params as {
-      measure: string; measure_field?: string; dimension?: string;
-      buckets?: number[];
-      filters?: { field: string; operator: string; value: string; value2?: string }[];
-    };
+    return buildSnapshotSQL("uniscrm.user", params, tenantId);
+  }
 
-    const filterClauses = (filters || []).filter(f => f.field && f.operator).map(f => {
-      if (f.operator === "has value") return `AND ${f.field} IS NOT NULL`;
-      if (f.operator === "no value") return `AND ${f.field} IS NULL`;
-      if (f.operator === "between") return `AND ${f.field} BETWEEN ${f.value} AND ${f.value2 || f.value}`;
-      const op = f.operator === "≠" ? "!=" : f.operator;
-      const val = isNaN(Number(f.value)) ? `'${f.value}'` : f.value;
-      return `AND ${f.field} ${op} ${val}`;
-    }).join(" ");
-
-    let dimExpr = "";
-    let dimGroup = "";
-    if (dimension) {
-      if (buckets && buckets.length > 0) {
-        const cases = buckets.map((b, i) => {
-          const prev = i === 0 ? 0 : buckets[i - 1];
-          return `WHEN ${dimension} < ${b} THEN '${prev}-${b}'`;
-        });
-        cases.push(`ELSE '${buckets[buckets.length - 1]}+'`);
-        dimExpr = `, CASE ${cases.join(" ")} END as dimension`;
-        dimGroup = " GROUP BY dimension ORDER BY dimension";
-      } else {
-        dimExpr = `, ${dimension} as dimension`;
-        dimGroup = ` GROUP BY ${dimension} ORDER BY value DESC`;
-      }
-    }
-
-    const agg = measure === "avg" && measure_field ? `AVG(CAST(${measure_field} AS DOUBLE))`
-      : measure === "sum" && measure_field ? `SUM(CAST(${measure_field} AS DOUBLE))`
-      : "COUNT(*)";
-
-    return `SELECT ${agg} as value${dimExpr}
-FROM uniscrm.user
-WHERE tenant_id = ${tenantId} ${filterClauses}${dimGroup}`;
+  if (type === "content") {
+    return buildSnapshotSQL("uniscrm.content", params, tenantId);
   }
 
   if (type === "funnel") {
@@ -581,6 +547,48 @@ WHERE tenant_id = ${tenantId} ${filterClauses}${dimGroup}`;
   }
 
   return "SELECT 1";
+}
+
+export function buildSnapshotSQL(tableName: string, params: Record<string, unknown>, tenantId: string): string {
+  const { measure, measure_field, dimension, buckets, filters } = params as {
+    measure: string; measure_field?: string; dimension?: string;
+    buckets?: number[];
+    filters?: { field: string; operator: string; value: string; value2?: string }[];
+  };
+
+  const filterClauses = (filters || []).filter(f => f.field && f.operator).map(f => {
+    if (f.operator === "has value") return `AND ${f.field} IS NOT NULL`;
+    if (f.operator === "no value") return `AND ${f.field} IS NULL`;
+    if (f.operator === "between") return `AND ${f.field} BETWEEN ${f.value} AND ${f.value2 || f.value}`;
+    const op = f.operator === "≠" ? "!=" : f.operator;
+    const val = isNaN(Number(f.value)) ? `'${f.value}'` : f.value;
+    return `AND ${f.field} ${op} ${val}`;
+  }).join(" ");
+
+  let dimExpr = "";
+  let dimGroup = "";
+  if (dimension) {
+    if (buckets && buckets.length > 0) {
+      const cases = buckets.map((b, i) => {
+        const prev = i === 0 ? 0 : buckets[i - 1];
+        return `WHEN ${dimension} < ${b} THEN '${prev}-${b}'`;
+      });
+      cases.push(`ELSE '${buckets[buckets.length - 1]}+'`);
+      dimExpr = `, CASE ${cases.join(" ")} END as dimension`;
+      dimGroup = " GROUP BY dimension ORDER BY dimension";
+    } else {
+      dimExpr = `, ${dimension} as dimension`;
+      dimGroup = ` GROUP BY ${dimension} ORDER BY value DESC`;
+    }
+  }
+
+  const agg = measure === "avg" && measure_field ? `AVG(CAST(${measure_field} AS DOUBLE))`
+    : measure === "sum" && measure_field ? `SUM(CAST(${measure_field} AS DOUBLE))`
+    : "COUNT(*)";
+
+  return `SELECT ${agg} as value${dimExpr}
+FROM ${tableName}
+WHERE tenant_id = ${tenantId} ${filterClauses}${dimGroup}`;
 }
 
 function processFunnelResults(rows: unknown[], steps: string[]): { steps: { step: string; eventType: string; count: number; conversionRate: number; totalRate: number }[] } {

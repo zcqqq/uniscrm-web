@@ -16,17 +16,20 @@ export const PROPS_X = definePropDefinitions([
   {
     propId: "name",
     dataType: "TEXT",
+    entity: ["user"],
     label: { en: "Name", zh: "名称" },
   },
   {
     propId: "username",
     dataType: "TEXT",
+    entity: ["user"],
     label: { en: "Username", zh: "用户名" },
   },
   {
     propId: "is_follow",
     isInsight: true,
     dataType: "ENUM_INT",
+    entity: ["user"],
     label: { en: "Is following", zh: "是否关注" },
     enums: [
       { value: 0, label: { en: "Not following", zh: "未关注" } },
@@ -37,6 +40,7 @@ export const PROPS_X = definePropDefinitions([
     propId: "is_followed",
     isInsight: true,
     dataType: "ENUM_INT",
+    entity: ["user"],
     label: { en: "Is followed", zh: "是否被关注" },
     enums: [
       { value: 0, label: { en: "Not followed", zh: "未被关注" } },
@@ -56,47 +60,55 @@ export const PROPS_X = definePropDefinitions([
   {
     propId: "description",
     dataType: "TEXT",
+    entity: ["user"],
     label: { en: "Description", zh: "描述" },
   },
   {
     propId: "profile_image_url",
     dataType: "TEXT",
+    entity: ["user"],
     label: { en: "Profile Image URL", zh: "头像URL" },
   },
   {
     propId: "followers_count",
     isInsight: true,
     dataType: "INT",
+    entity: ["user"],
     label: { en: "Followers", zh: "粉丝数" },
   },
   {
     propId: "following_count",
     isInsight: true,
     dataType: "INT",
+    entity: ["user"],
     label: { en: "Following", zh: "关注数" },
   },
   {
     propId: "tweet_count",
     isInsight: true,
     dataType: "INT",
+    entity: ["user"],
     label: { en: "Tweets", zh: "发帖数" },
   },
   {
     propId: "listed_count",
     isInsight: true,
     dataType: "INT",
+    entity: ["user"],
     label: { en: "Lists", zh: "收藏数" },
   },
   {
     propId: "like_count",
     isInsight: true,
     dataType: "INT",
+    entity: ["user", "content"],
     label: { en: "Likes", zh: "点赞数" },
   },
   {
     propId: "media_count",
     isInsight: true,
     dataType: "INT",
+    entity: ["user"],
     label: { en: "Medias", zh: "多媒体数" },
   },
   {
@@ -109,6 +121,7 @@ export const PROPS_X = definePropDefinitions([
     propId: "source_created_at",
     isInsight: true,
     dataType: "DATETIME",
+    entity: ["content"],
     label: { en: "Posted at", zh: "发布时间" },
   },
   {
@@ -120,6 +133,7 @@ export const PROPS_X = definePropDefinitions([
     propId: "content_type",
     isInsight: true,
     dataType: "ENUM_TEXT",
+    entity: ["content"],
     label: { en: "Content Type", zh: "内容类型" },
     enums: [
       { value: "TWEET", label: { en: "Tweet", zh: "推文" } },
@@ -129,41 +143,48 @@ export const PROPS_X = definePropDefinitions([
   {
     propId: "title",
     dataType: "TEXT",
+    entity: ["content"],
     label: { en: "Title", zh: "标题" },
   },
   {
     propId: "content_text",
     dataType: "TEXT",
+    entity: ["content"],
     label: { en: "Content Text", zh: "内容文本" },
   },
   {
     propId: "bookmark_count",
     isInsight: true,
     dataType: "INT",
+    entity: ["content"],
     label: { en: "Bookmarks", zh: "收藏数" },
   },
   {
     propId: "impression_count",
     isInsight: true,
     dataType: "INT",
+    entity: ["content"],
     label: { en: "Impressions", zh: "曝光数" },
   },
   {
     propId: "quote_count",
     isInsight: true,
     dataType: "INT",
+    entity: ["content"],
     label: { en: "Quotes", zh: "Quotes" },
   },
   {
     propId: "reply_count",
     isInsight: true,
     dataType: "INT",
+    entity: ["content"],
     label: { en: "Replies", zh: "回复数" },
   },
   {
     propId: "repost_count",
     isInsight: true,
     dataType: "INT",
+    entity: ["content"],
     label: { en: "Reposts", zh: "转发数" },
   },
 ]);

@@ -6,6 +6,11 @@ export interface PropDefinition {
   propId: string;
   dataType: PropDataType;
   isInsight?: boolean;
+  // Which R2 snapshot table(s) this prop is a real column on. Drives which
+  // props Content/User Analysis dimension & measure-field pickers offer —
+  // keep in sync with link/src/services/x-users.ts's USER_TABLE_COLUMNS and
+  // link/src/services/content.ts's CONTENT_COLUMN_MAP.
+  entity?: Array<"user" | "content">;
   label: LocalizedString;
   enums?: { value: string | number; label: LocalizedString }[];
 }

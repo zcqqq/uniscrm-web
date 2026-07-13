@@ -711,7 +711,14 @@ export default {
   // as real time passes, even with no user edits. Scoped to dashboard-pinned
   // reports only to keep load predictable; reports already mid-computation
   // are left alone so we don't clobber an in-flight manual edit/recompute.
+  // Compaction runs first and is awaited to completion before any dashboard report is
+  // enqueued for recompute — otherwise the queue consumer (which runs independently of
+  // this function) could read a still-duplicated R2 table if it processed a message
+  // before compaction finished. See docs/adr/0002-r2-data-catalog-dedup-via-periodic-compaction.md.
   async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
+    await compactUserTable(env);
+    await compactContentTable(env);
+
     const { results } = await env.ANALYTICS_DB.prepare(
       `SELECT DISTINCT ar.id, ar.tenant_id, ar.type, ar.params_json
        FROM analytics_reports ar
@@ -732,8 +739,6 @@ export default {
         warehouse: env.R2_WAREHOUSE,
       });
     }
-
-    await compactUserTable(env);
   },
 };
 
@@ -765,5 +770,34 @@ async function compactUserTable(env: Env): Promise<void> {
     }
   } catch (err) {
     console.error(JSON.stringify({ event: "user_compaction_error", error: err instanceof Error ? err.message : String(err) }));
+  }
+}
+
+// Same rationale as compactUserTable, applied to uniscrm.content (see
+// docs/adr/0002-r2-data-catalog-dedup-via-periodic-compaction.md).
+async function compactContentTable(env: Env): Promise<void> {
+  try {
+    const instance = env.COMPACTOR_CONTAINER.getByName("singleton");
+    await instance.startAndWaitForPorts();
+    const res = await instance.fetch("http://container/compact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        catalog_uri: env.R2_CATALOG_URI,
+        warehouse: env.R2_WAREHOUSE,
+        namespace: "uniscrm",
+        table: "content",
+        key_columns: ["tenant_id", "channel_id", "source_content_id"],
+        token: env.R2_CATALOG_TOKEN,
+      }),
+    });
+    const body = await res.text();
+    if (!res.ok) {
+      console.error(JSON.stringify({ event: "content_compaction_error", status: res.status, body }));
+    } else {
+      console.log(JSON.stringify({ event: "content_compaction_done", body }));
+    }
+  } catch (err) {
+    console.error(JSON.stringify({ event: "content_compaction_error", error: err instanceof Error ? err.message : String(err) }));
   }
 }

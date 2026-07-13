@@ -143,6 +143,7 @@ describe("XUsersService.upsertUserFromMetadata", () => {
 describe("XUsersService.upsertUser (regression: no more zero-defaulting)", () => {
   it("omits a missing count field from the pipeline record instead of writing 0", async () => {
     const tenantDb = createMockTenantDb();
+    tenantDb.query.mockResolvedValue([]);
     tenantDb.run.mockResolvedValue({ changes: 1 });
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
     const service = new XUsersService(tenantDb as any, { pipelineUser: pipelineUser as any, tenantId: 42 });

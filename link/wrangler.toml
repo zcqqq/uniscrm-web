@@ -76,7 +76,7 @@ stream = "8e45214807d640e9bdfea318fd1fb8d2"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_CONTENT"
-pipeline = "137cceb43d1b4ce7be1b57c1f0c46660"
+stream = "2ed6fd2b333d42638580689910ed2661"
 
 [[env.dev.secrets_store_secrets]]
 binding = "ENCRYPTION_KEY"

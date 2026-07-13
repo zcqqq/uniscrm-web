@@ -1,0 +1,19 @@
+{
+  "fields": [
+    { "name": "tenant_id", "type": "int32", "required": true },
+    { "name": "id", "type": "string", "required": true },
+    { "name": "channel_id", "type": "string", "required": true },
+    { "name": "source_content_id", "type": "string", "required": true },
+    { "name": "channel_type", "type": "string", "required": false },
+    { "name": "created_at", "type": "string", "required": true },
+    { "name": "updated_at", "type": "string", "required": true },
+    { "name": "content_type", "type": "string", "required": false },
+    { "name": "source_created_at", "type": "string", "required": false },
+    { "name": "bookmark_count", "type": "int32", "required": false },
+    { "name": "impression_count", "type": "int32", "required": false },
+    { "name": "like_count", "type": "int32", "required": false },
+    { "name": "quote_count", "type": "int32", "required": false },
+    { "name": "reply_count", "type": "int32", "required": false },
+    { "name": "repost_count", "type": "int32", "required": false }
+  ]
+}

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { TIERS } from "../plans";
 import type { Tier } from "../plans";
 import { UpgradeIcon } from "./UpgradeIcon";
+import { useTier } from "./useTier";
 import { authFetch } from "./lib/auth-fetch";
 
 export interface SidebarUrls {
@@ -64,13 +65,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
-  const getTierFromCookie = (): Tier | undefined => {
-    if (typeof document === "undefined") return undefined;
-    const match = document.cookie.match(/(?:^|; )tier=([^;]*)/);
-    const v = match?.[1];
-    return v === "basic" || v === "pro" ? v : undefined;
-  };
-  const [fetchedTier] = useState<Tier | undefined>(tierProp ?? getTierFromCookie());
+  const tier = useTier(tierProp);
 
   useEffect(() => {
     authFetch("/api/auth/me")
@@ -119,8 +114,8 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
     {
       id: "content", label: "Content", icon: Icons.Content,
       items: [
-        { id: "recommendation", label: "Recommendation", href: `${urls.web}/recommendations` },
-        { id: "content-library", label: "Content Library", href: `${urls.link}/content` },
+        { id: "recommendations", label: "Recommendation", href: `${urls.web}/recommendations` },
+        { id: "content", label: "Content Library", href: `${urls.link}/content` },
       ],
     },
     { id: "commerce", label: "Commerce", icon: Icons.ShoppingBag, href: `${urls.link}/commerce` },
@@ -141,7 +136,6 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
     },
   ];
 
-  const tier = tierProp ?? fetchedTier;
   const tierModules = tier ? TIERS[tier]?.modules : undefined;
   const isGroupDisabled = (groupId: string) =>
     tierModules ? groupId in tierModules && !tierModules[groupId].enabled : false;

@@ -8,6 +8,8 @@ import { ContentService } from "./services/content";
 import { TikTokChannel } from "./channels/tiktok";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
+import { getActiveSubscriptionTier } from "../../shared/credit-service";
+import { canUseFeature } from "../../shared/plans";
 
 import { X_CHANNEL_SCOPES } from "../../shared/x-scopes";
 export { X_CHANNEL_SCOPES };
@@ -166,7 +168,15 @@ export function oauthRoutes() {
         console.error("BYOK XAA subscription setup failed:", e);
       }
     } else {
-      // System App: existing flow
+      // System App: existing flow — abuse-only gate, normal users never reach this
+      // because the Connect button is already disabled by tier in the frontend.
+      if (tenantId) {
+        const sub = await getActiveSubscriptionTier(c.env.ADMIN_DB, Number(tenantId));
+        if (sub && !canUseFeature(sub.tier, "link.x")) {
+          return c.json({ error: "forbidden" }, 403);
+        }
+      }
+
       const config = JSON.stringify({
         x_user_id: xUser.id,
         x_username: xUser.username,

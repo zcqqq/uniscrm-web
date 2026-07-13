@@ -26,7 +26,7 @@ export async function getActiveSubscriptionTier(
   tenantId: number
 ): Promise<{ tier: Tier; createdAt: string } | null> {
   const row = await db
-    .prepare("SELECT tier, created_at FROM subscriptions WHERE tenant_id = ? AND status = 'active'")
+    .prepare("SELECT tier, created_at FROM subscriptions WHERE tenant_id = ? AND status IN ('active', 'trialing')")
     .bind(tenantId)
     .first<{ tier: string; created_at: string }>();
   if (!row || (row.tier !== "basic" && row.tier !== "pro")) return null;

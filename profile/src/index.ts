@@ -3,6 +3,8 @@ import { cors } from "hono/cors";
 import { Container } from "@cloudflare/containers";
 import type { Env } from "./types";
 import { TenantDataDB } from "../../shared/tenant-data-db";
+import { createModuleGuard } from "../../shared/plan-guard";
+import { getActiveSubscriptionTier } from "../../shared/credit-service";
 
 type HonoEnv = { Bindings: Env; Variables: { tenantId: string; memberId: string; tenantDataDb: TenantDataDB } };
 
@@ -110,6 +112,14 @@ app.get("/api/auth/me", async (c) => {
     headers: { "Content-Type": "application/json" },
   });
 });
+
+const profileModuleGuard = createModuleGuard("profile", async (c: any) => {
+  const tenantId = Number(c.get("tenantId"));
+  const sub = await getActiveSubscriptionTier(c.env.ADMIN_DB, tenantId);
+  return sub?.tier ?? null;
+});
+app.use("/api/users/*", profileModuleGuard);
+app.use("/api/lists/*", profileModuleGuard);
 
 // --- Users (from tenant DB) ---
 

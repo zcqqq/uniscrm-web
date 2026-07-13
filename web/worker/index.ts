@@ -11,6 +11,9 @@ import { createWebhookRouter } from "./api/webhook";
 import { createSettingsRouter } from "./api/settings";
 import { createBillingRouter } from "./api/billing";
 import { authMiddleware } from "./auth/middleware";
+import { createModuleGuard } from "../../shared/plan-guard";
+import { BillingService } from "./services/billing";
+import type { Tier } from "../../shared/plans";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -22,6 +25,16 @@ app.route("/api/auth", createAuthRouter());
 app.route("/api/auth", createOAuthRouter());
 
 app.use("/api/recommendations/*", authMiddleware);
+app.use("/api/recommendations/*", createModuleGuard("content.recommendations", async (c) => {
+  const tenantId = c.get("tenantId" as never) as number;
+  const billing = new BillingService(c.env.ADMIN_URL, c.env.INTERNAL_SECRET);
+  try {
+    const sub = await billing.getSubscription(String(tenantId));
+    return sub.tier === "basic" || sub.tier === "pro" ? (sub.tier as Tier) : null;
+  } catch {
+    return null;
+  }
+}));
 app.route("/api/recommendations", createRecommendationsRouter());
 
 app.use("/api/settings/*", authMiddleware);

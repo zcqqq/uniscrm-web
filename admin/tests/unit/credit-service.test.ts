@@ -32,7 +32,7 @@ class FakeD1 {
         }
         if (db_sqlIncludes(sql, "FROM subscriptions")) {
           const [tenantId] = this._params as [number];
-          const row = db.subscriptions.find((s) => s.tenant_id === tenantId && s.status === "active");
+          const row = db.subscriptions.find((s) => s.tenant_id === tenantId && (s.status === "active" || s.status === "trialing"));
           return (row as T) ?? null;
         }
         return null;
@@ -126,5 +126,19 @@ describe("getActiveSubscriptionTier", () => {
     fakeDb.subscriptions.push({ tenant_id: 5, tier: "pro", status: "active", created_at: "2026-02-01T00:00:00.000Z" });
     const tier = await getActiveSubscriptionTier(fakeDb as unknown as D1Database, 5);
     expect(tier).toEqual({ tier: "pro", createdAt: "2026-02-01T00:00:00.000Z" });
+  });
+
+  it("returns tier for a trialing subscription (every new signup starts here, not 'active')", async () => {
+    const fakeDb = new FakeD1();
+    fakeDb.subscriptions.push({ tenant_id: 7, tier: "basic", status: "trialing", created_at: "2026-07-01T00:00:00.000Z" });
+    const tier = await getActiveSubscriptionTier(fakeDb as unknown as D1Database, 7);
+    expect(tier).toEqual({ tier: "basic", createdAt: "2026-07-01T00:00:00.000Z" });
+  });
+
+  it("returns null for an expired/past_due subscription", async () => {
+    const fakeDb = new FakeD1();
+    fakeDb.subscriptions.push({ tenant_id: 9, tier: "basic", status: "expired", created_at: "2026-01-01T00:00:00.000Z" });
+    const tier = await getActiveSubscriptionTier(fakeDb as unknown as D1Database, 9);
+    expect(tier).toBeNull();
   });
 });

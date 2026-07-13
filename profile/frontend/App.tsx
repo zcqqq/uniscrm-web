@@ -4,6 +4,7 @@ import { URLS } from "../../shared/frontend/urls";
 import { Users } from "./pages/Users";
 import { Lists } from "./pages/Lists";
 import { Toaster } from "../../shared/frontend/ui/toaster";
+import { TierGuard } from "../../shared/frontend/TierGuard";
 
 const urls = { ...URLS, profile: "", insightSegment: URLS.segment };
 
@@ -13,9 +14,9 @@ export default function App() {
       <Sidebar urls={urls} currentModule="profile" />
       <main className="flex-1 overflow-auto bg-background text-foreground">
         <Routes>
-          <Route path="/" element={<Users />} />
-          <Route path="/users" element={<Users />} />
-          <Route path="/lists" element={<Lists />} />
+          <Route path="/" element={<TierGuard module="profile"><Users /></TierGuard>} />
+          <Route path="/users" element={<TierGuard module="profile"><Users /></TierGuard>} />
+          <Route path="/lists" element={<TierGuard module="profile"><Lists /></TierGuard>} />
         </Routes>
       </main>
       <Toaster />

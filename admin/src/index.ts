@@ -42,7 +42,7 @@ export default {
   fetch: app.fetch,
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
     const db = new SubscriptionDB(env.ADMIN_DB);
-    const expired = await db.expireNonStripeSubscriptions();
+    const expired = await db.expireNonStripeSubscriptions(env.LINK_DB);
     if (expired > 0) {
       console.log(JSON.stringify({ event: "subscriptions_expired", count: expired }));
     }

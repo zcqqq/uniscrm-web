@@ -58,7 +58,17 @@ export class XUsersService {
     console.log(JSON.stringify({ event: "x_user_raw", user_id: user.id, payload: user }));
     const dbData = JSON.stringify(pickDbFields(user));
     const now = new Date().toISOString();
-    const id = crypto.randomUUID();
+
+    const existing = await this.tenantDb.query<{ id: string; name: string | null; username: string | null; profile_image_url: string | null }>(
+      "SELECT id, name, username, profile_image_url FROM user WHERE channel_id = ? AND source_user_id = ?",
+      [channelId, user.id]
+    );
+    const id = existing.length > 0 ? existing[0].id : crypto.randomUUID();
+    const unchanged = existing.length > 0
+      && (user.name || null) === existing[0].name
+      && (user.username || null) === existing[0].username
+      && (user.profile_image_url || null) === existing[0].profile_image_url;
+
     await this.tenantDb.run(
       `INSERT INTO user (id, channel_id, source_user_id, channel_type, name, username, profile_image_url, raw_data, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
@@ -71,7 +81,7 @@ export class XUsersService {
       [id, channelId, user.id, channelType, user.name || null, user.username || null, user.profile_image_url || null, dbData]
     );
 
-    if (this.pipelineUser && this.tenantId) {
+    if (this.pipelineUser && this.tenantId && !unchanged) {
       const record: Record<string, unknown> = {
         tenant_id: this.tenantId,
         id: id,
@@ -110,8 +120,8 @@ export class XUsersService {
     const sourceUserId = String(resolvedProps.source_user_id ?? rawItem.id ?? "");
     if (!sourceUserId) throw new Error("upsertUserFromMetadata: missing source_user_id");
 
-    const existing = await this.tenantDb.query<{ id: string }>(
-      "SELECT id FROM user WHERE channel_id = ? AND source_user_id = ?",
+    const existing = await this.tenantDb.query<Record<string, unknown> & { id: string }>(
+      `SELECT id, ${USER_TABLE_COLUMNS.join(", ")} FROM user WHERE channel_id = ? AND source_user_id = ?`,
       [channelId, sourceUserId]
     );
     const isNew = existing.length === 0;
@@ -128,6 +138,10 @@ export class XUsersService {
       if (val !== undefined && val !== null && val !== "") columnValues[col] = val;
     }
     const dynamicCols = Object.keys(columnValues);
+    // Poller re-walks pages of already-known followers on every tick (see x-followers.ts
+    // runIncrementalPoll) — without this check, every visit resends an unchanged user to
+    // the R2 pipeline, which has no dedup on write (append-only Iceberg sink).
+    const unchanged = !isNew && dynamicCols.every((c) => String(columnValues[c]) === String(existing[0][c] ?? ""));
 
     // Atomic upsert: INSERT ... ON CONFLICT DO UPDATE closes the TOCTOU race where two
     // concurrent writers (e.g. a backfill poll and a real-time webhook event) both see
@@ -149,7 +163,7 @@ export class XUsersService {
       insertParams
     );
 
-    if (this.pipelineUser && this.tenantId) {
+    if (this.pipelineUser && this.tenantId && !unchanged) {
       const record: Record<string, unknown> = {
         tenant_id: this.tenantId,
         id,

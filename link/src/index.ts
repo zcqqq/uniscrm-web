@@ -11,6 +11,8 @@ import { internalRoutes } from "./routes-internal";
 import { oauthRoutes } from "./oauth";
 import { webhookRoutes } from "./webhook";
 import { handleCron } from "./cron";
+import { createModuleGuard } from "../../shared/plan-guard";
+import { getActiveSubscriptionTier } from "../../shared/credit-service";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -34,6 +36,15 @@ app.post("/api/auth/logout", (c) => c.json({ ok: true }));
 app.route("/api/channels", channelsRoutes());
 app.route("/api/users", usersRoutes());
 app.route("/api/content", contentsRoutes());
+
+const resolveTier = async (c: any) => {
+  const tenantId = c.get("tenantId" as never) as number;
+  const sub = await getActiveSubscriptionTier(c.env.ADMIN_DB, tenantId);
+  return sub?.tier ?? null;
+};
+app.use("/api/commerce/*", createModuleGuard("commerce", resolveTier));
+app.use("/api/lists/*", createModuleGuard("social.lists", resolveTier));
+
 app.route("/api/commerce", productsRoutes());
 app.route("/api/lists", listsRoutes());
 

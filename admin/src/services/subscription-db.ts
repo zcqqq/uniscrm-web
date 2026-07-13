@@ -93,8 +93,19 @@ export class SubscriptionDB {
       .run();
   }
 
-  async expireNonStripeSubscriptions(): Promise<number> {
+  async expireNonStripeSubscriptions(linkDb?: D1Database): Promise<number> {
     const now = new Date().toISOString();
+
+    const affected = await this.db
+      .prepare(
+        `SELECT tenant_id FROM subscriptions
+         WHERE current_period_end < ?
+           AND stripe_subscription_id IS NULL
+           AND tier != 'free'`
+      )
+      .bind(now)
+      .all<{ tenant_id: string }>();
+
     const result = await this.db
       .prepare(
         `UPDATE subscriptions
@@ -105,6 +116,19 @@ export class SubscriptionDB {
       )
       .bind(now, now)
       .run();
+
+    if (linkDb) {
+      for (const row of affected.results) {
+        await linkDb
+          .prepare(
+            `UPDATE channels SET is_active = 0, deactivated_reason = 'tier_limit', updated_at = datetime('now')
+             WHERE tenant_id = ? AND channel_type IN ('TWITTER', 'X') AND is_byok = 0 AND is_active = 1`
+          )
+          .bind(Number(row.tenant_id))
+          .run();
+      }
+    }
+
     return result.meta.changes ?? 0;
   }
 }

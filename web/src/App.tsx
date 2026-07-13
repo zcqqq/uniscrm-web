@@ -4,6 +4,7 @@ import { initTheme } from "../../shared/frontend/theme";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { Sidebar } from "../../shared/frontend/Sidebar";
 import { Toaster } from "../../shared/frontend/ui/toaster";
+import { TierGuard } from "../../shared/frontend/TierGuard";
 
 initTheme();
 import { Login } from "./pages/Login";
@@ -69,7 +70,9 @@ export function App() {
               path="/recommendations"
               element={
                 <ProtectedRoute>
-                  <Home />
+                  <TierGuard module="content.recommendations">
+                    <Home />
+                  </TierGuard>
                 </ProtectedRoute>
               }
             />

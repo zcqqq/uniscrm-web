@@ -72,7 +72,7 @@ queue = "uniscrm-event-dev"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_USER"
-pipeline = "b7275097961b4056b50f938eb7159ee8"
+stream = "8e45214807d640e9bdfea318fd1fb8d2"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_CONTENT"
@@ -136,9 +136,13 @@ queue = "uniscrm-event"
 binding = "PIPELINE_EVENT"
 stream = "a0ee570cbd4842b0b11e30af75abb779"
 
-[[env.production.pipelines]]
-binding = "PIPELINE_USER"
-stream = "c62a940e5b6b45b4aa865ea808caa3b0"
+# R2 Data Catalog was never actually provisioned for the prod bucket ("uniscrm" bucket
+# doesn't exist yet) — the old stream id here was dangling/non-functional. Recreate via
+# `wrangler r2 bucket catalog enable uniscrm` + streams/sinks/pipeline create (see dev
+# section for the pattern) before launching prod.
+# [[env.production.pipelines]]
+# binding = "PIPELINE_USER"
+# stream = "TODO_PROVISION_PROD_R2_CATALOG"
 
 [[env.production.secrets_store_secrets]]
 binding = "ENCRYPTION_KEY"

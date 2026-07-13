@@ -9,6 +9,7 @@ interface ContainerNamespace {
 
 export interface Env {
   WEB_DB: D1Database;
+  ADMIN_DB: D1Database;
   ASSETS: Fetcher;
   WEB_URL: string;
   INTERNAL_SECRET: string;

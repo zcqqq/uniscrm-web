@@ -29,6 +29,11 @@ binding = "WEB_DB"
 database_name = "uniscrm-web-dev"
 database_id = "899d288e-198c-49d9-824b-bd8d5c0a3cb8"
 
+[[env.dev.d1_databases]]
+binding = "LINK_DB"
+database_name = "uniscrm-link-dev"
+database_id = "464f02da-5a53-438d-8f7b-f92519cf8bd9"
+
 [env.production]
 name = "admin"
 routes = [{ pattern = "admin.uni-scrm.com", custom_domain = true }]
@@ -48,3 +53,8 @@ migrations_dir = "migrations"
 binding = "WEB_DB"
 database_name = "uniscrm-web"
 database_id = "98ea05ba-91de-423d-9126-aa3cd9b42382"
+
+[[env.production.d1_databases]]
+binding = "LINK_DB"
+database_name = "uniscrm-link"
+database_id = "279a86a5-985c-4a22-8d50-ebc64c8ed63b"

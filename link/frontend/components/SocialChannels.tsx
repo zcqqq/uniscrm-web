@@ -26,6 +26,10 @@ import { SIMPLE_CHANNELS, type SimpleChannelConfig } from "../lib/channelRegistr
 import { XLogo } from "../lib/channelLogos";
 import { api } from "../lib/api";
 import type { Locale } from "../../../metadata/locale";
+import { useTier } from "../../../shared/frontend/useTier";
+import { canUseFeature } from "../../../shared/plans";
+import { UpgradeIcon } from "../../../shared/frontend/UpgradeIcon";
+import { URLS } from "../../../shared/frontend/urls";
 
 // ─── X (managed app) — bespoke: re-auth flow instead of plain disconnect ────
 
@@ -33,6 +37,8 @@ function XChannelCard({ locale }: { locale: Locale }) {
   const { connected, username, createdAt, hasByok, loading, connect } = useXChannel();
   const [reauthOpen, setReauthOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
+  const tier = useTier();
+  const canConnectX = tier ? canUseFeature(tier, "link.x") : true;
 
   const status = loading ? "loading" : connected ? "connected" : "disconnected";
 
@@ -63,6 +69,13 @@ function XChannelCard({ locale }: { locale: Locale }) {
             <Button variant="destructive" className="w-full" onClick={() => setReauthOpen(true)}>
               Re-connect
             </Button>
+          ) : !canConnectX ? (
+            <div className="flex items-center gap-2 w-full">
+              <Button className="flex-1 opacity-40 cursor-default" disabled>
+                Connect X
+              </Button>
+              <UpgradeIcon webUrl={URLS.web} />
+            </div>
           ) : (
             <Button className="w-full" onClick={handleConnectClick} disabled={loading}>
               Connect X

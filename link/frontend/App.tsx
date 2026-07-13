@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Sidebar, type SidebarUrls } from "../../shared/frontend/Sidebar";
 import { Toaster } from "../../shared/frontend/ui/toaster";
+import { TierGuard } from "../../shared/frontend/TierGuard";
 import { Social } from "./pages/Social";
 import { Users } from "./pages/Users";
 import { UserDetail } from "./pages/UserDetail";
@@ -26,8 +27,8 @@ export function App() {
             <Route path="/users" element={<Users />} />
             <Route path="/users/:id" element={<UserDetail />} />
             <Route path="/content" element={<Content />} />
-            <Route path="/commerce" element={<Commerce />} />
-            <Route path="/list" element={<Lists />} />
+            <Route path="/commerce" element={<TierGuard module="commerce"><Commerce /></TierGuard>} />
+            <Route path="/list" element={<TierGuard module="social.lists"><Lists /></TierGuard>} />
           </Routes>
         </main>
       </div>

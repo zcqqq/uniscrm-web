@@ -25,19 +25,22 @@ export const TIERS: Record<Tier, TierConfig> = {
       "social.users": { enabled: true, description: "Unlimited tracked users" },
       "social.lists": { enabled: false },
       profile: { enabled: false },
-      content: { enabled: true },
+      "content.content": { enabled: true, description: "Contents from social channels and content libraries" },
+      "content.recommendations": { enabled: false },
       commerce: { enabled: false },
       insight: { enabled: true, description: "Unlimited analytics and dashboards" },
       settings: { enabled: true },
     },
     features: {
-      "link.tiktok": { enabled: false },
+      "link.x": { enabled: false },
+      "link.x-byok": { enabled: true },
+      "link.tiktok": { enabled: true },
     },
     limits: {
       // Monthly X-action credit allowance, in micros (1,000,000 micros = $1). Resets on the
       // subscription's monthly anniversary. See shared/credit.ts and shared/credit-service.ts.
       // 用6位小数是业界标准
-      credit: { value: 20_000_000, description: "$5.00/month of credit (for X paid APIs)" },
+      //credit: { value: 20_000_000, description: "$5.00/month of credit (for X paid APIs)" },
     },
   },
   pro: {
@@ -54,7 +57,7 @@ export const TIERS: Record<Tier, TierConfig> = {
   },
 };
 
-export const TIER_LIST: TierConfig[] = [TIERS.basic, TIERS.pro];
+export const TIER_LIST: TierConfig[] = [TIERS.basic];
 
 export function canAccessModule(tier: Tier, module: string): boolean {
   return TIERS[tier]?.modules[module]?.enabled ?? true;

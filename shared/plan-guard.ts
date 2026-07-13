@@ -44,3 +44,16 @@ export function checkLimit(tier: Tier, key: string, currentCount: number): PlanC
     }),
   };
 }
+
+// Untyped `c`/return signature deliberately avoids importing "hono" here — shared/ has no
+// node_modules of its own, so a hono type import would resolve against whichever consuming
+// worker builds it, which isn't reliable. Callers pass a real Hono Context; duck-typed at runtime.
+export function createModuleGuard(moduleKey: string, resolveTier: (c: any) => Promise<Tier | null>) {
+  return async (c: any, next: () => Promise<void>) => {
+    const tier = await resolveTier(c);
+    if (tier && !checkModuleAccess(tier, moduleKey).allowed) {
+      return c.json({ error: "forbidden" }, 403);
+    }
+    await next();
+  };
+}

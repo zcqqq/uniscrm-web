@@ -31,6 +31,11 @@ database_name = "uniscrm-web-dev"
 database_id = "899d288e-198c-49d9-824b-bd8d5c0a3cb8"
 migrations_dir = "migrations"
 
+[[env.dev.d1_databases]]
+binding = "ADMIN_DB"
+database_name = "uniscrm-admin-dev"
+database_id = "e82f67f3-3571-473f-abf4-fa0ad5a309a2"
+
 [[env.dev.containers]]
 class_name = "MaigretContainer"
 image = "./Dockerfile"
@@ -63,6 +68,11 @@ binding = "WEB_DB"
 database_name = "uniscrm-web"
 database_id = "98ea05ba-91de-423d-9126-aa3cd9b42382"
 migrations_dir = "migrations"
+
+[[env.production.d1_databases]]
+binding = "ADMIN_DB"
+database_name = "uniscrm-admin"
+database_id = "ecf7a3be-2457-4e40-a537-bab4cc0ec281"
 
 [[env.production.containers]]
 class_name = "MaigretContainer"

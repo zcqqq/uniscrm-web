@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import Stripe from "stripe";
 import type { Env } from "../types";
 import { SubscriptionDB } from "../services/subscription-db";
-import { getTierByPriceId } from "../../../shared/plans";
+import { getTierByPriceId, canUseFeature } from "../../../shared/plans";
 import type { Tier } from "../../../shared/plans";
 
 export async function webhookRoute(c: Context<{ Bindings: Env }>) {
@@ -39,7 +39,7 @@ export async function webhookRoute(c: Context<{ Bindings: Env }>) {
       await handleCheckoutCompleted(db, event.data.object as Stripe.Checkout.Session, stripe);
       break;
     case "customer.subscription.updated":
-      await handleSubscriptionUpdated(db, event.data.object as Stripe.Subscription, priceMap);
+      await handleSubscriptionUpdated(db, c.env.LINK_DB, event.data.object as Stripe.Subscription, priceMap);
       break;
     case "customer.subscription.deleted":
       await handleSubscriptionDeleted(db, event.data.object as Stripe.Subscription);
@@ -77,16 +77,39 @@ async function handleCheckoutCompleted(
   });
 }
 
-async function handleSubscriptionUpdated(db: SubscriptionDB, subscription: Stripe.Subscription, priceMap: Record<string, Tier>) {
+export async function handleSubscriptionUpdated(db: SubscriptionDB, linkDb: D1Database, subscription: Stripe.Subscription, priceMap: Record<string, Tier>) {
   const priceId = subscription.items.data[0]?.price?.id;
   const plan = priceId ? getTierByPriceId(priceId, priceMap) : null;
+  const newTier: Tier = plan?.tier ?? "basic";
 
   await db.updateByStripeSubscriptionId(subscription.id, {
-    tier: plan?.tier ?? "basic",
+    tier: newTier,
     status: subscription.status,
     current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
     cancel_at_period_end: subscription.cancel_at_period_end ? 1 : 0,
   });
+
+  const row = await db.getByStripeSubscriptionId(subscription.id);
+  if (!row) return;
+  const tenantId = Number(row.tenant_id);
+
+  if (!canUseFeature(newTier, "link.x")) {
+    await linkDb
+      .prepare(
+        `UPDATE channels SET is_active = 0, deactivated_reason = 'tier_limit', updated_at = datetime('now')
+         WHERE tenant_id = ? AND channel_type IN ('TWITTER', 'X') AND is_byok = 0 AND is_active = 1`
+      )
+      .bind(tenantId)
+      .run();
+  } else {
+    await linkDb
+      .prepare(
+        `UPDATE channels SET is_active = 1, deactivated_reason = NULL, updated_at = datetime('now')
+         WHERE tenant_id = ? AND channel_type IN ('TWITTER', 'X') AND is_byok = 0 AND is_active = 0 AND deactivated_reason = 'tier_limit'`
+      )
+      .bind(tenantId)
+      .run();
+  }
 }
 
 async function handleSubscriptionDeleted(db: SubscriptionDB, subscription: Stripe.Subscription) {

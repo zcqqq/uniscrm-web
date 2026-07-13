@@ -11,8 +11,8 @@ import { Button } from "../../../shared/frontend/ui/button";
 import { Checkbox } from "../../../shared/frontend/ui/checkbox";
 
 const TRIGGER_EVENTS = EventMetadata_X.filter((e) => e.flowType !== "action");
-const USER_PROPS = PROPS_X.filter((p) => p.isInsight);
-const NUMERIC_USER_PROPS = USER_PROPS.filter((p) => p.dataType === "INT");
+const propsByEntity = (entity: "user" | "content") =>
+  PROPS_X.filter((p) => p.isInsight && p.entity?.includes(entity));
 
 const UI = {
   en: {
@@ -64,7 +64,7 @@ export interface FilterCondition {
 }
 
 export interface ReportConfigValues {
-  mode?: "event" | "interval" | "user" | "funnel";
+  mode?: "event" | "interval" | "user" | "content" | "funnel";
   eventType: string;
   measure: "count" | "users" | "avg" | "sum";
   measureField?: string;
@@ -85,13 +85,15 @@ export interface ReportConfigValues {
 interface ReportConfigProps {
   values: ReportConfigValues;
   onChange: (values: ReportConfigValues) => void;
-  mode?: "event" | "interval" | "user" | "funnel";
+  mode?: "event" | "interval" | "user" | "content" | "funnel";
 }
 
 export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigProps) {
   const { locale } = useLocale();
   const s = UI[locale];
   const mode = modeProp || values.mode || "event";
+  const entityProps = propsByEntity(mode === "content" ? "content" : "user");
+  const numericEntityProps = entityProps.filter((p) => p.dataType === "INT");
   const [showFilter, setShowFilter] = useState((values.filters?.length || 0) > 0);
 
   const update = (partial: Partial<ReportConfigValues>) => onChange({ ...values, ...partial });
@@ -177,12 +179,12 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                   </div>
                 </div>
               </>
-            ) : mode === "user" ? (
+            ) : mode === "user" || mode === "content" ? (
               <>
                 <Label className="mb-2 block">{s.measure}</Label>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <Select value={values.measure} onChange={(e) => update({ measure: e.target.value as any, measureField: e.target.value !== "count" ? (values.measureField || NUMERIC_USER_PROPS[0]?.propId || "") : undefined })}>
-                    <option value="count">{locale === "zh" ? "用户数" : "User count"}</option>
+                  <Select value={values.measure} onChange={(e) => update({ measure: e.target.value as any, measureField: e.target.value !== "count" ? (values.measureField || numericEntityProps[0]?.propId || "") : undefined })}>
+                    <option value="count">{mode === "content" ? (locale === "zh" ? "内容数" : "Content count") : (locale === "zh" ? "用户数" : "User count")}</option>
                     <option value="avg">{locale === "zh" ? "平均值" : "Average"}</option>
                     <option value="sum">{locale === "zh" ? "总和" : "Sum"}</option>
                   </Select>
@@ -190,7 +192,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                     <>
                       <span className="text-muted-foreground text-sm">→</span>
                       <Select value={values.measureField || ""} onChange={(e) => update({ measureField: e.target.value })}>
-                        {NUMERIC_USER_PROPS.map((p) => <option key={p.propId} value={p.propId}>{t(p.label, locale)}</option>)}
+                        {numericEntityProps.map((p) => <option key={p.propId} value={p.propId}>{t(p.label, locale)}</option>)}
                       </Select>
                     </>
                   )}
@@ -218,10 +220,10 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
             <Label className="mb-2 block">{s.dimension}</Label>
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground text-sm">{s.viewBy}</span>
-              {mode === "user" ? (
+              {mode === "user" || mode === "content" ? (
                 <Select value={values.dimension} onChange={(e) => update({ dimension: e.target.value, buckets: "" })}>
                   <option value="">{s.noGroup}</option>
-                  {USER_PROPS.map((p) => <option key={p.propId} value={p.propId}>{t(p.label, locale)}</option>)}
+                  {entityProps.map((p) => <option key={p.propId} value={p.propId}>{t(p.label, locale)}</option>)}
                 </Select>
               ) : (
                 <SelectProps
@@ -233,7 +235,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                 />
               )}
             </div>
-            {values.dimension && USER_PROPS.find(p => p.propId === values.dimension)?.dataType === "INT" && (
+            {values.dimension && entityProps.find(p => p.propId === values.dimension)?.dataType === "INT" && (
               <div className="mt-2">
                 <Input
                   type="text"
@@ -279,8 +281,8 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
           </Button>
         </div>
 
-        {/* Time range + Granularity + Compare (not for user mode) */}
-        {mode !== "user" && <div className="flex items-center gap-3 mt-4 flex-wrap">
+        {/* Time range + Granularity + Compare (not for user/content snapshot modes) */}
+        {mode !== "user" && mode !== "content" && <div className="flex items-center gap-3 mt-4 flex-wrap">
           <Select value={values.timeRange} onChange={(e) => update({ timeRange: e.target.value })}>
             {TIME_RANGES.map((r) => <option key={r.value} value={r.value}>{s[r.key]}</option>)}
           </Select>

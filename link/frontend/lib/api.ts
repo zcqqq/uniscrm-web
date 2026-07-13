@@ -40,12 +40,21 @@ export interface XEvent {
 export interface ContentItem {
   id: string;
   channel_type: string;
+  content_type: string | null;
   source_content_id: string;
   title: string;
+  content_text: string | null;
   summary: string | null;
   status: string;
   source_url: string | null;
   source_updated_at: string | null;
+  source_created_at: string | null;
+  bookmark_count: number | null;
+  impression_count: number | null;
+  like_count: number | null;
+  quote_count: number | null;
+  reply_count: number | null;
+  repost_count: number | null;
   raw_data: string;
   created_at: string;
   updated_at: string;

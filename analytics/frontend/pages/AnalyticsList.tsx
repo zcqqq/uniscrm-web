@@ -14,11 +14,11 @@ import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 
 const UI = {
-  en: { newBtn: "New", event: "Event Analysis", interval: "Interval Analysis", user: "User Analysis", funnel: "Funnel Analysis", name: "Name", type: "Type", status: "Status", created: "Created", empty: "No reports yet", createFirst: "Create your first analysis" },
-  zh: { newBtn: "新建", event: "事件分析", interval: "间隔分析", user: "用户分析", funnel: "漏斗分析", name: "名称", type: "类型", status: "状态", created: "创建时间", empty: "暂无报表", createFirst: "创建你的第一个分析" },
+  en: { newBtn: "New", event: "Event Analysis", interval: "Interval Analysis", user: "User Analysis", content: "Content Analysis", funnel: "Funnel Analysis", name: "Name", type: "Type", status: "Status", created: "Created", empty: "No reports yet", createFirst: "Create your first analysis" },
+  zh: { newBtn: "新建", event: "事件分析", interval: "间隔分析", user: "用户分析", content: "内容分析", funnel: "漏斗分析", name: "名称", type: "类型", status: "状态", created: "创建时间", empty: "暂无报表", createFirst: "创建你的第一个分析" },
 };
 
-const TYPE_LABELS = { en: { event: "Event", interval: "Interval", user: "User", funnel: "Funnel" }, zh: { event: "事件", interval: "间隔", user: "用户", funnel: "漏斗" } };
+const TYPE_LABELS = { en: { event: "Event", interval: "Interval", user: "User", content: "Content", funnel: "Funnel" }, zh: { event: "事件", interval: "间隔", user: "用户", content: "内容", funnel: "漏斗" } };
 
 export function AnalyticsList() {
   const navigate = useNavigate();
@@ -74,6 +74,9 @@ export function AnalyticsList() {
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => navigate("/analytics/user/new")}>
               {s.user}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate("/analytics/content/new")}>
+              {s.content}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => navigate("/analytics/funnel/new")}>
               {s.funnel}

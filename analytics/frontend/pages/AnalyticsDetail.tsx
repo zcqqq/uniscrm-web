@@ -24,6 +24,7 @@ const MODE_TITLES: Record<string, { en: string; zh: string }> = {
   event: { en: "Event Analysis", zh: "事件分析" },
   interval: { en: "Interval Analysis", zh: "间隔分析" },
   user: { en: "User Analysis", zh: "用户分析" },
+  content: { en: "Content Analysis", zh: "内容分析" },
   funnel: { en: "Funnel Analysis", zh: "漏斗分析" },
 };
 
@@ -64,6 +65,7 @@ const UI = {
     conv: "Conv.",
     overall: "Overall",
     totalUsers: "Total Users",
+    totalContent: "Total Content",
   },
   zh: {
     saved: "已保存",
@@ -101,17 +103,18 @@ const UI = {
     conv: "转化率",
     overall: "总转化",
     totalUsers: "用户总数",
+    totalContent: "内容总数",
   },
 } as const;
 
-export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval" | "user" | "funnel" }) {
+export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval" | "user" | "content" | "funnel" }) {
   const { id: paramId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { locale, timezone } = useLocale();
   const { toast } = useToast();
   const t = UI[locale as "en" | "zh"];
 
-  const [mode, setMode] = useState<"event" | "interval" | "user" | "funnel">(modeProp || "event");
+  const [mode, setMode] = useState<"event" | "interval" | "user" | "content" | "funnel">(modeProp || "event");
   const [name, setName] = useState(() => (paramId ? "" : `Untitled ${MODE_TITLES[mode]?.en || "Analysis"}`));
   // Unified chart-type preference, persisted to report params as `chart_type`
   // for every mode (event: line/bar, user: pie/bar, interval: boxplot only —
@@ -119,7 +122,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   // recomputation (see backend PATCH diff logic).
   const [chartType, setChartType] = useState<string>(() => {
     const m = modeProp || "event";
-    return m === "user" ? "pie" : m === "interval" ? "boxplot" : "line";
+    return m === "user" || m === "content" ? "pie" : m === "interval" ? "boxplot" : "line";
   });
   const [config, setConfig] = useState<ReportConfigValues>({
     mode,
@@ -187,7 +190,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
       if (typeof p.chart_type === "string") {
         setChartType(p.chart_type);
       } else {
-        setChartType(resolvedMode === "user" ? "pie" : resolvedMode === "interval" ? "boxplot" : "line");
+        setChartType(resolvedMode === "user" || resolvedMode === "content" ? "pie" : resolvedMode === "interval" ? "boxplot" : "line");
       }
       if (r.results) setResults(r.results);
       setComputedAt(r.computed_at || null);
@@ -217,7 +220,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         filters: config.filters,
       };
     }
-    if (mode === "user") {
+    if (mode === "user" || mode === "content") {
       const buckets = config.buckets ? config.buckets.split(",").map(Number).filter(n => !isNaN(n) && n > 0) : undefined;
       return {
         measure: config.measure,
@@ -514,7 +517,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         )}
 
         {/* Event results — time series chart */}
-        {hasData && mode !== "user" && eventData.length > 0 && (
+        {hasData && mode !== "user" && mode !== "content" && eventData.length > 0 && (
           <>
             <Card className="mb-4">
               <CardContent className="p-6 pt-4">
@@ -660,13 +663,14 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           );
         })()}
 
-        {/* User results — Pie/Bar chart + table (no dimension selected collapses to a single "Total" slice, same code path) */}
-        {hasData && mode === "user" && (() => {
+        {/* User/Content results — Pie/Bar chart + table (no dimension selected collapses to a single "Total" slice, same code path) */}
+        {hasData && (mode === "user" || mode === "content") && (() => {
           const dimensioned = results.data.filter((d: any) => d.dimension != null);
+          const totalLabel = mode === "content" ? t.totalContent : t.totalUsers;
           const data = dimensioned.length > 0
             ? dimensioned
             : results.data.length === 1
-              ? [{ dimension: config.measure === "count" ? t.totalUsers : (config.measureField || t.value), value: results.data[0].value }]
+              ? [{ dimension: config.measure === "count" ? totalLabel : (config.measureField || t.value), value: results.data[0].value }]
               : [];
           const total = data.reduce((s: number, d: any) => s + (d.value || 0), 0);
           if (data.length === 0) return null;

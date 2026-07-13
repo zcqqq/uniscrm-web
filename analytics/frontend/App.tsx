@@ -18,6 +18,7 @@ export function App() {
             <Route path="/analytics/event/new" element={<AnalyticsDetail mode="event" />} />
             <Route path="/analytics/interval/new" element={<AnalyticsDetail mode="interval" />} />
             <Route path="/analytics/user/new" element={<AnalyticsDetail mode="user" />} />
+            <Route path="/analytics/content/new" element={<AnalyticsDetail mode="content" />} />
             <Route path="/analytics/funnel/new" element={<AnalyticsDetail mode="funnel" />} />
             <Route path="/analytics/:id" element={<AnalyticsDetail />} />
           </Routes>

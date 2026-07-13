@@ -208,6 +208,17 @@ git commit -m "Gate content pipeline send on an unchanged check"
 
 ---
 
+### Task 1.5 (discovered mid-execution, not in the original plan): Upgrade vitest-pool-workers to unblock link's test suite
+
+While verifying Task 1's tests, the controller discovered `link`'s entire vitest suite could not run at all — the bundled wrangler inside the pinned `@cloudflare/vitest-pool-workers@^0.8.0` doesn't recognize the `stream` field on pipelines bindings (introduced for `PIPELINE_USER` in commit `3c14c20`, unrelated to and predating this plan). No 0.8.x-0.12.x version fixes this; only 0.13+ does, which requires vitest 4.
+
+**Files:**
+- Modify: `link/package.json`, `link/vitest.config.ts`, `link/tests/services/x-users.test.ts` (a genuinely broken pre-existing mock, uncovered only once the suite could run again)
+- Modify: `web/package.json`, `web/vitest.config.ts` (upgraded alongside for version consistency, per user decision — not itself blocking anything, since `web`'s wrangler.toml has no `stream` fields)
+- Modify: `admin/package.json` (version bump only — admin has no `vitest.config.ts` and doesn't actually use the plugin)
+
+This was executed directly by the controller (exploratory dependency-version archaeology, not "plan text contains the complete code to write"), verified via before/after A-B comparison (`git stash`/`git stash pop` around a clean `npm ci`) confirming zero regressions in all three modules, and committed as `8d6a48c`. See that commit's message for full detail. A task reviewer should still review this commit like any other task.
+
 ### Task 2: Recreate dev's content R2 pipeline (operational — controller runs directly)
 
 **Files:**

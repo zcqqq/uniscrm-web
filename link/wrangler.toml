@@ -94,6 +94,9 @@ routes = [{ pattern = "link.uni-scrm.com", custom_domain = true }]
 LINK_URL = "https://link.uni-scrm.com"
 TREND_RETENTION_DAYS = "30"
 WEB_URL = "https://web.uni-scrm.com"
+CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
+R2_BUCKET = "uniscrm"
+R2_WAREHOUSE = "b34f3ff4aec4c36584672d5bf1320757_uniscrm"
 X_CLIENT_ID = "cXVhYUNyWVJWSlFtdFdjekt3V1U6MTpjaQ"
 INTERNAL_SECRET = "prod-internal-secret-change-me"
 
@@ -136,13 +139,13 @@ queue = "uniscrm-event"
 binding = "PIPELINE_EVENT"
 stream = "a0ee570cbd4842b0b11e30af75abb779"
 
-# R2 Data Catalog was never actually provisioned for the prod bucket ("uniscrm" bucket
-# doesn't exist yet) — the old stream id here was dangling/non-functional. Recreate via
-# `wrangler r2 bucket catalog enable uniscrm` + streams/sinks/pipeline create (see dev
-# section for the pattern) before launching prod.
-# [[env.production.pipelines]]
-# binding = "PIPELINE_USER"
-# stream = "TODO_PROVISION_PROD_R2_CATALOG"
+[[env.production.pipelines]]
+binding = "PIPELINE_USER"
+stream = "8713643e4698423b8a333bcfe6d7ba54"
+
+[[env.production.pipelines]]
+binding = "PIPELINE_CONTENT"
+stream = "ee92f40c732c4b93ad509962cdc5cf64"
 
 [[env.production.secrets_store_secrets]]
 binding = "ENCRYPTION_KEY"

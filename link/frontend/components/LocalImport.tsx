@@ -1,7 +1,8 @@
 import { useState, useRef } from "react";
 import { readMdFiles, type ParsedMd } from "../lib/markdown";
 import { Button } from "../../../shared/frontend/ui/button";
-import { Card, CardContent } from "../../../shared/frontend/ui/card";
+import { ChannelCard } from "./ChannelCard";
+import { LocalLogo } from "../lib/channelLogos";
 
 interface Props {
   onImport: (files: ParsedMd[]) => Promise<boolean>;
@@ -50,14 +51,27 @@ export function LocalImport({ onImport }: Props) {
     }
   };
 
+  const hiddenInput = (
+    <input
+      ref={inputRef}
+      type="file"
+      className="hidden"
+      onChange={handleFolderSelect}
+      {...({ webkitdirectory: "", directory: "" } as any)}
+    />
+  );
+
   if (previewing.length > 0) {
     return (
-      <Card>
-        <CardContent className="p-4">
-          <h3 className="font-semibold mb-3">Preview ({previewing.length} files)</h3>
-          <div className="max-h-60 overflow-y-auto mb-4">
+      <ChannelCard
+        logo={<LocalLogo />}
+        name="Local"
+        tagline={`${previewing.length} file${previewing.length === 1 ? "" : "s"} ready to import`}
+        status="pending"
+        extra={
+          <div className="max-h-40 overflow-y-auto rounded-md border border-border">
             {previewing.map((f) => (
-              <div key={f.filename} className="flex justify-between py-1 text-sm border-b border-border">
+              <div key={f.filename} className="flex justify-between px-2 py-1.5 text-xs border-b border-border last:border-b-0">
                 <span className="truncate">{f.title}</span>
                 <span className="text-muted-foreground ml-2 shrink-0">
                   {f.fileModifiedAt ? new Date(f.fileModifiedAt).toLocaleDateString() : "—"}
@@ -65,45 +79,42 @@ export function LocalImport({ onImport }: Props) {
               </div>
             ))}
           </div>
-          <div className="flex gap-2">
-            <Button onClick={handleConfirm} disabled={importing}>
+        }
+        actions={
+          <div className="flex gap-2 w-full">
+            <Button className="flex-1" onClick={handleConfirm} disabled={importing}>
               {importing ? "Importing..." : "Confirm Import"}
             </Button>
             <Button variant="outline" onClick={() => setPreviewing([])}>
               Cancel
             </Button>
           </div>
-        </CardContent>
-      </Card>
+        }
+      />
     );
   }
 
   return (
-    <Card
-      className={`border-2 border-dashed transition-colors ${
-        dragging ? "border-primary bg-primary/5" : ""
-      }`}
+    <div
+      onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={handleDrop}
     >
-      <CardContent
-        className="p-6 text-center"
-        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={handleDrop}
-      >
-        <div className="text-sm font-medium text-foreground mb-2">Local</div>
-        <p className="text-muted-foreground text-sm mb-3">Drag & drop .md files or a folder</p>
-        <input
-          ref={inputRef}
-          type="file"
-          className="hidden"
-          onChange={handleFolderSelect}
-          {...({ webkitdirectory: "", directory: "" } as any)}
-        />
-        <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
-          Select Folder
-        </Button>
-      </CardContent>
-    </Card>
+      <ChannelCard
+        logo={<LocalLogo />}
+        name="Local"
+        tagline="Drag & drop .md files or a folder"
+        status="connected"
+        statusLabel="Ready"
+        className={dragging ? "border-primary bg-primary/5" : "border-dashed"}
+        actions={
+          <Button variant="outline" className="w-full" onClick={() => inputRef.current?.click()}>
+            Select Folder
+          </Button>
+        }
+      />
+      {hiddenInput}
+    </div>
   );
 }
 

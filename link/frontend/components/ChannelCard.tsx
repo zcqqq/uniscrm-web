@@ -70,45 +70,51 @@ export function ChannelCard({
       )}
     >
       {/* Body */}
-      <div className="flex flex-col items-center text-center px-8 pt-10 pb-6 flex-1 gap-4">
-        {/* Logo */}
-        <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-foreground/5 ring-1 ring-border/50 shrink-0">
-          {logo}
-        </div>
-
-        {/* Identity */}
-        <div className="space-y-1.5">
-          <h3 className="text-base font-semibold leading-tight">{name}</h3>
-          <div className="flex items-center justify-center gap-2 flex-wrap">
-            <StatusDot status={status} />
-            {statusLabel && (
-              <span className="text-xs font-medium text-foreground/70 bg-muted rounded-full px-2 py-0.5">
-                {statusLabel}
-              </span>
-            )}
+      <div className="flex flex-col px-5 py-4 flex-1 gap-2.5">
+        {/* Header: logo + name + status on one row */}
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-foreground/5 ring-1 ring-border/50 shrink-0 [&>svg]:w-5 [&>svg]:h-5">
+            {logo}
           </div>
-          {createdAt && (
-            <p className="text-[11px] text-muted-foreground/60">
-              Connected {new Date(createdAt).toLocaleDateString()}
-            </p>
-          )}
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-semibold leading-tight truncate">{name}</h3>
+            <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+              <StatusDot status={status} />
+              {statusLabel && (
+                <span className="text-xs font-medium text-foreground/70 bg-muted rounded-full px-1.5 py-0.5 truncate max-w-[8rem]">
+                  {statusLabel}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* Tagline */}
-        <div className="space-y-1.5">
-          <p className="text-sm text-muted-foreground leading-relaxed">{taglineText}</p>
+        {/* Tagline: single line, truncated with full text on hover (title attr) rather
+            than auto-scrolling — scrolling/marquee text fights prefers-reduced-motion
+            and is hard to read; truncate+tooltip is the accessible standard instead. */}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <p className="text-xs text-muted-foreground truncate flex-1 min-w-0" title={taglineText}>
+            {taglineText}
+          </p>
           {helpUrl && (
             <a
               href={helpUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+              aria-label={locale === "zh" ? "查看详情" : "Read more"}
+              title={locale === "zh" ? "查看详情" : "Read more"}
+              className="inline-flex items-center shrink-0 text-primary hover:text-primary/80"
             >
-              {locale === "zh" ? "查看详情" : "Read more"}
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
           )}
         </div>
+
+        {createdAt && (
+          <p className="text-[11px] text-muted-foreground/60 -mt-1.5">
+            Connected {new Date(createdAt).toLocaleDateString()}
+          </p>
+        )}
 
         {/* Extra slot (e.g. BYOK channel list) */}
         {extra && <div className="w-full">{extra}</div>}
@@ -116,7 +122,7 @@ export function ChannelCard({
 
       {/* Actions footer — only render when actions provided */}
       {actions && (
-        <div className="border-t border-border/60 px-6 py-4 flex flex-col gap-2">
+        <div className="border-t border-border/60 px-4 py-3 flex flex-col gap-2">
           {actions}
         </div>
       )}

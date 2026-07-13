@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, BarChart, Bar, Legend } from "recharts";
+import { ResponsiveContainer, LineChart as ReLineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, PieChart as RePieChart, Pie, Cell, BarChart as ReBarChart, Bar, Legend } from "recharts";
+import { LineChart, BarChart3, PieChart } from "lucide-react";
 import { createReport, getReport, updateReport, recomputeReport, listDashboards, createDashboard, addDashboardItem, type Dashboard } from "../lib/api";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { useLocale } from "../hooks/useLocale";
@@ -12,16 +13,18 @@ import { fmtDuration } from "../lib/format";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
 import { Tooltip as UiTooltip, TooltipTrigger as UiTooltipTrigger, TooltipContent as UiTooltipContent, TooltipProvider as UiTooltipProvider } from "../../../shared/frontend/ui/tooltip";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
 import { DIMENSION_COLORS } from "../../../shared/frontend/lib/colors";
+import { ResultsTable } from "../../../shared/frontend/components/ResultsTable";
+import { ChartTypeToggle } from "../../../shared/frontend/components/ChartTypeToggle";
 import { formatPeriod as sharedFormatPeriod } from "../lib/format-period";
 
 const MODE_TITLES: Record<string, { en: string; zh: string }> = {
   event: { en: "Event Analysis", zh: "事件分析" },
   interval: { en: "Interval Analysis", zh: "间隔分析" },
   user: { en: "User Analysis", zh: "用户分析" },
+  funnel: { en: "Funnel Analysis", zh: "漏斗分析" },
 };
 
 const UI = {
@@ -49,6 +52,7 @@ const UI = {
     max: "Max",
     line: "Line",
     bar: "Bar",
+    pieChart: "Pie",
     data: "Data",
     dimension: "Dimension",
     value: "Value",
@@ -85,6 +89,7 @@ const UI = {
     max: "最大值",
     line: "折线",
     bar: "柱状",
+    pieChart: "饼图",
     data: "明细数据",
     dimension: "维度",
     value: "值",
@@ -492,39 +497,19 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               </CardContent>
             </Card>
 
-            <Card className="mb-4">
-              <CardContent className="p-6 pt-4 pb-0">
-                <p className="text-sm font-medium text-foreground mb-2">{t.distributionData}</p>
-              </CardContent>
-              <div className="border-t border-border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t.period}</TableHead>
-                      <TableHead className="text-right">{t.count}</TableHead>
-                      <TableHead className="text-right">{t.min}</TableHead>
-                      <TableHead className="text-right">P25</TableHead>
-                      <TableHead className="text-right">{t.median}</TableHead>
-                      <TableHead className="text-right">P75</TableHead>
-                      <TableHead className="text-right">{t.max}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {intervalSlots.map((s, i) => (
-                      <TableRow key={i}>
-                        <TableCell className="text-muted-foreground">{formatPeriod(s.period)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s.stats ? s.stats.count.toLocaleString() : "—"}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s.stats ? fmtDuration(s.stats.min) : "—"}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s.stats ? fmtDuration(s.stats.p25) : "—"}</TableCell>
-                        <TableCell className="text-right font-medium tabular-nums">{s.stats ? fmtDuration(s.stats.median) : "—"}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s.stats ? fmtDuration(s.stats.p75) : "—"}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s.stats ? fmtDuration(s.stats.max) : "—"}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </Card>
+            <ResultsTable
+              title={t.distributionData}
+              columns={[
+                { key: "period", label: t.period, render: (s: any) => <span className="text-muted-foreground">{formatPeriod(s.period)}</span> },
+                { key: "count", label: t.count, align: "right", render: (s: any) => s.stats ? s.stats.count.toLocaleString() : "—" },
+                { key: "min", label: t.min, align: "right", render: (s: any) => s.stats ? fmtDuration(s.stats.min) : "—" },
+                { key: "p25", label: "P25", align: "right", render: (s: any) => s.stats ? fmtDuration(s.stats.p25) : "—" },
+                { key: "median", label: t.median, align: "right", render: (s: any) => <span className="font-medium">{s.stats ? fmtDuration(s.stats.median) : "—"}</span> },
+                { key: "p75", label: "P75", align: "right", render: (s: any) => s.stats ? fmtDuration(s.stats.p75) : "—" },
+                { key: "max", label: t.max, align: "right", render: (s: any) => s.stats ? fmtDuration(s.stats.max) : "—" },
+              ]}
+              rows={intervalSlots as unknown as Record<string, unknown>[]}
+            />
           </>
         )}
 
@@ -534,21 +519,18 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
             <Card className="mb-4">
               <CardContent className="p-6 pt-4">
                 <div className="flex items-center justify-end mb-4">
-                  <div className="flex items-center gap-0.5 border border-border rounded-md p-0.5 bg-muted/30">
-                    {(["line", "bar"] as const).map((ct) => (
-                      <button
-                        key={ct}
-                        onClick={() => setChartType(ct)}
-                        className={`px-3 py-1 text-xs rounded font-medium transition-colors ${chartType === ct ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                      >
-                        {ct === "line" ? t.line : t.bar}
-                      </button>
-                    ))}
-                  </div>
+                  <ChartTypeToggle
+                    value={chartType}
+                    onChange={setChartType}
+                    options={[
+                      { value: "line", icon: LineChart, tooltip: t.line },
+                      { value: "bar", icon: BarChart3, tooltip: t.bar },
+                    ]}
+                  />
                 </div>
                 <ResponsiveContainer width="100%" height={320}>
                   {chartType === "bar" ? (
-                    <BarChart data={eventData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+                    <ReBarChart data={eventData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
                       <XAxis dataKey="period" tickFormatter={formatPeriod} tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={40} />
@@ -563,9 +545,9 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                       ) : (
                         <Bar dataKey="value" fill="var(--color-primary)" radius={[3, 3, 0, 0]} />
                       )}
-                    </BarChart>
+                    </ReBarChart>
                   ) : (
-                    <LineChart data={eventData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+                    <ReLineChart data={eventData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
                       <XAxis dataKey="period" tickFormatter={formatPeriod} tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={40} />
@@ -598,7 +580,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                           activeDot={{ r: 5, fill: "#fff", stroke: "var(--color-primary)", strokeWidth: 2 }}
                         />
                       )}
-                    </LineChart>
+                    </ReLineChart>
                   )}
                 </ResponsiveContainer>
               </CardContent>
@@ -609,31 +591,15 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                 ? eventData.flatMap((row: any) => dimensions.map((dim) => ({ period: row.period, dimension: dim, value: Number(row[dim]) || 0 })))
                 : eventData.map((d: any) => ({ period: d.period, value: Number(d.value) || 0 }));
               return (
-                <Card className="mb-4">
-                  <CardContent className="p-6 pt-4 pb-0">
-                    <p className="text-sm font-medium text-foreground mb-2">{t.data}</p>
-                  </CardContent>
-                  <div className="border-t border-border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>{t.period}</TableHead>
-                          {hasDimension && <TableHead>{t.dimension}</TableHead>}
-                          <TableHead className="text-right">{t.value}</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {tableRows.map((d, i) => (
-                          <TableRow key={i}>
-                            <TableCell className="text-muted-foreground">{formatPeriod(d.period)}</TableCell>
-                            {hasDimension && <TableCell>{String(d.dimension ?? "—")}</TableCell>}
-                            <TableCell className="text-right font-medium tabular-nums">{d.value.toLocaleString()}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </Card>
+                <ResultsTable
+                  title={t.data}
+                  columns={[
+                    { key: "period", label: t.period, render: (d: any) => <span className="text-muted-foreground">{formatPeriod(d.period)}</span> },
+                    ...(hasDimension ? [{ key: "dimension", label: t.dimension, render: (d: any) => String(d.dimension ?? "—") }] : []),
+                    { key: "value", label: t.value, align: "right" as const, render: (d: any) => <span className="font-medium">{d.value.toLocaleString()}</span> },
+                  ]}
+                  rows={tableRows}
+                />
               );
             })()}
           </>
@@ -679,121 +645,102 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                 </CardContent>
               </Card>
 
-              <Card className="mb-4">
-                <CardContent className="p-0">
-                  <table className="w-full text-sm">
-                    <thead><tr className="border-b">
-                      <th className="text-left px-4 py-2 font-medium text-muted-foreground">#</th>
-                      <th className="text-left px-4 py-2 font-medium text-muted-foreground">{t.event}</th>
-                      <th className="text-right px-4 py-2 font-medium text-muted-foreground">{t.users}</th>
-                      <th className="text-right px-4 py-2 font-medium text-muted-foreground">{t.conv}</th>
-                      <th className="text-right px-4 py-2 font-medium text-muted-foreground">{t.overall}</th>
-                    </tr></thead>
-                    <tbody>
-                      {steps.map((s, i) => (
-                        <tr key={i} className="border-b last:border-0">
-                          <td className="px-4 py-2">{i + 1}</td>
-                          <td className="px-4 py-2">{s.eventType}</td>
-                          <td className="text-right px-4 py-2 font-medium">{s.count.toLocaleString()}</td>
-                          <td className="text-right px-4 py-2 text-muted-foreground">{i === 0 ? "—" : `${s.conversionRate}%`}</td>
-                          <td className="text-right px-4 py-2 text-muted-foreground">{s.totalRate}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </CardContent>
-              </Card>
+              <ResultsTable
+                title={t.data}
+                columns={[
+                  { key: "idx", label: "#", render: (s: any) => s.idx },
+                  { key: "eventType", label: t.event, render: (s: any) => s.eventType },
+                  { key: "count", label: t.users, align: "right", render: (s: any) => <span className="font-medium">{s.count.toLocaleString()}</span> },
+                  { key: "conversionRate", label: t.conv, align: "right", render: (s: any) => <span className="text-muted-foreground">{s.idx === 1 ? "—" : `${s.conversionRate}%`}</span> },
+                  { key: "totalRate", label: t.overall, align: "right", render: (s: any) => <span className="text-muted-foreground">{s.totalRate}%</span> },
+                ]}
+                rows={steps.map((s, i) => ({ ...s, idx: i + 1 }))}
+              />
             </>
           );
         })()}
 
-        {/* User results — Pie/Bar chart + table */}
+        {/* User results — Pie/Bar chart + table (no dimension selected collapses to a single "Total" slice, same code path) */}
         {hasData && mode === "user" && (() => {
-          const data = results.data.filter((d: any) => d.dimension != null);
+          const dimensioned = results.data.filter((d: any) => d.dimension != null);
+          const data = dimensioned.length > 0
+            ? dimensioned
+            : results.data.length === 1
+              ? [{ dimension: config.measure === "count" ? t.totalUsers : (config.measureField || t.value), value: results.data[0].value }]
+              : [];
           const total = data.reduce((s: number, d: any) => s + (d.value || 0), 0);
-          const singleValue = !data.length && results.data.length === 1;
+          if (data.length === 0) return null;
           return (
             <>
-              {singleValue ? (
-                <Card className="mb-4">
-                  <CardContent className="p-6 text-center">
-                    <p className="text-xs text-muted-foreground">{config.measure === "count" ? t.totalUsers : config.measureField}</p>
-                    <p className="text-4xl font-bold tracking-tight mt-2">{Number(results.data[0].value).toLocaleString()}</p>
-                  </CardContent>
-                </Card>
-              ) : data.length > 0 && (
-                <>
-                  <Card className="mb-4">
-                    <CardContent className="p-6 pt-4">
-                      <div className="flex items-center justify-between mb-4">
-                        <p className="text-sm font-medium text-foreground">{t.distribution}</p>
-                        <div className="flex items-center gap-1 border rounded-md p-0.5">
-                          <button onClick={() => setChartType("pie")} className={`px-2 py-1 text-xs rounded ${chartType === "pie" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>◔</button>
-                          <button onClick={() => setChartType("bar")} className={`px-2 py-1 text-xs rounded ${chartType === "bar" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>▥</button>
-                        </div>
-                      </div>
-                      {chartType === "pie" ? (
-                        <div className="flex items-center gap-8">
-                          <ResponsiveContainer width="50%" height={280}>
-                            <PieChart>
-                              <Pie data={data} dataKey="value" nameKey="dimension" cx="50%" cy="50%" outerRadius={100} innerRadius={50} paddingAngle={2}>
-                                {data.map((_: any, i: number) => <Cell key={i} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} />)}
-                              </Pie>
-                              <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
-                            </PieChart>
-                          </ResponsiveContainer>
-                          <div className="flex-1 space-y-2">
-                            {data.map((d: any, i: number) => (
-                              <div key={i} className="flex items-center gap-2 text-sm">
-                                <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: DIMENSION_COLORS[i % DIMENSION_COLORS.length] }} />
-                                <span className="flex-1 truncate text-foreground">{String(d.dimension ?? "null")}</span>
-                                <span className="text-muted-foreground">{total ? `${Math.round(d.value / total * 100)}%` : "0%"}</span>
-                                <span className="font-medium w-16 text-right">{Number(d.value).toLocaleString()}</span>
-                              </div>
-                            ))}
+              <Card className="mb-4">
+                <CardContent className="p-6 pt-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <p className="text-sm font-medium text-foreground">{t.distribution}</p>
+                    <ChartTypeToggle
+                      value={chartType}
+                      onChange={setChartType}
+                      options={[
+                        { value: "pie", icon: PieChart, tooltip: t.pieChart },
+                        { value: "bar", icon: BarChart3, tooltip: t.bar },
+                      ]}
+                    />
+                  </div>
+                  {chartType === "pie" ? (
+                    <div className="flex items-center gap-8">
+                      <ResponsiveContainer width="50%" height={280}>
+                        <RePieChart>
+                          <Pie data={data} dataKey="value" nameKey="dimension" cx="50%" cy="50%" outerRadius={100} innerRadius={50} paddingAngle={2}>
+                            {data.map((_: any, i: number) => <Cell key={i} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} />)}
+                          </Pie>
+                          <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
+                        </RePieChart>
+                      </ResponsiveContainer>
+                      <div className="flex-1 space-y-2">
+                        {data.map((d: any, i: number) => (
+                          <div key={i} className="flex items-center gap-2 text-sm">
+                            <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: DIMENSION_COLORS[i % DIMENSION_COLORS.length] }} />
+                            <span className="flex-1 truncate text-foreground">{String(d.dimension ?? "null")}</span>
+                            <span className="text-muted-foreground">{total ? `${Math.round(d.value / total * 100)}%` : "0%"}</span>
+                            <span className="font-medium w-16 text-right">{Number(d.value).toLocaleString()}</span>
                           </div>
-                        </div>
-                      ) : (
-                        <ResponsiveContainer width="100%" height={280}>
-                          <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
-                            <XAxis dataKey="dimension" tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
-                            <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={40} />
-                            <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
-                            <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                              {data.map((_: any, i: number) => <Cell key={i} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} />)}
-                            </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
-                      )}
-                    </CardContent>
-                  </Card>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <ReBarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
+                        <XAxis dataKey="dimension" tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
+                        <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={40} />
+                        <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
+                        <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                          {data.map((_: any, i: number) => <Cell key={i} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} />)}
+                        </Bar>
+                      </ReBarChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
 
-                  <Card className="mb-4">
-                    <CardContent className="p-0">
-                      <table className="w-full text-sm">
-                        <thead><tr className="border-b">
-                          <th className="text-left px-4 py-2 font-medium text-muted-foreground">{t.dimension}</th>
-                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">{t.value}</th>
-                          <th className="text-right px-4 py-2 font-medium text-muted-foreground">%</th>
-                        </tr></thead>
-                        <tbody>
-                          {data.map((d: any, i: number) => (
-                            <tr key={i} className="border-b last:border-0">
-                              <td className="px-4 py-2 flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: DIMENSION_COLORS[i % DIMENSION_COLORS.length] }} />
-                                {String(d.dimension ?? "null")}
-                              </td>
-                              <td className="text-right px-4 py-2">{Number(d.value).toLocaleString()}</td>
-                              <td className="text-right px-4 py-2 text-muted-foreground">{total ? `${Math.round(d.value / total * 100)}%` : "0%"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </CardContent>
-                  </Card>
-                </>
-              )}
+              <ResultsTable
+                title={t.data}
+                columns={[
+                  {
+                    key: "dimension", label: t.dimension, render: (d: any) => {
+                      const i = data.indexOf(d);
+                      return (
+                        <span className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: DIMENSION_COLORS[i % DIMENSION_COLORS.length] }} />
+                          {String(d.dimension ?? "null")}
+                        </span>
+                      );
+                    },
+                  },
+                  { key: "value", label: t.value, align: "right", render: (d: any) => Number(d.value).toLocaleString() },
+                  { key: "pct", label: "%", align: "right", render: (d: any) => <span className="text-muted-foreground">{total ? `${Math.round(d.value / total * 100)}%` : "0%"}</span> },
+                ]}
+                rows={data}
+              />
             </>
           );
         })()}

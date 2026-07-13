@@ -10,6 +10,12 @@ export class AnalyticsContainer extends Container {
   enableInternet = true;
 }
 
+export class CompactorContainer extends Container {
+  defaultPort = 8080;
+  sleepAfter = "5m";
+  enableInternet = true;
+}
+
 type HonoEnv = { Bindings: Env; Variables: { tenantId: string; memberId: string } };
 
 const app = new Hono<HonoEnv>();
@@ -726,5 +732,38 @@ export default {
         warehouse: env.R2_WAREHOUSE,
       });
     }
+
+    await compactUserTable(env);
   },
 };
+
+// R2 Data Catalog's Pipeline sink is append-only (no upsert/merge on write) and R2 SQL
+// is read-only, so `uniscrm.user` accumulates one row per poll/webhook write instead of
+// one row per user. This periodically rewrites the table down to the latest row per
+// (tenant_id, channel_id, source_user_id) via the Iceberg REST catalog (PyIceberg), which
+// is the only interface in this stack that can actually write/overwrite Iceberg tables.
+async function compactUserTable(env: Env): Promise<void> {
+  try {
+    const instance = env.COMPACTOR_CONTAINER.getByName("singleton");
+    await instance.startAndWaitForPorts();
+    const res = await instance.fetch("http://container/compact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        catalog_uri: env.R2_CATALOG_URI,
+        warehouse: env.R2_WAREHOUSE,
+        namespace: "uniscrm",
+        table: "user",
+        token: env.R2_CATALOG_TOKEN,
+      }),
+    });
+    const body = await res.text();
+    if (!res.ok) {
+      console.error(JSON.stringify({ event: "user_compaction_error", status: res.status, body }));
+    } else {
+      console.log(JSON.stringify({ event: "user_compaction_done", body }));
+    }
+  } catch (err) {
+    console.error(JSON.stringify({ event: "user_compaction_error", error: err instanceof Error ? err.message : String(err) }));
+  }
+}

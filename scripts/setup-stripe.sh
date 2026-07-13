@@ -24,11 +24,20 @@ find_or_create_price() {
   local TIER=$1 AMOUNT=$2 PRODUCT_NAME=$3
   local LOOKUP_KEY="uniscrm_${TIER}_monthly"
 
-  # Check by lookup_key first
-  local EXISTING=$(stripe_get "prices?lookup_keys[]=$LOOKUP_KEY&limit=1" | jq -r '.data[0].id // empty')
+  # Check by lookup_key first — but only reuse it if the amount still matches
+  # shared/plans.ts (the source of truth for displayed/charged pricing). Prices
+  # are immutable in Stripe, so a mismatch means the old price is stale: retire
+  # it and fall through to create a fresh one with the same lookup_key.
+  local EXISTING_JSON=$(stripe_get "prices?lookup_keys[]=$LOOKUP_KEY&limit=1")
+  local EXISTING=$(echo "$EXISTING_JSON" | jq -r '.data[0].id // empty')
+  local EXISTING_AMOUNT=$(echo "$EXISTING_JSON" | jq -r '.data[0].unit_amount // empty')
   if [ -n "$EXISTING" ]; then
-    echo "$EXISTING"
-    return
+    if [ "$EXISTING_AMOUNT" = "$AMOUNT" ]; then
+      echo "$EXISTING"
+      return
+    fi
+    echo "  Stale price $EXISTING ($EXISTING_AMOUNT cents) != plans.ts ($AMOUNT cents) — retiring" >&2
+    stripe_post "prices/$EXISTING" -d "active=false" -d "lookup_key=" > /dev/null
   fi
 
   # Search for existing product by name
@@ -61,8 +70,10 @@ find_or_create_price() {
 }
 
 echo "💳 Setting up Stripe prices..."
-PRICE_BASIC=$(find_or_create_price "basic" 500 "UniSCRM Basic")
-PRICE_PRO=$(find_or_create_price "pro" 2000 "UniSCRM Pro")
+# Amounts (cents) must match shared/plans.ts TIERS[tier].price_monthly — that's the
+# source of truth the UI displays and quotes to customers.
+PRICE_BASIC=$(find_or_create_price "basic" 2000 "UniSCRM Basic")
+PRICE_PRO=$(find_or_create_price "pro" 10000 "UniSCRM Pro")
 
 echo "$PRICE_BASIC" | npx wrangler secret put STRIPE_PRICE_BASIC --env "$ENV" --config "$CONFIG"
 echo "$PRICE_PRO" | npx wrangler secret put STRIPE_PRICE_PRO --env "$ENV" --config "$CONFIG"

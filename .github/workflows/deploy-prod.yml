@@ -121,6 +121,13 @@ jobs:
             cd ${{ matrix.module }} && npx vite build
           fi
 
+      - name: Download vendored pyarrow wheel (analytics compactor)
+        if: matrix.module == 'analytics'
+        run: |
+          mkdir -p analytics/compactor/vendor
+          curl -L --fail -o analytics/compactor/vendor/pyarrow-25.0.0-cp312-cp312-manylinux_2_28_x86_64.whl \
+            https://files.pythonhosted.org/packages/55/0e/cd705c042bc4fe7022478db577fcab4abdcfabb9bc37ab7a75556b3fcb2b/pyarrow-25.0.0-cp312-cp312-manylinux_2_28_x86_64.whl
+
       - name: Deploy
         run: npx wrangler deploy --env production --config ${{ matrix.module }}/wrangler.toml
         env:

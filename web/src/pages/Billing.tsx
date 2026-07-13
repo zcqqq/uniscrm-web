@@ -12,7 +12,7 @@ import type { SubStatus } from "../../../shared/plans";
 
 export function Billing() {
   useEffect(() => { document.title = "Billing — UniSCRM" }, []);
-  const { plans, subscription, loading, subscribe, cancel, manageSubscription } = useBilling();
+  const { plans, subscription, loading, subscribe, cancel, manageSubscription, refresh } = useBilling();
   const [searchParams] = useSearchParams();
   const success = searchParams.get("success");
   const cancelled = searchParams.get("cancelled");
@@ -22,6 +22,20 @@ export function Billing() {
       window.history.replaceState({}, "", "/billing");
     }
   }, [success, cancelled]);
+
+  // Stripe's webhook updates the subscription asynchronously and can land after
+  // the browser is already redirected back here, so the first fetch on mount may
+  // still show the pre-upgrade (trialing) status. Poll briefly until it catches up.
+  useEffect(() => {
+    if (!success || subscription?.status !== "trialing") return;
+    let attempts = 0;
+    const interval = setInterval(() => {
+      attempts += 1;
+      refresh();
+      if (attempts >= 5) clearInterval(interval);
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [success, subscription?.status, refresh]);
 
   useEffect(() => {
     if (subscription?.tier === "basic" || subscription?.tier === "pro") {

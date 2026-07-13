@@ -24,17 +24,32 @@ export class SubscriptionDB {
       .first<SubscriptionRow>();
   }
 
+  // Read-merge-write rather than a single ON CONFLICT ... COALESCE(excluded.x, ...):
+  // a SQL-level default (e.g. COALESCE(?, 'free') in VALUES) resolves `excluded.x` away
+  // from NULL before the ON CONFLICT branch ever sees it, silently defeating the
+  // "preserve existing value when not provided" semantics for a partial update
+  // (e.g. checkout.ts recording just stripe_customer_id before the subscription exists).
   async upsert(tenantId: string, data: Partial<Omit<SubscriptionRow, "id" | "tenant_id">>): Promise<void> {
     const now = new Date().toISOString();
-    const id = crypto.randomUUID();
+    const existing = await this.getByTenantId(tenantId);
+    const id = existing?.id ?? crypto.randomUUID();
+
+    const merged = {
+      stripe_customer_id: data.stripe_customer_id ?? existing?.stripe_customer_id ?? null,
+      stripe_subscription_id: data.stripe_subscription_id ?? existing?.stripe_subscription_id ?? null,
+      tier: data.tier ?? existing?.tier ?? "free",
+      status: data.status ?? existing?.status ?? "active",
+      current_period_end: data.current_period_end ?? existing?.current_period_end ?? null,
+      cancel_at_period_end: data.cancel_at_period_end ?? existing?.cancel_at_period_end ?? 0,
+    };
 
     await this.db
       .prepare(
         `INSERT INTO subscriptions (id, tenant_id, stripe_customer_id, stripe_subscription_id, tier, status, current_period_end, cancel_at_period_end, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(tenant_id) DO UPDATE SET
-           stripe_customer_id = COALESCE(excluded.stripe_customer_id, subscriptions.stripe_customer_id),
-           stripe_subscription_id = COALESCE(excluded.stripe_subscription_id, subscriptions.stripe_subscription_id),
+           stripe_customer_id = excluded.stripe_customer_id,
+           stripe_subscription_id = excluded.stripe_subscription_id,
            tier = excluded.tier,
            status = excluded.status,
            current_period_end = excluded.current_period_end,
@@ -44,13 +59,13 @@ export class SubscriptionDB {
       .bind(
         id,
         tenantId,
-        data.stripe_customer_id ?? null,
-        data.stripe_subscription_id ?? null,
-        data.tier ?? "free",
-        data.status ?? "active",
-        data.current_period_end ?? null,
-        data.cancel_at_period_end ?? 0,
-        now,
+        merged.stripe_customer_id,
+        merged.stripe_subscription_id,
+        merged.tier,
+        merged.status,
+        merged.current_period_end,
+        merged.cancel_at_period_end,
+        existing?.created_at ?? now,
         now
       )
       .run();

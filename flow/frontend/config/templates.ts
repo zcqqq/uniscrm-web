@@ -2,6 +2,7 @@ export interface FlowTemplate {
   id: string;
   name: string;
   description: string;
+  domain: "user" | "content";
   graph: {
     nodes: { id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }[];
     edges: { id: string; source: string; target: string; sourceHandle?: string }[];
@@ -13,6 +14,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
     id: "tpl-follow-back-blue",
     name: "Follow back Blue Premium",
     description: "When a Blue-verified user follows you, automatically follow them back",
+    domain: "user",
     graph: {
       nodes: [
         { id: "t1", type: "xTrigger", position: { x: 0, y: 0 }, data: { channelType: "X", eventType: "follow.followed", channelId: "", conditions: [{ field: "verified_type", operator: "==", value: "blue" }] } },
@@ -27,6 +29,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
     id: "tpl-unfollow-unfollowers",
     name: "Unfollow who unfollows me",
     description: "When someone unfollows you, automatically unfollow them back",
+    domain: "user",
     graph: {
       nodes: [
         { id: "t1", type: "xTrigger", position: { x: 0, y: 0 }, data: { channelType: "X", eventType: "follow.unfollowed", channelId: "", conditions: [] } },
@@ -41,6 +44,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
     id: "tpl-dm-not-followed-back",
     name: "DM if not followed back",
     description: "After following someone, if they don't follow back in 1 day, send a Direct Message; if still no response, unfollow and mute",
+    domain: "user",
     graph: {
       nodes: [
         { id: "t1", type: "xTrigger", position: { x: 0, y: 80 }, data: { channelType: "X", eventType: "follow.follow", channelId: "", conditions: [] } },
@@ -59,6 +63,21 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         { id: "e5", source: "a2", sourceHandle: "success", target: "a3" },
         { id: "e6", source: "a2", sourceHandle: "failed", target: "a3" },
         { id: "e7", source: "w2", sourceHandle: "no", target: "a4" },
+      ],
+    },
+  },
+  {
+    id: "tpl-content-rewrite-crosspost",
+    name: "AI-rewrite new posts to another channel",
+    description: "When a new post is ingested from a connected channel, rewrite it with AI and publish it to another connected channel",
+    domain: "content",
+    graph: {
+      nodes: [
+        { id: "t1", type: "contentTrigger", position: { x: 0, y: 0 }, data: { conditions: [] } },
+        { id: "a1", type: "action", position: { x: 320, y: 0 }, data: { actionType: "aiRewritePublish", channelType: "", channelId: "" } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "a1" },
       ],
     },
   },

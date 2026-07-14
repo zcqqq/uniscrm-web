@@ -11,3 +11,10 @@ test("GET /api/flows returns list", async ({ request }) => {
   const data = await res.json();
   expect(data).toHaveProperty("flows");
 });
+
+test("GET /api/flows?domain=content returns only contentTrigger flows", async ({ request }) => {
+  const res = await request.get("/api/flows?domain=content");
+  expect(res.status()).toBe(200);
+  const data = await res.json();
+  expect(data).toHaveProperty("flows");
+});

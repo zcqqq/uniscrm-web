@@ -151,6 +151,9 @@ export default function EditorPage() {
       const nodes = tpl?.graph.nodes || [];
       const edges = tpl?.graph.edges || [];
       setFlow(null as any, name, false, nodes, edges);
+      if (!tpl && searchParams.get("domain") === "content") {
+        useFlowEditor.getState().addNode("contentTrigger", { x: 0, y: 0 });
+      }
       void useFlowEditor.getState().autoFillChannelIds();
       setLoading(false);
       return;

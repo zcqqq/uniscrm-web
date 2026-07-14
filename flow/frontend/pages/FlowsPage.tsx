@@ -14,16 +14,19 @@ import { TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../..
 import { DataTable } from "../../../shared/frontend/components/DataTable";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
-import { Pencil as EditIcon, Search as SearchIcon, Clock as ClockIcon, List as ListIcon } from "lucide-react";
+import { Pencil as EditIcon, Search as SearchIcon, Clock as ClockIcon, List as ListIcon, FileText as FileTextIcon } from "lucide-react";
 import { XIcon } from "../../../shared/frontend/ui/icons";
 
 function getNodeIcon(type: string, data: Record<string, unknown>) {
   if (type === "xTrigger") return XIcon;
+  if (type === "contentTrigger") return FileTextIcon;
   if (type === "waitForEvent") return SearchIcon;
   if (type === "wait") return ClockIcon;
   if (type === "action") {
     const at = data.actionType as string;
     if (at === "addToList") return ListIcon;
+    if (at === "repost" || at === "aiRewritePublish") return FileTextIcon;
+    if (at === "updateContentStatus") return ListIcon;
     return XIcon;
   }
   return ClockIcon;
@@ -44,7 +47,8 @@ type SortDir = "asc" | "desc";
 
 export default function FlowsPage() {
   useEffect(() => { document.title = "Flow — UniSCRM"; }, []);
-  const { flows, loading, page, total, totalPages, setPage, createFlow, deleteFlow, refresh } = useFlows();
+  const [domain, setDomain] = useState<"user" | "content">("user");
+  const { flows, loading, page, total, totalPages, setPage, createFlow, deleteFlow, refresh } = useFlows(domain);
   const { timezone } = useLocale();
   const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<SortKey>("updated_at");
@@ -54,7 +58,7 @@ export default function FlowsPage() {
     if (template) {
       navigate(`/flows/new?template=${template.id}`);
     } else {
-      navigate("/flows/new");
+      navigate(`/flows/new?domain=${domain}`);
     }
   };
 
@@ -91,9 +95,26 @@ export default function FlowsPage() {
             <Button onClick={() => handleCreate()}>+ New</Button>
           </div>
 
+          <div className="flex gap-1 mb-6 border-b border-border">
+            <button
+              type="button"
+              onClick={() => setDomain("user")}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${domain === "user" ? "border-primary text-foreground" : "border-transparent text-muted-foreground"}`}
+            >
+              User Flows
+            </button>
+            <button
+              type="button"
+              onClick={() => setDomain("content")}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${domain === "content" ? "border-primary text-foreground" : "border-transparent text-muted-foreground"}`}
+            >
+              Content Flows
+            </button>
+          </div>
+
           {/* Template cards */}
           <div className="grid grid-cols-3 gap-4 mb-8">
-            {FLOW_TEMPLATES.map((tpl) => {
+            {FLOW_TEMPLATES.filter((tpl) => tpl.domain === domain).map((tpl) => {
               const { icons, extra } = getNodeIcons(tpl.graph.nodes);
               return (
                 <Card

@@ -43,9 +43,9 @@ const channelListCache: Record<string, Promise<ChannelOption[]>> = {};
 
 export const api = {
   flows: {
-    list: (page = 1) =>
+    list: (page = 1, domain: "user" | "content" = "user") =>
       request<{ flows: FlowSummary[]; total: number; page: number; totalPages: number }>(
-        `/api/flows?page=${page}`
+        `/api/flows?page=${page}&domain=${domain}`
       ),
     create: (name?: string, graph_json?: string) =>
       request<{ flow: { id: string; name: string } }>("/api/flows", {

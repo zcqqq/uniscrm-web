@@ -3,6 +3,7 @@ import { EventMetadata_X, PROPS_X } from "../../../metadata/x";
 import type { PropDefinition } from "../../../metadata/dataTypes";
 import { t } from "../../../metadata/locale";
 import { SelectProps } from "../../../shared/frontend/components/SelectProps";
+import { BucketModePopover, type BucketMode } from "../../../shared/frontend/components/BucketModePopover";
 import { useLocale } from "../hooks/useLocale";
 import { Select } from "../../../shared/frontend/ui/select";
 import { Input } from "../../../shared/frontend/ui/input";
@@ -77,6 +78,7 @@ export interface ReportConfigValues {
   eventTypeA?: string;
   eventTypeB?: string;
   dimension: string;
+  dimensionBucketMode?: BucketMode;
   buckets?: string;
   timeRange: string;
   granularity: "total" | "day" | "week" | "month" | "hour" | "weekday";
@@ -100,6 +102,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
   const mode = modeProp || values.mode || "event";
   const entityProps = propsByEntity(mode === "content" ? "content" : "user");
   const numericEntityProps = entityProps.filter((p) => p.dataType === "INT");
+  const selectedDimensionIsInt = PROPS_X.find((p) => p.propId === values.dimension)?.dataType === "INT";
   const [showFilter, setShowFilter] = useState((values.filters?.length || 0) > 0);
 
   const update = (partial: Partial<ReportConfigValues>) => onChange({ ...values, ...partial });
@@ -244,14 +247,13 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                 />
               )}
             </div>
-            {values.dimension && entityProps.find(p => p.propId === values.dimension)?.dataType === "INT" && (
+            {values.dimension && selectedDimensionIsInt && (
               <div className="mt-2">
-                <Input
-                  type="text"
-                  value={values.buckets || ""}
-                  onChange={(e) => update({ buckets: e.target.value })}
-                  placeholder={locale === "zh" ? "分档边界 (逗号分隔, 如 100,1000,10000)" : "Bucket boundaries (comma-separated, e.g. 100,1000,10000)"}
-                  className="text-xs h-7"
+                <BucketModePopover
+                  mode={values.dimensionBucketMode || (values.buckets ? "custom" : "discrete")}
+                  buckets={values.buckets || ""}
+                  onChange={({ mode, buckets }) => update({ dimensionBucketMode: mode, buckets })}
+                  locale={locale}
                 />
               </div>
             )}

@@ -177,6 +177,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         eventTypeA: p.event_type_a || "",
         eventTypeB: p.event_type_b || "",
         dimension: p.dimension || "",
+        dimensionBucketMode: p.dimension_bucket_mode || (Array.isArray(p.buckets) && p.buckets.length > 0 ? "custom" : "discrete"),
         buckets: Array.isArray(p.buckets) ? p.buckets.join(",") : (p.buckets || ""),
         timeRange: typeof p.time_range === "string" && p.time_range ? p.time_range : inferTimeRange(p.time_range_start || ""),
         granularity: p.granularity || "day",
@@ -226,6 +227,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         measure: config.measure,
         measure_field: config.measureField || undefined,
         dimension: config.dimension || undefined,
+        dimension_bucket_mode: config.dimensionBucketMode || undefined,
         buckets: buckets?.length ? buckets : undefined,
         filters: config.filters,
         chart_type: chartType,
@@ -246,10 +248,13 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
       };
     }
 
+    const buckets = config.buckets ? config.buckets.split(",").map(Number).filter(n => !isNaN(n) && n > 0) : undefined;
     return {
       event_type: config.eventType,
       measure: config.measure,
       dimension: config.dimension || undefined,
+      dimension_bucket_mode: config.dimensionBucketMode || undefined,
+      buckets: buckets?.length ? buckets : undefined,
       granularity: config.granularity,
       time_range: config.timeRange,
       time_range_start: start,

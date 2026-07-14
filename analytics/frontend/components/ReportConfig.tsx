@@ -246,17 +246,15 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                   placeholder={s.noGroup}
                 />
               )}
-            </div>
-            {values.dimension && selectedDimensionIsInt && mode !== "interval" && (
-              <div className="mt-2">
+              {values.dimension && selectedDimensionIsInt && mode !== "interval" && (
                 <BucketModePopover
                   mode={values.dimensionBucketMode || (values.buckets ? "custom" : "discrete")}
                   buckets={values.buckets || ""}
                   onChange={({ mode, buckets }) => update({ dimensionBucketMode: mode, buckets })}
                   locale={locale}
                 />
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>}
 

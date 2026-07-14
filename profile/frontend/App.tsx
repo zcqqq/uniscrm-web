@@ -2,7 +2,6 @@ import { Routes, Route } from "react-router-dom";
 import { Sidebar } from "../../shared/frontend/Sidebar";
 import { URLS } from "../../shared/frontend/urls";
 import { Users } from "./pages/Users";
-import { Lists } from "./pages/Lists";
 import { Toaster } from "../../shared/frontend/ui/toaster";
 import { TierGuard } from "../../shared/frontend/TierGuard";
 
@@ -16,7 +15,6 @@ export default function App() {
         <Routes>
           <Route path="/" element={<TierGuard module="profile"><Users /></TierGuard>} />
           <Route path="/users" element={<TierGuard module="profile"><Users /></TierGuard>} />
-          <Route path="/lists" element={<TierGuard module="profile"><Lists /></TierGuard>} />
         </Routes>
       </main>
       <Toaster />

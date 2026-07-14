@@ -44,30 +44,6 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 
 // --- Internal routes ---
 
-app.post("/internal/lists/:id/users", async (c) => {
-  const secret = c.req.header("X-Internal-Secret");
-  if (!secret || secret !== c.env.INTERNAL_SECRET) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
-  const tenantId = c.req.header("X-Tenant-Id");
-  if (!tenantId) return c.json({ error: "X-Tenant-Id required" }, 400);
-
-  const listId = c.req.param("id");
-  const body = await c.req.json<{ userId: string }>();
-  if (!body.userId) return c.json({ error: "userId is required" }, 400);
-
-  const list = await c.env.WEB_DB.prepare(
-    "SELECT id FROM lists WHERE id = ? AND tenant_id = ?"
-  ).bind(listId, Number(tenantId)).first();
-  if (!list) return c.json({ error: "List not found" }, 404);
-
-  await c.env.WEB_DB.prepare(
-    "INSERT OR IGNORE INTO list_users (list_id, user_id, tenant_id) VALUES (?, ?, ?)"
-  ).bind(listId, body.userId, Number(tenantId)).run();
-
-  return c.json({ ok: true }, 201);
-});
-
 app.post("/internal/maigret-retry", async (c) => {
   const secret = c.req.header("X-Internal-Secret");
   if (!secret || secret !== c.env.INTERNAL_SECRET) {
@@ -119,7 +95,6 @@ const profileModuleGuard = createModuleGuard("profile", async (c: any) => {
   return sub?.tier ?? null;
 });
 app.use("/api/users/*", profileModuleGuard);
-app.use("/api/lists/*", profileModuleGuard);
 
 // --- Users (from tenant DB) ---
 
@@ -140,115 +115,6 @@ app.get("/api/users", async (c) => {
   );
 
   return c.json({ users, total, page, totalPages: Math.ceil(total / limit) });
-});
-
-// --- Lists (main DB) ---
-
-app.get("/api/lists", async (c) => {
-  const tenantId = c.get("tenantId");
-
-  const { results: lists } = await c.env.WEB_DB.prepare(
-    `SELECT l.id, l.name, l.created_at, l.updated_at, COUNT(lu.user_id) as user_count
-     FROM lists l
-     LEFT JOIN list_users lu ON lu.list_id = l.id
-     WHERE l.tenant_id = ?
-     GROUP BY l.id
-     ORDER BY l.updated_at DESC`
-  ).bind(Number(tenantId)).all();
-
-  return c.json({ lists });
-});
-
-app.post("/api/lists", async (c) => {
-  const tenantId = c.get("tenantId");
-  const memberId = c.get("memberId");
-  const body = await c.req.json<{ name: string }>();
-  if (!body.name?.trim()) return c.json({ error: "Name is required" }, 400);
-
-  const id = crypto.randomUUID();
-  await c.env.WEB_DB.prepare(
-    "INSERT INTO lists (id, name, tenant_id, member_id) VALUES (?, ?, ?, ?)"
-  ).bind(id, body.name.trim(), Number(tenantId), memberId).run();
-
-  return c.json({ id, name: body.name.trim() }, 201);
-});
-
-app.delete("/api/lists/:id", async (c) => {
-  const tenantId = c.get("tenantId");
-  const listId = c.req.param("id");
-
-  await c.env.WEB_DB.prepare(
-    "DELETE FROM lists WHERE id = ? AND tenant_id = ?"
-  ).bind(listId, Number(tenantId)).run();
-
-  return c.json({ ok: true });
-});
-
-// --- List Users ---
-
-app.get("/api/lists/:id/users", async (c) => {
-  const tenantId = c.get("tenantId");
-  const tdb = c.get("tenantDataDb");
-  const listId = c.req.param("id");
-  const page = Math.max(1, Number(c.req.query("page")) || 1);
-  const limit = 20;
-  const offset = (page - 1) * limit;
-
-  const countResult = await c.env.WEB_DB.prepare(
-    "SELECT COUNT(*) as total FROM list_users WHERE list_id = ? AND tenant_id = ?"
-  ).bind(listId, Number(tenantId)).first<{ total: number }>();
-  const total = countResult?.total || 0;
-
-  const { results: listUserRows } = await c.env.WEB_DB.prepare(
-    "SELECT user_id, created_at as added_at FROM list_users WHERE list_id = ? AND tenant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
-  ).bind(listId, Number(tenantId), limit, offset).all<{ user_id: string; added_at: string }>();
-
-  let users: any[] = [];
-  if (tdb && listUserRows.length > 0) {
-    const ids = listUserRows.map((r) => r.user_id);
-    const placeholders = ids.map(() => "?").join(",");
-    const userDetails = await tdb.query<{ id: string; name: string; username: string; updated_at: string }>(
-      `SELECT id, name, username, updated_at FROM user WHERE id IN (${placeholders})`,
-      ids
-    );
-    const detailMap = new Map(userDetails.map((u) => [u.id, u]));
-    users = listUserRows.map((r) => ({
-      ...(detailMap.get(r.user_id) || { id: r.user_id, name: null, username: null }),
-      added_at: r.added_at,
-    }));
-  }
-
-  return c.json({ users, total, page, totalPages: Math.ceil(total / limit) });
-});
-
-app.post("/api/lists/:id/users", async (c) => {
-  const tenantId = c.get("tenantId");
-  const listId = c.req.param("id");
-  const body = await c.req.json<{ userId: string }>();
-  if (!body.userId) return c.json({ error: "userId is required" }, 400);
-
-  const list = await c.env.WEB_DB.prepare(
-    "SELECT id FROM lists WHERE id = ? AND tenant_id = ?"
-  ).bind(listId, Number(tenantId)).first();
-  if (!list) return c.json({ error: "List not found" }, 404);
-
-  await c.env.WEB_DB.prepare(
-    "INSERT OR IGNORE INTO list_users (list_id, user_id, tenant_id) VALUES (?, ?, ?)"
-  ).bind(listId, body.userId, Number(tenantId)).run();
-
-  return c.json({ ok: true }, 201);
-});
-
-app.delete("/api/lists/:id/users/:userId", async (c) => {
-  const tenantId = c.get("tenantId");
-  const listId = c.req.param("id");
-  const userId = c.req.param("userId");
-
-  await c.env.WEB_DB.prepare(
-    "DELETE FROM list_users WHERE list_id = ? AND user_id = ? AND tenant_id = ?"
-  ).bind(listId, userId, Number(tenantId)).run();
-
-  return c.json({ ok: true });
 });
 
 // --- Maigret Logic ---

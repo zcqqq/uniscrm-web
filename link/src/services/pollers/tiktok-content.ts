@@ -16,6 +16,7 @@ export interface TikTokContentPollerContext {
   ai: Ai;
   vectorize: VectorizeIndex;
   pipelineContent?: Pipeline;
+  flowQueue?: Queue;
   deadline: number;
 }
 
@@ -36,7 +37,7 @@ export async function runTikTokContentPoller(ctx: TikTokContentPollerContext): P
     return;
   }
 
-  const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent);
+  const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue);
   const phase = state.backfill_complete ? "incremental" : "backfill";
   console.log(JSON.stringify({ event: "tiktok_content_poll_started", channel_id: ctx.channelId, phase, cursor: state.cursor }));
 
@@ -50,7 +51,8 @@ export async function runTikTokContentPoller(ctx: TikTokContentPollerContext): P
 async function upsertPage(
   contentService: ContentService,
   items: Record<string, unknown>[],
-  channelId: string
+  channelId: string,
+  emitFlowEvent: boolean
 ): Promise<number> {
   let newCount = 0;
   for (const item of items) {
@@ -62,7 +64,7 @@ async function upsertPage(
     if (typeof props.source_created_at === "number") {
       props.source_created_at = new Date(props.source_created_at * 1000).toISOString();
     }
-    const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "TIKTOK");
+    const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "TIKTOK", emitFlowEvent);
     if (isNew) newCount++;
   }
   return newCount;
@@ -84,7 +86,7 @@ async function runBackfill(
     }
 
     pagesFetched++;
-    await upsertPage(contentService, page.data, ctx.channelId);
+    await upsertPage(contentService, page.data, ctx.channelId, false);
 
     if (!page.hasMore) {
       await ctx.linkDb
@@ -118,7 +120,7 @@ async function runIncrementalPoll(ctx: TikTokContentPollerContext, contentServic
     if (rateLimited) { stopReason = "rate_limited"; break; }
 
     pagesFetched++;
-    const newCount = await upsertPage(contentService, page.data, ctx.channelId);
+    const newCount = await upsertPage(contentService, page.data, ctx.channelId, true);
     totalNew += newCount;
 
     if (newCount === 0) { stopReason = "no_new_content"; break; }

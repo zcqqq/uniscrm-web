@@ -107,7 +107,7 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
         await runPostsPoller({
           channelId: row.id, xUserId: config.x_user_id, accessToken,
           linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id!,
-          ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT,
+          ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
           deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
         });
       } catch (e) {
@@ -116,7 +116,7 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
         await runPostsPoller({
           channelId: row.id, xUserId: config.x_user_id, accessToken,
           linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id!,
-          ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT,
+          ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
           deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
         });
       }
@@ -149,7 +149,7 @@ async function pollTikTokChannel(env: Env, row: { id: string; config: string; te
     try {
       await runTikTokContentPoller({
         channelId: row.id, accessToken, linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id,
-        ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT,
+        ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
         deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
       });
     } catch (e) {
@@ -157,7 +157,7 @@ async function pollTikTokChannel(env: Env, row: { id: string; config: string; te
       accessToken = await tokenService.refreshAccessToken(row.id);
       await runTikTokContentPoller({
         channelId: row.id, accessToken, linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id,
-        ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT,
+        ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
         deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
       });
     }

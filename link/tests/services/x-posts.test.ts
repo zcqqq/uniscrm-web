@@ -141,4 +141,31 @@ describe("runPostsPoller", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  describe("x-posts poller: content.created emission gating", () => {
+    it("does not emit content.created during backfill even for new posts", async () => {
+      const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null });
+      const tenantDb = createMockTenantDb();
+      const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+
+      fetchMock.mockImplementationOnce(() => jsonResponse({ data: [{ id: "t1", text: "hello" }], meta: {} }));
+
+      await runPostsPoller(baseCtx(linkDb, tenantDb, { flowQueue }));
+
+      expect(flowQueue.send).not.toHaveBeenCalled();
+    });
+
+    it("emits content.created during incremental polling for new posts", async () => {
+      const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
+      const tenantDb = createMockTenantDb();
+      const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+
+      fetchMock.mockImplementationOnce(() => jsonResponse({ data: [{ id: "t1", text: "hello" }], meta: {} }));
+
+      await runPostsPoller(baseCtx(linkDb, tenantDb, { flowQueue }));
+
+      expect(flowQueue.send).toHaveBeenCalledTimes(1);
+      expect(flowQueue.send.mock.calls[0][0]).toMatchObject({ eventType: "content.created", channelId: "chan1" });
+    });
+  });
 });

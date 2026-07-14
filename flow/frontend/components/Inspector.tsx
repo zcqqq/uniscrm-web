@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useFlowEditor, ACTION_CHANNEL_TYPE } from "../store/flow-editor";
-import { CHANNEL_TYPES, type TriggerFieldDefinition } from "../config/trigger-fields";
+import { CHANNEL_TYPES, CONTENT_TRIGGER_FIELDS, type TriggerFieldDefinition } from "../config/trigger-fields";
 import { SelectPropsValue } from "../../../shared/frontend/components/SelectPropsValue";
 import { api } from "../lib/api";
 import { Button } from "../../../shared/frontend/ui/button";
@@ -223,6 +223,24 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
   );
 }
 
+
+function ContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+  const conditions: Condition[] = data.conditions || [];
+  const fields = CONTENT_TRIGGER_FIELDS;
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">Content Trigger</h4>
+      <p className="text-xs text-muted-foreground mb-3">Fires when a new item is ingested from one of your own connected channels.</p>
+      <ConditionsEditor
+        conditions={conditions}
+        fields={fields}
+        onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+      />
+    </div>
+  );
+}
 
 function WaitInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
@@ -666,6 +684,9 @@ export default function Inspector() {
 
       {node.type === "xTrigger" && (
         <XTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />
+      )}
+      {node.type === "contentTrigger" && (
+        <ContentTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />
       )}
       {node.type === "cronTrigger" && (
         <CronTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />

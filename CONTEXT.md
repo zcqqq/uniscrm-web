@@ -20,6 +20,10 @@ _Avoid_: analytics prop, tracked field.
 Distinguishes the kind of a `content` row from the same channel. For X: `TWEET` (default) vs `ARTICLE` (X Articles arrive as a tweet payload with an extra `article.title` structure — see `_reference/x/post.json`). Detected by presence-checking the raw payload in poller code, not by metadata.
 _Avoid_: post type, media type.
 
+**deactivated_reason**:
+A free-text column on `channels` recording *why* `is_active` was set to 0, distinguishing causes that must never be conflated: `'tier_limit'` (set by tier-enforcement downgrade/expiry in `admin/src/routes/webhook.ts` and `subscription-db.ts`; a later tier upgrade's reactivation query matches on this exact string) vs. `'byok_merged source_channel_id=<id>'` (set when an X BYOK OAuth callback frees a channel row's `(channel_type, source_channel_id)` slot because the account is being taken over by a different row — see `docs/adr/0003-...`). A row deactivated for one reason must never be swept up by reactivation logic written for another.
+_Avoid_: disconnect reason, status reason — this is specifically about why `is_active` flipped to 0, not a general channel status field.
+
 **Compaction**:
 The periodic job (in `analytics/compactor`, run daily from the `analytics` Worker's cron) that rewrites an R2 Data Catalog table down to one row per business key (e.g. `tenant_id`+`channel_id`+`source_user_id` for `uniscrm.user`, `tenant_id`+`channel_id`+`source_content_id` for `uniscrm.content`), keeping the latest by `updated_at`. Exists because R2 Pipelines sinks are append-only (no upsert/merge on write) — every poller/webhook write that resends an unchanged row becomes a duplicate row in the Iceberg table, so periodic compaction is the only place dedup actually happens for these tables.
 _Avoid_: dedup job, cleanup job. Also distinct from Cloudflare's native R2 Data Catalog "compaction" feature (`wrangler r2 bucket catalog compaction enable`), which only merges small Parquet files for query performance and does not do row-level dedup.

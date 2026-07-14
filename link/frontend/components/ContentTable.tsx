@@ -106,7 +106,7 @@ export function ContentTable({ items, onUpdate, onDelete }: Props) {
           </Badge>
         ),
       },
-      byKey.get("impression_count")!,
+      byKey.get("view_count")!,
       byKey.get("like_count")!,
       byKey.get("repost_count")!,
       byKey.get("reply_count")!,

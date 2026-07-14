@@ -54,7 +54,7 @@ export interface ContentItem {
   source_updated_at: string | null;
   source_created_at: string | null;
   bookmark_count: number | null;
-  impression_count: number | null;
+  view_count: number | null;
   like_count: number | null;
   quote_count: number | null;
   reply_count: number | null;

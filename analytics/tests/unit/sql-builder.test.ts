@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSQL, buildSnapshotSQL } from "../../src/index";
+import { buildSQL, buildSnapshotSQL, buildDimensionRangeSQL } from "../../src/index";
 
 describe("buildSnapshotSQL", () => {
   it("builds a plain count query with no dimension", () => {
@@ -202,5 +202,23 @@ describe("buildSQL event dimension bucketing", () => {
     );
     expect(sql).toContain("WITH bounds AS");
     expect(sql).toContain("GROUP BY period, dimension");
+  });
+});
+
+describe("buildDimensionRangeSQL", () => {
+  it("maps mode to the correct table", () => {
+    expect(buildDimensionRangeSQL("user", "followers_count", "1")).toContain("FROM uniscrm.user");
+    expect(buildDimensionRangeSQL("content", "source_created_at", "1")).toContain("FROM uniscrm.content");
+    expect(buildDimensionRangeSQL("event", "source_created_at", "1")).toContain("FROM uniscrm.event");
+  });
+
+  it("selects MIN/MAX aliased as mn/mx, scoped by tenant", () => {
+    const sql = buildDimensionRangeSQL("content", "source_created_at", "42");
+    expect(sql).toContain("SELECT MIN(source_created_at) as mn, MAX(source_created_at) as mx");
+    expect(sql).toContain("WHERE tenant_id = 42");
+  });
+
+  it("throws for an unrecognized mode", () => {
+    expect(() => buildDimensionRangeSQL("bogus", "x", "1")).toThrow();
   });
 });

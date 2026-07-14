@@ -41,6 +41,7 @@ async function authMiddleware(c: any, next: any) {
 
 app.use("/api/reports", authMiddleware);
 app.use("/api/reports/*", authMiddleware);
+app.use("/api/dimension-range", authMiddleware);
 app.use("/api/dashboards", authMiddleware);
 app.use("/api/dashboards/*", authMiddleware);
 app.use("/api/dashboard-items/*", authMiddleware);
@@ -247,6 +248,45 @@ app.delete("/api/reports/:id", async (c) => {
 
   if (!result.meta.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
+});
+
+// ============ Dimension Range API (sync query, for Configure popover default) ============
+//
+// Unlike every other R2 SQL query in this file (which run through the async
+// "create report -> queue -> container executes -> write results_json ->
+// frontend polls" pipeline in the Queue Handler section below), this
+// endpoint queries the container directly and waits for the result inline.
+// It exists only to seed a one-off best-effort suggestion for the DATETIME
+// Configure popover's default selection, so the extra latency (including a
+// possible container cold start) is an acceptable tradeoff here.
+
+app.get("/api/dimension-range", async (c) => {
+  const tenantId = c.get("tenantId");
+  const mode = c.req.query("mode") || "";
+  const dimension = c.req.query("dimension") || "";
+
+  if (!dimension || !DIMENSION_RANGE_TABLES[mode]) {
+    return c.json({ error: "Invalid mode or dimension" }, 400);
+  }
+
+  const sql = buildDimensionRangeSQL(mode, dimension, tenantId);
+  const container = c.env.ANALYTICS_CONTAINER.getByName("analytics-singleton");
+  await container.startAndWaitForPorts();
+
+  const response = await container.fetch("http://container/query", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sql, warehouse: c.env.R2_WAREHOUSE, token: c.env.R2_CATALOG_TOKEN }),
+  });
+
+  if (!response.ok) {
+    const errBody = await response.text();
+    return c.json({ error: `Query failed: ${errBody}` }, 502);
+  }
+
+  const result = await response.json() as { data: { mn: string | null; mx: string | null }[] };
+  const row = result.data[0];
+  return c.json({ min: row?.mn ?? null, max: row?.mx ?? null });
 });
 
 // ============ Dashboards API ============
@@ -660,6 +700,18 @@ function buildDatetimeDimensionBucketing(params: {
     boundsCte: "",
     fromExtra: "",
   };
+}
+
+const DIMENSION_RANGE_TABLES: Record<string, string> = {
+  user: "uniscrm.user",
+  content: "uniscrm.content",
+  event: "uniscrm.event",
+};
+
+export function buildDimensionRangeSQL(mode: string, dimension: string, tenantId: string): string {
+  const table = DIMENSION_RANGE_TABLES[mode];
+  if (!table) throw new Error(`Unknown mode: ${mode}`);
+  return `SELECT MIN(${dimension}) as mn, MAX(${dimension}) as mx FROM ${table} WHERE tenant_id = ${tenantId}`;
 }
 
 export function buildSnapshotSQL(tableName: string, params: Record<string, unknown>, tenantId: string): string {

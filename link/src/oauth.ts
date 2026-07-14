@@ -335,6 +335,16 @@ export function oauthRoutes() {
       .bind(channelId, config, openId, tokenData.access_token, tenantId ? parseInt(tenantId) : null, memberId || null)
       .run();
 
+    // On re-authorization, the ON CONFLICT path updates the pre-existing row in
+    // place and keeps ITS original id — the freshly-generated channelId above is
+    // never actually written to any row. Re-query for the real active row's id,
+    // mirroring the X System App connect path's actualChannelId pattern above.
+    const tiktokRow = await c.env.LINK_DB
+      .prepare(`SELECT id FROM channels WHERE channel_type = 'TIKTOK' AND source_channel_id = ? AND is_active = 1`)
+      .bind(openId)
+      .first<{ id: string }>();
+    const actualChannelId = tiktokRow?.id || channelId;
+
     // Seed (or reset, on re-authorization) poll state for the content poller —
     // full backfill runs again, mirroring the X BYOK callback's pattern.
     await c.env.LINK_DB
@@ -343,11 +353,11 @@ export function oauthRoutes() {
          VALUES (?, 'content', NULL, 0, NULL, datetime('now'))
          ON CONFLICT(channel_id, poller_name) DO UPDATE SET cursor = NULL, backfill_complete = 0, last_polled_at = NULL, updated_at = datetime('now')`
       )
-      .bind(channelId)
+      .bind(actualChannelId)
       .run();
 
     try {
-      await pollChannelOnce(c.env, "TIKTOK", channelId);
+      await pollChannelOnce(c.env, "TIKTOK", actualChannelId);
     } catch (e) {
       console.error("TikTok instant poll failed:", e);
     }

@@ -238,4 +238,34 @@ describe("TikTok OAuth callback", () => {
     expect(seedCall!.sql).toContain("'content'");
     expect(pollChannelOnceMock).toHaveBeenCalledWith(expect.anything(), "TIKTOK", expect.any(String));
   });
+
+  it("on re-authorization (ON CONFLICT path), uses the existing row's real id — not the freshly-generated phantom id — for poll state seeding and the instant poll", async () => {
+    const existingChannelId = "existing-tiktok-chan";
+    const kv = {
+      get: vi.fn().mockResolvedValue(JSON.stringify({ tenantId: "5", memberId: "m1" })),
+      put: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+    };
+    // Simulate the channels INSERT hitting ON CONFLICT and updating a pre-existing
+    // row: the re-query for the active row must return that row's real id, which
+    // differs from whatever fresh UUID crypto.randomUUID() generated locally.
+    const linkDb = createMockLinkDb([
+      ["channel_type = 'TIKTOK' AND source_channel_id", { id: existingChannelId }],
+    ]);
+
+    const app = buildApp();
+    const res = await app.request(
+      "/tiktok/callback?code=abc&state=state123",
+      {},
+      { KV: kv, LINK_DB: linkDb, WEB_DB: { prepare: vi.fn().mockReturnValue({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(null) }) }) } } as any
+    );
+
+    expect(res.status).toBe(302);
+
+    const seedCall = linkDb.calls.find((c) => c.sql.includes("INSERT INTO channel_poll_state"));
+    expect(seedCall).toBeDefined();
+    expect(seedCall!.args[0]).toBe(existingChannelId);
+
+    expect(pollChannelOnceMock).toHaveBeenCalledWith(expect.anything(), "TIKTOK", existingChannelId);
+  });
 });

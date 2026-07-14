@@ -233,7 +233,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                 <SelectProps
                   options={entityProps}
                   value={values.dimension}
-                  onChange={(v) => update({ dimension: v, buckets: "" })}
+                  onChange={(v) => update({ dimension: v, buckets: "", dimensionBucketMode: undefined })}
                   locale={locale}
                   placeholder={s.noGroup}
                 />
@@ -247,7 +247,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                 />
               )}
             </div>
-            {values.dimension && selectedDimensionIsInt && (
+            {values.dimension && selectedDimensionIsInt && mode !== "interval" && (
               <div className="mt-2">
                 <BucketModePopover
                   mode={values.dimensionBucketMode || (values.buckets ? "custom" : "discrete")}

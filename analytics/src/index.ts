@@ -597,6 +597,15 @@ function buildDimensionBucketing(params: {
     };
   }
 
+  if (mode === "discrete") {
+    return {
+      dimExpr: `, ${dimension} as dimension`,
+      dimGroupCol: dimension,
+      boundsCte: "",
+      fromExtra: "",
+    };
+  }
+
   if (buckets && buckets.length > 0) {
     const cases = buckets.map((b, i) => {
       const prev = i === 0 ? 0 : buckets[i - 1];

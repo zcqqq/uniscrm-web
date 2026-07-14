@@ -8,6 +8,7 @@ import { Aggregator } from "./trend/aggregator";
 import { TrendCache } from "./trend/storage/cache";
 import { TrendVectorStore } from "./trend/storage/vectorize";
 import { XTokenService } from "./services/x-token";
+import { TikTokTokenService } from "./services/tiktok-token";
 import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { runFollowersPoller } from "./services/pollers/x-followers";
@@ -131,8 +132,10 @@ async function handleTokenRefresh(env: Env): Promise<void> {
     .prepare("SELECT id, config FROM channels WHERE channel_type = 'TIKTOK' AND is_active = 1")
     .all<{ id: string; config: string }>();
 
+  const tiktokTokenService = new TikTokTokenService(env.LINK_DB, env.TIKTOK_CLIENT_KEY, env.TIKTOK_CLIENT_SECRET);
+
   for (const row of tiktokChannels.results) {
-    const config = JSON.parse(row.config) as { refresh_token?: string; expires_at?: string; access_token?: string };
+    const config = JSON.parse(row.config) as { refresh_token?: string; expires_at?: string };
     if (!config.refresh_token) continue;
 
     const shouldRefresh = !config.expires_at ||
@@ -140,31 +143,7 @@ async function handleTokenRefresh(env: Env): Promise<void> {
     if (!shouldRefresh) continue;
 
     try {
-      const res = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_key: env.TIKTOK_CLIENT_KEY,
-          client_secret: env.TIKTOK_CLIENT_SECRET,
-          grant_type: "refresh_token",
-          refresh_token: config.refresh_token,
-        }),
-      });
-
-      if (!res.ok) {
-        console.error(`TikTok token refresh failed for ${row.id}: ${await res.text()}`);
-        continue;
-      }
-
-      const data = (await res.json()) as { access_token: string; refresh_token?: string; expires_in?: number };
-      config.access_token = data.access_token;
-      if (data.refresh_token) config.refresh_token = data.refresh_token;
-      if (data.expires_in) config.expires_at = new Date(Date.now() + data.expires_in * 1000).toISOString();
-
-      await env.LINK_DB.prepare("UPDATE channels SET config = ?, updated_at = datetime('now') WHERE id = ?")
-        .bind(JSON.stringify(config), row.id)
-        .run();
-
+      await tiktokTokenService.refreshAccessToken(row.id);
       console.log(JSON.stringify({ event: "tiktok_token_refreshed", channel_id: row.id }));
     } catch (e) {
       console.error(`TikTok token refresh error for ${row.id}:`, e);

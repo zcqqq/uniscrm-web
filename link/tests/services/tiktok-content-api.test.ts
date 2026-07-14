@@ -84,4 +84,12 @@ describe("fetchVideoListPage", () => {
 
     await expect(fetchVideoListPage("tok")).rejects.toThrow("TikTok video.list failed");
   });
+
+  it("throws TikTokUnauthorizedError when a non-2xx status body still carries access_token_invalid", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "access_token_invalid", message: "expired" } }), { status: 401 })
+    );
+
+    await expect(fetchVideoListPage("tok")).rejects.toThrow(TikTokUnauthorizedError);
+  });
 });

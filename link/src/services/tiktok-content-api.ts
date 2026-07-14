@@ -46,24 +46,37 @@ export async function fetchVideoListPage(
     body: JSON.stringify(body),
   });
 
-  if (!res.ok) {
-    throw new Error(`TikTok video.list failed: ${res.status} ${await res.text()}`);
+  const rawText = await res.text();
+  let responseBody:
+    | {
+        data?: { videos?: Record<string, unknown>[]; cursor?: number; has_more?: boolean };
+        error?: { code: string; message: string };
+      }
+    | undefined;
+  try {
+    responseBody = JSON.parse(rawText);
+  } catch {
+    responseBody = undefined;
   }
 
-  const responseBody = (await res.json()) as {
-    data?: { videos?: Record<string, unknown>[]; cursor?: number; has_more?: boolean };
-    error?: { code: string; message: string };
-  };
+  if (responseBody === undefined) {
+    // Body isn't parseable JSON at all — fall back to HTTP status.
+    throw new Error(`TikTok video.list failed: ${res.status} ${rawText}`);
+  }
 
   const errorCode = responseBody.error?.code;
-  if (errorCode === "rate_limit_exceeded") {
-    return { page: { data: [], hasMore: false }, rateLimited: true };
-  }
   if (errorCode === "access_token_invalid") {
     throw new TikTokUnauthorizedError(`TikTok video.list failed: ${errorCode} ${responseBody.error?.message ?? ""}`);
   }
+  if (errorCode === "rate_limit_exceeded") {
+    return { page: { data: [], hasMore: false }, rateLimited: true };
+  }
   if (errorCode && errorCode !== "ok") {
     throw new Error(`TikTok video.list failed: ${errorCode} ${responseBody.error?.message ?? ""}`);
+  }
+
+  if (!res.ok) {
+    throw new Error(`TikTok video.list failed: ${res.status} ${rawText}`);
   }
 
   return {

@@ -421,6 +421,15 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   const dimensions: string[] = hasDimension
     ? Array.from(new Set(results.data.map((d: any) => String(d.dimension ?? "null"))))
     : [];
+  // The chart's legend/series order (and DIMENSION_COLORS index assignment)
+  // follows the user's sort choice only when sorting by "Dimension" itself —
+  // "Value"/"Period" sorts have no single well-defined per-dimension order
+  // to reorder the legend by (a dimension's value varies per period), so
+  // for those the legend keeps its natural (first-seen) order while the
+  // flattened table below still sorts by whichever column was chosen.
+  const sortedDimensions = sortColumn === "dimension"
+    ? [...dimensions].sort((a, b) => compareRows({ dimension: a }, { dimension: b }, "dimension", dimensionSortType, sortDirection))
+    : dimensions;
   // For multi-dimension pivot data by period; for single dimension use filled time series
   const eventData: any[] = hasDimension
     ? (() => {
@@ -575,7 +584,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                       {hasDimension ? (
                         <>
                           <Legend wrapperStyle={{ fontSize: 11 }} />
-                          {dimensions.map((dim, i) => (
+                          {sortedDimensions.map((dim, i) => (
                             <Bar key={dim} dataKey={dim} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} radius={[3, 3, 0, 0]} />
                           ))}
                         </>
@@ -592,7 +601,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                       {hasDimension ? (
                         <>
                           <Legend wrapperStyle={{ fontSize: 11 }} />
-                          {dimensions.map((dim, i) => {
+                          {sortedDimensions.map((dim, i) => {
                             const color = DIMENSION_COLORS[i % DIMENSION_COLORS.length];
                             return (
                               <Line
@@ -627,15 +636,30 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               const tableRows: { period: string; dimension?: string; value: number }[] = hasDimension
                 ? eventData.flatMap((row: any) => dimensions.map((dim) => ({ period: row.period, dimension: dim, value: Number(row[dim]) || 0 })))
                 : eventData.map((d: any) => ({ period: d.period, value: Number(d.value) || 0 }));
+              const columns = [
+                { key: "period", label: t.period, sortable: true, sortType: "date" as const, render: (d: any) => <span className="text-muted-foreground">{formatPeriod(d.period)}</span> },
+                ...(hasDimension ? [{ key: "dimension", label: t.dimension, sortable: true, sortType: dimensionSortType, render: (d: any) => String(d.dimension ?? "—") }] : []),
+                { key: "value", label: t.value, align: "right" as const, sortable: true, sortType: "number" as const, render: (d: any) => <span className="font-medium">{d.value.toLocaleString()}</span> },
+              ];
+              // Clicking "Dimension" fully re-sorts the flattened row array
+              // (one row per period x dimension) by the chosen column,
+              // matching ResultsTable's single-active-sort-column model —
+              // this can intermix periods, which is expected here (see
+              // spec section 3), not a bug.
+              const activeSortColumn = columns.some((c) => c.key === sortColumn) ? sortColumn : undefined;
+              const sortedTableRows = activeSortColumn
+                ? [...tableRows].sort((a: any, b: any) =>
+                    compareRows(a, b, activeSortColumn, columns.find((c) => c.key === activeSortColumn)?.sortType, sortDirection)
+                  )
+                : tableRows;
               return (
                 <ResultsTable
                   title={t.data}
-                  columns={[
-                    { key: "period", label: t.period, render: (d: any) => <span className="text-muted-foreground">{formatPeriod(d.period)}</span> },
-                    ...(hasDimension ? [{ key: "dimension", label: t.dimension, render: (d: any) => String(d.dimension ?? "—") }] : []),
-                    { key: "value", label: t.value, align: "right" as const, render: (d: any) => <span className="font-medium">{d.value.toLocaleString()}</span> },
-                  ]}
-                  rows={tableRows}
+                  columns={columns}
+                  rows={sortedTableRows}
+                  sortKey={sortColumn}
+                  sortDir={sortDirection}
+                  onSortChange={handleSortChange}
                 />
               );
             })()}

@@ -8,13 +8,10 @@ import { Aggregator } from "./trend/aggregator";
 import { TrendCache } from "./trend/storage/cache";
 import { TrendVectorStore } from "./trend/storage/vectorize";
 import { XTokenService } from "./services/x-token";
-import { TikTokTokenService } from "./services/tiktok-token";
 import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
-import { runFollowersPoller } from "./services/pollers/x-followers";
-import { runPostsPoller } from "./services/pollers/x-posts";
-import { XUnauthorizedError } from "./services/x-errors";
-import { TenantDataDB } from "../../shared/tenant-data-db";
+import { TikTokTokenService } from "./services/tiktok-token";
+import { pollChannelOnce } from "./services/pollers/poll-channel";
 
 export async function handleCron(env: Env): Promise<void> {
   await Promise.allSettled([
@@ -152,14 +149,12 @@ async function handleTokenRefresh(env: Env): Promise<void> {
 }
 
 export async function handlePolling(env: Env): Promise<void> {
-  const PER_CHANNEL_BUDGET_MS = 20_000;
   const TOTAL_BUDGET_MS = 50_000;
-  const REPOLL_INTERVAL_MS = 55 * 60 * 1000; // just under an hour, guards overlapping cron runs
   const runDeadline = Date.now() + TOTAL_BUDGET_MS;
 
   const rows = await env.LINK_DB
-    .prepare("SELECT id, config, tenant_id FROM channels WHERE channel_type = 'X' AND is_active = 1")
-    .all<{ id: string; config: string; tenant_id: number | null }>();
+    .prepare("SELECT id, channel_type FROM channels WHERE channel_type IN ('X', 'TIKTOK') AND is_active = 1")
+    .all<{ id: string; channel_type: "X" | "TIKTOK" }>();
 
   console.log(JSON.stringify({ event: "polling_cron_started", candidateChannels: rows.results.length }));
 
@@ -168,140 +163,6 @@ export async function handlePolling(env: Env): Promise<void> {
       console.log(JSON.stringify({ event: "polling_cron_budget_exhausted", channel_id: row.id }));
       break;
     }
-
-    const config = JSON.parse(row.config) as ByokConfig & { x_user_id?: string };
-    if (!config.is_byok) continue;
-    if (!config.x_user_id || !row.tenant_id) {
-      console.log(JSON.stringify({ event: "followers_poll_skipped_unauthorized", channel_id: row.id, hasXUserId: !!config.x_user_id, hasTenantId: !!row.tenant_id }));
-      continue;
-    }
-
-    const shouldPoll = async (pollerName: "followers" | "posts"): Promise<boolean> => {
-      const state = await env.LINK_DB
-        .prepare("SELECT backfill_complete, last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = ?")
-        .bind(row.id, pollerName)
-        .first<{ backfill_complete: number; last_polled_at: string | null }>();
-      if (!state) {
-        console.log(JSON.stringify({ event: `${pollerName}_poll_skipped_no_state_row`, channel_id: row.id }));
-        return false;
-      }
-      if (state.backfill_complete && state.last_polled_at) {
-        const elapsedMs = Date.now() - new Date(state.last_polled_at).getTime();
-        if (elapsedMs < REPOLL_INTERVAL_MS) {
-          console.log(JSON.stringify({ event: `${pollerName}_poll_skipped_too_recent`, channel_id: row.id, elapsedMs }));
-          return false;
-        }
-      }
-      return true;
-    };
-
-    const pollFollowers = await shouldPoll("followers");
-    const pollPosts = await shouldPoll("posts");
-    if (!pollFollowers && !pollPosts) continue;
-
-    let accessToken: string;
-    let tenantDb: TenantDataDB;
-    let tokenService: XTokenService;
-    try {
-      const creds = await getAppCredentials(env, config);
-      tokenService = new XTokenService(env.LINK_DB, creds.clientId, creds.clientSecret);
-      accessToken = await tokenService.getValidToken(row.id);
-
-      const tenant = await env.WEB_DB
-        .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-        .bind(row.tenant_id)
-        .first<{ d1_database_id: string | null }>();
-      if (!tenant?.d1_database_id) continue;
-
-      tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenant.d1_database_id);
-    } catch (e) {
-      console.error(JSON.stringify({ event: "poll_setup_error", channel_id: row.id, error: String(e) }));
-      continue;
-    }
-
-    // Each poller gets its own try/catch: a failure in one (e.g. a transient X API
-    // error) must not prevent the other from running for the same channel/tick.
-    //
-    // Each poller also gets its own PER_CHANNEL_BUDGET_MS window, computed fresh
-    // right before it starts — NOT capped by the shared runDeadline. Capping against
-    // runDeadline previously meant a slow/large followers backfill could consume the
-    // whole tick's budget, leaving posts a deadline already in the past and starving
-    // it indefinitely (observed: posts_poll_deadline_reached with pagesFetched=0 on
-    // every tick). runDeadline still bounds the outer loop (see the check above) so
-    // a channel with a stuck poller can't block the rest of the channel list forever.
-    //
-    // A 401 mid-poll means the access token was rejected even though getValidToken
-    // thought it was still fresh (early revocation, clock skew, concurrent refresh
-    // elsewhere). Force one refresh (which persists the new token to channels.config
-    // via XTokenService.refreshAccessToken) and retry the poller once before giving up.
-    if (pollFollowers) {
-      try {
-        try {
-          await runFollowersPoller({
-            channelId: row.id,
-            xUserId: config.x_user_id,
-            accessToken,
-            linkDb: env.LINK_DB,
-            tenantDb,
-            tenantId: row.tenant_id,
-            pipelineUser: env.PIPELINE_USER,
-            deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
-          });
-        } catch (e) {
-          if (!(e instanceof XUnauthorizedError)) throw e;
-          console.log(JSON.stringify({ event: "followers_poll_token_refresh_retry", channel_id: row.id }));
-          accessToken = await tokenService.refreshAccessToken(row.id);
-          await runFollowersPoller({
-            channelId: row.id,
-            xUserId: config.x_user_id,
-            accessToken,
-            linkDb: env.LINK_DB,
-            tenantDb,
-            tenantId: row.tenant_id,
-            pipelineUser: env.PIPELINE_USER,
-            deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
-          });
-        }
-      } catch (e) {
-        console.error(JSON.stringify({ event: "followers_poll_error", channel_id: row.id, error: String(e) }));
-      }
-    }
-
-    if (pollPosts) {
-      try {
-        try {
-          await runPostsPoller({
-            channelId: row.id,
-            xUserId: config.x_user_id,
-            accessToken,
-            linkDb: env.LINK_DB,
-            tenantDb,
-            tenantId: row.tenant_id,
-            ai: env.AI,
-            vectorize: env.VECTORIZE,
-            pipelineContent: env.PIPELINE_CONTENT,
-            deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
-          });
-        } catch (e) {
-          if (!(e instanceof XUnauthorizedError)) throw e;
-          console.log(JSON.stringify({ event: "posts_poll_token_refresh_retry", channel_id: row.id }));
-          accessToken = await tokenService.refreshAccessToken(row.id);
-          await runPostsPoller({
-            channelId: row.id,
-            xUserId: config.x_user_id,
-            accessToken,
-            linkDb: env.LINK_DB,
-            tenantDb,
-            tenantId: row.tenant_id,
-            ai: env.AI,
-            vectorize: env.VECTORIZE,
-            pipelineContent: env.PIPELINE_CONTENT,
-            deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
-          });
-        }
-      } catch (e) {
-        console.error(JSON.stringify({ event: "posts_poll_error", channel_id: row.id, error: String(e) }));
-      }
-    }
+    await pollChannelOnce(env, row.channel_type, row.id);
   }
 }

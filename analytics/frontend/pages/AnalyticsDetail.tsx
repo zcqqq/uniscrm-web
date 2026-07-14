@@ -395,7 +395,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     });
   };
 
-  const formatPeriod = (p: unknown) => sharedFormatPeriod(p, config.granularity, locale, timezone);
+  const formatPeriod = (p: unknown) => sharedFormatPeriod(p, config.granularity, timezone);
 
   // ResultsTable is controlled: sort state lives here (not inside
   // ResultsTable) so both the chart above a results table and the table

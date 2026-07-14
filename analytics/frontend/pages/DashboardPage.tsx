@@ -213,7 +213,7 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
   const chartType = (item.params as any)?.chart_type;
   const restrictSmall = chartType === "line" || chartType === "bar";
 
-  const formatTick = (p: unknown) => formatPeriod(p, granularity, locale, "UTC");
+  const formatTick = (p: unknown) => formatPeriod(p, granularity, "UTC");
 
   return (
     <Card className={`${colSpan}`}>

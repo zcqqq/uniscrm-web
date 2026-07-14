@@ -126,9 +126,9 @@ export function oauthRoutes() {
     if (byokChannelId) {
       // BYOK: update existing channel with user tokens
       const existingRow = await c.env.LINK_DB
-        .prepare("SELECT config FROM channels WHERE id = ?")
+        .prepare("SELECT config, tenant_id FROM channels WHERE id = ?")
         .bind(byokChannelId)
-        .first<{ config: string }>();
+        .first<{ config: string; tenant_id: number | null }>();
       const existingConfig = existingRow ? JSON.parse(existingRow.config) : {};
       const updatedConfig = JSON.stringify({
         ...existingConfig,
@@ -140,10 +140,39 @@ export function oauthRoutes() {
         expires_at: expiresAt,
       });
 
+      // channels has UNIQUE(channel_type, source_channel_id) — this X account may
+      // already be tied to a different row (a prior system-app connection, or a
+      // duplicate BYOK placeholder from a double-click "Add App"). Take that row
+      // over instead of erroring, since it's the same real-world X account.
+      const conflictingRow = await c.env.LINK_DB
+        .prepare("SELECT id, tenant_id FROM channels WHERE channel_type = 'X' AND source_channel_id = ? AND id != ?")
+        .bind(xUser.id, byokChannelId)
+        .first<{ id: string; tenant_id: number | null }>();
+
+      if (conflictingRow && conflictingRow.tenant_id !== (existingRow?.tenant_id ?? null)) {
+        console.error(JSON.stringify({ event: "x_byok_cross_tenant_conflict", byokChannelId, conflictingChannelId: conflictingRow.id }));
+        return c.json({ error: "This X account is already connected under a different tenant" }, 409);
+      }
+
+      const targetChannelId = conflictingRow?.id ?? byokChannelId;
+
       await c.env.LINK_DB
-        .prepare(`UPDATE channels SET config = ?, source_channel_id = ?, access_token = ?, updated_at = datetime('now') WHERE id = ?`)
-        .bind(updatedConfig, xUser.id, tokens.accessToken(), byokChannelId)
+        .prepare(`UPDATE channels SET config = ?, source_channel_id = ?, access_token = ?, is_byok = 1, is_active = 1, updated_at = datetime('now') WHERE id = ?`)
+        .bind(updatedConfig, xUser.id, tokens.accessToken(), targetChannelId)
         .run();
+
+      if (targetChannelId !== byokChannelId) {
+        // Placeholder superseded by the row it merged into — logically delete it
+        // (see CLAUDE.md: 重要的被关联数据用逻辑删除) rather than losing the audit trail.
+        await c.env.LINK_DB
+          .prepare("UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE id = ?")
+          .bind(byokChannelId)
+          .run();
+        await c.env.LINK_DB
+          .prepare("DELETE FROM channel_poll_state WHERE channel_id = ?")
+          .bind(byokChannelId)
+          .run();
+      }
 
       // Seed (or reset, on re-authorization) poll state for both pollers — full backfill runs again
       for (const pollerName of ["followers", "posts"]) {
@@ -153,17 +182,17 @@ export function oauthRoutes() {
              VALUES (?, ?, NULL, 0, NULL, datetime('now'))
              ON CONFLICT(channel_id, poller_name) DO UPDATE SET cursor = NULL, backfill_complete = 0, last_polled_at = NULL, updated_at = datetime('now')`
           )
-          .bind(byokChannelId, pollerName)
+          .bind(targetChannelId, pollerName)
           .run();
       }
 
       // Setup subscriptions using BYOK channel's own webhook URL
       const tokenService = new XTokenService(c.env.LINK_DB, clientId, clientSecret);
       try {
-        const webhookUrl = `${url.origin}/x/webhook/${byokChannelId}`;
+        const webhookUrl = `${url.origin}/x/webhook/${targetChannelId}`;
         const userService = new XActivityService(tokens.accessToken());
         const ids = await userService.setupAllSubscriptions(xUser.id, webhookUrl);
-        await tokenService.updateConfig(byokChannelId, { subscription_ids: ids });
+        await tokenService.updateConfig(targetChannelId, { subscription_ids: ids });
       } catch (e) {
         console.error("BYOK XAA subscription setup failed:", e);
       }

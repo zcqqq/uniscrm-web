@@ -226,6 +226,7 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
             </DialogTitle>
             <DialogDescription>
               输入你的 X Developer App 凭证以连接自己的应用。
+              如果该 X 账号已通过其他方式连接（如托管应用），授权后会自动切换为此 BYOK 连接。
             </DialogDescription>
           </DialogHeader>
 

@@ -555,10 +555,59 @@ WHERE event_type = '${event_type_a}' AND next_type = '${event_type_b}'`;
   return "SELECT 1";
 }
 
+function buildDimensionBucketing(params: {
+  dimension: string;
+  mode?: "discrete" | "default" | "custom";
+  buckets?: number[];
+  fromTable: string;
+  tenantId: string;
+  scopeFilter: string;
+}): { dimExpr: string; dimGroupCol: string; boundsCte: string; fromExtra: string } {
+  const { dimension, mode, buckets, fromTable, tenantId, scopeFilter } = params;
+
+  if (mode === "default") {
+    const boundsCte = `WITH bounds AS (SELECT MIN(${dimension}) as mn, MAX(${dimension}) as mx FROM ${fromTable} WHERE tenant_id = ${tenantId} ${scopeFilter}) `;
+    const edge = (i: number) => `(bounds.mn + (bounds.mx - bounds.mn) * ${i} / 10)`;
+    const cases: string[] = [];
+    for (let i = 1; i <= 9; i++) {
+      const lowEdge = i === 1 ? "bounds.mn" : edge(i - 1);
+      cases.push(`WHEN ${dimension} < ${edge(i)} THEN CAST(CAST(${lowEdge} AS BIGINT) AS VARCHAR) || '-' || CAST(CAST(${edge(i)} AS BIGINT) AS VARCHAR)`);
+    }
+    cases.push(`ELSE CAST(CAST(${edge(9)} AS BIGINT) AS VARCHAR) || '+'`);
+    return {
+      dimExpr: `, CASE ${cases.join(" ")} END as dimension`,
+      dimGroupCol: "dimension",
+      boundsCte,
+      fromExtra: ", bounds",
+    };
+  }
+
+  if (buckets && buckets.length > 0) {
+    const cases = buckets.map((b, i) => {
+      const prev = i === 0 ? 0 : buckets[i - 1];
+      return `WHEN ${dimension} < ${b} THEN '${prev}-${b}'`;
+    });
+    cases.push(`ELSE '${buckets[buckets.length - 1]}+'`);
+    return {
+      dimExpr: `, CASE ${cases.join(" ")} END as dimension`,
+      dimGroupCol: "dimension",
+      boundsCte: "",
+      fromExtra: "",
+    };
+  }
+
+  return {
+    dimExpr: `, ${dimension} as dimension`,
+    dimGroupCol: dimension,
+    boundsCte: "",
+    fromExtra: "",
+  };
+}
+
 export function buildSnapshotSQL(tableName: string, params: Record<string, unknown>, tenantId: string): string {
-  const { measure, measure_field, dimension, buckets, filters } = params as {
+  const { measure, measure_field, dimension, buckets, dimension_bucket_mode, filters } = params as {
     measure: string; measure_field?: string; dimension?: string;
-    buckets?: number[];
+    buckets?: number[]; dimension_bucket_mode?: "discrete" | "default" | "custom";
     filters?: { field: string; operator: string; value: string; value2?: string }[];
   };
 
@@ -573,27 +622,27 @@ export function buildSnapshotSQL(tableName: string, params: Record<string, unkno
 
   let dimExpr = "";
   let dimGroup = "";
+  let boundsCte = "";
+  let fromExtra = "";
   if (dimension) {
-    if (buckets && buckets.length > 0) {
-      const cases = buckets.map((b, i) => {
-        const prev = i === 0 ? 0 : buckets[i - 1];
-        return `WHEN ${dimension} < ${b} THEN '${prev}-${b}'`;
-      });
-      cases.push(`ELSE '${buckets[buckets.length - 1]}+'`);
-      dimExpr = `, CASE ${cases.join(" ")} END as dimension`;
-      dimGroup = " GROUP BY dimension ORDER BY dimension";
-    } else {
-      dimExpr = `, ${dimension} as dimension`;
-      dimGroup = ` GROUP BY ${dimension} ORDER BY value DESC`;
-    }
+    const bucketing = buildDimensionBucketing({
+      dimension, mode: dimension_bucket_mode, buckets,
+      fromTable: tableName, tenantId, scopeFilter: filterClauses,
+    });
+    dimExpr = bucketing.dimExpr;
+    boundsCte = bucketing.boundsCte;
+    fromExtra = bucketing.fromExtra;
+    dimGroup = bucketing.dimGroupCol === dimension
+      ? ` GROUP BY ${dimension} ORDER BY value DESC`
+      : " GROUP BY dimension ORDER BY dimension";
   }
 
   const agg = measure === "avg" && measure_field ? `AVG(CAST(${measure_field} AS DOUBLE))`
     : measure === "sum" && measure_field ? `SUM(CAST(${measure_field} AS DOUBLE))`
     : "COUNT(*)";
 
-  return `SELECT ${agg} as value${dimExpr}
-FROM ${tableName}
+  return `${boundsCte}SELECT ${agg} as value${dimExpr}
+FROM ${tableName}${fromExtra}
 WHERE tenant_id = ${tenantId} ${filterClauses}${dimGroup}`;
 }
 

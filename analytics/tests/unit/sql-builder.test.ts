@@ -39,6 +39,41 @@ describe("buildSnapshotSQL", () => {
     expect(sql).toContain("GROUP BY dimension ORDER BY dimension");
   });
 
+  it("groups by a default 10-bucket equal-width split when mode is default", () => {
+    const sql = buildSnapshotSQL(
+      "uniscrm.content",
+      { measure: "count", dimension: "like_count", dimension_bucket_mode: "default" },
+      "1"
+    );
+    expect(sql).toContain("WITH bounds AS (SELECT MIN(like_count) as mn, MAX(like_count) as mx FROM uniscrm.content WHERE tenant_id = 1 )");
+    expect(sql).toContain("FROM uniscrm.content, bounds");
+    expect(sql).toContain("WHEN like_count < (bounds.mn + (bounds.mx - bounds.mn) * 1 / 10) THEN");
+    expect(sql).toContain("ELSE CAST(CAST((bounds.mn + (bounds.mx - bounds.mn) * 9 / 10) AS BIGINT) AS VARCHAR) || '+'");
+    expect(sql).toContain("GROUP BY dimension ORDER BY dimension");
+  });
+
+  it("default mode's bounds CTE includes the same filter clauses as the outer query", () => {
+    const sql = buildSnapshotSQL(
+      "uniscrm.content",
+      {
+        measure: "count", dimension: "like_count", dimension_bucket_mode: "default",
+        filters: [{ field: "content_type", operator: "=", value: "TWEET" }],
+      },
+      "1"
+    );
+    expect(sql).toContain("WITH bounds AS (SELECT MIN(like_count) as mn, MAX(like_count) as mx FROM uniscrm.content WHERE tenant_id = 1 AND content_type = 'TWEET')");
+  });
+
+  it("default mode takes priority over a stale buckets array", () => {
+    const sql = buildSnapshotSQL(
+      "uniscrm.content",
+      { measure: "count", dimension: "like_count", dimension_bucket_mode: "default", buckets: [100, 1000] },
+      "1"
+    );
+    expect(sql).toContain("WITH bounds AS");
+    expect(sql).not.toContain("WHEN like_count < 100 THEN");
+  });
+
   it("applies filter clauses", () => {
     const sql = buildSnapshotSQL(
       "uniscrm.content",

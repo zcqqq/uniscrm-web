@@ -173,6 +173,42 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
   return { stmts, rateLimited };
 }
 
+async function executeContentActions(
+  actions: ActionResult[],
+  contentId: string,
+  channelId: string,
+  tenantId: string,
+  env: Env,
+  payload?: Record<string, unknown>,
+  flowId?: string
+): Promise<void> {
+  for (const action of actions) {
+    if (action.type === "repost") {
+      const res = await fetch(`${env.LINK_URL}/internal/x/repost`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+        body: JSON.stringify({ channelId, contentId, flowId: flowId || null }),
+      });
+      console.log(JSON.stringify({ event: "content_action_repost", contentId, channelId, status: res.status }));
+    } else if (action.type === "aiRewritePublish") {
+      const targetChannelId = action.targetChannelId as string;
+      const res = await fetch(`${env.LINK_URL}/internal/content/ai-rewrite-publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+        body: JSON.stringify({ contentId, sourceChannelId: channelId, targetChannelId, flowId: flowId || null }),
+      });
+      console.log(JSON.stringify({ event: "content_action_ai_rewrite_publish", contentId, targetChannelId, status: res.status }));
+    } else if (action.type === "updateContentStatus" && action.status) {
+      const tenantRow = await env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+        .bind(Number(tenantId)).first<{ d1_database_id: string }>();
+      if (tenantRow?.d1_database_id) {
+        const tdb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
+        await tdb.run(`UPDATE content SET status = ? WHERE id = ?`, [action.status as string, contentId]);
+      }
+    }
+  }
+}
+
 type HonoEnv = { Bindings: Env; Variables: { tenantId: string; memberId: string } };
 
 const app = new Hono<HonoEnv>();
@@ -645,7 +681,7 @@ export default {
 
     for (const message of batch.messages) {
       try {
-        const { tenantId, eventType, userId, payload } = message.body as FlowQueueMessage;
+        const { tenantId, eventType, userId, contentId, channelId, payload } = message.body as FlowQueueMessage;
 
         const rows = await env.FLOW_DB.prepare(
           `SELECT id, graph_json FROM flows WHERE tenant_id = ? AND status = 'published'`
@@ -653,17 +689,59 @@ export default {
           .bind(tenantId)
           .all<{ id: string; graph_json: string }>();
 
+        if (contentId) {
+          for (const flow of rows.results) {
+            const graph: FlowGraph = JSON.parse(flow.graph_json);
+            const result = executeFlow(graph, eventType, payload);
+            // Content-domain execution intentionally skips emitNodeLogs/PIPELINE_FLOW_LOG —
+            // that sink's schema is fixed and keyed on user_id; adding a content_id variant
+            // is a Pipeline-schema migration out of scope here. content_flow_executions is
+            // this domain's only execution history for now.
+            if (result.actions.length > 0) {
+              await executeContentActions(result.actions, contentId, channelId, tenantId, env, payload, flow.id);
+              await env.FLOW_DB.prepare(
+                `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+                 VALUES (?, ?, ?, ?, 1, ?)`
+              ).bind(crypto.randomUUID(), flow.id, contentId, tenantId, new Date().toISOString()).run();
+              console.log(JSON.stringify({ event: "content_flow_matched", flowId: flow.id, contentId, eventType, actions: result.actions }));
+            }
+
+            for (const wait of result.pendingWaits) {
+              const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
+              // Stash channelId inside the stored payload (under channel_id) — content_flow_pending
+              // has no channel_id column of its own, and the resume path in scheduled() (Task 6)
+              // needs the source channel to execute repost/aiRewritePublish once the wait elapses.
+              await env.FLOW_DB.prepare(
+                `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              ).bind(
+                crypto.randomUUID(), flow.id, wait.nodeId, contentId, tenantId,
+                JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(), wait.awaitingEvent || "",
+                wait.conditions ? JSON.stringify(wait.conditions) : ""
+              ).run();
+              console.log(JSON.stringify({ event: "content_flow_wait_scheduled", flowId: flow.id, nodeId: wait.nodeId, executeAt }));
+            }
+          }
+          message.ack();
+          continue;
+        }
+
+        // contentId and userId are mutually exclusive per FlowQueueMessage's contract, but
+        // that's a domain invariant, not something TypeScript can infer from the `if (contentId)`
+        // check above (they're separate optional properties). Guard explicitly so the rest of
+        // this user-domain block gets real `userId: string` narrowing instead of an `as string`
+        // stopgap cast. This can't fire for any message producible today (every non-content
+        // message carries userId); if it ever did, the outer catch below retries the message,
+        // same as the D1_TYPE_ERROR an undefined userId would otherwise throw further down.
+        if (!userId) throw new Error("flow queue message has neither contentId nor userId");
+
         for (const flow of rows.results) {
           const graph: FlowGraph = JSON.parse(flow.graph_json);
           const result = executeFlow(graph, eventType, payload);
-          // TODO(Task 5): userId is now optional on FlowQueueMessage (content-domain messages
-          // carry contentId instead). Every message on this path today is still user-domain,
-          // so userId is always present at runtime here. This assertion is a stopgap until
-          // Task 5 branches queue() on contentId vs userId.
-          if (result.nodeLogs.length > 0) await emitNodeLogs(result.nodeLogs, flow.id, userId as string, Number(tenantId), env);
+          if (result.nodeLogs.length > 0) await emitNodeLogs(result.nodeLogs, flow.id, userId, Number(tenantId), env);
 
           if (result.actions.length > 0) {
-            const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, userId as string, tenantId, env, payload, flow.id);
+            const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, userId, tenantId, env, payload, flow.id);
             const stmts: D1PreparedStatement[] = [
               env.FLOW_DB.prepare(
                 `INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at)

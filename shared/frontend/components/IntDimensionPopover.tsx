@@ -6,7 +6,7 @@ import type { Locale } from "../../../metadata/locale";
 
 export type BucketMode = "discrete" | "default" | "custom";
 
-interface BucketModePopoverProps {
+interface IntDimensionPopoverProps {
   mode: BucketMode;
   buckets: string; // comma-separated ascending boundary points, e.g. "100,1000"
   onChange: (next: { mode: BucketMode; buckets: string }) => void;
@@ -38,7 +38,7 @@ function parseBoundaries(buckets: string): number[] {
   return buckets.split(",").map(Number).filter((n) => !isNaN(n));
 }
 
-export function BucketModePopover({ mode, buckets, onChange, locale = "en" }: BucketModePopoverProps) {
+export function IntDimensionPopover({ mode, buckets, onChange, locale = "en" }: IntDimensionPopoverProps) {
   const s = UI[locale];
   const [open, setOpen] = useState(false);
   const [draftMode, setDraftMode] = useState<BucketMode>(mode);

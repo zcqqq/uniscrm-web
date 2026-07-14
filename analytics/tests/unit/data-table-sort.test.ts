@@ -37,7 +37,7 @@ describe("compareRows", () => {
 
   it("sorts bucket-range-string labels by their extracted lower bound", () => {
     // "100-1000" and "1000+" are produced by the "default"/"custom" INT
-    // bucket modes (see BucketModePopover) — Number() on these strings is
+    // bucket modes (see IntDimensionPopover) — Number() on these strings is
     // NaN, so without special handling they'd all be treated as missing
     // and sort last. They must instead sort by their leading number.
     const rows = [

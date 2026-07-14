@@ -4,7 +4,7 @@ import { PROPS } from "../../../metadata/props";
 import type { PropDefinition } from "../../../metadata/dataTypes";
 import { t } from "../../../metadata/locale";
 import { SelectProps } from "../../../shared/frontend/components/SelectProps";
-import { BucketModePopover, type BucketMode } from "../../../shared/frontend/components/BucketModePopover";
+import { IntDimensionPopover, type BucketMode } from "../../../shared/frontend/components/IntDimensionPopover";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { Select } from "../../../shared/frontend/ui/select";
 import { Input } from "../../../shared/frontend/ui/input";
@@ -250,7 +250,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                 />
               )}
               {values.dimension && selectedDimensionIsInt && mode !== "interval" && (
-                <BucketModePopover
+                <IntDimensionPopover
                   mode={values.dimensionBucketMode || (values.buckets ? "custom" : "discrete")}
                   buckets={values.buckets || ""}
                   onChange={({ mode, buckets }) => update({ dimensionBucketMode: mode, buckets })}

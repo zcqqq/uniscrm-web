@@ -44,7 +44,8 @@ export class ContentService {
     private vectorize: VectorizeIndex,
     private ai: Ai,
     private tenantId: number,
-    private pipelineContent?: Pipeline
+    private pipelineContent?: Pipeline,
+    private flowQueue?: Queue
   ) {
     this.namespace = `tenant-${tenantId}`;
   }
@@ -141,7 +142,8 @@ export class ContentService {
     rawItem: Record<string, unknown>,
     resolvedProps: Record<string, unknown>,
     channelId: string,
-    channelType: ChannelType
+    channelType: ChannelType,
+    emitFlowEvent: boolean
   ): Promise<boolean> {
     const sourceContentId = String(resolvedProps.source_content_id ?? "");
     if (!sourceContentId) throw new Error("upsertContentFromMetadata: missing source_content_id");
@@ -219,6 +221,18 @@ export class ContentService {
       }
       await this.pipelineContent.send([record]).catch((err) => {
         console.error(JSON.stringify({ event: "pipeline_content_error", error: String(err) }));
+      });
+    }
+
+    if (isNew && emitFlowEvent && this.flowQueue) {
+      await this.flowQueue.send({
+        tenantId: String(this.tenantId),
+        eventType: "content.created",
+        contentId: id,
+        channelId,
+        payload: { channel_type: channelType, ...resolvedProps },
+      }).catch((err) => {
+        console.error(JSON.stringify({ event: "content_flow_queue_send_error", contentId: id, error: String(err) }));
       });
     }
 

@@ -89,3 +89,12 @@ export function getEventDefinition(eventType: string, locale: Locale = "en"): Ev
   }
   return undefined;
 }
+
+export function getContentTriggerFields(locale: Locale = "en"): TriggerFieldDefinition[] {
+  return PROPS
+    .filter((p) => p.entity?.includes("content"))
+    .map((p) => propToField(p.propId, locale, "event"))
+    .filter(Boolean) as TriggerFieldDefinition[];
+}
+
+export const CONTENT_TRIGGER_FIELDS: TriggerFieldDefinition[] = getContentTriggerFields("en");

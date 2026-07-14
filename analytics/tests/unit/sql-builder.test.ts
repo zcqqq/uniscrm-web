@@ -84,6 +84,65 @@ describe("buildSnapshotSQL", () => {
   });
 });
 
+describe("buildSnapshotSQL datetime dimension granularity", () => {
+  it("groups by raw datetime value when granularity is unset (regression check)", () => {
+    const sql = buildSnapshotSQL("uniscrm.content", { measure: "count", dimension: "source_created_at" }, "1");
+    expect(sql).toContain(", source_created_at as dimension");
+    expect(sql).toContain("GROUP BY source_created_at ORDER BY value DESC");
+  });
+
+  it("truncates to day when dimension_date_granularity is 'day'", () => {
+    const sql = buildSnapshotSQL(
+      "uniscrm.content",
+      { measure: "count", dimension: "source_created_at", dimension_date_granularity: "day" },
+      "1"
+    );
+    expect(sql).toContain(", DATE_TRUNC('day', source_created_at) as dimension");
+    expect(sql).toContain("GROUP BY dimension ORDER BY dimension");
+  });
+
+  it("truncates to quarter when dimension_date_granularity is 'quarter'", () => {
+    const sql = buildSnapshotSQL(
+      "uniscrm.content",
+      { measure: "count", dimension: "source_created_at", dimension_date_granularity: "quarter" },
+      "1"
+    );
+    expect(sql).toContain(", DATE_TRUNC('quarter', source_created_at) as dimension");
+  });
+
+  it("treats 'none' the same as unset (raw grouping, no DATE_TRUNC)", () => {
+    const sql = buildSnapshotSQL(
+      "uniscrm.content",
+      { measure: "count", dimension: "source_created_at", dimension_date_granularity: "none" },
+      "1"
+    );
+    expect(sql).toContain(", source_created_at as dimension");
+    expect(sql).not.toContain("DATE_TRUNC");
+  });
+
+  it("dimension_date_granularity takes priority over dimension_bucket_mode when both are present", () => {
+    const sql = buildSnapshotSQL(
+      "uniscrm.content",
+      { measure: "count", dimension: "source_created_at", dimension_date_granularity: "month", dimension_bucket_mode: "default" },
+      "1"
+    );
+    expect(sql).toContain(", DATE_TRUNC('month', source_created_at) as dimension");
+    expect(sql).not.toContain("bounds");
+  });
+});
+
+describe("buildSQL event dimension datetime granularity", () => {
+  it("truncates the event dimension to week", () => {
+    const sql = buildSQL(
+      "event",
+      { event_type: "post.create", measure: "count", dimension: "source_created_at", granularity: "day", dimension_date_granularity: "week" },
+      "1"
+    );
+    expect(sql).toContain(", DATE_TRUNC('week', source_created_at) as dimension");
+    expect(sql).toContain("GROUP BY period, dimension ORDER BY period");
+  });
+});
+
 describe("buildSQL", () => {
   it("delegates the content type to uniscrm.content", () => {
     const sql = buildSQL("content", { measure: "count" }, "1");

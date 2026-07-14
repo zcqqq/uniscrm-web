@@ -415,9 +415,10 @@ async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<void> {
 
 export function buildSQL(type: string, params: Record<string, unknown>, tenantId: string): string {
   if (type === "event") {
-    const { event_type, measure, dimension, granularity, dimension_bucket_mode, buckets, time_range_start, time_range_end, filters } = params as {
+    const { event_type, measure, dimension, granularity, dimension_bucket_mode, buckets, dimension_date_granularity, time_range_start, time_range_end, filters } = params as {
       event_type: string; measure: string; dimension?: string; granularity?: string;
       dimension_bucket_mode?: "discrete" | "default" | "custom"; buckets?: number[];
+      dimension_date_granularity?: "none" | "hour" | "day" | "week" | "month" | "quarter";
       time_range_start?: string; time_range_end?: string;
       filters?: { field: string; operator: string; value: string; value2?: string }[];
     };
@@ -444,10 +445,15 @@ export function buildSQL(type: string, params: Record<string, unknown>, tenantId
     let boundsCte = "";
     let fromExtra = "";
     if (dimension) {
-      const bucketing = buildDimensionBucketing({
-        dimension, mode: dimension_bucket_mode, buckets,
-        fromTable: "uniscrm.event", tenantId, scopeFilter: eventScopeFilter,
-      });
+      const bucketing = dimension_date_granularity
+        ? buildDatetimeDimensionBucketing({
+            dimension, dateGranularity: dimension_date_granularity,
+            fromTable: "uniscrm.event", tenantId, scopeFilter: eventScopeFilter,
+          })
+        : buildIntDimensionBucketing({
+            dimension, mode: dimension_bucket_mode, buckets,
+            fromTable: "uniscrm.event", tenantId, scopeFilter: eventScopeFilter,
+          });
       dimCol = bucketing.dimExpr;
       boundsCte = bucketing.boundsCte;
       fromExtra = bucketing.fromExtra;
@@ -570,7 +576,7 @@ WHERE event_type = '${event_type_a}' AND next_type = '${event_type_b}'`;
   return "SELECT 1";
 }
 
-function buildDimensionBucketing(params: {
+function buildIntDimensionBucketing(params: {
   dimension: string;
   mode?: "discrete" | "default" | "custom";
   buckets?: number[];
@@ -628,10 +634,39 @@ function buildDimensionBucketing(params: {
   };
 }
 
+function buildDatetimeDimensionBucketing(params: {
+  dimension: string;
+  dateGranularity?: "none" | "hour" | "day" | "week" | "month" | "quarter";
+  fromTable: string;
+  tenantId: string;
+  scopeFilter: string;
+}): { dimExpr: string; dimGroupCol: string; boundsCte: string; fromExtra: string } {
+  const { dimension, dateGranularity } = params;
+
+  if (dateGranularity && dateGranularity !== "none") {
+    return {
+      dimExpr: `, DATE_TRUNC('${dateGranularity}', ${dimension}) as dimension`,
+      dimGroupCol: "dimension",
+      boundsCte: "",
+      fromExtra: "",
+    };
+  }
+
+  // "none" (or unset) groups by the raw, untruncated value — identical to
+  // the pre-feature-only behavior and to INT's "discrete" mode.
+  return {
+    dimExpr: `, ${dimension} as dimension`,
+    dimGroupCol: dimension,
+    boundsCte: "",
+    fromExtra: "",
+  };
+}
+
 export function buildSnapshotSQL(tableName: string, params: Record<string, unknown>, tenantId: string): string {
-  const { measure, measure_field, dimension, buckets, dimension_bucket_mode, filters } = params as {
+  const { measure, measure_field, dimension, buckets, dimension_bucket_mode, dimension_date_granularity, filters } = params as {
     measure: string; measure_field?: string; dimension?: string;
     buckets?: number[]; dimension_bucket_mode?: "discrete" | "default" | "custom";
+    dimension_date_granularity?: "none" | "hour" | "day" | "week" | "month" | "quarter";
     filters?: { field: string; operator: string; value: string; value2?: string }[];
   };
 
@@ -649,10 +684,15 @@ export function buildSnapshotSQL(tableName: string, params: Record<string, unkno
   let boundsCte = "";
   let fromExtra = "";
   if (dimension) {
-    const bucketing = buildDimensionBucketing({
-      dimension, mode: dimension_bucket_mode, buckets,
-      fromTable: tableName, tenantId, scopeFilter: filterClauses,
-    });
+    const bucketing = dimension_date_granularity
+      ? buildDatetimeDimensionBucketing({
+          dimension, dateGranularity: dimension_date_granularity,
+          fromTable: tableName, tenantId, scopeFilter: filterClauses,
+        })
+      : buildIntDimensionBucketing({
+          dimension, mode: dimension_bucket_mode, buckets,
+          fromTable: tableName, tenantId, scopeFilter: filterClauses,
+        });
     dimExpr = bucketing.dimExpr;
     boundsCte = bucketing.boundsCte;
     fromExtra = bucketing.fromExtra;

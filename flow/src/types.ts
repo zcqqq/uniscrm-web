@@ -30,9 +30,10 @@ export interface FlowLogMessage {
 export interface FlowQueueMessage {
   tenantId: string;
   eventType: string;
-  userId: string;
   channelId: string;
   payload: Record<string, unknown>;
+  userId?: string;    // present for user-domain events (follow/DM/post webhooks)
+  contentId?: string; // present for content-domain events (content.created) — mutually exclusive with userId
 }
 
 export interface PendingWait {

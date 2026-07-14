@@ -379,7 +379,7 @@ async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<void> {
   const response = await container.fetch("http://container/query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sql, warehouse, token: env.CF_D1_API_TOKEN }),
+    body: JSON.stringify({ sql, warehouse, token: env.R2_CATALOG_TOKEN }),
   });
 
   if (!response.ok) {

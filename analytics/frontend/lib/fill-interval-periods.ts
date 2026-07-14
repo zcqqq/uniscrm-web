@@ -6,7 +6,7 @@ export type IntervalPeriodSlot = { period: string; stats: IntervalPeriodStats | 
 /**
  * Fills gaps in interval-analysis period stats so the chart always shows a
  * complete time axis (e.g. exactly 5 weekly slots for "Last 30 days" + Week),
- * mirroring how fillTimeSeries zero-fills Event Analysis data. Periods with
+ * mirroring how fillTimeSeries zero-fills Event Analytics data. Periods with
  * no pairs keep their period key (for axis labeling) but `stats: null`, so
  * the box plot can skip drawing a box for that column instead of rendering a
  * fabricated zero-value stat.

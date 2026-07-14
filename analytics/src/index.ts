@@ -716,7 +716,7 @@ function processIntervalResults(rows: unknown[], granularity: string): IntervalR
     if (isNaN(start) || isNaN(end) || end <= start) continue;
 
     // Period is anchored on the first event's time (event_time), matching how
-    // Event Analysis buckets by event occurrence time.
+    // Event Analytics buckets by event occurrence time.
     const period = truncatePeriod(start, granularity);
     if (!byPeriod.has(period)) byPeriod.set(period, []);
     byPeriod.get(period)!.push((end - start) / 1000);

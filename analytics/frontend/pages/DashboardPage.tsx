@@ -203,10 +203,10 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
   // yet computed".
   const summary = (item.results as any)?.summary ?? 0;
 
-  // Event Analysis's Line/Bar chart_type restricts widget size to
+  // Event Analytics's Line/Bar chart_type restricts widget size to
   // medium/large only — narrower "small" widgets don't have room for a
   // legible time-series axis. Deliberately keyed off the chart_type value
-  // itself (shared by Event and User Analysis), not the report's analytics
+  // itself (shared by Event and User Analytics), not the report's analytics
   // type. The "Small" option stays visible but disabled/grayed out (rather
   // than removed) so the restriction is an obvious, discoverable UI state
   // instead of a silently missing option.

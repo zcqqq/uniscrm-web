@@ -8,16 +8,16 @@ const UI = {
 };
 
 /**
- * Renders the Interval Analysis "Distribution" chart as a multi-period box
+ * Renders the Interval Analytics "Distribution" chart as a multi-period box
  * plot — one vertical box per time period (day/week/month, matching the
  * report's granularity), sharing a single recharts Y-axis so the visual
- * language (axis, grid, tooltip) stays consistent with Event Analysis.
+ * language (axis, grid, tooltip) stays consistent with Event Analytics.
  *
  * Implementation note: recharts has no built-in box plot. Rather than
  * computing our own Y domain and manually mapping values to pixels (which
  * previously broke whenever backend rounding made min/max inconsistent with
  * the padded domain), we let the Y-axis auto-compute its domain exactly like
- * Event Analysis does (no explicit `domain` prop). We then derive pixel
+ * Event Analytics does (no explicit `domain` prop). We then derive pixel
  * positions for min/p25/median/p75 by reading the *actual rendered geometry*
  * of an invisible reference Bar (dataKey = max), which recharts positions
  * using the real resolved scale regardless of what "nice" domain it picked.

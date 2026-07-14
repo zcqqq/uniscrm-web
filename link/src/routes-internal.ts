@@ -194,6 +194,25 @@ export function internalRoutes() {
     return c.json({ channel_id: actualChannelId });
   });
 
+  // Stub: real X repost API not implemented yet. Content-flow's `repost` action
+  // calls this so the flow-engine framework (Task 5/6 in the content-flow-triggers
+  // plan) can be built and tested end-to-end without waiting on the real API.
+  router.post("/x/repost", async (c) => {
+    const { channelId, contentId } = await c.req.json<{ channelId: string; contentId: string; flowId?: string | null }>();
+    console.log(JSON.stringify({ event: "repost_stub_called", channelId, contentId }));
+    return c.json({ ok: false, notImplemented: true }, 501);
+  });
+
+  // Stub: real TikTok Content Posting API (and X post-creation for the reverse
+  // direction) not implemented yet — same reasoning as /x/repost above.
+  router.post("/content/ai-rewrite-publish", async (c) => {
+    const { contentId, sourceChannelId, targetChannelId } = await c.req.json<{
+      contentId: string; sourceChannelId: string; targetChannelId: string; flowId?: string | null;
+    }>();
+    console.log(JSON.stringify({ event: "ai_rewrite_publish_stub_called", contentId, sourceChannelId, targetChannelId }));
+    return c.json({ ok: false, notImplemented: true }, 501);
+  });
+
   // TikTok content sync (internal, no session)
   router.post("/tiktok/sync", async (c) => {
     const { ContentService } = await import("./services/content");

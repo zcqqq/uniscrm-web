@@ -250,13 +250,19 @@ function collectActions(
 
     if (targetNode.type === "action") {
       const actionType = targetNode.data.actionType as string;
-      const isExternalApi = actionType === "xAction";
+      const isExternalApi = actionType === "xAction" || actionType === "repost" || actionType === "aiRewritePublish";
       const actionData: ActionResult = { type: actionType, nodeId: targetNode.id, hasBranches: isExternalApi };
       if (actionType === "addToList") actionData.listId = targetNode.data.listId as string;
       if (actionType === "xAction") {
         actionData.xEvent = targetNode.data.xEvent as string;
         actionData.channelId = targetNode.data.channelId as string;
         if (targetNode.data.messageText) actionData.messageText = targetNode.data.messageText as string;
+      }
+      if (actionType === "aiRewritePublish") {
+        actionData.targetChannelId = targetNode.data.channelId as string;
+      }
+      if (actionType === "updateContentStatus") {
+        actionData.status = targetNode.data.status as string;
       }
       actions.push(actionData);
       nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });

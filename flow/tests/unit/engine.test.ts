@@ -43,3 +43,50 @@ describe("executeFlow: contentTrigger", () => {
     expect(result.matched).toBe(true);
   });
 });
+
+describe("collectActions: new content-domain action types", () => {
+  it("collects a repost action with hasBranches true", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "repost" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", {});
+    expect(result.actions).toEqual([{ type: "repost", nodeId: "a1", hasBranches: true }]);
+  });
+
+  it("collects an aiRewritePublish action carrying its target channel", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "aiRewritePublish", channelId: "tiktok-chan-1" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", {});
+    expect(result.actions).toEqual([
+      { type: "aiRewritePublish", nodeId: "a1", hasBranches: true, targetChannelId: "tiktok-chan-1" },
+    ]);
+  });
+
+  it("collects an updateContentStatus action and continues traversal past it", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
+        { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "ignored" }, position: { x: 400, y: 0 } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "a1" },
+        { id: "e2", source: "a1", target: "a2" },
+      ],
+    };
+    const result = executeFlow(graph, "content.created", {});
+    expect(result.actions).toEqual([
+      { type: "updateContentStatus", nodeId: "a1", hasBranches: false, status: "published" },
+      { type: "updateContentStatus", nodeId: "a2", hasBranches: false, status: "ignored" },
+    ]);
+  });
+});

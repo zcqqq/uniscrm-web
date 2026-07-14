@@ -17,6 +17,8 @@ import { Tooltip as UiTooltip, TooltipTrigger as UiTooltipTrigger, TooltipConten
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
 import { DIMENSION_COLORS } from "../../../shared/frontend/lib/colors";
 import { ResultsTable } from "../../../shared/frontend/components/ResultsTable";
+import { compareRows } from "../../../shared/frontend/components/DataTable";
+import { PROPS_X } from "../../../metadata/x";
 import { ChartTypeToggle } from "../../../shared/frontend/components/ChartTypeToggle";
 import { formatPeriod as sharedFormatPeriod } from "../lib/format-period";
 
@@ -402,6 +404,15 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     setConfig((prev) => ({ ...prev, sortColumn: key, sortDirection: dir }));
   };
 
+  // Only INT/DATETIME dimensions get a numeric/chronological sort on the
+  // "Dimension" column (bucketed INT range-strings like "100-1000" still
+  // count as INT here — Task 1's compareRows extracts their lower bound).
+  // Everything else (TEXT/ENUM_TEXT/ENUM_INT) falls through to compareRows'
+  // plain string-compare branch by leaving sortType undefined.
+  const dimensionPropDef = PROPS_X.find((p) => p.propId === config.dimension);
+  const dimensionSortType: "number" | "date" | undefined =
+    dimensionPropDef?.dataType === "DATETIME" ? "date" : dimensionPropDef?.dataType === "INT" ? "number" : undefined;
+
   const hasStats = results && "periods" in results;
   const intervalSlots = hasStats ? fillIntervalPeriods(results.periods, config.timeRange, config.granularity) : [];
   const hasData = results && "data" in results;
@@ -697,6 +708,15 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               : [];
           const total = data.reduce((s: number, d: any) => s + (d.value || 0), 0);
           if (data.length === 0) return null;
+          // "%" isn't a real field on each row (it's derived from value/total
+          // at render time) — sorting by "%" is a monotonic transform of
+          // sorting by "value" (total is always >= 0), so reuse the "value"
+          // comparison for it rather than materializing a "pct" field.
+          const sortTypeForColumn = sortColumn === "dimension" ? dimensionSortType : "number";
+          const effectiveSortKey = sortColumn === "pct" ? "value" : sortColumn;
+          const sortedData = [...data].sort((a: any, b: any) =>
+            compareRows(a, b, effectiveSortKey, sortTypeForColumn, sortDirection)
+          );
           return (
             <>
               <Card className="mb-4">
@@ -716,14 +736,14 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                     <div className="flex items-center gap-8">
                       <ResponsiveContainer width="50%" height={280}>
                         <RePieChart>
-                          <Pie data={data} dataKey="value" nameKey="dimension" cx="50%" cy="50%" outerRadius={100} innerRadius={50} paddingAngle={2}>
-                            {data.map((_: any, i: number) => <Cell key={i} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} />)}
+                          <Pie data={sortedData} dataKey="value" nameKey="dimension" cx="50%" cy="50%" outerRadius={100} innerRadius={50} paddingAngle={2}>
+                            {sortedData.map((_: any, i: number) => <Cell key={i} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} />)}
                           </Pie>
                           <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
                         </RePieChart>
                       </ResponsiveContainer>
                       <div className="flex-1 space-y-2">
-                        {data.map((d: any, i: number) => (
+                        {sortedData.map((d: any, i: number) => (
                           <div key={i} className="flex items-center gap-2 text-sm">
                             <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: DIMENSION_COLORS[i % DIMENSION_COLORS.length] }} />
                             <span className="flex-1 truncate text-foreground">{String(d.dimension ?? "null")}</span>
@@ -735,13 +755,13 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                     </div>
                   ) : (
                     <ResponsiveContainer width="100%" height={280}>
-                      <ReBarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                      <ReBarChart data={sortedData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
                         <XAxis dataKey="dimension" tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
                         <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={40} />
                         <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
                         <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                          {data.map((_: any, i: number) => <Cell key={i} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} />)}
+                          {sortedData.map((_: any, i: number) => <Cell key={i} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} />)}
                         </Bar>
                       </ReBarChart>
                     </ResponsiveContainer>
@@ -753,8 +773,8 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                 title={t.data}
                 columns={[
                   {
-                    key: "dimension", label: t.dimension, render: (d: any) => {
-                      const i = data.indexOf(d);
+                    key: "dimension", label: t.dimension, sortable: true, sortType: dimensionSortType, render: (d: any) => {
+                      const i = sortedData.indexOf(d);
                       return (
                         <span className="flex items-center gap-2">
                           <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: DIMENSION_COLORS[i % DIMENSION_COLORS.length] }} />
@@ -763,10 +783,13 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                       );
                     },
                   },
-                  { key: "value", label: t.value, align: "right", render: (d: any) => Number(d.value).toLocaleString() },
-                  { key: "pct", label: "%", align: "right", render: (d: any) => <span className="text-muted-foreground">{total ? `${Math.round(d.value / total * 100)}%` : "0%"}</span> },
+                  { key: "value", label: t.value, align: "right", sortable: true, sortType: "number", render: (d: any) => Number(d.value).toLocaleString() },
+                  { key: "pct", label: "%", align: "right", sortable: true, sortType: "number", render: (d: any) => <span className="text-muted-foreground">{total ? `${Math.round(d.value / total * 100)}%` : "0%"}</span> },
                 ]}
-                rows={data}
+                rows={sortedData}
+                sortKey={sortColumn}
+                sortDir={sortDirection}
+                onSortChange={handleSortChange}
               />
             </>
           );

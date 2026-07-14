@@ -4,10 +4,8 @@ import { Twitter, generateState, generateCodeVerifier } from "arctic";
 import type { Env, Session } from "./types";
 import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
-import { ContentService } from "./services/content";
-import { TikTokChannel } from "./channels/tiktok";
-import { TenantDataDB } from "../../shared/tenant-data-db";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
+import { pollChannelOnce } from "./services/pollers/poll-channel";
 import { getActiveSubscriptionTier } from "../../shared/credit-service";
 import { canUseFeature } from "../../shared/plans";
 
@@ -182,6 +180,12 @@ export function oauthRoutes() {
           .run();
       }
 
+      try {
+        await pollChannelOnce(c.env, "X", byokChannelId);
+      } catch (e) {
+        console.error("X BYOK instant poll failed:", e);
+      }
+
       // Setup subscriptions using BYOK channel's own webhook URL
       const tokenService = new XTokenService(c.env.LINK_DB, clientId, clientSecret);
       try {
@@ -331,26 +335,21 @@ export function oauthRoutes() {
       .bind(channelId, config, openId, tokenData.access_token, tenantId ? parseInt(tenantId) : null, memberId || null)
       .run();
 
-    // Trigger TikTok content sync (now local function call)
+    // Seed (or reset, on re-authorization) poll state for the content poller —
+    // full backfill runs again, mirroring the X BYOK callback's pattern.
+    await c.env.LINK_DB
+      .prepare(
+        `INSERT INTO channel_poll_state (channel_id, poller_name, cursor, backfill_complete, last_polled_at, updated_at)
+         VALUES (?, 'content', NULL, 0, NULL, datetime('now'))
+         ON CONFLICT(channel_id, poller_name) DO UPDATE SET cursor = NULL, backfill_complete = 0, last_polled_at = NULL, updated_at = datetime('now')`
+      )
+      .bind(channelId)
+      .run();
+
     try {
-      const parsedTenantId = tenantId ? parseInt(tenantId) : null;
-      if (parsedTenantId) {
-        const tenant = await c.env.WEB_DB
-          .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-          .bind(parsedTenantId)
-          .first<{ d1_database_id: string | null }>();
-        if (tenant?.d1_database_id) {
-          const tenantDataDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenant.d1_database_id);
-          const tiktok = new TikTokChannel(tokenData.access_token);
-          const items = await tiktok.fetchItems({});
-          if (items.length > 0) {
-            const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, parsedTenantId);
-            await contentService.syncBatch("TIKTOK", items);
-          }
-        }
-      }
+      await pollChannelOnce(c.env, "TIKTOK", channelId);
     } catch (e) {
-      console.error("TikTok content sync failed:", e);
+      console.error("TikTok instant poll failed:", e);
     }
 
     return c.redirect(url.origin, 302);

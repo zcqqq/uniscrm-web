@@ -51,6 +51,11 @@ vi.mock("../../shared/tenant-data-db", () => ({ TenantDataDB: class {} }));
 vi.mock("../../shared/credit-service", () => ({ getActiveSubscriptionTier: vi.fn() }));
 vi.mock("../../shared/plans", () => ({ canUseFeature: vi.fn().mockReturnValue(true) }));
 
+const pollChannelOnceMock = vi.fn().mockResolvedValue(undefined);
+vi.mock("../src/services/pollers/poll-channel", () => ({
+  pollChannelOnce: (...args: unknown[]) => pollChannelOnceMock(...args),
+}));
+
 import { oauthRoutes } from "../src/oauth";
 
 type MockRow = Record<string, unknown> | null;
@@ -97,6 +102,7 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     getAppCredentialsMock.mockClear();
     updateConfigMock.mockClear();
     setupAllSubscriptionsMock.mockClear();
+    pollChannelOnceMock.mockClear();
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -142,6 +148,8 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     for (const call of pollSeedCalls) {
       expect(call.args[0]).toBe(byokChannelId);
     }
+
+    expect(pollChannelOnceMock).toHaveBeenCalledWith(expect.anything(), "X", byokChannelId);
 
     expect(setupAllSubscriptionsMock).toHaveBeenCalledWith("xuser-999", `http://localhost/x/webhook/${byokChannelId}`);
     expect(updateConfigMock).toHaveBeenCalledWith(byokChannelId, { subscription_ids: ["sub-1"] });
@@ -192,5 +200,42 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     expect(res.status).toBe(409);
     expect(linkDb.calls.some((c) => c.sql.includes("is_byok = 1"))).toBe(false);
     expect(linkDb.calls.some((c) => c.sql.includes("source_channel_id = NULL"))).toBe(false);
+  });
+});
+
+describe("TikTok OAuth callback", () => {
+  beforeEach(() => {
+    pollChannelOnceMock.mockClear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url.includes("oauth/token")) {
+          return Promise.resolve(new Response(JSON.stringify({ open_id: "tt-user-1", access_token: "tt-tok", expires_in: 86400 }), { status: 200 }));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ data: { user: { open_id: "tt-user-1", display_name: "Name" } } }), { status: 200 }));
+      })
+    );
+  });
+
+  it("seeds channel_poll_state for poller_name='content' and calls pollChannelOnce", async () => {
+    const kv = {
+      get: vi.fn().mockResolvedValue(JSON.stringify({ tenantId: "5", memberId: "m1" })),
+      put: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+    };
+    const linkDb = createMockLinkDb([]);
+
+    const app = buildApp();
+    const res = await app.request(
+      "/tiktok/callback?code=abc&state=state123",
+      {},
+      { KV: kv, LINK_DB: linkDb, WEB_DB: { prepare: vi.fn().mockReturnValue({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(null) }) }) } } as any
+    );
+
+    expect(res.status).toBe(302);
+    const seedCall = linkDb.calls.find((c) => c.sql.includes("INSERT INTO channel_poll_state"));
+    expect(seedCall).toBeDefined();
+    expect(seedCall!.sql).toContain("'content'");
+    expect(pollChannelOnceMock).toHaveBeenCalledWith(expect.anything(), "TIKTOK", expect.any(String));
   });
 });

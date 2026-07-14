@@ -4,7 +4,6 @@ import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Textarea } from "../../../shared/frontend/ui/textarea";
 import { Badge } from "../../../shared/frontend/ui/badge";
-import { Select } from "../../../shared/frontend/ui/select";
 import { DataTable, type Column } from "../../../shared/frontend/components/DataTable";
 import { DateCell } from "../../../shared/frontend/components/CellDate";
 import { buildEntityColumns } from "../../../shared/frontend/lib/metadata-columns";
@@ -13,11 +12,9 @@ import { PROPS } from "../../../metadata/props";
 
 interface Props {
   items: ContentItem[];
-  onUpdate: (id: string, fields: { title?: string; summary?: string; status?: string }) => Promise<void>;
+  onUpdate: (id: string, fields: { title?: string; summary?: string }) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }
-
-const STATUS_OPTIONS = ["new", "pending", "published", "ignored"] as const;
 
 const CHANNEL_LABEL: Record<string, string> = {
   LOCAL: "Local",
@@ -56,47 +53,59 @@ export function ContentTable({ items, onUpdate, onDelete }: Props) {
   };
 
   const columns: Column<ContentItem>[] = useMemo(() => {
-    const generated = buildEntityColumns<ContentItem>(PROPS, "content", locale, timezone);
-    const byKey = new Map(generated.map((c) => [c.key, c]));
+    // Metadata-driven: one column per entity:["content"] prop in props.ts's
+    // declaration order. title and source_created_at override the generated
+    // renderer for feature behavior (inline edit, source_updated_at fallback)
+    // — everything else stays exactly what buildEntityColumns produces.
+    const generated = buildEntityColumns<ContentItem>(PROPS, "content", locale, timezone).map((c) => {
+      if (c.key === "title") {
+        return {
+          ...c,
+          render: (item: ContentItem) =>
+            editingId === item.id ? (
+              <div className="space-y-1" onClick={(e) => e.stopPropagation()}>
+                <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
+                <Textarea value={editSummary} onChange={(e) => setEditSummary(e.target.value)} rows={2} />
+                <div className="flex gap-1">
+                  <Button variant="link" size="sm" onClick={() => saveEdit(item.id)}>Save</Button>
+                  <Button variant="ghost" size="sm" onClick={() => setEditingId(null)}>Cancel</Button>
+                </div>
+              </div>
+            ) : (
+              <div onClick={(e) => { e.stopPropagation(); startEdit(item); }} className="cursor-pointer">
+                <div className="font-medium truncate max-w-sm" title={displayTitle(item)}>
+                  {item.source_url ? (
+                    <a
+                      href={item.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:underline text-primary"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {displayTitle(item)}
+                    </a>
+                  ) : (
+                    displayTitle(item)
+                  )}
+                </div>
+                {item.summary && <div className="text-muted-foreground truncate max-w-sm">{item.summary}</div>}
+              </div>
+            ),
+        };
+      }
+      if (c.key === "source_created_at") {
+        return {
+          ...c,
+          render: (item: ContentItem) => {
+            const at = item.source_created_at ?? item.source_updated_at;
+            return at ? <DateCell iso={at} timezone={timezone} /> : "—";
+          },
+        };
+      }
+      return c;
+    });
 
-    // title needs inline-edit behavior (a feature, not just styling) and
-    // source_created_at needs its source_updated_at fallback — both override
-    // the metadata-default renderer. content_type/content_text stay metadata-driven.
     return [
-      {
-        ...byKey.get("title")!,
-        render: (item) =>
-          editingId === item.id ? (
-            <div className="space-y-1" onClick={(e) => e.stopPropagation()}>
-              <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
-              <Textarea value={editSummary} onChange={(e) => setEditSummary(e.target.value)} rows={2} />
-              <div className="flex gap-1">
-                <Button variant="link" size="sm" onClick={() => saveEdit(item.id)}>Save</Button>
-                <Button variant="ghost" size="sm" onClick={() => setEditingId(null)}>Cancel</Button>
-              </div>
-            </div>
-          ) : (
-            <div onClick={(e) => { e.stopPropagation(); startEdit(item); }} className="cursor-pointer">
-              <div className="font-medium truncate max-w-sm" title={displayTitle(item)}>
-                {item.source_url ? (
-                  <a
-                    href={item.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="hover:underline text-primary"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {displayTitle(item)}
-                  </a>
-                ) : (
-                  displayTitle(item)
-                )}
-              </div>
-              {item.summary && <div className="text-muted-foreground truncate max-w-sm">{item.summary}</div>}
-            </div>
-          ),
-      },
-      byKey.get("content_type")!,
       {
         key: "channel_type",
         label: "Channel",
@@ -106,34 +115,7 @@ export function ContentTable({ items, onUpdate, onDelete }: Props) {
           </Badge>
         ),
       },
-      byKey.get("view_count")!,
-      byKey.get("like_count")!,
-      byKey.get("repost_count")!,
-      byKey.get("reply_count")!,
-      byKey.get("quote_count")!,
-      byKey.get("bookmark_count")!,
-      {
-        key: "status",
-        label: "Status",
-        render: (item) => (
-          <div onClick={(e) => e.stopPropagation()}>
-            <Select
-              value={item.status}
-              onChange={(e) => onUpdate(item.id, { status: e.target.value })}
-              className="text-xs"
-            >
-              {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </Select>
-          </div>
-        ),
-      },
-      {
-        ...byKey.get("source_created_at")!,
-        render: (item) => {
-          const at = item.source_created_at ?? item.source_updated_at;
-          return at ? <DateCell iso={at} timezone={timezone} /> : "—";
-        },
-      },
+      ...generated,
       {
         key: "actions",
         label: "Actions",

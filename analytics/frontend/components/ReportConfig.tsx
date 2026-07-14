@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { EventMetadata_X, PROPS_X } from "../../../metadata/x";
+import type { PropDefinition } from "../../../metadata/dataTypes";
 import { t } from "../../../metadata/locale";
 import { SelectProps } from "../../../shared/frontend/components/SelectProps";
 import { useLocale } from "../hooks/useLocale";
@@ -13,6 +14,11 @@ import { Checkbox } from "../../../shared/frontend/ui/checkbox";
 const TRIGGER_EVENTS = EventMetadata_X.filter((e) => e.flowType !== "action");
 const propsByEntity = (entity: "user" | "content") =>
   PROPS_X.filter((p) => p.isInsight && p.entity?.includes(entity));
+const eventPropsFor = (eventType: string): PropDefinition[] => {
+  const meta = EventMetadata_X.find((e) => e.eventType === eventType);
+  const eventPropIds = meta?.eventProps.map((p) => p.propId) || [];
+  return eventPropIds.map((id) => PROPS_X.find((p) => p.propId === id)).filter((p): p is PropDefinition => !!p);
+};
 
 const UI = {
   en: {
@@ -221,13 +227,16 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground text-sm">{s.viewBy}</span>
               {mode === "user" || mode === "content" ? (
-                <Select value={values.dimension} onChange={(e) => update({ dimension: e.target.value, buckets: "" })}>
-                  <option value="">{s.noGroup}</option>
-                  {entityProps.map((p) => <option key={p.propId} value={p.propId}>{t(p.label, locale)}</option>)}
-                </Select>
+                <SelectProps
+                  options={entityProps}
+                  value={values.dimension}
+                  onChange={(v) => update({ dimension: v, buckets: "" })}
+                  locale={locale}
+                  placeholder={s.noGroup}
+                />
               ) : (
                 <SelectProps
-                  eventType={mode === "interval" ? (values.eventTypeA || "") : values.eventType}
+                  options={eventPropsFor(mode === "interval" ? (values.eventTypeA || "") : values.eventType)}
                   value={values.dimension}
                   onChange={(v) => update({ dimension: v })}
                   locale={locale}
@@ -255,7 +264,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
             {(values.filters || []).map((f, i) => (
               <div key={i} className="flex items-center gap-2 flex-wrap">
                 <SelectProps
-                  eventType={values.eventType}
+                  options={eventPropsFor(values.eventType)}
                   value={f.field}
                   onChange={(v) => updateFilter(i, { field: v })}
                   locale={locale}

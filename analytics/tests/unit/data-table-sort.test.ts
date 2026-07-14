@@ -34,4 +34,28 @@ describe("compareRows", () => {
     const sorted = [...rows].sort((a, b) => compareRows(a, b, "name", undefined, "asc"));
     expect(sorted.map((r) => r.id)).toEqual(["b", "a"]);
   });
+
+  it("sorts bucket-range-string labels by their extracted lower bound", () => {
+    // "100-1000" and "1000+" are produced by the "default"/"custom" INT
+    // bucket modes (see BucketModePopover) — Number() on these strings is
+    // NaN, so without special handling they'd all be treated as missing
+    // and sort last. They must instead sort by their leading number.
+    const rows = [
+      { id: "a", bucket: "100-1000" },
+      { id: "b", bucket: "1000+" },
+      { id: "c", bucket: "0-100" },
+    ];
+    const sorted = [...rows].sort((a, b) => compareRows(a, b, "bucket", "number", "asc"));
+    expect(sorted.map((r) => r.id)).toEqual(["c", "a", "b"]);
+  });
+
+  it("still sorts missing bucket-range values last", () => {
+    const rows = [
+      { id: "a", bucket: "100-1000" },
+      { id: "b", bucket: null as unknown as string },
+      { id: "c", bucket: "0-100" },
+    ];
+    const sorted = [...rows].sort((a, b) => compareRows(a, b, "bucket", "number", "asc"));
+    expect(sorted.map((r) => r.id)).toEqual(["c", "a", "b"]);
+  });
 });

@@ -40,6 +40,19 @@ export interface Column<T> {
   render?: (row: T) => ReactNode;
 }
 
+// Extracts the leading number from a bucket-range label produced by
+// analytics' "default"/"custom" INT bucket modes (e.g. "100-1000", "1000+"),
+// so range labels sort by their lower bound instead of being treated as
+// unparseable (which would otherwise sort them all to the end as "missing").
+function parseLeadingNumber(v: unknown): number {
+  if (typeof v === "number") return v;
+  const s = String(v);
+  const direct = Number(s);
+  if (!Number.isNaN(direct)) return direct;
+  const m = s.match(/^-?\d+(\.\d+)?/);
+  return m ? Number(m[0]) : NaN;
+}
+
 // Missing values always sort to the end, regardless of direction — pure function so it
 // can be unit-tested without rendering the component.
 export function compareRows<T extends Record<string, unknown>>(
@@ -53,8 +66,8 @@ export function compareRows<T extends Record<string, unknown>>(
   const bv = b[sortKey] ?? "";
 
   if (sortType === "number") {
-    const an = av === "" ? NaN : Number(av);
-    const bn = bv === "" ? NaN : Number(bv);
+    const an = av === "" ? NaN : parseLeadingNumber(av);
+    const bn = bv === "" ? NaN : parseLeadingNumber(bv);
     if (Number.isNaN(an) && Number.isNaN(bn)) return 0;
     if (Number.isNaN(an)) return 1;
     if (Number.isNaN(bn)) return -1;

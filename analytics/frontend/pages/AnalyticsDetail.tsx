@@ -594,10 +594,14 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
                       <XAxis dataKey="period" tickFormatter={formatPeriod} tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={40} />
-                      <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} labelFormatter={formatPeriod} />
+                      <Tooltip
+                        contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
+                        labelFormatter={formatPeriod}
+                        formatter={(value: any, name: any) => [value, formatDimensionValue(String(name))]}
+                      />
                       {hasDimension ? (
                         <>
-                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                          <Legend wrapperStyle={{ fontSize: 11 }} formatter={(value: string) => formatDimensionValue(value)} />
                           {sortedDimensions.map((dim, i) => (
                             <Bar key={dim} dataKey={dim} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} radius={[3, 3, 0, 0]} />
                           ))}
@@ -611,10 +615,14 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
                       <XAxis dataKey="period" tickFormatter={formatPeriod} tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={40} />
-                      <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} labelFormatter={formatPeriod} />
+                      <Tooltip
+                        contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
+                        labelFormatter={formatPeriod}
+                        formatter={(value: any, name: any) => [value, formatDimensionValue(String(name))]}
+                      />
                       {hasDimension ? (
                         <>
-                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                          <Legend wrapperStyle={{ fontSize: 11 }} formatter={(value: string) => formatDimensionValue(value)} />
                           {sortedDimensions.map((dim, i) => {
                             const color = DIMENSION_COLORS[i % DIMENSION_COLORS.length];
                             return (
@@ -652,7 +660,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                 : eventData.map((d: any) => ({ period: d.period, value: Number(d.value) || 0 }));
               const columns = [
                 { key: "period", label: t.period, sortable: true, sortType: "date" as const, render: (d: any) => <span className="text-muted-foreground">{formatPeriod(d.period)}</span> },
-                ...(hasDimension ? [{ key: "dimension", label: t.dimension, sortable: true, sortType: dimensionSortType, render: (d: any) => String(d.dimension ?? "—") }] : []),
+                ...(hasDimension ? [{ key: "dimension", label: t.dimension, sortable: true, sortType: dimensionSortType, render: (d: any) => d.dimension == null ? "—" : formatDimensionValue(String(d.dimension)) }] : []),
                 { key: "value", label: t.value, align: "right" as const, sortable: true, sortType: "number" as const, render: (d: any) => <span className="font-medium">{d.value.toLocaleString()}</span> },
               ];
               // Clicking "Dimension" fully re-sorts the flattened row array

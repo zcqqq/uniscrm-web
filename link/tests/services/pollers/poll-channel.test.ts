@@ -107,6 +107,29 @@ describe("pollChannelOnce", () => {
     expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
   });
 
+  it("X: force-refreshes and retries once on XUnauthorizedError (followers)", async () => {
+    runFollowersPollerMock
+      .mockRejectedValueOnce(new XUnauthorizedError("expired"))
+      .mockResolvedValueOnce(undefined);
+    const linkDb = {
+      prepare: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes("FROM channels")) {
+          return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({
+            id: "chan-1", tenant_id: 1, config: JSON.stringify({ is_byok: true, x_user_id: "u1" }),
+          }) }) };
+        }
+        return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({ backfill_complete: 0, last_polled_at: null }) }) };
+      }),
+    };
+    await pollChannelOnce(baseEnv(linkDb, mockWebDb()), "X", "chan-1");
+    expect(refreshAccessTokenMock).toHaveBeenCalledWith("chan-1");
+    expect(runFollowersPollerMock).toHaveBeenCalledTimes(2);
+    expect(runFollowersPollerMock.mock.calls[0][0]).toMatchObject({ accessToken: "tok" });
+    expect(runFollowersPollerMock.mock.calls[1][0]).toMatchObject({ accessToken: "refreshed-tok" });
+    // posts still runs independently on the original (unrefreshed at call time) token
+    expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
+  });
+
   it("TIKTOK: no BYOK gate — runs content poller for any active channel with seeded poll state", async () => {
     const linkDb = {
       prepare: vi.fn().mockImplementation((sql: string) => {
@@ -140,5 +163,47 @@ describe("pollChannelOnce", () => {
     await pollChannelOnce(baseEnv(linkDb, mockWebDb()), "TIKTOK", "chan-tt");
     expect(tiktokRefreshAccessTokenMock).toHaveBeenCalledWith("chan-tt");
     expect(runTikTokContentPollerMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("X: still runs the posts poller when the followers poller throws a non-401 error (failure isolation)", async () => {
+    runFollowersPollerMock.mockRejectedValueOnce(new Error("X get-followers failed: 503 Service Unavailable"));
+    const linkDb = {
+      prepare: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes("FROM channels")) {
+          return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({
+            id: "chan-1", tenant_id: 1, config: JSON.stringify({ is_byok: true, x_user_id: "u1" }),
+          }) }) };
+        }
+        return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({ backfill_complete: 0, last_polled_at: null }) }) };
+      }),
+    };
+    await expect(pollChannelOnce(baseEnv(linkDb, mockWebDb()), "X", "chan-1")).resolves.not.toThrow();
+    expect(runFollowersPollerMock).toHaveBeenCalledTimes(1);
+    expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("X: gives the posts poller its own fresh budget even if followers consumed most of it (starvation fix)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    runFollowersPollerMock.mockImplementationOnce(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    const linkDb = {
+      prepare: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes("FROM channels")) {
+          return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({
+            id: "chan-1", tenant_id: 1, config: JSON.stringify({ is_byok: true, x_user_id: "u1" }),
+          }) }) };
+        }
+        return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({ backfill_complete: 0, last_polled_at: null }) }) };
+      }),
+    };
+    await pollChannelOnce(baseEnv(linkDb, mockWebDb()), "X", "chan-1");
+    expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
+    const postsDeadline = runPostsPollerMock.mock.calls[0][0].deadline as number;
+    // Each poller computes its own deadline fresh (Date.now() + 20s) rather than
+    // being capped by a shared run-level deadline, so posts still gets ~20s here.
+    expect(postsDeadline - Date.now()).toBeGreaterThan(15_000);
+    vi.useRealTimers();
   });
 });

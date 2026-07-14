@@ -868,6 +868,55 @@ export default {
       }
     }
 
+    // content_flow_pending sweep: resumes wait/timeCondition/abSplit nodes downstream of a
+    // contentTrigger, mirroring the flow_pending sweep below but for the content domain (Task 5's
+    // executeContentActions + content_flow_executions, keyed by content_id instead of user_id).
+    // Placed before the flow_pending sweep (rather than strictly after it, per the plan) so that
+    // the flow_pending sweep's own early return on an empty flow_pending table can't skip this
+    // block — the two sweeps are independent (different tables), so order between them doesn't
+    // matter functionally.
+    const contentPending = await env.FLOW_DB.prepare(
+      `SELECT id, flow_id, node_id, content_id, tenant_id, payload, awaiting_event FROM content_flow_pending WHERE execute_at <= ?`
+    )
+      .bind(now)
+      .all<{ id: string; flow_id: string; node_id: string; content_id: string; tenant_id: string; payload: string; awaiting_event: string }>();
+
+    for (const row of contentPending.results) {
+      try {
+        const claim = await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE id = ?`).bind(row.id).run();
+        if (!claim.meta.changes) continue;
+
+        const flow = await env.FLOW_DB.prepare(`SELECT graph_json, status FROM flows WHERE id = ?`)
+          .bind(row.flow_id)
+          .first<{ graph_json: string; status: string }>();
+        if (!flow || flow.status !== "published") continue;
+
+        const graph: FlowGraph = JSON.parse(flow.graph_json);
+        const payload = JSON.parse(row.payload);
+        const branch = row.awaiting_event ? "no" : undefined;
+        const result = resumeFromNode(graph, row.node_id, payload, branch);
+
+        if (result.actions.length > 0) {
+          const channelId = String(payload.channel_id ?? "");
+          await executeContentActions(result.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
+          await env.FLOW_DB.prepare(
+            `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+             VALUES (?, ?, ?, ?, 1, ?)`
+          ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, now).run();
+        }
+
+        for (const wait of result.pendingWaits) {
+          const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
+          await env.FLOW_DB.prepare(
+            `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(crypto.randomUUID(), row.flow_id, wait.nodeId, row.content_id, row.tenant_id, row.payload, executeAt, now, wait.awaitingEvent || "").run();
+        }
+      } catch (e) {
+        console.error(JSON.stringify({ event: "content_flow_pending_error", id: row.id, error: String(e) }));
+      }
+    }
+
     const pending = await env.FLOW_DB.prepare(
       `SELECT id, flow_id, node_id, user_id, tenant_id, payload, awaiting_event, retry_action, retry_count FROM flow_pending WHERE execute_at <= ?`
     )

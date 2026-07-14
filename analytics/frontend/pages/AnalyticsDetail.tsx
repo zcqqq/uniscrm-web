@@ -21,6 +21,7 @@ import { compareRows } from "../../../shared/frontend/components/DataTable";
 import { PROPS } from "../../../metadata/props";
 import { ChartTypeToggle } from "../../../shared/frontend/components/ChartTypeToggle";
 import { formatPeriod as sharedFormatPeriod } from "../lib/format-period";
+import { formatCompactDate, formatCompactWeekRange } from "../lib/format-compact-date";
 
 const MODE_TITLES: Record<string, { en: string; zh: string }> = {
   event: { en: "Event Analytics", zh: "事件分析" },
@@ -416,6 +417,16 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   const dimensionSortType: "number" | "date" | undefined =
     dimensionPropDef?.dataType === "DATETIME" ? "date" : dimensionPropDef?.dataType === "INT" ? "number" : undefined;
 
+  // Formats a DATETIME dimension's raw/DATE_TRUNC'd value into the shared
+  // non-locale-dependent compact format; every other dataType (TEXT,
+  // ENUM_*, INT discrete/bucketed) passes through unchanged, since only
+  // DATETIME values ever arrive as ISO timestamps needing this treatment.
+  const formatDimensionValue = (v: string): string => {
+    if (dimensionPropDef?.dataType !== "DATETIME") return v;
+    const gran = config.dimensionDateGranularity || "none";
+    return gran === "week" ? formatCompactWeekRange(v, timezone) : formatCompactDate(v, gran, timezone);
+  };
+
   const hasStats = results && "periods" in results;
   const intervalSlots = hasStats ? fillIntervalPeriods(results.periods, config.timeRange, config.granularity) : [];
   const hasData = results && "data" in results;
@@ -766,14 +777,17 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                           <Pie data={sortedData} dataKey="value" nameKey="dimension" cx="50%" cy="50%" outerRadius={100} innerRadius={50} paddingAngle={2}>
                             {sortedData.map((_: any, i: number) => <Cell key={i} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} />)}
                           </Pie>
-                          <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
+                          <Tooltip
+                            contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }}
+                            formatter={(value: any, name: any) => [value, formatDimensionValue(String(name))]}
+                          />
                         </RePieChart>
                       </ResponsiveContainer>
                       <div className="flex-1 space-y-2">
                         {sortedData.map((d: any, i: number) => (
                           <div key={i} className="flex items-center gap-2 text-sm">
                             <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: DIMENSION_COLORS[i % DIMENSION_COLORS.length] }} />
-                            <span className="flex-1 truncate text-foreground">{String(d.dimension ?? "null")}</span>
+                            <span className="flex-1 truncate text-foreground">{d.dimension == null ? "null" : formatDimensionValue(String(d.dimension))}</span>
                             <span className="text-muted-foreground">{total ? `${Math.round(d.value / total * 100)}%` : "0%"}</span>
                             <span className="font-medium w-16 text-right">{Number(d.value).toLocaleString()}</span>
                           </div>
@@ -784,9 +798,12 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                     <ResponsiveContainer width="100%" height={280}>
                       <ReBarChart data={sortedData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" opacity={0.5} />
-                        <XAxis dataKey="dimension" tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
+                        <XAxis dataKey="dimension" tickFormatter={(v: any) => formatDimensionValue(String(v))} tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} />
                         <YAxis tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} tickLine={false} axisLine={false} width={40} />
-                        <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }} />
+                        <Tooltip
+                          contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }}
+                          labelFormatter={(v: any) => formatDimensionValue(String(v))}
+                        />
                         <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                           {sortedData.map((_: any, i: number) => <Cell key={i} fill={DIMENSION_COLORS[i % DIMENSION_COLORS.length]} />)}
                         </Bar>
@@ -805,7 +822,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                       return (
                         <span className="flex items-center gap-2">
                           <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: DIMENSION_COLORS[i % DIMENSION_COLORS.length] }} />
-                          {String(d.dimension ?? "null")}
+                          {d.dimension == null ? "null" : formatDimensionValue(String(d.dimension))}
                         </span>
                       );
                     },

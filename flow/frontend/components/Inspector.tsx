@@ -385,6 +385,23 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
     return <XActionInspector nodeId={nodeId} data={data} />;
   }
 
+  if (actionType === "repost") {
+    return (
+      <div>
+        <h4 className="text-sm font-semibold text-primary mb-3">Repost</h4>
+        <p className="text-xs text-muted-foreground">Reposts this content on the same channel it was ingested from. No configuration needed.</p>
+      </div>
+    );
+  }
+
+  if (actionType === "aiRewritePublish") {
+    return <AiRewritePublishInspector nodeId={nodeId} data={data} />;
+  }
+
+  if (actionType === "updateContentStatus") {
+    return <UpdateContentStatusInspector nodeId={nodeId} data={data} />;
+  }
+
   return <p className="text-sm text-muted-foreground">Unknown action type</p>;
 }
 
@@ -455,6 +472,76 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
             </Select>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+const CONTENT_CHANNEL_TYPES = ["X", "TIKTOK"];
+
+function AiRewritePublishInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+  const [channelType, setChannelType] = useState<string>(data.channelType || "");
+  const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
+
+  useEffect(() => {
+    if (!channelType) { setChannels([]); return; }
+    api.channels.list(channelType).then(setChannels).catch(() => setChannels([]));
+  }, [channelType]);
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">AI Rewrite &amp; Publish</h4>
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Target Platform</Label>
+          <Select
+            value={channelType}
+            onChange={(e: SelectChange) => { setChannelType(e.target.value); updateNodeData(nodeId, { channelType: e.target.value, channelId: "" }); }}
+            className="w-full text-sm"
+          >
+            <option value="">Select platform...</option>
+            {CONTENT_CHANNEL_TYPES.map((ct) => <option key={ct} value={ct}>{ct}</option>)}
+          </Select>
+        </div>
+        {channelType && (
+          <div>
+            <Label className="text-xs block mb-1">Target Account</Label>
+            {channels.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">No accounts linked for this platform</p>
+            ) : (
+              <Select
+                value={data.channelId || ""}
+                onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
+                className="w-full text-sm"
+              >
+                <option value="">Select account...</option>
+                {channels.map((ch) => <option key={ch.id} value={ch.id}>@{ch.username}</option>)}
+              </Select>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UpdateContentStatusInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">Update Content Status</h4>
+      <div>
+        <Label className="text-xs block mb-1">New Status</Label>
+        <Select
+          value={data.status || ""}
+          onChange={(e: SelectChange) => updateNodeData(nodeId, { status: e.target.value })}
+          className="w-full text-sm"
+        >
+          <option value="">Select status...</option>
+          <option value="published">Published</option>
+          <option value="ignored">Ignored</option>
+        </Select>
       </div>
     </div>
   );

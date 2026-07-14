@@ -6,7 +6,6 @@ import { DateCell } from "../../../shared/frontend/components/CellDate";
 import { StatusCell } from "../../../shared/frontend/components/CellStatus";
 import { OperationCell, type OperationsByStatus } from "../../../shared/frontend/components/CellOperation";
 import { Button } from "../../../shared/frontend/ui/button";
-import { Badge } from "../../../shared/frontend/ui/badge";
 import { TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
 import { DataTable } from "../../../shared/frontend/components/DataTable";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
@@ -14,7 +13,7 @@ import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 
 const UI = {
-  en: { newBtn: "New", event: "Event Analysis", interval: "Interval Analysis", user: "User Analysis", content: "Content Analysis", funnel: "Funnel Analysis", name: "Name", type: "Type", status: "Status", created: "Created", empty: "No reports yet", createFirst: "Create your first analysis" },
+  en: { newBtn: "New", event: "Event Analytics", interval: "Interval Analytics", user: "User Analytics", content: "Content Analytics", funnel: "Funnel Analytics", name: "Name", type: "Type", status: "Status", created: "Created", empty: "No reports yet", createFirst: "Create your first analytics" },
   zh: { newBtn: "新建", event: "事件分析", interval: "间隔分析", user: "用户分析", content: "内容分析", funnel: "漏斗分析", name: "名称", type: "类型", status: "状态", created: "创建时间", empty: "暂无报表", createFirst: "创建你的第一个分析" },
 };
 
@@ -117,9 +116,7 @@ export function AnalyticsList() {
                   {r.name || (r.params as any).name || `${r.type} #${r.id.slice(0, 8)}`}
                 </TableCell>
                 <TableCell>
-                  <Badge variant={r.type === "event" ? "default" : "secondary"}>
-                    {TYPE_LABELS[locale][r.type as keyof typeof TYPE_LABELS["en"]] || r.type}
-                  </Badge>
+                  {TYPE_LABELS[locale][r.type as keyof typeof TYPE_LABELS["en"]] || r.type}
                 </TableCell>
                 <TableCell>
                   <StatusCell status={r.status} />

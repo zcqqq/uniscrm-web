@@ -26,7 +26,7 @@ export interface XUser {
   socials?: string;
   maigret_status?: string;
   created_at?: string;
-  // Real API response also includes entity="user" PROPS_X columns
+  // Real API response also includes entity="user" PROPS columns
   // (channel_type, is_follow, is_followed, followers_count, ...) not all
   // enumerated here; the index signature lets Users.tsx read them dynamically.
   [key: string]: unknown;

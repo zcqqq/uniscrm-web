@@ -18,16 +18,16 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { DIMENSION_COLORS } from "../../../shared/frontend/lib/colors";
 import { ResultsTable } from "../../../shared/frontend/components/ResultsTable";
 import { compareRows } from "../../../shared/frontend/components/DataTable";
-import { PROPS_X } from "../../../metadata/x";
+import { PROPS } from "../../../metadata/props";
 import { ChartTypeToggle } from "../../../shared/frontend/components/ChartTypeToggle";
 import { formatPeriod as sharedFormatPeriod } from "../lib/format-period";
 
 const MODE_TITLES: Record<string, { en: string; zh: string }> = {
-  event: { en: "Event Analysis", zh: "事件分析" },
-  interval: { en: "Interval Analysis", zh: "间隔分析" },
-  user: { en: "User Analysis", zh: "用户分析" },
-  content: { en: "Content Analysis", zh: "内容分析" },
-  funnel: { en: "Funnel Analysis", zh: "漏斗分析" },
+  event: { en: "Event Analytics", zh: "事件分析" },
+  interval: { en: "Interval Analytics", zh: "间隔分析" },
+  user: { en: "User Analytics", zh: "用户分析" },
+  content: { en: "Content Analytics", zh: "内容分析" },
+  funnel: { en: "Funnel Analytics", zh: "漏斗分析" },
 };
 
 const UI = {
@@ -117,7 +117,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   const t = UI[locale as "en" | "zh"];
 
   const [mode, setMode] = useState<"event" | "interval" | "user" | "content" | "funnel">(modeProp || "event");
-  const [name, setName] = useState(() => (paramId ? "" : `Untitled ${MODE_TITLES[mode]?.en || "Analysis"}`));
+  const [name, setName] = useState(() => (paramId ? "" : `Untitled ${MODE_TITLES[mode]?.en || "Analytics"}`));
   // Unified chart-type preference, persisted to report params as `chart_type`
   // for every mode (event: line/bar, user: pie/bar, interval: boxplot only —
   // no user-facing toggle yet, funnel: unused). Editing this never triggers
@@ -409,7 +409,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   // count as INT here — Task 1's compareRows extracts their lower bound).
   // Everything else (TEXT/ENUM_TEXT/ENUM_INT) falls through to compareRows'
   // plain string-compare branch by leaving sortType undefined.
-  const dimensionPropDef = PROPS_X.find((p) => p.propId === config.dimension);
+  const dimensionPropDef = PROPS.find((p) => p.propId === config.dimension);
   const dimensionSortType: "number" | "date" | undefined =
     dimensionPropDef?.dataType === "DATETIME" ? "date" : dimensionPropDef?.dataType === "INT" ? "number" : undefined;
 

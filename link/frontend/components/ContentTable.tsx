@@ -9,7 +9,7 @@ import { DataTable, type Column } from "../../../shared/frontend/components/Data
 import { DateCell } from "../../../shared/frontend/components/CellDate";
 import { buildEntityColumns } from "../../../shared/frontend/lib/metadata-columns";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
-import { PROPS_X } from "../../../metadata/x";
+import { PROPS } from "../../../metadata/props";
 
 interface Props {
   items: ContentItem[];
@@ -56,7 +56,7 @@ export function ContentTable({ items, onUpdate, onDelete }: Props) {
   };
 
   const columns: Column<ContentItem>[] = useMemo(() => {
-    const generated = buildEntityColumns<ContentItem>(PROPS_X, "content", locale, timezone);
+    const generated = buildEntityColumns<ContentItem>(PROPS, "content", locale, timezone);
     const byKey = new Map(generated.map((c) => [c.key, c]));
 
     // title needs inline-edit behavior (a feature, not just styling) and

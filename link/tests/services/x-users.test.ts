@@ -126,8 +126,8 @@ describe("XUsersService.upsertUserFromMetadata", () => {
       source_user_id: "u1",
       description: "some free-text bio that should never reach R2",
       profile_image_url: "https://example.com/pic.jpg",
-      followers_count: 42, // isInsight: true in PROPS_X
-      is_followed: 1, // isInsight: true in PROPS_X
+      followers_count: 42, // isInsight: true in PROPS
+      is_followed: 1, // isInsight: true in PROPS
     };
 
     await service.upsertUserFromMetadata(rawItem, resolvedProps, "chan1", "X");

@@ -1,4 +1,4 @@
-import { EventMetadata_X, PROPS_X, t } from "../../../metadata";
+import { EventMetadata_X, PROPS, t } from "../../../metadata";
 import type { Locale } from "../../../metadata";
 
 export interface TriggerFieldDefinition {
@@ -29,7 +29,7 @@ const STRING_OPS = ["==", "!=", "contains"];
 const ENUM_OPS = ["==", "!="];
 
 function propToField(propId: string, locale: Locale, group: "event" | "user"): TriggerFieldDefinition | null {
-  const prop = PROPS_X.find((p) => p.propId === propId);
+  const prop = PROPS.find((p) => p.propId === propId);
   if (!prop) return null;
 
   if (prop.dataType === "ENUM_INT" || prop.dataType === "ENUM_TEXT") {

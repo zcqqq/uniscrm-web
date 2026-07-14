@@ -1,4 +1,4 @@
-import { PROPS_X, EventMetadata_X, t } from "../../metadata";
+import { PROPS, EventMetadata_X, t } from "../../metadata";
 import type { PropDefinition, Locale } from "../../metadata";
 
 export type Operator = "=" | "!=" | ">" | "<" | ">=" | "<=" | "IN" | "BETWEEN";
@@ -33,7 +33,7 @@ const SQL_EXPR_MAP: Record<string, { source: "user" | "event"; sqlExpr: string }
 };
 
 export function getAllFields(locale: Locale = "en"): InsightField[] {
-  const propFields = PROPS_X.map((prop) => {
+  const propFields = PROPS.map((prop) => {
     const mapping = SQL_EXPR_MAP[prop.propId];
     if (!mapping) return null;
     return {

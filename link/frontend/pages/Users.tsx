@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { DataTable, type Column } from "../../../shared/frontend/components/DataTable";
 import { buildEntityColumns } from "../../../shared/frontend/lib/metadata-columns";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
-import { PROPS_X } from "../../../metadata/x";
+import { PROPS } from "../../../metadata/props";
 import { api } from "../lib/api";
 
 interface UserRow {
@@ -20,7 +20,7 @@ export function Users() {
 
   const columns: Column<UserRow>[] = useMemo(() => [
     { key: "channel_type", label: "Channel" },
-    ...buildEntityColumns<UserRow>(PROPS_X, "user", locale, timezone),
+    ...buildEntityColumns<UserRow>(PROPS, "user", locale, timezone),
     { key: "updated_at", label: "Updated", sortable: true, sortType: "date", type: "datetime" },
   ], [locale, timezone]);
 

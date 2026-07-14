@@ -1,13 +1,13 @@
 import type { TenantDataDB } from "../../../shared/tenant-data-db";
 import type { ContentRow, ChannelType, Pipeline } from "../types";
 import type { ChannelItem } from "../channels/interface";
-import { PROPS_X } from "../../../metadata/x";
+import { PROPS } from "../../../metadata/props";
 
 const EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5";
 
 // Same isInsight registry x-users.ts uses for the user/event pipelines — only
 // props marked isInsight:true become dynamic columns on the R2 Iceberg tables.
-const INSIGHT_PROPS = PROPS_X.filter((p) => p.isInsight);
+const INSIGHT_PROPS = PROPS.filter((p) => p.isInsight);
 
 // propId -> content column. All propIds here are 1:1 name matches with their column.
 // A resolved prop not in this map only ever lives in raw_data.

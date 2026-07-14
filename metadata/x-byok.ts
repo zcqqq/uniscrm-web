@@ -14,7 +14,7 @@ export const UserMetadata_X: UserMetadata[] = [
       { propId: "profile_image_url", dataId: "{linkPrefix}.profile_image_url" },
       { propId: "followers_count", dataId: "{linkPrefix}.public_metrics.followers_count" },
       { propId: "following_count", dataId: "{linkPrefix}.public_metrics.following_count" },
-      { propId: "tweet_count", dataId: "{linkPrefix}.public_metrics.tweet_count" },
+      { propId: "post_count", dataId: "{linkPrefix}.public_metrics.tweet_count" },
       { propId: "listed_count", dataId: "{linkPrefix}.public_metrics.listed_count" },
       { propId: "like_count", dataId: "{linkPrefix}.public_metrics.like_count" },
       { propId: "media_count", dataId: "{linkPrefix}.public_metrics.media_count" },
@@ -28,12 +28,12 @@ export const ContentMetadata_X: ContentMetadata[] = [
     linkPrefix: "data[]",
     contentProps: [
       { propId: "content_type", value: "TWEET" },  //ARTICLE，参见uniscrm-web/_reference/x/post.json
-      { propId: "source_created_at", dataId: "{linkPrefix}.created_at" },
       { propId: "source_content_id", dataId: "{linkPrefix}.id" },
+      { propId: "source_created_at", dataId: "{linkPrefix}.created_at" },
       { propId: "title", dataId: "{linkPrefix}.article.title" },
       { propId: "content_text", dataId: "{linkPrefix}.text" },
       { propId: "bookmark_count", dataId: "{linkPrefix}.public_metrics.bookmark_count" },
-      { propId: "impression_count", dataId: "{linkPrefix}.public_metrics.impression_count" },
+      { propId: "view_count", dataId: "{linkPrefix}.public_metrics.impression_count" },
       { propId: "like_count", dataId: "{linkPrefix}.public_metrics.like_count" },
       { propId: "quote_count", dataId: "{linkPrefix}.public_metrics.quote_count" },
       { propId: "reply_count", dataId: "{linkPrefix}.public_metrics.reply_count" },

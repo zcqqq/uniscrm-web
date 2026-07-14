@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { PROPS_X } from "../../../metadata/x";
+import { PROPS } from "../../../metadata/props";
 
-describe("PROPS_X entity tagging", () => {
-  const insightProps = PROPS_X.filter((p) => p.isInsight);
+describe("PROPS entity tagging", () => {
+  const insightProps = PROPS.filter((p) => p.isInsight);
   const userProps = insightProps.filter((p) => p.entity?.includes("user"));
   const contentProps = insightProps.filter((p) => p.entity?.includes("content"));
 

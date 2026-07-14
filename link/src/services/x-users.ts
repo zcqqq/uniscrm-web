@@ -1,8 +1,8 @@
 import { TenantDataDB } from "../../../shared/tenant-data-db";
-import { PROPS_X } from "../../../metadata/x";
+import { PROPS } from "../../../metadata/props";
 import type { Pipeline } from "../types";
 
-const INSIGHT_PROPS = PROPS_X.filter((p) => p.isInsight);
+const INSIGHT_PROPS = PROPS.filter((p) => p.isInsight);
 
 // propIds that map 1:1 to a same-named column on `user`. A resolved prop not in this
 // list only ever lives in raw_data. Extend when a new column is added to the user table.

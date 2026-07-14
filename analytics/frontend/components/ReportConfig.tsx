@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { EventMetadata_X, PROPS_X } from "../../../metadata/x";
+import { EventMetadata_X } from "../../../metadata/x";
+import { PROPS } from "../../../metadata/props";
 import type { PropDefinition } from "../../../metadata/dataTypes";
 import { t } from "../../../metadata/locale";
 import { SelectProps } from "../../../shared/frontend/components/SelectProps";
@@ -14,11 +15,11 @@ import { Checkbox } from "../../../shared/frontend/ui/checkbox";
 
 const TRIGGER_EVENTS = EventMetadata_X.filter((e) => e.flowType !== "action");
 const propsByEntity = (entity: "user" | "content") =>
-  PROPS_X.filter((p) => p.isInsight && p.entity?.includes(entity));
+  PROPS.filter((p) => p.isInsight && p.entity?.includes(entity));
 const eventPropsFor = (eventType: string): PropDefinition[] => {
   const meta = EventMetadata_X.find((e) => e.eventType === eventType);
   const eventPropIds = meta?.eventProps.map((p) => p.propId) || [];
-  return eventPropIds.map((id) => PROPS_X.find((p) => p.propId === id)).filter((p): p is PropDefinition => !!p);
+  return eventPropIds.map((id) => PROPS.find((p) => p.propId === id)).filter((p): p is PropDefinition => !!p);
 };
 
 const UI = {
@@ -104,7 +105,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
   const mode = modeProp || values.mode || "event";
   const entityProps = propsByEntity(mode === "content" ? "content" : "user");
   const numericEntityProps = entityProps.filter((p) => p.dataType === "INT");
-  const selectedDimensionIsInt = PROPS_X.find((p) => p.propId === values.dimension)?.dataType === "INT";
+  const selectedDimensionIsInt = PROPS.find((p) => p.propId === values.dimension)?.dataType === "INT";
   const [showFilter, setShowFilter] = useState((values.filters?.length || 0) > 0);
 
   const update = (partial: Partial<ReportConfigValues>) => onChange({ ...values, ...partial });

@@ -1,60 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { DataTable, type Column } from "../../../shared/frontend/components/DataTable";
+import { buildEntityColumns } from "../../../shared/frontend/lib/metadata-columns";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
+import { PROPS_X } from "../../../metadata/x";
 import { api } from "../lib/api";
 
 interface UserRow {
   id: string;
-  channel_type: string;
-  name: string;
-  username: string;
-  is_follow: number;
-  is_followed: number;
-  followers_count: number;
-  following_count: number;
-  updated_at: string;
+  [key: string]: unknown;
 }
-
-const columns: Column<UserRow>[] = [
-  {
-    key: "name",
-    label: "User",
-    sortable: true,
-    render: (r) => (
-      <div>
-        <div className="font-medium text-sm">{r.name || "—"}</div>
-        <div className="text-xs text-muted-foreground">@{r.username}</div>
-      </div>
-    ),
-  },
-  { key: "channel_type", label: "Channel", sortable: true },
-  {
-    key: "is_followed",
-    label: "Followed",
-    sortable: true,
-    render: (r) => r.is_followed ? "✓" : "",
-  },
-  {
-    key: "is_follow",
-    label: "Following",
-    sortable: true,
-    render: (r) => r.is_follow ? "✓" : "",
-  },
-  { key: "followers_count", label: "Followers", sortable: true },
-  { key: "following_count", label: "Following#", sortable: true },
-  {
-    key: "updated_at",
-    label: "Updated",
-    sortable: true,
-    render: (r) => r.updated_at ? new Date(r.updated_at).toLocaleDateString() : "",
-  },
-];
 
 export function Users() {
   useEffect(() => { document.title = "Users — UniSCRM"; }, []);
+  const { locale, timezone } = useLocale();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+
+  const columns: Column<UserRow>[] = useMemo(() => [
+    { key: "channel_type", label: "Channel" },
+    ...buildEntityColumns<UserRow>(PROPS_X, "user", locale, timezone),
+    { key: "updated_at", label: "Updated", sortable: true, sortType: "date", type: "datetime" },
+  ], [locale, timezone]);
 
   useEffect(() => {
     api.users.list().then((d) => setUsers(d.users as UserRow[])).finally(() => setLoading(false));
@@ -70,6 +38,7 @@ export function Users() {
         searchKeys={["name", "username"]}
         onRowClick={(r) => navigate(`/users/${r.id}`)}
         loading={loading}
+        timezone={timezone}
       />
     </main>
   );

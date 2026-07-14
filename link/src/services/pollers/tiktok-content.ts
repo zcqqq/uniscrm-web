@@ -55,6 +55,13 @@ async function upsertPage(
   let newCount = 0;
   for (const item of items) {
     const props = resolveProps(item, VIDEO_METADATA.contentProps, VIDEO_METADATA.linkPrefix);
+    // TikTok's create_time is Unix epoch seconds, unlike X's created_at (already
+    // ISO8601) — PropMapping only supports fixed value/dataId extraction, so this
+    // unit conversion stays here rather than in the declarative metadata (same
+    // reasoning as x-posts.ts's item.article content_type fixup).
+    if (typeof props.source_created_at === "number") {
+      props.source_created_at = new Date(props.source_created_at * 1000).toISOString();
+    }
     const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "TIKTOK");
     if (isNew) newCount++;
   }

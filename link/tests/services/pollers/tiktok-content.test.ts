@@ -97,6 +97,29 @@ describe("runTikTokContentPoller", () => {
     expect(linkDb.prepare.mock.calls.some((c: unknown[]) => (c[0] as string).includes("last_polled_at = datetime"))).toBe(true);
   });
 
+  it("converts create_time (Unix epoch seconds) to an ISO8601 source_created_at before upserting", async () => {
+    const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null });
+    fetchVideoListPageMock.mockResolvedValueOnce({
+      page: { data: [{ id: "v1", create_time: 1781669273 }], nextCursor: undefined, hasMore: false },
+      rateLimited: false,
+    });
+
+    await runTikTokContentPoller({
+      channelId: "chan-1",
+      accessToken: "tok",
+      linkDb: linkDb as any,
+      tenantDb: {} as any,
+      tenantId: 1,
+      ai: {} as any,
+      vectorize: {} as any,
+      deadline: Date.now() + 20_000,
+    });
+
+    expect(upsertContentFromMetadataMock).toHaveBeenCalledTimes(1);
+    const resolvedProps = upsertContentFromMetadataMock.mock.calls[0][1];
+    expect(resolvedProps.source_created_at).toBe(new Date(1781669273 * 1000).toISOString());
+  });
+
   it("stops backfill without setting backfill_complete when rate limited", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null });
     fetchVideoListPageMock.mockResolvedValueOnce({ page: { data: [], hasMore: false }, rateLimited: true });

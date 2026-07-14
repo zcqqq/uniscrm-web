@@ -95,3 +95,53 @@ describe("buildSQL", () => {
     expect(sql).toContain("FROM uniscrm.user");
   });
 });
+
+describe("buildSQL event dimension bucketing", () => {
+  it("still groups by the raw dimension column when no bucket mode is set (regression check)", () => {
+    const sql = buildSQL("event", { event_type: "follow.follow", measure: "count", dimension: "followers_count", granularity: "day" }, "1");
+    expect(sql).toContain(", followers_count as dimension");
+    expect(sql).toContain("GROUP BY period, followers_count ORDER BY period");
+  });
+
+  it("applies custom buckets to the event dimension", () => {
+    const sql = buildSQL(
+      "event",
+      { event_type: "follow.follow", measure: "count", dimension: "followers_count", granularity: "day", buckets: [100, 1000] },
+      "1"
+    );
+    expect(sql).toContain("WHEN followers_count < 100 THEN '0-100'");
+    expect(sql).toContain("GROUP BY period, dimension ORDER BY period");
+  });
+
+  it("applies default 10-bucket equal-width split to the event dimension", () => {
+    const sql = buildSQL(
+      "event",
+      { event_type: "follow.follow", measure: "count", dimension: "followers_count", granularity: "day", dimension_bucket_mode: "default" },
+      "1"
+    );
+    expect(sql).toContain("WITH bounds AS (SELECT MIN(followers_count) as mn, MAX(followers_count) as mx FROM uniscrm.event WHERE tenant_id = 1 AND event_type = 'follow.follow'");
+    expect(sql).toContain("FROM uniscrm.event, bounds");
+    expect(sql).toContain("GROUP BY period, dimension ORDER BY period");
+  });
+
+  it("applies default bucketing in total (no time-grouping) mode", () => {
+    const sql = buildSQL(
+      "event",
+      { event_type: "follow.follow", measure: "count", dimension: "followers_count", granularity: "total", dimension_bucket_mode: "default" },
+      "1"
+    );
+    expect(sql).toContain("WITH bounds AS");
+    expect(sql).toContain("SELECT 'total' as period, CASE");
+    expect(sql).toContain("GROUP BY dimension");
+  });
+
+  it("applies default bucketing in avg-measure mode", () => {
+    const sql = buildSQL(
+      "event",
+      { event_type: "follow.follow", measure: "avg", dimension: "followers_count", granularity: "day", dimension_bucket_mode: "default" },
+      "1"
+    );
+    expect(sql).toContain("WITH bounds AS");
+    expect(sql).toContain("GROUP BY period, dimension");
+  });
+});

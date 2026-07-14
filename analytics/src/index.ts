@@ -415,8 +415,9 @@ async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<void> {
 
 export function buildSQL(type: string, params: Record<string, unknown>, tenantId: string): string {
   if (type === "event") {
-    const { event_type, measure, dimension, granularity, time_range_start, time_range_end, filters } = params as {
+    const { event_type, measure, dimension, granularity, dimension_bucket_mode, buckets, time_range_start, time_range_end, filters } = params as {
       event_type: string; measure: string; dimension?: string; granularity?: string;
+      dimension_bucket_mode?: "discrete" | "default" | "custom"; buckets?: number[];
       time_range_start?: string; time_range_end?: string;
       filters?: { field: string; operator: string; value: string; value2?: string }[];
     };
@@ -436,15 +437,29 @@ export function buildSQL(type: string, params: Record<string, unknown>, tenantId
       return `AND ${f.field} ${op} ${val}`;
     }).join(" ");
 
-    const dimCol = dimension ? `, ${dimension} as dimension` : "";
-    const dimGroup = dimension ? `, ${dimension}` : "";
+    const eventScopeFilter = `AND event_type = '${event_type}' ${timeFilter} ${filterClauses}`;
+
+    let dimCol = "";
+    let dimGroupCol = "";
+    let boundsCte = "";
+    let fromExtra = "";
+    if (dimension) {
+      const bucketing = buildDimensionBucketing({
+        dimension, mode: dimension_bucket_mode, buckets,
+        fromTable: "uniscrm.event", tenantId, scopeFilter: eventScopeFilter,
+      });
+      dimCol = bucketing.dimExpr;
+      boundsCte = bucketing.boundsCte;
+      fromExtra = bucketing.fromExtra;
+      dimGroupCol = bucketing.dimGroupCol;
+    }
 
     // Total (aggregate) mode — no time grouping
     if (gran === "total") {
       const agg = measure === "users" ? "COUNT(DISTINCT user_id)" : measure === "avg" ? "CAST(COUNT(*) AS DOUBLE) / NULLIF(COUNT(DISTINCT user_id), 0)" : "COUNT(*)";
-      return `SELECT 'total' as period${dimCol}, ${agg} as value
-FROM uniscrm.event
-WHERE tenant_id = ${tenantId} AND event_type = '${event_type}' ${timeFilter} ${filterClauses}${dimGroup ? ` GROUP BY ${dimension}` : ""}`;
+      return `${boundsCte}SELECT 'total' as period${dimCol}, ${agg} as value
+FROM uniscrm.event${fromExtra}
+WHERE tenant_id = ${tenantId} ${eventScopeFilter}${dimGroupCol ? ` GROUP BY ${dimGroupCol}` : ""}`;
     }
 
     const periodExpr = gran === "month" ? "DATE_TRUNC('month', event_time)"
@@ -454,19 +469,19 @@ WHERE tenant_id = ${tenantId} AND event_type = '${event_type}' ${timeFilter} ${f
       : "DATE_TRUNC('day', event_time)";
 
     if (measure === "avg") {
-      return `SELECT period${dimCol ? ", dimension" : ""}, CAST(total AS DOUBLE) / NULLIF(users, 0) as value FROM (
+      return `${boundsCte}SELECT period${dimCol ? ", dimension" : ""}, CAST(total AS DOUBLE) / NULLIF(users, 0) as value FROM (
   SELECT ${periodExpr} as period${dimCol}, COUNT(*) as total, COUNT(DISTINCT user_id) as users
-  FROM uniscrm.event
-  WHERE tenant_id = ${tenantId} AND event_type = '${event_type}' ${timeFilter} ${filterClauses}
-  GROUP BY period${dimGroup}
+  FROM uniscrm.event${fromExtra}
+  WHERE tenant_id = ${tenantId} ${eventScopeFilter}
+  GROUP BY period${dimGroupCol ? `, ${dimGroupCol}` : ""}
 ) ORDER BY period`;
     }
 
     const agg = measure === "users" ? "COUNT(DISTINCT user_id)" : "COUNT(*)";
-    return `SELECT ${periodExpr} as period${dimCol}, ${agg} as value
-FROM uniscrm.event
-WHERE tenant_id = ${tenantId} AND event_type = '${event_type}' ${timeFilter} ${filterClauses}
-GROUP BY period${dimGroup} ORDER BY period`;
+    return `${boundsCte}SELECT ${periodExpr} as period${dimCol}, ${agg} as value
+FROM uniscrm.event${fromExtra}
+WHERE tenant_id = ${tenantId} ${eventScopeFilter}
+GROUP BY period${dimGroupCol ? `, ${dimGroupCol}` : ""} ORDER BY period`;
   }
 
   if (type === "interval") {

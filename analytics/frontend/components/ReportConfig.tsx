@@ -5,6 +5,8 @@ import type { PropDefinition } from "../../../metadata/dataTypes";
 import { t } from "../../../metadata/locale";
 import { SelectProps } from "../../../shared/frontend/components/SelectProps";
 import { IntDimensionPopover, type BucketMode } from "../../../shared/frontend/components/IntDimensionPopover";
+import { DatetimeDimensionPopover, type DatetimeGranularity } from "../../../shared/frontend/components/DatetimeDimensionPopover";
+import { getDimensionRange } from "../lib/api";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { Select } from "../../../shared/frontend/ui/select";
 import { Input } from "../../../shared/frontend/ui/input";
@@ -81,6 +83,7 @@ export interface ReportConfigValues {
   dimension: string;
   dimensionBucketMode?: BucketMode;
   buckets?: string;
+  dimensionDateGranularity?: DatetimeGranularity;
   sortColumn?: string;
   sortDirection?: "asc" | "desc";
   timeRange: string;
@@ -106,6 +109,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
   const entityProps = propsByEntity(mode === "content" ? "content" : "user");
   const numericEntityProps = entityProps.filter((p) => p.dataType === "INT");
   const selectedDimensionIsInt = PROPS.find((p) => p.propId === values.dimension)?.dataType === "INT";
+  const selectedDimensionIsDatetime = PROPS.find((p) => p.propId === values.dimension)?.dataType === "DATETIME";
   const [showFilter, setShowFilter] = useState((values.filters?.length || 0) > 0);
 
   const update = (partial: Partial<ReportConfigValues>) => onChange({ ...values, ...partial });
@@ -236,7 +240,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                 <SelectProps
                   options={entityProps}
                   value={values.dimension}
-                  onChange={(v) => update({ dimension: v, buckets: "", dimensionBucketMode: undefined })}
+                  onChange={(v) => update({ dimension: v, buckets: "", dimensionBucketMode: undefined, dimensionDateGranularity: undefined })}
                   locale={locale}
                   placeholder={s.noGroup}
                 />
@@ -244,7 +248,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                 <SelectProps
                   options={eventPropsFor(mode === "interval" ? (values.eventTypeA || "") : values.eventType)}
                   value={values.dimension}
-                  onChange={(v) => update({ dimension: v, buckets: "", dimensionBucketMode: undefined })}
+                  onChange={(v) => update({ dimension: v, buckets: "", dimensionBucketMode: undefined, dimensionDateGranularity: undefined })}
                   locale={locale}
                   placeholder={s.noGroup}
                 />
@@ -254,6 +258,16 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                   mode={values.dimensionBucketMode || (values.buckets ? "custom" : "discrete")}
                   buckets={values.buckets || ""}
                   onChange={({ mode, buckets }) => update({ dimensionBucketMode: mode, buckets })}
+                  locale={locale}
+                />
+              )}
+              {values.dimension && selectedDimensionIsDatetime && mode !== "interval" && (
+                <DatetimeDimensionPopover
+                  dimension={values.dimension}
+                  mode={mode}
+                  value={values.dimensionDateGranularity}
+                  onChange={(v) => update({ dimensionDateGranularity: v })}
+                  fetchRange={getDimensionRange}
                   locale={locale}
                 />
               )}

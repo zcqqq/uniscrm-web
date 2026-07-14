@@ -131,6 +131,8 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     eventTypeA: "",
     eventTypeB: "",
     dimension: "",
+    sortColumn: "dimension",
+    sortDirection: "asc",
     timeRange: "7",
     granularity: "day",
   });
@@ -179,6 +181,8 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         dimension: p.dimension || "",
         dimensionBucketMode: p.dimension_bucket_mode || (Array.isArray(p.buckets) && p.buckets.length > 0 ? "custom" : "discrete"),
         buckets: Array.isArray(p.buckets) ? p.buckets.join(",") : (p.buckets || ""),
+        sortColumn: p.sort_column || "dimension",
+        sortDirection: (p.sort_direction === "desc" ? "desc" : "asc"),
         timeRange: typeof p.time_range === "string" && p.time_range ? p.time_range : inferTimeRange(p.time_range_start || ""),
         granularity: p.granularity || "day",
         compareEnabled: !!p.compare_enabled,
@@ -231,6 +235,8 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         buckets: buckets?.length ? buckets : undefined,
         filters: config.filters,
         chart_type: chartType,
+        sort_column: config.sortColumn || "dimension",
+        sort_direction: config.sortDirection || "asc",
       };
     }
     if (mode === "interval") {
@@ -262,6 +268,8 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
       compare_time_range: config.compareTimeRange || undefined,
       filters: config.filters,
       chart_type: chartType,
+      sort_column: config.sortColumn || "dimension",
+      sort_direction: config.sortDirection || "asc",
     };
   }, [config, mode, chartType]);
 
@@ -383,6 +391,16 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
   };
 
   const formatPeriod = (p: unknown) => sharedFormatPeriod(p, config.granularity, locale, timezone);
+
+  // ResultsTable is controlled: sort state lives here (not inside
+  // ResultsTable) so both the chart above a results table and the table
+  // itself can reorder from the same resolved order. Persisted into
+  // config like chart_type, restored on load, PATCHed on Save.
+  const sortColumn = config.sortColumn || "dimension";
+  const sortDirection = config.sortDirection || "asc";
+  const handleSortChange = (key: string, dir: "asc" | "desc") => {
+    setConfig((prev) => ({ ...prev, sortColumn: key, sortDirection: dir }));
+  };
 
   const hasStats = results && "periods" in results;
   const intervalSlots = hasStats ? fillIntervalPeriods(results.periods, config.timeRange, config.granularity) : [];

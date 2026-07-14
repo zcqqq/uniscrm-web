@@ -141,7 +141,7 @@ app.get("/api/reports/:id", async (c) => {
 //   so it naturally drifts forward with real time even when the user
 //   changes nothing. The relative "time_range" value itself is what
 //   reflects real user intent and is NOT excluded.
-const COSMETIC_PARAM_FIELDS = ["chart_type", "name", "time_range_start"] as const;
+const COSMETIC_PARAM_FIELDS = ["chart_type", "name", "time_range_start", "sort_column", "sort_direction"] as const;
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);

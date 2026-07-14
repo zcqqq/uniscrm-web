@@ -80,6 +80,8 @@ export interface ReportConfigValues {
   dimension: string;
   dimensionBucketMode?: BucketMode;
   buckets?: string;
+  sortColumn?: string;
+  sortDirection?: "asc" | "desc";
   timeRange: string;
   granularity: "total" | "day" | "week" | "month" | "hour" | "weekday";
   compareEnabled?: boolean;

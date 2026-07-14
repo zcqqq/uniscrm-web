@@ -656,10 +656,14 @@ export default {
         for (const flow of rows.results) {
           const graph: FlowGraph = JSON.parse(flow.graph_json);
           const result = executeFlow(graph, eventType, payload);
-          if (result.nodeLogs.length > 0) await emitNodeLogs(result.nodeLogs, flow.id, userId, Number(tenantId), env);
+          // TODO(Task 5): userId is now optional on FlowQueueMessage (content-domain messages
+          // carry contentId instead). Every message on this path today is still user-domain,
+          // so userId is always present at runtime here. This assertion is a stopgap until
+          // Task 5 branches queue() on contentId vs userId.
+          if (result.nodeLogs.length > 0) await emitNodeLogs(result.nodeLogs, flow.id, userId as string, Number(tenantId), env);
 
           if (result.actions.length > 0) {
-            const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, userId, tenantId, env, payload, flow.id);
+            const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, userId as string, tenantId, env, payload, flow.id);
             const stmts: D1PreparedStatement[] = [
               env.FLOW_DB.prepare(
                 `INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at)

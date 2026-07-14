@@ -105,14 +105,14 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     );
   });
 
-  it("merges into the existing channel row sharing the same X account instead of throwing a UNIQUE constraint error", async () => {
+  it("frees the conflicting channel row's slot (deactivate + clear source_channel_id) and claims the account on byokChannelId instead of throwing a UNIQUE constraint error", async () => {
     const byokChannelId = "placeholder-chan";
-    const existingChannelId = "existing-chan";
+    const oldChannelId = "old-system-app-chan";
     const kv = createMockKv(byokChannelId);
     const linkDb = createMockLinkDb([
       ["WHERE id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
       ["SELECT config, tenant_id FROM channels WHERE id = ?", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }), tenant_id: 5 }],
-      ["channel_type = 'X' AND source_channel_id", { id: existingChannelId, tenant_id: 5 }],
+      ["channel_type = 'X' AND source_channel_id", { id: oldChannelId, tenant_id: 5 }],
     ]);
 
     const app = buildApp();
@@ -124,26 +124,27 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
 
     expect(res.status).toBe(302);
 
+    // The BYOK placeholder row is always the one that ends up active with is_byok=1 —
+    // it already holds the BYOK app credentials, so there's nothing to merge into it.
     const updateCall = linkDb.calls.find((c) => c.sql.includes("is_byok = 1"));
     expect(updateCall).toBeDefined();
-    expect(updateCall!.args[updateCall!.args.length - 1]).toBe(existingChannelId);
+    expect(updateCall!.args[updateCall!.args.length - 1]).toBe(byokChannelId);
 
-    const deactivateCall = linkDb.calls.find((c) => c.sql.includes("SET is_active = 0"));
-    expect(deactivateCall).toBeDefined();
-    expect(deactivateCall!.args).toEqual([byokChannelId]);
-
-    const pollStateDeleteCall = linkDb.calls.find((c) => c.sql.includes("DELETE FROM channel_poll_state"));
-    expect(pollStateDeleteCall).toBeDefined();
-    expect(pollStateDeleteCall!.args).toEqual([byokChannelId]);
+    // The old (non-BYOK) row that previously held this X account is freed: deactivated,
+    // source_channel_id cleared (so it never collides again), reason recorded for audit
+    // and so tier-reactivation logic (admin/src/routes/webhook.ts) never touches it.
+    const freeCall = linkDb.calls.find((c) => c.sql.includes("source_channel_id = NULL"));
+    expect(freeCall).toBeDefined();
+    expect(freeCall!.args).toEqual(["byok_merged source_channel_id=xuser-999", oldChannelId]);
 
     const pollSeedCalls = linkDb.calls.filter((c) => c.sql.includes("INSERT INTO channel_poll_state"));
     expect(pollSeedCalls).toHaveLength(2);
     for (const call of pollSeedCalls) {
-      expect(call.args[0]).toBe(existingChannelId);
+      expect(call.args[0]).toBe(byokChannelId);
     }
 
-    expect(setupAllSubscriptionsMock).toHaveBeenCalledWith("xuser-999", `http://localhost/x/webhook/${existingChannelId}`);
-    expect(updateConfigMock).toHaveBeenCalledWith(existingChannelId, { subscription_ids: ["sub-1"] });
+    expect(setupAllSubscriptionsMock).toHaveBeenCalledWith("xuser-999", `http://localhost/x/webhook/${byokChannelId}`);
+    expect(updateConfigMock).toHaveBeenCalledWith(byokChannelId, { subscription_ids: ["sub-1"] });
   });
 
   it("updates the placeholder row itself (and sets is_byok=1) when no other channel claims that X account", async () => {
@@ -168,8 +169,7 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     expect(updateCall).toBeDefined();
     expect(updateCall!.args[updateCall!.args.length - 1]).toBe(byokChannelId);
 
-    expect(linkDb.calls.some((c) => c.sql.includes("SET is_active = 0"))).toBe(false);
-    expect(linkDb.calls.some((c) => c.sql.includes("DELETE FROM channel_poll_state"))).toBe(false);
+    expect(linkDb.calls.some((c) => c.sql.includes("source_channel_id = NULL"))).toBe(false);
   });
 
   it("refuses to merge across tenants and leaves both rows untouched", async () => {
@@ -191,6 +191,6 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
 
     expect(res.status).toBe(409);
     expect(linkDb.calls.some((c) => c.sql.includes("is_byok = 1"))).toBe(false);
-    expect(linkDb.calls.some((c) => c.sql.includes("SET is_active = 0"))).toBe(false);
+    expect(linkDb.calls.some((c) => c.sql.includes("source_channel_id = NULL"))).toBe(false);
   });
 });

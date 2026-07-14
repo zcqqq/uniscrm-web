@@ -32,7 +32,7 @@ export interface IntervalResults {
   summary?: number;
 }
 
-export interface EventAnalysisParams {
+export interface EventAnalyticsParams {
   event_type: string;
   measure: "count" | "users" | "avg";
   dimension?: string;
@@ -41,7 +41,7 @@ export interface EventAnalysisParams {
   time_range_end?: string;
 }
 
-export interface EventAnalysisResults {
+export interface EventAnalyticsResults {
   sql: string;
   data: { period: string; value: number; dimension?: string }[];
   summary?: number;
@@ -53,7 +53,7 @@ export interface ReportSummary {
   type: string;
   params: Record<string, unknown>;
   status: string;
-  results: IntervalResults | EventAnalysisResults | null;
+  results: IntervalResults | EventAnalyticsResults | null;
   error_message: string | null;
   computed_at: string | null;
   created_at: string;
@@ -118,7 +118,7 @@ export interface DashboardItem {
   report_name: string | null;
   type: string;
   params: Record<string, unknown> | null;
-  results: EventAnalysisResults | IntervalResults | null;
+  results: EventAnalyticsResults | IntervalResults | null;
   status: string;
   size: string;
   position: number;

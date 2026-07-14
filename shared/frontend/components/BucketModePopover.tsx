@@ -68,7 +68,7 @@ export function BucketModePopover({ mode, buckets, onChange, locale = "en" }: Bu
 
   const confirm = () => {
     const sorted = [...draftBoundaries].sort((a, b) => a - b);
-    onChange({ mode: draftMode, buckets: draftMode === "custom" ? sorted.join(",") : buckets });
+    onChange({ mode: draftMode, buckets: draftMode === "custom" ? sorted.join(",") : "" });
     setOpen(false);
   };
 

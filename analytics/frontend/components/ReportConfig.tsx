@@ -241,7 +241,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                 <SelectProps
                   options={eventPropsFor(mode === "interval" ? (values.eventTypeA || "") : values.eventType)}
                   value={values.dimension}
-                  onChange={(v) => update({ dimension: v })}
+                  onChange={(v) => update({ dimension: v, buckets: "", dimensionBucketMode: undefined })}
                   locale={locale}
                   placeholder={s.noGroup}
                 />

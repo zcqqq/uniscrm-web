@@ -4,7 +4,7 @@ import { ResponsiveContainer, LineChart as ReLineChart, Line, XAxis, YAxis, Tool
 import { LineChart, BarChart3, PieChart } from "lucide-react";
 import { createReport, getReport, updateReport, recomputeReport, listDashboards, createDashboard, addDashboardItem, type Dashboard } from "../lib/api";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
-import { useLocale } from "../hooks/useLocale";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { ReportConfig, type ReportConfigValues } from "../components/ReportConfig";
 import { IntervalDistributionChart } from "../components/IntervalDistributionChart";
 import { fillTimeSeries, generatePeriodKeys, normalizeDate } from "../lib/fill-time-series";

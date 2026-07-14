@@ -21,7 +21,7 @@ import {
 import { ChannelCard } from "./ChannelCard";
 import { useXChannel } from "../hooks/useXChannel";
 import { useSimpleChannel } from "../hooks/useSimpleChannel";
-import { useLocale } from "../hooks/useLocale";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { SIMPLE_CHANNELS, type SimpleChannelConfig } from "../lib/channelRegistry";
 import { XLogo } from "../lib/channelLogos";
 import { api } from "../lib/api";

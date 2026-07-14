@@ -2,7 +2,7 @@ export function formatDateTime(utcISO: string, timezone: string): string {
   return new Intl.DateTimeFormat(undefined, {
     timeZone: timezone,
     dateStyle: "medium",
-    timeStyle: "short",
+    timeStyle: "medium",
   }).format(new Date(utcISO));
 }
 
@@ -13,9 +13,10 @@ export function formatDate(utcISO: string, timezone: string): string {
   }).format(new Date(utcISO));
 }
 
+// timeStyle: "medium" includes seconds (vs "short", which only shows HH:MM).
 export function formatTime(utcISO: string, timezone: string): string {
   return new Intl.DateTimeFormat(undefined, {
     timeZone: timezone,
-    timeStyle: "short",
+    timeStyle: "medium",
   }).format(new Date(utcISO));
 }

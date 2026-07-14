@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toPng } from "html-to-image";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { listDashboards, createDashboard, getDashboard, deleteDashboard, updateDashboardItem, deleteDashboardItem, type Dashboard, type DashboardItem, type IntervalResults } from "../lib/api";
-import { useLocale } from "../hooks/useLocale";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { fillTimeSeries } from "../lib/fill-time-series";
 import { fillIntervalPeriods } from "../lib/fill-interval-periods";

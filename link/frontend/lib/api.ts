@@ -26,6 +26,10 @@ export interface XUser {
   socials?: string;
   maigret_status?: string;
   created_at?: string;
+  // Real API response also includes entity="user" PROPS_X columns
+  // (channel_type, is_follow, is_followed, followers_count, ...) not all
+  // enumerated here; the index signature lets Users.tsx read them dynamically.
+  [key: string]: unknown;
 }
 
 export interface XEvent {
@@ -58,6 +62,7 @@ export interface ContentItem {
   raw_data: string;
   created_at: string;
   updated_at: string;
+  [key: string]: unknown;
 }
 
 // Commerce types

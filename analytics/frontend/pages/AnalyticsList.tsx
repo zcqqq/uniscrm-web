@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { listReports, deleteReport, type ReportSummary } from "../lib/api";
-import { useLocale } from "../hooks/useLocale";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { DateCell } from "../../../shared/frontend/components/CellDate";
 import { StatusCell } from "../../../shared/frontend/components/CellStatus";
 import { OperationCell, type OperationsByStatus } from "../../../shared/frontend/components/CellOperation";

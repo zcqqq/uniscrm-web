@@ -66,6 +66,7 @@ export const PROPS_X = definePropDefinitions([
   {
     propId: "profile_image_url",
     dataType: "TEXT",
+    fieldType: "IMAGE",
     entity: ["user"],
     label: { en: "Profile Image URL", zh: "头像URL" },
   },

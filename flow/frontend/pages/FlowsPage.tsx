@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { FLOW_TEMPLATES, type FlowTemplate } from "../config/templates";
 import { Nav } from "../components/Nav";
 import { DateCell } from "../../../shared/frontend/components/CellDate";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { StatusCell } from "../../../shared/frontend/components/CellStatus";
 import { OperationCell } from "../../../shared/frontend/components/CellOperation";
 import { EmptyState } from "../../../shared/frontend/components/EmptyState";
@@ -44,6 +45,7 @@ type SortDir = "asc" | "desc";
 export default function FlowsPage() {
   useEffect(() => { document.title = "Flow — UniSCRM"; }, []);
   const { flows, loading, page, total, totalPages, setPage, createFlow, deleteFlow, refresh } = useFlows();
+  const { timezone } = useLocale();
   const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<SortKey>("updated_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -164,7 +166,7 @@ export default function FlowsPage() {
                         </TableCell>
                         <TableCell className="text-muted-foreground">{flow.trigger_count || "-"}</TableCell>
                         <TableCell className="text-muted-foreground">
-                          <DateCell iso={flow.updated_at} timezone={Intl.DateTimeFormat().resolvedOptions().timeZone} />
+                          <DateCell iso={flow.updated_at} timezone={timezone} />
                         </TableCell>
                         <TableCell className="text-muted-foreground">{flow.member_email || "-"}</TableCell>
                         <TableCell className="text-right">

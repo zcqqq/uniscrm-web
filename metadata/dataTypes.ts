@@ -1,10 +1,12 @@
 export type PropDataType = "INT" | "TEXT" | "ENUM_INT" | "ENUM_TEXT" | "DATETIME";
+export type PropFieldType = "IMAGE";
 
 export type LocalizedString = { en: string; zh: string };
 
 export interface PropDefinition {
   propId: string;
   dataType: PropDataType;
+  fieldType?: PropFieldType;
   isInsight?: boolean;
   // Which R2 snapshot table(s) this prop is a real column on. Drives which
   // props Content/User Analysis dimension & measure-field pickers offer —

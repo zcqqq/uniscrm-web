@@ -272,7 +272,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
 
               {hoveredGroup === group.id && !disabled && (
                 <div className="absolute left-full top-0 pl-1 z-50">
-                <div className="bg-popover border border-border rounded-md shadow-md py-1.5 min-w-[160px]">
+                <div className="bg-popover border border-border rounded-md shadow-lg py-1.5 min-w-[160px]">
                   <div className="px-3 py-1.5 text-xs font-medium text-foreground border-b border-border mb-1">{group.label}</div>
                   {group.items ? group.items.map((item) => {
                     const itemLocked = isItemDisabled(group.id, item.id);
@@ -306,13 +306,13 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
           <button onClick={() => setCollapsed(false)} className="flex items-center justify-center w-10 h-10 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer transition-colors">
             <Icons.Expand />
           </button>
-          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 hidden group-hover/expand:block z-50 bg-popover border border-border rounded-md shadow-md px-2 py-1 text-xs text-foreground whitespace-nowrap">Expand</div>
+          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 hidden group-hover/expand:block z-50 bg-popover border border-border rounded-md shadow-lg px-2 py-1 text-xs text-foreground whitespace-nowrap">Expand</div>
         </div>
         <div className="relative group/logout flex justify-center">
           <button onClick={handleLogout} className="flex items-center justify-center w-10 h-10 rounded-md text-muted-foreground hover:text-destructive cursor-pointer transition-colors">
             <Icons.LogOut />
           </button>
-          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 hidden group-hover/logout:block z-50 bg-popover border border-border rounded-md shadow-md px-2 py-1 text-xs text-foreground whitespace-nowrap">Logout</div>
+          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 hidden group-hover/logout:block z-50 bg-popover border border-border rounded-md shadow-lg px-2 py-1 text-xs text-foreground whitespace-nowrap">Logout</div>
         </div>
       </div>
     </div>

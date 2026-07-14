@@ -6,8 +6,11 @@ import { Button } from "../../../shared/frontend/ui/button";
 import { PageHeader } from "../../../shared/frontend/components/PageHeader";
 import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 import { Pagination } from "../../../shared/frontend/components/DataTable";
+import { DateCell } from "../../../shared/frontend/components/CellDate";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 
 export function Users() {
+  const { timezone } = useLocale();
   const [users, setUsers] = useState<UserX[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -69,7 +72,7 @@ export function Users() {
               <TableRow key={user.id}>
                 <TableCell className="text-foreground">{user.name}</TableCell>
                 <TableCell className="text-muted-foreground">@{user.username}</TableCell>
-                <TableCell className="text-muted-foreground/60">{new Date(user.updated_at).toLocaleDateString()}</TableCell>
+                <TableCell className="text-muted-foreground/60"><DateCell iso={user.updated_at} timezone={timezone} /></TableCell>
                 <TableCell className="relative">
                   <Button
                     variant="outline"

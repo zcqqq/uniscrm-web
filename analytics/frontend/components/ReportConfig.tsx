@@ -4,7 +4,7 @@ import type { PropDefinition } from "../../../metadata/dataTypes";
 import { t } from "../../../metadata/locale";
 import { SelectProps } from "../../../shared/frontend/components/SelectProps";
 import { BucketModePopover, type BucketMode } from "../../../shared/frontend/components/BucketModePopover";
-import { useLocale } from "../hooks/useLocale";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { Select } from "../../../shared/frontend/ui/select";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";

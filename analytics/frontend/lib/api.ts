@@ -103,6 +103,12 @@ export function recomputeReport(id: string) {
   return request<{ ok: boolean }>(`${BASE}/${id}/recompute`, { method: "POST" });
 }
 
+export function getDimensionRange(mode: string, dimension: string) {
+  return request<{ min: string | null; max: string | null }>(
+    `/api/dimension-range?mode=${mode}&dimension=${dimension}`
+  );
+}
+
 // ============ Dashboards ============
 
 export interface Dashboard {

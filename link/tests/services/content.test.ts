@@ -82,7 +82,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
       source_content_id: "t1",
       title: "Free Skill - some article",
       bookmark_count: 3,
-      impression_count: 37,
+      view_count: 100,
       like_count: 1,
       quote_count: 0,
       reply_count: 2,
@@ -92,10 +92,10 @@ describe("ContentService.upsertContentFromMetadata", () => {
     await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X");
 
     const [sql, params] = tenantDb.run.mock.calls[0];
-    for (const col of ["title", "bookmark_count", "impression_count", "like_count", "quote_count", "reply_count", "repost_count"]) {
+    for (const col of ["title", "bookmark_count", "view_count", "like_count", "quote_count", "reply_count", "repost_count"]) {
       expect(sql).toContain(col);
     }
-    expect(params).toEqual(expect.arrayContaining(["Free Skill - some article", 3, 37, 1, 0, 2, 5]));
+    expect(params).toEqual(expect.arrayContaining(["Free Skill - some article", 3, 100, 1, 0, 2, 5]));
   });
 
   it("sends only isInsight props to the content pipeline, keyed by tenant_id/id/source_content_id", async () => {
@@ -107,7 +107,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
       content_type: "TWEET",
       title: "not sent to R2 (free text)",
       content_text: "not sent to R2 (free text)",
-      impression_count: 37,
+      view_count: 100,
       like_count: 1,
     };
 
@@ -121,7 +121,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
       channel_type: "X",
       source_content_id: "t1",
       content_type: "TWEET",
-      impression_count: 37,
+      view_count: 100,
       like_count: 1,
     });
     expect(record.title).toBeUndefined();
@@ -199,6 +199,41 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     expect(ai.run).toHaveBeenCalled();
     expect(vectorize.upsert).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CONTENT_COLUMN_MAP coverage", () => {
+  it("maps view_count, share_count, cover_image_url, duration, height, width to matching columns", async () => {
+    const tenantDb = createMockTenantDb();
+    const ai = createMockAi();
+    const vectorize = createMockVectorize();
+    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 1);
+
+    tenantDb.query.mockResolvedValue([]);
+    await service.upsertContentFromMetadata(
+      { id: "v1" },
+      {
+        source_content_id: "v1",
+        content_type: "VIDEO",
+        view_count: 100,
+        share_count: 5,
+        cover_image_url: "https://example.com/c.jpg",
+        duration: 30,
+        height: 1920,
+        width: 1080,
+      },
+      "chan-1",
+      "TIKTOK"
+    );
+
+    const insertCall = tenantDb.run.mock.calls.find((c: unknown[]) => (c[0] as string).includes("INSERT INTO content"));
+    expect(insertCall![0]).toContain("view_count");
+    expect(insertCall![0]).toContain("share_count");
+    expect(insertCall![0]).toContain("cover_image_url");
+    expect(insertCall![0]).toContain("duration");
+    expect(insertCall![0]).toContain("height");
+    expect(insertCall![0]).toContain("width");
+    expect(insertCall![0]).not.toContain("impression_count");
   });
 });
 

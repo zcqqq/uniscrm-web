@@ -17,11 +17,16 @@ const CONTENT_COLUMN_MAP: Record<string, string> = {
   title: "title",
   source_created_at: "source_created_at",
   bookmark_count: "bookmark_count",
-  impression_count: "impression_count",
+  view_count: "view_count",
   like_count: "like_count",
   quote_count: "quote_count",
   reply_count: "reply_count",
   repost_count: "repost_count",
+  share_count: "share_count",
+  cover_image_url: "cover_image_url",
+  duration: "duration",
+  height: "height",
+  width: "width",
 };
 const CONTENT_TABLE_COLUMNS = Object.values(CONTENT_COLUMN_MAP);
 

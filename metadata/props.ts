@@ -139,6 +139,7 @@ export const PROPS = definePropDefinitions([
     enums: [
       { value: "TWEET", label: { en: "Tweet", zh: "推文" } },
       { value: "ARTICLE", label: { en: "Article", zh: "文章" } },
+      { value: "VIDEO", label: { en: "Video", zh: "视频" } },
     ],
   },
   {

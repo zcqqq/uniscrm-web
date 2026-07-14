@@ -32,9 +32,9 @@ describe("buildEntityColumns", () => {
   it("only marks INT and DATETIME columns sortable, with an explicit sortType", () => {
     const cols = buildEntityColumns<Row>(PROPS, "content", "en", "UTC");
 
-    const impressions = cols.find((c) => c.key === "impression_count")!;
-    expect(impressions.sortable).toBe(true);
-    expect(impressions.sortType).toBe("number");
+    const viewCount = cols.find((c) => c.key === "view_count")!;
+    expect(viewCount.sortable).toBe(true);
+    expect(viewCount.sortType).toBe("number");
 
     const postedAt = cols.find((c) => c.key === "source_created_at")!;
     expect(postedAt.sortable).toBe(true);
@@ -79,5 +79,11 @@ describe("buildEntityColumns", () => {
     const cols = buildEntityColumns<Row>(PROPS, "user", "en", "UTC");
     const desc = cols.find((c) => c.key === "description")!;
     expect(desc.render!({})).toBe("—");
+  });
+
+  it("content_type prop accepts VIDEO alongside TWEET/ARTICLE", () => {
+    const contentTypeProp = PROPS.find((p) => p.propId === "content_type")!;
+    const values = contentTypeProp.enums!.map((e) => e.value);
+    expect(values).toContain("VIDEO");
   });
 });

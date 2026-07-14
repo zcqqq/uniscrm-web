@@ -14,3 +14,27 @@ sequenceDiagram
     LQ->>FW: 批量消费日志
     FW->>TDB: 写入 flow_log 表
 ```
+
+## Content-triggered flows
+
+```mermaid
+sequenceDiagram
+    participant P as link Worker (poller)
+    participant CS as ContentService
+    participant EQ as Queue: uniscrm-event
+    participant FW as flow Worker
+    participant CFP as content_flow_pending
+    participant STUB as link internal (stub)
+
+    P->>CS: upsertContentFromMetadata(..., emitFlowEvent)
+    CS->>CS: isNew && emitFlowEvent?
+    CS->>EQ: content.created { contentId, channelId, payload }
+    EQ->>FW: queue() dispatches on contentId
+    FW->>FW: executeFlow (contentTrigger match)
+    alt has wait/timeCondition/abSplit downstream
+        FW->>CFP: INSERT content_flow_pending
+        Note over FW,CFP: resumed later by scheduled() sweep
+    end
+    FW->>STUB: repost / ai-rewrite-publish (stub, 501)
+    FW->>FW: INSERT content_flow_executions
+```

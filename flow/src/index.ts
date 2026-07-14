@@ -312,9 +312,11 @@ app.get("/api/flows", async (c) => {
   const page = Math.max(1, parseInt(c.req.query("page") || "1", 10));
   const limit = Math.min(50, Math.max(1, parseInt(c.req.query("limit") || "10", 10)));
   const offset = (page - 1) * limit;
+  const domain = c.req.query("domain") === "content" ? "content" : "user";
+  const domainClause = domain === "content" ? "AND f.graph_json LIKE '%contentTrigger%'" : "AND f.graph_json NOT LIKE '%contentTrigger%'";
 
   const countRow = await c.env.FLOW_DB.prepare(
-    `SELECT COUNT(*) as total FROM flows WHERE tenant_id = ?`
+    `SELECT COUNT(*) as total FROM flows f WHERE f.tenant_id = ? ${domainClause}`
   )
     .bind(tenantId)
     .first<{ total: number }>();
@@ -322,8 +324,8 @@ app.get("/api/flows", async (c) => {
 
   const rows = await c.env.FLOW_DB.prepare(
     `SELECT f.id, f.name, f.description, f.status, f.member_id, f.created_at, f.updated_at,
-       (SELECT COUNT(*) FROM flow_executions WHERE flow_id = f.id) as trigger_count
-     FROM flows f WHERE f.tenant_id = ? ORDER BY f.updated_at DESC LIMIT ? OFFSET ?`
+       (SELECT COUNT(*) FROM flow_executions WHERE flow_id = f.id) + (SELECT COUNT(*) FROM content_flow_executions WHERE flow_id = f.id) as trigger_count
+     FROM flows f WHERE f.tenant_id = ? ${domainClause} ORDER BY f.updated_at DESC LIMIT ? OFFSET ?`
   )
     .bind(tenantId, limit, offset)
     .all<{ id: string; name: string; description: string; status: string; member_id: string; created_at: string; updated_at: string; trigger_count: number }>();

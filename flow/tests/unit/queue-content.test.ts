@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
+import { executeFlow } from "../../src/engine";
 
 const graphContentToStatus = JSON.stringify({
   nodes: [
@@ -132,11 +133,11 @@ describe("queue(): content.created dispatch", () => {
   });
 });
 
-describe("queue(): aiRewritePublish branch resolution", () => {
-  const graphWithBranches = JSON.stringify({
+describe("queue(): xContentAction branch resolution", () => {
+  const graphWithBranchesObj = {
     nodes: [
       { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
-      { id: "a1", type: "action", data: { actionType: "aiRewritePublish", channelId: "target-chan-1", skillId: "punchy-social" }, position: { x: 200, y: 0 } },
+      { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "target-chan-1", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
       { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 400, y: 0 } },
       { id: "a3", type: "action", data: { actionType: "updateContentStatus", status: "ignored" }, position: { x: 400, y: 100 } },
     ],
@@ -145,6 +146,12 @@ describe("queue(): aiRewritePublish branch resolution", () => {
       { id: "e2", source: "a1", target: "a2", sourceHandle: "success" },
       { id: "e3", source: "a1", target: "a3", sourceHandle: "failed" },
     ],
+  };
+  const graphWithBranches = JSON.stringify(graphWithBranchesObj);
+
+  it("does not collect both branches on the initial dispatch (hasBranches gating) — executeFlow's initial pass over an xContentAction node yields only the action itself, not either branch's downstream updateContentStatus node", () => {
+    const result = executeFlow(graphWithBranchesObj, "content.created", {});
+    expect(result.actions.map((a) => a.type)).toEqual(["xContentAction"]);
   });
 
   beforeEach(async () => {
@@ -171,11 +178,15 @@ describe("queue(): aiRewritePublish branch resolution", () => {
 
     // updateContentStatus tries to look up the tenant's d1_database_id and no-ops if missing
     // (same pattern the existing queue-content.test.ts beforeEach relies on) — what we're
-    // actually asserting here is that the branch resolved and a second content_flow_executions
-    // row was recorded for the resumed action, proving resumeFromNode fired. The outer queue()
-    // call site unconditionally writes one row whenever the initial executeFlow() call produces
-    // any actions (i.e. just for matching aiRewritePublish itself), so >=1 would pass even
-    // without branch resolution — >=2 is the assertion that actually discriminates.
+    // actually asserting here is that resumeFromNode fired at all (a second
+    // content_flow_executions row was recorded for the resumed action) after the fetch resolved.
+    // The outer queue() call site unconditionally writes one row whenever the initial
+    // executeFlow() call produces any actions (i.e. just for matching xContentAction itself), so
+    // >=1 would pass even without branch resolution — >=2 discriminates "resumeFromNode ran".
+    // NOTE: this count does NOT by itself prove only one branch (not both) resolved — that
+    // one-vs-both gating property is proven separately above by the "does not collect both
+    // branches on the initial dispatch" test, which asserts on executeFlow()'s actions array
+    // directly.
     const rows = await env.FLOW_DB.prepare(
       `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-branch1'`
     ).first<{ c: number }>();
@@ -211,6 +222,35 @@ describe("queue(): aiRewritePublish branch resolution", () => {
       `SELECT retry_action, retry_count FROM content_flow_pending WHERE flow_id = 'flow-branch1' AND content_id = 'content-branch-3'`
     ).first<{ retry_action: string; retry_count: number }>();
     expect(pending?.retry_count).toBe(0);
-    expect(JSON.parse(pending?.retry_action || "{}")).toMatchObject({ type: "aiRewritePublish" });
+    expect(JSON.parse(pending?.retry_action || "{}")).toMatchObject({ type: "xContentAction" });
+  });
+
+  it("interpolates $content.xxx fields from the payload into the prompt before calling link", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const graphWithInterpolation = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-1", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-interp', 1, 'interp flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithInterpolation).run();
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-interp", channelId: "src-chan", payload: { content_text: "original post text" } }),
+      env
+    );
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body as string);
+    expect(body.interpolatedPrompt).toBe("Rewrite: original post text");
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-interp'`).run();
+    vi.unstubAllGlobals();
   });
 });

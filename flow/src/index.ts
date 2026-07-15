@@ -197,16 +197,17 @@ async function executeContentActions(
         body: JSON.stringify({ channelId, contentId, flowId: flowId || null }),
       });
       console.log(JSON.stringify({ event: "content_action_repost", contentId, channelId, status: res.status }));
-    } else if (action.type === "aiRewritePublish") {
+    } else if (action.type === "xContentAction") {
       const targetChannelId = action.targetChannelId as string;
-      const skillId = action.skillId as string;
-      const res = await fetch(`${env.LINK_URL}/internal/content/ai-rewrite-publish`, {
+      const provider = action.provider as string;
+      const interpolatedPrompt = String(action.prompt || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""));
+      const res = await fetch(`${env.LINK_URL}/internal/content/create-post`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
-        body: JSON.stringify({ contentId, sourceChannelId: channelId, targetChannelId, skillId, flowId: flowId || null }),
+        body: JSON.stringify({ contentId, interpolatedPrompt, provider, targetChannelId, flowId: flowId || null }),
       });
       const body = await res.json().catch(() => ({ ok: false })) as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string };
-      console.log(JSON.stringify({ event: "content_action_ai_rewrite_publish", contentId, targetChannelId, skillId, status: res.status, ok: body.ok }));
+      console.log(JSON.stringify({ event: "content_action_x_content_action", contentId, targetChannelId, provider, status: res.status, ok: body.ok }));
 
       if (body.rateLimited) {
         rateLimited.push({ action, retryAt: body.rateLimitReset || new Date(Date.now() + 15 * 60 * 1000).toISOString() });
@@ -345,9 +346,11 @@ app.get("/api/channels", async (c) => {
   });
 });
 
-// Proxy skills from content worker
-app.get("/api/skills", async (c) => {
-  const res = await fetch(`${c.env.CONTENT_URL}/api/skills`);
+// Proxy configured LLM providers from content worker (tenant-scoped, forwards the session cookie)
+app.get("/api/llm-providers", async (c) => {
+  const res = await fetch(`${c.env.CONTENT_URL}/api/llm-credentials`, {
+    headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
+  });
   return new Response(await res.text(), {
     status: res.status,
     headers: { "Content-Type": "application/json" },
@@ -766,7 +769,7 @@ export default {
               const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
               // Stash channelId inside the stored payload (under channel_id) — content_flow_pending
               // has no channel_id column of its own, and the resume path in scheduled() (Task 6)
-              // needs the source channel to execute repost/aiRewritePublish once the wait elapses.
+              // needs the source channel to execute repost/xContentAction once the wait elapses.
               await env.FLOW_DB.prepare(
                 `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`

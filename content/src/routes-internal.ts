@@ -6,25 +6,24 @@ export function internalRoutes() {
   const router = new Hono<{ Bindings: Env }>();
 
   router.post("/generate", async (c) => {
-    const { tenantId, skillId, material, targetPlatform } = await c.req.json<{
+    const { tenantId, prompt, provider } = await c.req.json<{
       tenantId: number;
-      skillId: string;
-      material: { title?: string; content_text?: string; summary?: string };
-      targetPlatform: "X" | "TIKTOK";
+      prompt: string;
+      provider: "default" | "openai" | "anthropic";
     }>();
 
-    if (!tenantId || !skillId || !targetPlatform) {
-      return c.json({ error: "tenantId, skillId, targetPlatform required" }, 400);
+    if (!tenantId || !prompt || !provider) {
+      return c.json({ error: "tenantId, prompt, provider required" }, 400);
     }
 
     try {
-      const text = await generateContent(c.env, { tenantId, skillId, material: material || {}, targetPlatform });
+      const text = await generateContent(c.env, { tenantId, prompt, provider });
       return c.json({ text });
     } catch (err) {
-      if (String(err).includes("Unknown skill")) {
+      if (String(err).includes("No") && String(err).includes("credentials configured")) {
         return c.json({ error: String(err) }, 400);
       }
-      console.error(JSON.stringify({ event: "generate_failed", tenantId, skillId, error: String(err) }));
+      console.error(JSON.stringify({ event: "generate_failed", tenantId, provider, error: String(err) }));
       return c.json({ error: "Generation failed" }, 502);
     }
   });

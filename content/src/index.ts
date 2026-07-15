@@ -2,8 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Env } from "./types";
 import { internalRoutes } from "./routes-internal";
-import { SKILL_CATALOG } from "./skills";
-import { setTenantLlmCredentials, hasTenantLlmCredentials } from "./services/llm-credentials";
+import { setTenantLlmCredentials, listConfiguredProviders, deleteTenantLlmCredentials } from "./services/llm-credentials";
 
 type HonoEnv = { Bindings: Env; Variables: { tenantId: string } };
 
@@ -39,23 +38,30 @@ app.route("/internal", internalRoutes());
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
-app.get("/api/skills", (c) => {
-  return c.json({ skills: SKILL_CATALOG.map((s) => ({ id: s.id, label: s.label })) });
-});
-
-app.use("/api/llm-credentials", sessionAuth);
+// Hono's `/*` wildcard also matches the exact parent path, so a single middleware
+// registration here covers both "/api/llm-credentials" and "/api/llm-credentials/:provider"
+// (registering both "/api/llm-credentials" and "/api/llm-credentials/*" would run sessionAuth
+// twice for the base path, double-consuming its internal fetch() Response body).
+app.use("/api/llm-credentials/*", sessionAuth);
 
 app.get("/api/llm-credentials", async (c) => {
   const tenantId = Number(c.get("tenantId"));
-  const credentials = await hasTenantLlmCredentials(c.env, tenantId);
-  return c.json({ credentials });
+  const providers = await listConfiguredProviders(c.env, tenantId);
+  return c.json({ providers });
 });
 
 app.put("/api/llm-credentials", async (c) => {
   const tenantId = Number(c.get("tenantId"));
-  const { provider, apiKey } = await c.req.json<{ provider: "openai" | "anthropic"; apiKey: string }>();
-  if (!provider || !apiKey) return c.json({ error: "provider and apiKey required" }, 400);
-  await setTenantLlmCredentials(c.env, tenantId, provider, apiKey);
+  const { provider, apiKey, model } = await c.req.json<{ provider: "openai" | "anthropic"; apiKey: string; model: string }>();
+  if (!provider || !apiKey || !model) return c.json({ error: "provider, apiKey, model required" }, 400);
+  await setTenantLlmCredentials(c.env, tenantId, provider, apiKey, model);
+  return c.json({ ok: true });
+});
+
+app.delete("/api/llm-credentials/:provider", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
+  const provider = c.req.param("provider") as "openai" | "anthropic";
+  await deleteTenantLlmCredentials(c.env, tenantId, provider);
   return c.json({ ok: true });
 });
 

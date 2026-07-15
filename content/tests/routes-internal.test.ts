@@ -17,15 +17,18 @@ describe("POST /internal/generate", () => {
 
   beforeEach(async () => {
     // vitest-pool-workers does not auto-apply migrations/ (see tests/llm-credentials.test.ts) --
-    // create the post-migration schema by hand so generateContent's BYOK lookup (a plain SELECT
-    // against tenant_llm_credentials) doesn't fail with "no such table" for a tenant with no key.
+    // create the post-migration schema by hand (matching migrations/0002_multi_provider_credentials.sql)
+    // so generateContent's BYOK lookup (a SELECT against tenant_llm_credentials, including the
+    // `model` column) doesn't fail with "no such table"/"no such column" for a tenant with no key.
     await env.CONTENT_DB.prepare(
       `CREATE TABLE IF NOT EXISTS tenant_llm_credentials (
-         tenant_id INTEGER PRIMARY KEY,
+         tenant_id INTEGER NOT NULL,
          provider TEXT NOT NULL,
          encrypted_api_key TEXT NOT NULL,
+         model TEXT NOT NULL,
          created_at TEXT NOT NULL,
-         updated_at TEXT NOT NULL
+         updated_at TEXT NOT NULL,
+         PRIMARY KEY (tenant_id, provider)
        )`
     ).run();
   });
@@ -37,24 +40,19 @@ describe("POST /internal/generate", () => {
       new Request("https://content-dev.uni-scrm.com/internal/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tenantId: 1, skillId: "punchy-social", material: {}, targetPlatform: "X" }),
+        body: JSON.stringify({ tenantId: 1, prompt: "hello", provider: "default" }),
       }),
       testEnv
     );
     expect(res.status).toBe(403);
   });
 
-  it("returns generated text on success (Workers AI fallback, no BYOK key seeded)", async () => {
+  it("returns generated text on success (default provider, Workers AI)", async () => {
     const res = await worker.fetch(
       new Request("https://content-dev.uni-scrm.com/internal/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
-        body: JSON.stringify({
-          tenantId: 999,
-          skillId: "punchy-social",
-          material: { content_text: "hello world" },
-          targetPlatform: "X",
-        }),
+        body: JSON.stringify({ tenantId: 999, prompt: "hello world", provider: "default" }),
       }),
       testEnv
     );
@@ -63,24 +61,24 @@ describe("POST /internal/generate", () => {
     expect(typeof body.text).toBe("string");
   });
 
-  it("returns 400 for an unknown skillId", async () => {
+  it("returns 400 for missing required fields", async () => {
     const res = await worker.fetch(
       new Request("https://content-dev.uni-scrm.com/internal/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
-        body: JSON.stringify({ tenantId: 999, skillId: "nope", material: {}, targetPlatform: "X" }),
+        body: JSON.stringify({ tenantId: 999 }),
       }),
       testEnv
     );
     expect(res.status).toBe(400);
   });
 
-  it("returns 400 when required fields are missing", async () => {
+  it("returns 400 when provider is openai/anthropic with no configured credentials", async () => {
     const res = await worker.fetch(
       new Request("https://content-dev.uni-scrm.com/internal/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
-        body: JSON.stringify({ tenantId: 999, material: {} }),
+        body: JSON.stringify({ tenantId: 999, prompt: "hello", provider: "openai" }),
       }),
       testEnv
     );

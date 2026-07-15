@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
 
@@ -123,5 +123,75 @@ describe("scheduled(): content_flow_pending sweep", () => {
       `SELECT content_id FROM content_flow_executions WHERE flow_id = 'flow-c2'`
     ).first<{ content_id: string }>();
     expect(exec).toMatchObject({ content_id: "content-abc" });
+  });
+});
+
+describe("scheduled(): content_flow_pending retry_action handling", () => {
+  afterEach(async () => {
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-retry1'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-retry1'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-retry1'`).run();
+    vi.unstubAllGlobals();
+  });
+
+  const graphWithBranches = JSON.stringify({
+    nodes: [
+      { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+      { id: "a1", type: "action", data: { actionType: "aiRewritePublish", channelId: "chan-1", skillId: "punchy-social" }, position: { x: 200, y: 0 } },
+      { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 400, y: 0 } },
+    ],
+    edges: [
+      { id: "e1", source: "t1", target: "a1" },
+      { id: "e2", source: "a1", target: "a2", sourceHandle: "success" },
+    ],
+  });
+
+  it("re-attempts a rate-limited retry_action row and reschedules it again if still rate-limited", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-retry1', 1, 'retry flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBranches).run();
+
+    const action = { type: "aiRewritePublish", nodeId: "a1", hasBranches: true, targetChannelId: "chan-1", skillId: "punchy-social" };
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+       VALUES ('pend-retry-1', 'flow-retry1', '', 'content-retry-1', 1, '{}', ?, datetime('now'), ?, 0)`
+    ).bind(past, JSON.stringify(action)).run();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, rateLimited: true, rateLimitReset: "2099-01-01T00:00:00.000Z" }), { status: 429 }))
+    );
+
+    await worker.scheduled({} as any, env);
+
+    const row = await env.FLOW_DB.prepare(`SELECT retry_count, execute_at FROM content_flow_pending WHERE id = 'pend-retry-1'`).first<{ retry_count: number; execute_at: string }>();
+    expect(row?.retry_count).toBe(1);
+    expect(row?.execute_at).toBe("2099-01-01T00:00:00.000Z");
+  });
+
+  it("resolves the branch and clears the row once no longer rate-limited", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-retry1', 1, 'retry flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBranches).run();
+
+    const action = { type: "aiRewritePublish", nodeId: "a1", hasBranches: true, targetChannelId: "chan-1", skillId: "punchy-social" };
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+       VALUES ('pend-retry-2', 'flow-retry1', '', 'content-retry-2', 1, '{}', ?, datetime('now'), ?, 2)`
+    ).bind(past, JSON.stringify(action)).run();
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })));
+
+    await worker.scheduled({} as any, env);
+
+    const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE id = 'pend-retry-2'`).first();
+    expect(remaining).toBeNull();
+
+    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-retry1' AND content_id = 'content-retry-2'`).first<{ c: number }>();
+    expect(execCount?.c).toBeGreaterThanOrEqual(1);
   });
 });

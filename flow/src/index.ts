@@ -923,13 +923,41 @@ export default {
     // block — the two sweeps are independent (different tables), so order between them doesn't
     // matter functionally.
     const contentPending = await env.FLOW_DB.prepare(
-      `SELECT id, flow_id, node_id, content_id, tenant_id, payload, awaiting_event FROM content_flow_pending WHERE execute_at <= ?`
+      `SELECT id, flow_id, node_id, content_id, tenant_id, payload, awaiting_event, retry_action, retry_count FROM content_flow_pending WHERE execute_at <= ?`
     )
       .bind(now)
-      .all<{ id: string; flow_id: string; node_id: string; content_id: string; tenant_id: string; payload: string; awaiting_event: string }>();
+      .all<{ id: string; flow_id: string; node_id: string; content_id: string; tenant_id: string; payload: string; awaiting_event: string; retry_action: string; retry_count: number }>();
 
     for (const row of contentPending.results) {
       try {
+        if (row.retry_action) {
+          const action = JSON.parse(row.retry_action) as ActionResult;
+          const flow = await env.FLOW_DB.prepare(`SELECT graph_json, status FROM flows WHERE id = ?`)
+            .bind(row.flow_id)
+            .first<{ graph_json: string; status: string }>();
+          if (!flow || flow.status !== "published") {
+            await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE id = ?`).bind(row.id).run();
+            continue;
+          }
+          const graph: FlowGraph = JSON.parse(flow.graph_json);
+          const payload = JSON.parse(row.payload);
+          const channelId = String(payload.channel_id ?? "");
+          const { rateLimited } = await executeContentActions(graph, [action], row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
+
+          if (rateLimited.length > 0 && row.retry_count < 5) {
+            await env.FLOW_DB.prepare(
+              `UPDATE content_flow_pending SET execute_at = ?, retry_count = ? WHERE id = ?`
+            ).bind(rateLimited[0].retryAt, row.retry_count + 1, row.id).run();
+            console.log(JSON.stringify({ event: "content_flow_retry_rescheduled", id: row.id, retryCount: row.retry_count + 1 }));
+          } else {
+            await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE id = ?`).bind(row.id).run();
+            if (rateLimited.length > 0) {
+              console.log(JSON.stringify({ event: "content_flow_retry_exhausted", id: row.id, retryCount: row.retry_count }));
+            }
+          }
+          continue;
+        }
+
         const claim = await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE id = ?`).bind(row.id).run();
         if (!claim.meta.changes) continue;
 

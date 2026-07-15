@@ -74,7 +74,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
     graph: {
       nodes: [
         { id: "t1", type: "contentTrigger", position: { x: 0, y: 0 }, data: { conditions: [] } },
-        { id: "a1", type: "action", position: { x: 320, y: 0 }, data: { actionType: "aiRewritePublish", channelType: "", channelId: "" } },
+        { id: "a1", type: "action", position: { x: 320, y: 0 }, data: { actionType: "xContentAction", operation: "create-post", prompt: "$content.text", provider: "default", channelType: "", channelId: "" } },
       ],
       edges: [
         { id: "e1", source: "t1", target: "a1" },

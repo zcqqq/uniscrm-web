@@ -1,17 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fetchPostsPage } from "../../src/services/x-posts-api";
+import { fetchPostsPage, createPost } from "../../src/services/x-posts-api";
+
+let fetchMock: ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("fetchPostsPage", () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
 
   it("requests exclude=replies,retweets and no expansions param", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
@@ -59,5 +60,35 @@ describe("fetchPostsPage", () => {
     expect(result.rateLimited).toBe(false);
     expect(result.page.data).toEqual([{ id: "t1", text: "hi" }]);
     expect(result.page.nextToken).toBe("p2");
+  });
+});
+
+describe("createPost", () => {
+  it("posts text-only to /2/tweets and returns the new tweet id", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ data: { id: "tweet-123", text: "hello" } }), { status: 201 }));
+
+    const result = await createPost("tok", "hello world");
+
+    expect(result).toEqual({ ok: true, id: "tweet-123" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.x.com/2/tweets");
+    expect((init as Record<string, any>).headers.Authorization).toBe("Bearer tok");
+    expect(JSON.parse((init as Record<string, any>).body)).toEqual({ text: "hello world" });
+  });
+
+  it("returns rateLimited:true on 429 without throwing", async () => {
+    fetchMock.mockResolvedValue(new Response("{}", { status: 429 }));
+
+    const result = await createPost("tok", "hello world");
+
+    expect(result).toEqual({ ok: false, rateLimited: true });
+  });
+
+  it("returns ok:false on other non-ok statuses without throwing", async () => {
+    fetchMock.mockResolvedValue(new Response("server error", { status: 500 }));
+
+    const result = await createPost("tok", "hello world");
+
+    expect(result).toEqual({ ok: false });
   });
 });

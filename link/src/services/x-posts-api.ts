@@ -66,3 +66,30 @@ export async function fetchPostsPage(
   const body = (await res.json()) as { data?: Record<string, unknown>[]; meta?: { next_token?: string } };
   return { page: { data: body.data || [], nextToken: body.meta?.next_token }, rateLimited: false };
 }
+
+export interface CreatePostResult {
+  ok: boolean;
+  id?: string;
+  rateLimited?: boolean;
+}
+
+export async function createPost(accessToken: string, text: string): Promise<CreatePostResult> {
+  const res = await fetch("https://api.x.com/2/tweets", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ text }),
+  });
+
+  if (res.status === 429) {
+    return { ok: false, rateLimited: true };
+  }
+  if (!res.ok) {
+    return { ok: false };
+  }
+
+  const body = (await res.json()) as { data: { id: string; text: string } };
+  return { ok: true, id: body.data.id };
+}

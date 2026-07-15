@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fetchPostsPage, createPost } from "../../src/services/x-posts-api";
+import { fetchPostsPage, createPost, fetchOwnedLists, fetchListPostsPage } from "../../src/services/x-posts-api";
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -90,5 +90,58 @@ describe("createPost", () => {
     const result = await createPost("tok", "hello world");
 
     expect(result).toEqual({ ok: false });
+  });
+});
+
+describe("fetchOwnedLists", () => {
+  it("returns id/name pairs from get-owned-lists", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: "list1", name: "Competitors" }, { id: "list2", name: "Influencers" }] }), { status: 200 })
+    );
+
+    const lists = await fetchOwnedLists("tok", "x-user-1");
+
+    expect(lists).toEqual([{ id: "list1", name: "Competitors" }, { id: "list2", name: "Influencers" }]);
+    const calledUrl = new URL(fetchMock.mock.calls[0][0] as string);
+    expect(calledUrl.pathname).toContain("/2/users/x-user-1/owned_lists");
+  });
+
+  it("returns an empty array when the account owns no lists", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+
+    const lists = await fetchOwnedLists("tok", "x-user-1");
+
+    expect(lists).toEqual([]);
+  });
+
+  it("throws XUnauthorizedError on 401", async () => {
+    const { XUnauthorizedError } = await import("../../src/services/x-errors");
+    fetchMock.mockResolvedValue(new Response("", { status: 401 }));
+
+    await expect(fetchOwnedLists("tok", "x-user-1")).rejects.toBeInstanceOf(XUnauthorizedError);
+  });
+});
+
+describe("fetchListPostsPage", () => {
+  it("requests /2/lists/:id/tweets with the list id and pagination token", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: "t1", text: "hi" }], meta: { next_token: "p2" } }), { status: 200 })
+    );
+
+    const { page, rateLimited } = await fetchListPostsPage("tok", "listA", "p1");
+
+    expect(rateLimited).toBe(false);
+    expect(page).toEqual({ data: [{ id: "t1", text: "hi" }], nextToken: "p2" });
+    const calledUrl = new URL(fetchMock.mock.calls[0][0] as string);
+    expect(calledUrl.pathname).toContain("/2/lists/listA/tweets");
+    expect(calledUrl.searchParams.get("pagination_token")).toBe("p1");
+  });
+
+  it("returns rateLimited:true on 429 without throwing", async () => {
+    fetchMock.mockResolvedValue(new Response("", { status: 429 }));
+
+    const { rateLimited } = await fetchListPostsPage("tok", "listA");
+
+    expect(rateLimited).toBe(true);
   });
 });

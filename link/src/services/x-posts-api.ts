@@ -67,6 +67,58 @@ export async function fetchPostsPage(
   return { page: { data: body.data || [], nextToken: body.meta?.next_token }, rateLimited: false };
 }
 
+export interface XOwnedList {
+  id: string;
+  name: string;
+}
+
+export async function fetchOwnedLists(accessToken: string, xUserId: string): Promise<XOwnedList[]> {
+  const url = new URL(`https://api.x.com/2/users/${xUserId}/owned_lists`);
+  url.searchParams.set("max_results", "100");
+
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (res.status === 401) {
+    throw new XUnauthorizedError(`X get-owned-lists failed: ${res.status} ${await res.text()}`);
+  }
+  if (!res.ok) {
+    throw new Error(`X get-owned-lists failed: ${res.status} ${await res.text()}`);
+  }
+
+  const body = (await res.json()) as { data?: { id: string; name: string }[] };
+  return (body.data || []).map((l) => ({ id: l.id, name: l.name }));
+}
+
+export async function fetchListPostsPage(
+  accessToken: string,
+  listId: string,
+  paginationToken?: string
+): Promise<XPostsFetchResult> {
+  const url = new URL(`https://api.x.com/2/lists/${listId}/tweets`);
+  url.searchParams.set("max_results", "100");
+  url.searchParams.set("tweet.fields", TWEET_FIELDS);
+  if (paginationToken) url.searchParams.set("pagination_token", paginationToken);
+
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (res.status === 429) {
+    return { page: { data: [] }, rateLimited: true };
+  }
+  if (res.status === 401) {
+    throw new XUnauthorizedError(`X get-list-posts failed: ${res.status} ${await res.text()}`);
+  }
+  if (!res.ok) {
+    throw new Error(`X get-list-posts failed: ${res.status} ${await res.text()}`);
+  }
+
+  const body = (await res.json()) as { data?: Record<string, unknown>[]; meta?: { next_token?: string } };
+  return { page: { data: body.data || [], nextToken: body.meta?.next_token }, rateLimited: false };
+}
+
 export interface CreatePostResult {
   ok: boolean;
   id?: string;

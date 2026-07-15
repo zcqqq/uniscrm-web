@@ -10,6 +10,12 @@ type HonoEnv = { Bindings: Env; Variables: { tenantId: string } };
 const app = new Hono<HonoEnv>();
 app.use("*", cors());
 
+function getCookieValue(request: Request, name: string): string | null {
+  const header = request.headers.get("Cookie") || "";
+  const match = header.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 async function internalAuthMiddleware(c: any, next: any) {
   const secret = c.req.header("X-Internal-Secret");
   if (secret !== c.env.INTERNAL_SECRET) {
@@ -53,4 +59,35 @@ app.put("/api/llm-credentials", async (c) => {
   return c.json({ ok: true });
 });
 
-export default app;
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Auth redirect for HTML pages
+    const accept = request.headers.get("Accept") || "";
+    if (accept.includes("text/html") && !url.pathname.startsWith("/api") && !url.pathname.startsWith("/internal")) {
+      const sessionCookie = getCookieValue(request, "session");
+      if (!sessionCookie) {
+        return Response.redirect(`${env.WEB_URL}/login`, 302);
+      }
+      const authRes = await fetch(`${env.WEB_URL}/api/auth/me`, {
+        headers: { Cookie: `session=${sessionCookie}` },
+      });
+      if (!authRes.ok) {
+        return Response.redirect(`${env.WEB_URL}/login`, 302);
+      }
+    }
+
+    // Serve static assets first for non-API paths
+    if (!url.pathname.startsWith("/api") && !url.pathname.startsWith("/internal") && !url.pathname.startsWith("/health") && env.ASSETS) {
+      const assetRes = await env.ASSETS.fetch(request);
+      if (assetRes.status !== 404) return assetRes;
+    }
+
+    const res = await app.fetch(request, env);
+    if (res.status === 404 && accept.includes("text/html") && env.ASSETS) {
+      return env.ASSETS.fetch(new Request(new URL("/index.html", request.url)));
+    }
+    return res;
+  },
+};

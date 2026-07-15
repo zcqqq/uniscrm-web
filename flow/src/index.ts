@@ -173,15 +173,22 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
   return { stmts, rateLimited };
 }
 
+interface ContentActionExecResult {
+  rateLimited: { action: ActionResult; retryAt: string }[];
+}
+
 async function executeContentActions(
+  graph: FlowGraph,
   actions: ActionResult[],
   contentId: string,
   channelId: string,
   tenantId: string,
   env: Env,
-  payload?: Record<string, unknown>,
+  payload: Record<string, unknown> = {},
   flowId?: string
-): Promise<void> {
+): Promise<ContentActionExecResult> {
+  const rateLimited: { action: ActionResult; retryAt: string }[] = [];
+
   for (const action of actions) {
     if (action.type === "repost") {
       const res = await fetch(`${env.LINK_URL}/internal/x/repost`, {
@@ -192,12 +199,42 @@ async function executeContentActions(
       console.log(JSON.stringify({ event: "content_action_repost", contentId, channelId, status: res.status }));
     } else if (action.type === "aiRewritePublish") {
       const targetChannelId = action.targetChannelId as string;
+      const skillId = action.skillId as string;
       const res = await fetch(`${env.LINK_URL}/internal/content/ai-rewrite-publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
-        body: JSON.stringify({ contentId, sourceChannelId: channelId, targetChannelId, flowId: flowId || null }),
+        body: JSON.stringify({ contentId, sourceChannelId: channelId, targetChannelId, skillId, flowId: flowId || null }),
       });
-      console.log(JSON.stringify({ event: "content_action_ai_rewrite_publish", contentId, targetChannelId, status: res.status }));
+      const body = await res.json().catch(() => ({ ok: false })) as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string };
+      console.log(JSON.stringify({ event: "content_action_ai_rewrite_publish", contentId, targetChannelId, skillId, status: res.status, ok: body.ok }));
+
+      if (body.rateLimited) {
+        rateLimited.push({ action, retryAt: body.rateLimitReset || new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+        continue;
+      }
+
+      const branch = body.ok ? "success" : "failed";
+      const nodeId = action.nodeId as string;
+      const resumed = resumeFromNode(graph, nodeId, payload, branch);
+      if (resumed.actions.length > 0) {
+        const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
+        rateLimited.push(...nested.rateLimited);
+        await env.FLOW_DB.prepare(
+          `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+           VALUES (?, ?, ?, ?, 1, ?)`
+        ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
+      }
+      for (const wait of resumed.pendingWaits) {
+        const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
+        await env.FLOW_DB.prepare(
+          `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
+          JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
+          wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
+        ).run();
+      }
     } else if (action.type === "updateContentStatus" && action.status) {
       const tenantRow = await env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
         .bind(Number(tenantId)).first<{ d1_database_id: string }>();
@@ -207,6 +244,8 @@ async function executeContentActions(
       }
     }
   }
+
+  return { rateLimited };
 }
 
 type HonoEnv = { Bindings: Env; Variables: { tenantId: string; memberId: string } };
@@ -700,12 +739,18 @@ export default {
             // is a Pipeline-schema migration out of scope here. content_flow_executions is
             // this domain's only execution history for now.
             if (result.actions.length > 0) {
-              await executeContentActions(result.actions, contentId, channelId, tenantId, env, payload, flow.id);
+              const { rateLimited } = await executeContentActions(graph, result.actions, contentId, channelId, tenantId, env, payload, flow.id);
               await env.FLOW_DB.prepare(
                 `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
                  VALUES (?, ?, ?, ?, 1, ?)`
               ).bind(crypto.randomUUID(), flow.id, contentId, tenantId, new Date().toISOString()).run();
-              console.log(JSON.stringify({ event: "content_flow_matched", flowId: flow.id, contentId, eventType, actions: result.actions }));
+              for (const rl of rateLimited) {
+                await env.FLOW_DB.prepare(
+                  `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+                   VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 0)`
+                ).bind(crypto.randomUUID(), flow.id, contentId, tenantId, JSON.stringify(payload), rl.retryAt, new Date().toISOString(), JSON.stringify(rl.action)).run();
+              }
+              console.log(JSON.stringify({ event: "content_flow_matched", flowId: flow.id, contentId, eventType, actions: result.actions, rateLimited: rateLimited.length }));
             }
 
             for (const wait of result.pendingWaits) {
@@ -900,11 +945,17 @@ export default {
 
         if (result.actions.length > 0) {
           const channelId = String(payload.channel_id ?? "");
-          await executeContentActions(result.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
+          const { rateLimited } = await executeContentActions(graph, result.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
           await env.FLOW_DB.prepare(
             `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
              VALUES (?, ?, ?, ?, 1, ?)`
           ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, now).run();
+          for (const rl of rateLimited) {
+            await env.FLOW_DB.prepare(
+              `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+               VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 0)`
+            ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, row.payload, rl.retryAt, now, JSON.stringify(rl.action)).run();
+          }
         }
 
         for (const wait of result.pendingWaits) {

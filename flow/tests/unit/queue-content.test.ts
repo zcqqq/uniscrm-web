@@ -131,3 +131,86 @@ describe("queue(): content.created dispatch", () => {
     expect(row).toBeNull();
   });
 });
+
+describe("queue(): aiRewritePublish branch resolution", () => {
+  const graphWithBranches = JSON.stringify({
+    nodes: [
+      { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+      { id: "a1", type: "action", data: { actionType: "aiRewritePublish", channelId: "target-chan-1", skillId: "punchy-social" }, position: { x: 200, y: 0 } },
+      { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 400, y: 0 } },
+      { id: "a3", type: "action", data: { actionType: "updateContentStatus", status: "ignored" }, position: { x: 400, y: 100 } },
+    ],
+    edges: [
+      { id: "e1", source: "t1", target: "a1" },
+      { id: "e2", source: "a1", target: "a2", sourceHandle: "success" },
+      { id: "e3", source: "a1", target: "a3", sourceHandle: "failed" },
+    ],
+  });
+
+  beforeEach(async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-branch1', 1, 'branch flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBranches).run();
+  });
+
+  afterEach(async () => {
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-branch1'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-branch1'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-branch1'`).run();
+    vi.unstubAllGlobals();
+  });
+
+  it("resolves the success branch and runs updateContentStatus(published) when link returns ok:true", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })));
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-branch-1", channelId: "src-chan", payload: {} }),
+      env
+    );
+
+    // updateContentStatus tries to look up the tenant's d1_database_id and no-ops if missing
+    // (same pattern the existing queue-content.test.ts beforeEach relies on) — what we're
+    // actually asserting here is that the branch resolved and a second content_flow_executions
+    // row was recorded for the resumed action, proving resumeFromNode fired. The outer queue()
+    // call site unconditionally writes one row whenever the initial executeFlow() call produces
+    // any actions (i.e. just for matching aiRewritePublish itself), so >=1 would pass even
+    // without branch resolution — >=2 is the assertion that actually discriminates.
+    const rows = await env.FLOW_DB.prepare(
+      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-branch1'`
+    ).first<{ c: number }>();
+    expect(rows?.c).toBeGreaterThanOrEqual(2);
+  });
+
+  it("resolves the failed branch when link returns ok:false", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false }), { status: 502 })));
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-branch-2", channelId: "src-chan", payload: {} }),
+      env
+    );
+
+    const rows = await env.FLOW_DB.prepare(
+      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-branch1'`
+    ).first<{ c: number }>();
+    expect(rows?.c).toBeGreaterThanOrEqual(2);
+  });
+
+  it("schedules a content_flow_pending retry row when link reports rateLimited, instead of resolving a branch immediately", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, rateLimited: true, rateLimitReset: "2099-01-01T00:00:00.000Z" }), { status: 429 }))
+    );
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-branch-3", channelId: "src-chan", payload: {} }),
+      env
+    );
+
+    const pending = await env.FLOW_DB.prepare(
+      `SELECT retry_action, retry_count FROM content_flow_pending WHERE flow_id = 'flow-branch1' AND content_id = 'content-branch-3'`
+    ).first<{ retry_action: string; retry_count: number }>();
+    expect(pending?.retry_count).toBe(0);
+    expect(JSON.parse(pending?.retry_action || "{}")).toMatchObject({ type: "aiRewritePublish" });
+  });
+});

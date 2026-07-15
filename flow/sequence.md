@@ -35,16 +35,20 @@ sequenceDiagram
         FW->>CFP: INSERT content_flow_pending
         Note over FW,CFP: resumed later by scheduled() sweep
     end
-    FW->>STUB: repost / ai-rewrite-publish (stub, 501)
+    FW->>STUB: repost / xContentAction (stub, 501)
     FW->>FW: INSERT content_flow_executions
 ```
 
-## Content-domain: aiRewritePublish (real generation + publish)
+## Content-domain: xContentAction (real generation + publish)
 
-The `ai-rewrite-publish` call above is no longer a 501 stub. This diagram replaces
-that leg with the real path: `link` calls `content` to generate rewritten text,
-then posts it to X, then `flow` resolves the graph's success/failed branch —
-including the rate-limit retry loop via `content_flow_pending`.
+The `xContentAction` call above is no longer a 501 stub. This diagram replaces
+that leg with the real path: `flow` interpolates `$content.xxx` into the node's
+prompt itself, then calls `link`'s `create-post` handler, which (unless
+`provider` is `"none"`) calls `content` to generate the final text, then posts
+it to X, then `flow` resolves the graph's success/failed branch — including
+the rate-limit retry loop via `content_flow_pending`. `link` no longer queries
+the source `content` row itself — `flow` already resolved the final prompt
+text before this call.
 
 ```mermaid
 sequenceDiagram
@@ -55,10 +59,14 @@ sequenceDiagram
     participant TDB as Tenant D1
     participant CFP as content_flow_pending
 
-    FW->>LW: POST /internal/content/ai-rewrite-publish { contentId, sourceChannelId, targetChannelId, skillId, flowId }
-    LW->>TDB: SELECT title/content_text/summary FROM content WHERE id = contentId
-    LW->>CW: POST /internal/generate { tenantId, skillId, material, targetPlatform }
-    CW-->>LW: { text }
+    FW->>FW: interpolate $content.xxx into node's prompt -> interpolatedPrompt
+    FW->>LW: POST /internal/content/create-post { contentId, interpolatedPrompt, provider, targetChannelId, flowId }
+    alt provider !== "none"
+        LW->>CW: POST /internal/generate { tenantId, prompt: interpolatedPrompt, provider }
+        CW-->>LW: { text }
+    else provider === "none"
+        Note over LW: skip content entirely, text = interpolatedPrompt verbatim
+    end
     alt targetChannel.channel_type === "X"
         LW->>XAPI: POST /2/tweets
         XAPI-->>LW: { id } | 429 rate limited | error

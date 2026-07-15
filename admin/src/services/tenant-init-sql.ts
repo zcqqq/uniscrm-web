@@ -55,6 +55,7 @@ export const TENANT_DB_INIT_SQL = [
     channel_type TEXT NOT NULL,
     content_type TEXT,
     source_content_id TEXT NOT NULL,
+    list_id TEXT,
     title TEXT,
     content_text TEXT,
     summary TEXT,
@@ -77,6 +78,7 @@ export const TENANT_DB_INIT_SQL = [
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_content_channel_source ON content(channel_id, source_content_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_content_channel_source ON content(channel_id, source_content_id) WHERE list_id IS NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_content_channel_list_source ON content(channel_id, list_id, source_content_id) WHERE list_id IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_content_status ON content(status)`,
 ];

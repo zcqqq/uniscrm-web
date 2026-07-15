@@ -326,7 +326,11 @@ app.get("/internal/list-watches", async (c) => {
     } catch {
       continue;
     }
+    // Guard: graph.nodes must exist and be an array
+    if (!graph || !Array.isArray(graph.nodes)) continue;
     for (const node of graph.nodes) {
+      // Guard: node.data must exist before accessing properties
+      if (!node.data) continue;
       if (node.type !== "xContentTrigger" || node.data.mode !== "list_posts") continue;
       const channelId = node.data.channelId as string;
       const listId = node.data.listId as string;

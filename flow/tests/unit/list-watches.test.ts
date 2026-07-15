@@ -67,4 +67,41 @@ describe("GET /internal/list-watches", () => {
     const body = await res.json() as { watches: { channelId: string; listId: string }[] };
     expect(body.watches).toEqual([]);
   });
+
+  it("skips malformed graph_json rows (valid JSON but missing/wrong shape) instead of crashing", async () => {
+    // Valid row to ensure we still get results from other rows
+    const validGraph = JSON.stringify({
+      nodes: [{ id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "list_posts", listId: "listA" }, position: { x: 0, y: 0 } }],
+      edges: [],
+    });
+    // Malformed: valid JSON but no `nodes` key (yet contains xContentTrigger to pass SQL LIKE filter)
+    const malformedGraph1 = JSON.stringify({
+      edges: [],
+      note: "contains xContentTrigger string but no nodes array",
+    });
+    // Malformed: valid JSON but nodes is not an array
+    const malformedGraph2 = JSON.stringify({
+      nodes: { id: "invalid" },
+      note: "xContentTrigger nodes should be an array",
+    });
+    // Valid row with node.data = null (should skip that node but not crash)
+    const nodeNullDataGraph = JSON.stringify({
+      nodes: [{ id: "bad-node", type: "xContentTrigger", data: null, position: { x: 0, y: 0 } }],
+      edges: [],
+    });
+
+    await env.FLOW_DB.batch([
+      env.FLOW_DB.prepare(`INSERT INTO flows (id, tenant_id, graph_json, status, created_at, updated_at) VALUES ('lw-valid', 1, ?, 'published', datetime('now'), datetime('now'))`).bind(validGraph),
+      env.FLOW_DB.prepare(`INSERT INTO flows (id, tenant_id, graph_json, status, created_at, updated_at) VALUES ('lw-bad-1', 1, ?, 'published', datetime('now'), datetime('now'))`).bind(malformedGraph1),
+      env.FLOW_DB.prepare(`INSERT INTO flows (id, tenant_id, graph_json, status, created_at, updated_at) VALUES ('lw-bad-2', 1, ?, 'published', datetime('now'), datetime('now'))`).bind(malformedGraph2),
+      env.FLOW_DB.prepare(`INSERT INTO flows (id, tenant_id, graph_json, status, created_at, updated_at) VALUES ('lw-null-data', 1, ?, 'published', datetime('now'), datetime('now'))`).bind(nodeNullDataGraph),
+    ]);
+
+    const res = await worker.fetch(req("/internal/list-watches"), env);
+    // Should return 200, not 500, despite malformed rows
+    expect(res.status).toBe(200);
+    const body = await res.json() as { watches: { channelId: string; listId: string }[] };
+    // Only the valid row should appear
+    expect(body.watches).toEqual([{ channelId: "chan1", listId: "listA" }]);
+  });
 });

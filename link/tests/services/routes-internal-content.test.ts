@@ -3,11 +3,6 @@ import { describe, it, expect, vi } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
 
-let mockContentRow: { title: string | null; content_text: string | null; summary: string | null } | null = {
-  title: "Source title",
-  content_text: "Source body text",
-  summary: "Source summary",
-};
 const tenantDataDbRunMock = vi.fn().mockResolvedValue({ changes: 1 });
 
 // The real TenantDataDB talks to the Cloudflare D1 REST API over global `fetch`, which
@@ -17,7 +12,7 @@ const tenantDataDbRunMock = vi.fn().mockResolvedValue({ changes: 1 });
 vi.mock("../../../shared/tenant-data-db", () => ({
   TenantDataDB: class {
     query() {
-      return Promise.resolve(mockContentRow ? [mockContentRow] : []);
+      return Promise.resolve([]);
     }
     run(...args: unknown[]) {
       return tenantDataDbRunMock(...args);
@@ -67,13 +62,12 @@ describe("stub content-flow action endpoints", () => {
     expect(body).toMatchObject({ ok: false, notImplemented: true });
   });
 
-  it("POST /internal/content/ai-rewrite-publish generates, posts to X, and records the new content row", async () => {
+  it("POST /internal/content/create-post generates, posts to X, and records the new content row", async () => {
     const channelRow = {
       config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }),
       channel_type: "X",
       tenant_id: 1,
     };
-    mockContentRow = { title: "Source title", content_text: "Source body text", summary: "Source summary" };
     tenantDataDbRunMock.mockClear();
 
     const fetchMock = vi.fn()
@@ -82,10 +76,10 @@ describe("stub content-flow action endpoints", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const res = await worker.fetch(
-      new Request("https://link-dev.uni-scrm.com/internal/content/ai-rewrite-publish", {
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
-        body: JSON.stringify({ contentId: "content-1", sourceChannelId: "src-chan", targetChannelId: "tgt-chan", skillId: "punchy-social" }),
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", targetChannelId: "tgt-chan", flowId: "flow-1" }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
     );
@@ -103,8 +97,47 @@ describe("stub content-flow action endpoints", () => {
     expect(insertParams[4]).toBe("generated post text"); // content_text
     expect(JSON.parse(insertParams[6] as string)).toEqual({
       generatedFromContentId: "content-1",
-      skillId: "punchy-social",
+      flowId: "flow-1",
     });
+    vi.unstubAllGlobals();
+  });
+
+  // NOTE: The brief's original version of this test wrote directly to `env.LINK_DB`/relied on
+  // real `env.WEB_DB` (via `cloudflare:test`). Empirically, this repo's link/vitest.config.ts
+  // passes `configPath`/`environment` as flat WorkersPoolOptions keys instead of nesting them
+  // under `wrangler: {...}` (the schema `@cloudflare/vitest-pool-workers` v0.18 actually expects
+  // — confirmed by reading node_modules/@cloudflare/vitest-pool-workers/dist/pool/index.d.mts).
+  // As a result wrangler.toml bindings are never wired into `env` from "cloudflare:test" here:
+  // `env.LINK_DB` is `undefined` (only internal __VITEST_POOL_WORKERS_* services are present).
+  // Separately, even if that were fixed, WEB_DB has no `migrations_dir`/`tenants` table in this
+  // repo's test setup, so the real-D1 tenant lookup would still fail. Using this file's existing
+  // mockLinkDb/mockWebDb override pattern (as every other test here does) instead achieves the
+  // same assertion — provider:"none" makes exactly one fetch call (the X post, not /internal/generate).
+  it("posts the interpolated prompt as-is when provider is 'none', without calling content's /internal/generate", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-none", access_token: "tok", refresh_token: null }),
+      channel_type: "X",
+      tenant_id: 1,
+    };
+    tenantDataDbRunMock.mockClear();
+
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { id: "tweet-none-1", text: "plain text post" } }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "plain text post", provider: "none", targetChannelId: "tgt-chan-none" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1); // only the X call, no /internal/generate call
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("api.x.com");
     vi.unstubAllGlobals();
   });
 
@@ -114,7 +147,6 @@ describe("stub content-flow action endpoints", () => {
       channel_type: "X",
       tenant_id: 1,
     };
-    mockContentRow = { title: "Source title", content_text: "Source body text", summary: "Source summary" };
     tenantDataDbRunMock.mockClear();
 
     const fetchMock = vi.fn()
@@ -123,10 +155,10 @@ describe("stub content-flow action endpoints", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const res = await worker.fetch(
-      new Request("https://link-dev.uni-scrm.com/internal/content/ai-rewrite-publish", {
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
-        body: JSON.stringify({ contentId: "content-1", sourceChannelId: "src-chan", targetChannelId: "tgt-chan", skillId: "punchy-social" }),
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", targetChannelId: "tgt-chan", flowId: "flow-1" }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
     );
@@ -146,59 +178,25 @@ describe("stub content-flow action endpoints", () => {
       channel_type: "TIKTOK",
       tenant_id: 1,
     };
-    mockContentRow = { title: "Source title", content_text: "Source body text", summary: "Source summary" };
-    tenantDataDbRunMock.mockClear();
-
-    // Only the content /internal/generate call happens before the platform check runs.
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ text: "generated post text" }), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const res = await worker.fetch(
-      new Request("https://link-dev.uni-scrm.com/internal/content/ai-rewrite-publish", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
-        body: JSON.stringify({ contentId: "content-1", sourceChannelId: "src-chan", targetChannelId: "tgt-chan", skillId: "punchy-social" }),
-      }),
-      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
-    );
-
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: false });
-    expect(fetchMock).toHaveBeenCalledTimes(1); // generate only; api.x.com createPost never called
-    const generateCallUrl = (fetchMock.mock.calls[0][0] as string).toString();
-    expect(generateCallUrl).toContain("/internal/generate");
-    expect(tenantDataDbRunMock).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
-  });
-
-  it("returns ok:false without calling generate or X when the source content row doesn't exist", async () => {
-    const channelRow = {
-      config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }),
-      channel_type: "X",
-      tenant_id: 1,
-    };
-    mockContentRow = null; // no row found for contentId
     tenantDataDbRunMock.mockClear();
 
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const res = await worker.fetch(
-      new Request("https://link-dev.uni-scrm.com/internal/content/ai-rewrite-publish", {
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
-        body: JSON.stringify({ contentId: "missing-content", sourceChannelId: "src-chan", targetChannelId: "tgt-chan", skillId: "punchy-social" }),
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", targetChannelId: "tgt-chan", flowId: "flow-1" }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
     );
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: false });
-    expect(fetchMock).not.toHaveBeenCalled(); // no generate call, no X call
+    expect(fetchMock).not.toHaveBeenCalled(); // platform check happens before generate/X calls
     expect(tenantDataDbRunMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
-    mockContentRow = { title: "Source title", content_text: "Source body text", summary: "Source summary" }; // restore default for later tests
   });
 
   it("returns ok:false without calling X when generation fails", async () => {
@@ -207,17 +205,16 @@ describe("stub content-flow action endpoints", () => {
       channel_type: "X",
       tenant_id: 1,
     };
-    mockContentRow = { title: "Source title", content_text: "Source body text", summary: "Source summary" };
     tenantDataDbRunMock.mockClear();
 
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response("generation error", { status: 502 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const res = await worker.fetch(
-      new Request("https://link-dev.uni-scrm.com/internal/content/ai-rewrite-publish", {
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
-        body: JSON.stringify({ contentId: "content-1", sourceChannelId: "src-chan", targetChannelId: "tgt-chan", skillId: "punchy-social" }),
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", targetChannelId: "tgt-chan", flowId: "flow-1" }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
     );

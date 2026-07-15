@@ -40,4 +40,21 @@ export const ContentMetadata_X: ContentMetadata[] = [
       { propId: "repost_count", dataId: "{linkPrefix}.public_metrics.retweet_count" },
     ],
   },
+  {
+    sourceContentType: "get-list-posts", // https://docs.x.com/x-api/lists/get-list-posts
+    linkPrefix: "data[]",
+    contentProps: [
+      { propId: "content_type", value: "TWEET" },
+      { propId: "source_content_id", dataId: "{linkPrefix}.id" },
+      { propId: "source_created_at", dataId: "{linkPrefix}.created_at" },
+      { propId: "title", dataId: "{linkPrefix}.article.title" },
+      { propId: "content_text", dataId: "{linkPrefix}.text" },
+      { propId: "bookmark_count", dataId: "{linkPrefix}.public_metrics.bookmark_count" },
+      { propId: "view_count", dataId: "{linkPrefix}.public_metrics.impression_count" },
+      { propId: "like_count", dataId: "{linkPrefix}.public_metrics.like_count" },
+      { propId: "quote_count", dataId: "{linkPrefix}.public_metrics.quote_count" },
+      { propId: "reply_count", dataId: "{linkPrefix}.public_metrics.reply_count" },
+      { propId: "repost_count", dataId: "{linkPrefix}.public_metrics.retweet_count" },
+    ],
+  },
 ];

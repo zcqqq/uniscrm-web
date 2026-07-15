@@ -734,7 +734,7 @@ export default {
 
     for (const message of batch.messages) {
       try {
-        const { tenantId, eventType, userId, contentId, channelId, payload } = message.body as FlowQueueMessage;
+        const { tenantId, eventType, userId, contentId, channelId, listId, payload } = message.body as FlowQueueMessage;
 
         const rows = await env.FLOW_DB.prepare(
           `SELECT id, graph_json FROM flows WHERE tenant_id = ? AND status = 'published'`
@@ -743,9 +743,10 @@ export default {
           .all<{ id: string; graph_json: string }>();
 
         if (contentId) {
+          const matchPayload = { ...payload, channel_id: channelId, ...(listId ? { list_id: listId } : {}) };
           for (const flow of rows.results) {
             const graph: FlowGraph = JSON.parse(flow.graph_json);
-            const result = executeFlow(graph, eventType, payload);
+            const result = executeFlow(graph, eventType, matchPayload);
             // Content-domain execution intentionally skips emitNodeLogs/PIPELINE_FLOW_LOG —
             // that sink's schema is fixed and keyed on user_id; adding a content_id variant
             // is a Pipeline-schema migration out of scope here. content_flow_executions is
@@ -775,7 +776,7 @@ export default {
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
               ).bind(
                 crypto.randomUUID(), flow.id, wait.nodeId, contentId, tenantId,
-                JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(), wait.awaitingEvent || "",
+                JSON.stringify(matchPayload), executeAt, new Date().toISOString(), wait.awaitingEvent || "",
                 wait.conditions ? JSON.stringify(wait.conditions) : ""
               ).run();
               console.log(JSON.stringify({ event: "content_flow_wait_scheduled", flowId: flow.id, nodeId: wait.nodeId, executeAt }));

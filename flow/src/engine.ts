@@ -163,7 +163,11 @@ export function executeFlow(
   const triggerNodes = graph.nodes.filter(
     (n) => (n.type === "xTrigger" && (n.data.eventType === eventType || n.data.triggerType === eventType))
       || (n.type === "cronTrigger" && eventType === "cron.trigger")
-      || (n.type === "contentTrigger" && eventType === "content.created")
+      || (n.type === "xContentTrigger" && eventType === "content.created"
+          && n.data.channelId === payload.channel_id
+          && (n.data.mode === "list_posts"
+              ? n.data.listId === payload.list_id
+              : payload.list_id === undefined || payload.list_id === null))
   );
 
   if (triggerNodes.length === 0) return { matched: false, actions: [], pendingWaits: [], nodeLogs: [] };

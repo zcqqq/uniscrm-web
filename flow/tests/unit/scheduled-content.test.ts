@@ -4,7 +4,7 @@ import worker from "../../src/index";
 
 const graphWithWait = JSON.stringify({
   nodes: [
-    { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+    { id: "t1", type: "xContentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
     { id: "w1", type: "wait", data: { duration: 1, unit: "minutes" }, position: { x: 200, y: 0 } },
     { id: "a1", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 400, y: 0 } },
   ],
@@ -136,7 +136,7 @@ describe("scheduled(): content_flow_pending retry_action handling", () => {
 
   const graphWithBranches = JSON.stringify({
     nodes: [
-      { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+      { id: "t1", type: "xContentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
       { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-1", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
       { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 400, y: 0 } },
       { id: "a3", type: "action", data: { actionType: "updateContentStatus", status: "ignored" }, position: { x: 400, y: 100 } },

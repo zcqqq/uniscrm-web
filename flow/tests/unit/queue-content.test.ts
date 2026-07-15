@@ -5,7 +5,7 @@ import { executeFlow } from "../../src/engine";
 
 const graphContentToStatus = JSON.stringify({
   nodes: [
-    { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+    { id: "t1", type: "xContentTrigger", data: { channelId: "chan-1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
     { id: "a1", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
   ],
   edges: [{ id: "e1", source: "t1", target: "a1" }],
@@ -136,7 +136,7 @@ describe("queue(): content.created dispatch", () => {
 describe("queue(): xContentAction branch resolution", () => {
   const graphWithBranchesObj = {
     nodes: [
-      { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+      { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
       { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "target-chan-1", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
       { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 400, y: 0 } },
       { id: "a3", type: "action", data: { actionType: "updateContentStatus", status: "ignored" }, position: { x: 400, y: 100 } },
@@ -150,7 +150,7 @@ describe("queue(): xContentAction branch resolution", () => {
   const graphWithBranches = JSON.stringify(graphWithBranchesObj);
 
   it("does not collect both branches on the initial dispatch (hasBranches gating) — executeFlow's initial pass over an xContentAction node yields only the action itself, not either branch's downstream updateContentStatus node", () => {
-    const result = executeFlow(graphWithBranchesObj, "content.created", {});
+    const result = executeFlow(graphWithBranchesObj, "content.created", { channel_id: "src-chan" });
     expect(result.actions.map((a) => a.type)).toEqual(["xContentAction"]);
   });
 
@@ -231,7 +231,7 @@ describe("queue(): xContentAction branch resolution", () => {
 
     const graphWithInterpolation = JSON.stringify({
       nodes: [
-        { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
         { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-1", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],

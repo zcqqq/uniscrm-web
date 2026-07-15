@@ -35,6 +35,7 @@ export interface FlowQueueMessage {
   payload: Record<string, unknown>;
   userId?: string;    // present for user-domain events (follow/DM/post webhooks)
   contentId?: string; // present for content-domain events (content.created) — mutually exclusive with userId
+  listId?: string;    // present only for list-sourced content.created events (xContentTrigger List Posts mode)
 }
 
 export interface PendingWait {

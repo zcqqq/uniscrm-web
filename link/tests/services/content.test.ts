@@ -330,3 +330,32 @@ describe("ContentService.buildEmbeddingText fallback (via embedContents through 
     expect(ai.run).toHaveBeenCalledWith(expect.any(String), { text: ["tweet body text"] });
   });
 });
+
+describe("recordPublishedContent", () => {
+  let tenantDb: ReturnType<typeof createMockTenantDb>;
+  let ai: ReturnType<typeof createMockAi>;
+  let vectorize: ReturnType<typeof createMockVectorize>;
+
+  beforeEach(() => {
+    tenantDb = createMockTenantDb();
+    ai = createMockAi();
+    vectorize = createMockVectorize();
+  });
+
+  it("inserts a published content row referencing the source content and skill", async () => {
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42);
+
+    await svc.recordPublishedContent("target-chan-1", "X", "tweet-123", "generated post text", {
+      generatedFromContentId: "source-content-1",
+      skillId: "punchy-social",
+    });
+
+    expect(tenantDb.run).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO content"),
+      expect.arrayContaining(["target-chan-1", "X", "tweet-123", "generated post text", "published"])
+    );
+    const [, params] = tenantDb.run.mock.calls[tenantDb.run.mock.calls.length - 1];
+    const rawData = JSON.parse(params.find((p: unknown) => typeof p === "string" && p.startsWith("{")) || "{}");
+    expect(rawData).toEqual({ generatedFromContentId: "source-content-1", skillId: "punchy-social" });
+  });
+});

@@ -5,17 +5,12 @@ import { WorkersAiProvider } from "../providers/workers-ai";
 import { OpenAiProvider } from "../providers/openai";
 import { AnthropicProvider } from "../providers/anthropic";
 import type { LlmProvider } from "../providers/interface";
-import type { Skill } from "../skills";
 
 export interface GenerateParams {
   tenantId: number;
   skillId: string;
   material: { title?: string; content_text?: string; summary?: string };
   targetPlatform: "X" | "TIKTOK";
-}
-
-function buildSystemPrompt(skill: Skill): string {
-  return `${skill.label}\n\n${skill.systemPrompt}`;
 }
 
 function buildUserPrompt(material: GenerateParams["material"], targetPlatform: string): string {
@@ -30,7 +25,7 @@ export async function generateContent(env: Env, params: GenerateParams): Promise
   const skill = getSkill(params.skillId);
   if (!skill) throw new Error(`Unknown skill: ${params.skillId}`);
 
-  const systemPrompt = buildSystemPrompt(skill);
+  const systemPrompt = skill.systemPrompt;
   const userPrompt = buildUserPrompt(params.material, params.targetPlatform);
 
   const credentials = await credentialsModule.getTenantLlmCredentials(env, params.tenantId);

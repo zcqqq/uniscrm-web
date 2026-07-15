@@ -55,7 +55,7 @@ describe("generateContent", () => {
     await generateContent({ AI: { run: aiRun } } as any, baseParams);
 
     const [, callArgs] = aiRun.mock.calls[0];
-    expect(callArgs.messages[0].content).toContain("Punchy");
+    expect(callArgs.messages[0].content).toContain("punchy");
     expect(callArgs.messages[1].content).toContain("Big launch");
     expect(callArgs.messages[1].content).toContain("We shipped a thing today.");
   });

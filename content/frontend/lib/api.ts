@@ -13,14 +13,17 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
-export interface LlmCredentialsInfo {
-  provider: string | null;
+export interface ProviderCredentialInfo {
+  provider: "openai" | "anthropic";
+  model: string;
 }
 
 export const api = {
   llmCredentials: {
-    get: (): Promise<{ credentials: { provider: string } | null }> => request("/api/llm-credentials"),
-    save: (provider: "openai" | "anthropic", apiKey: string): Promise<{ ok: boolean }> =>
-      request("/api/llm-credentials", { method: "PUT", body: JSON.stringify({ provider, apiKey }) }),
+    list: (): Promise<{ providers: ProviderCredentialInfo[] }> => request("/api/llm-credentials"),
+    save: (provider: "openai" | "anthropic", apiKey: string, model: string): Promise<{ ok: boolean }> =>
+      request("/api/llm-credentials", { method: "PUT", body: JSON.stringify({ provider, apiKey, model }) }),
+    remove: (provider: "openai" | "anthropic"): Promise<{ ok: boolean }> =>
+      request(`/api/llm-credentials/${provider}`, { method: "DELETE" }),
   },
 };

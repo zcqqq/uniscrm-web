@@ -94,7 +94,111 @@ describe("stub content-flow action endpoints", () => {
     const body = await res.json();
     expect(body).toEqual({ ok: true });
     expect(tenantDataDbRunMock).toHaveBeenCalledTimes(1); // recordPublishedContent wrote the new content row
+    const [insertSql, insertParams] = tenantDataDbRunMock.mock.calls[0] as [string, unknown[]];
+    expect(insertSql).toMatch(/INSERT INTO content/);
+    // [id, channelId, channelType, sourceContentId, contentText, status, raw_data, created_at, updated_at]
+    expect(insertParams[1]).toBe("tgt-chan"); // target channel id
+    expect(insertParams[2]).toBe("X"); // channel_type
+    expect(insertParams[3]).toBe("tweet-999"); // source_content_id = new tweet's id
+    expect(insertParams[4]).toBe("generated post text"); // content_text
+    expect(JSON.parse(insertParams[6] as string)).toEqual({
+      generatedFromContentId: "content-1",
+      skillId: "punchy-social",
+    });
     vi.unstubAllGlobals();
+  });
+
+  it("returns rateLimited response (not a bare ok:false) when X createPost is rate-limited", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }),
+      channel_type: "X",
+      tenant_id: 1,
+    };
+    mockContentRow = { title: "Source title", content_text: "Source body text", summary: "Source summary" };
+    tenantDataDbRunMock.mockClear();
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ text: "generated post text" }), { status: 200 })) // content /internal/generate
+      .mockResolvedValueOnce(new Response(JSON.stringify({ title: "Too Many Requests" }), { status: 429 })); // X /2/tweets rate-limited
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/ai-rewrite-publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ contentId: "content-1", sourceChannelId: "src-chan", targetChannelId: "tgt-chan", skillId: "punchy-social" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string };
+    expect(body.ok).toBe(false);
+    expect(body.rateLimited).toBe(true);
+    expect(typeof body.rateLimitReset).toBe("string");
+    expect(tenantDataDbRunMock).not.toHaveBeenCalled(); // no content row recorded when rate-limited
+    vi.unstubAllGlobals();
+  });
+
+  it("returns ok:false without calling X when the target channel is not X (e.g. TIKTOK)", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }),
+      channel_type: "TIKTOK",
+      tenant_id: 1,
+    };
+    mockContentRow = { title: "Source title", content_text: "Source body text", summary: "Source summary" };
+    tenantDataDbRunMock.mockClear();
+
+    // Only the content /internal/generate call happens before the platform check runs.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ text: "generated post text" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/ai-rewrite-publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ contentId: "content-1", sourceChannelId: "src-chan", targetChannelId: "tgt-chan", skillId: "punchy-social" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false });
+    expect(fetchMock).toHaveBeenCalledTimes(1); // generate only; api.x.com createPost never called
+    const generateCallUrl = (fetchMock.mock.calls[0][0] as string).toString();
+    expect(generateCallUrl).toContain("/internal/generate");
+    expect(tenantDataDbRunMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("returns ok:false without calling generate or X when the source content row doesn't exist", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }),
+      channel_type: "X",
+      tenant_id: 1,
+    };
+    mockContentRow = null; // no row found for contentId
+    tenantDataDbRunMock.mockClear();
+
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/ai-rewrite-publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ contentId: "missing-content", sourceChannelId: "src-chan", targetChannelId: "tgt-chan", skillId: "punchy-social" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled(); // no generate call, no X call
+    expect(tenantDataDbRunMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+    mockContentRow = { title: "Source title", content_text: "Source body text", summary: "Source summary" }; // restore default for later tests
   });
 
   it("returns ok:false without calling X when generation fails", async () => {

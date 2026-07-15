@@ -226,7 +226,11 @@ export function internalRoutes() {
       "SELECT title, content_text, summary FROM content WHERE id = ?",
       [contentId]
     );
-    const material = sourceRows[0] || {};
+    if (!sourceRows[0]) {
+      console.error(JSON.stringify({ event: "ai_rewrite_publish_source_content_missing", contentId, targetChannelId }));
+      return c.json({ ok: false }, 200);
+    }
+    const material = sourceRows[0];
 
     const genRes = await fetch(`${c.env.CONTENT_URL}/internal/generate`, {
       method: "POST",

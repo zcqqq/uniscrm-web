@@ -42,10 +42,12 @@ function ModelPicker({
     }
     let cancelled = false;
     setFetchFailed(false);
-    api.llmModels.list(provider, apiKey || undefined)
-      .then((res) => { if (!cancelled) setOptions(res.models); })
-      .catch(() => { if (!cancelled) { setOptions(null); setFetchFailed(true); } });
-    return () => { cancelled = true; };
+    const timer = setTimeout(() => {
+      api.llmModels.list(provider, apiKey || undefined)
+        .then((res) => { if (!cancelled) setOptions(res.models); })
+        .catch(() => { if (!cancelled) { setOptions(null); setFetchFailed(true); } });
+    }, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [provider, apiKey]);
 
   if (options && options.length > 0) {

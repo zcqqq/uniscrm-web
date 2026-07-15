@@ -7,14 +7,22 @@ describe("generateContent", () => {
 
   const baseParams = { tenantId: 1, prompt: "Rewrite this in a punchy tone: We shipped a thing today.", provider: "default" as const };
 
-  it("uses Workers AI for provider: 'default'", async () => {
+  it("uses Workers AI for provider: 'default', falling back to the hardcoded model when the tenant never set one", async () => {
     const aiRun = vi.fn().mockResolvedValue({ response: "punchy text" });
-    const text = await generateContent({ AI: { run: aiRun } } as any, baseParams);
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+    const text = await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, baseParams);
     expect(text).toBe("punchy text");
     expect(aiRun).toHaveBeenCalledWith(
       "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
       expect.objectContaining({ messages: expect.arrayContaining([{ role: "user", content: baseParams.prompt }]) })
     );
+  });
+
+  it("uses the tenant's stored default-model choice for provider: 'default' when one is set", async () => {
+    const aiRun = vi.fn().mockResolvedValue({ response: "punchy text" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => ({ model: "@cf/meta/llama-4-scout-17b-16e-instruct" }) }) }) };
+    await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, baseParams);
+    expect(aiRun).toHaveBeenCalledWith("@cf/meta/llama-4-scout-17b-16e-instruct", expect.anything());
   });
 
   it("uses the tenant's OpenAI BYOK credentials for provider: 'openai'", async () => {

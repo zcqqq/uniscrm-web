@@ -12,7 +12,7 @@ beforeAll(async () => {
     `CREATE TABLE IF NOT EXISTS tenant_llm_credentials (
        tenant_id INTEGER NOT NULL,
        provider TEXT NOT NULL,
-       encrypted_api_key TEXT NOT NULL,
+       encrypted_api_key TEXT,
        model TEXT NOT NULL,
        created_at TEXT NOT NULL,
        updated_at TEXT NOT NULL,
@@ -81,7 +81,7 @@ describe("/api/llm-credentials", () => {
       new Request("https://content-dev.uni-scrm.com/api/llm-credentials", { headers: { Cookie: "session=ok" } }),
       testEnv
     );
-    expect(await getRes.json()).toEqual({ providers: [{ provider: "openai", model: "gpt-4o-mini" }] });
+    expect(await getRes.json()).toEqual({ providers: [{ provider: "openai", model: "gpt-4o-mini", createdAt: expect.any(String) }] });
   });
 
   it("DELETE removes a provider", async () => {

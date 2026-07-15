@@ -7,6 +7,8 @@ import {
   setTenantLlmCredentials,
   listConfiguredProviders,
   deleteTenantLlmCredentials,
+  getDefaultModel,
+  setDefaultModel,
 } from "../src/services/llm-credentials";
 
 describe("multi-provider tenant LLM credentials", () => {
@@ -23,7 +25,7 @@ describe("multi-provider tenant LLM credentials", () => {
       `CREATE TABLE IF NOT EXISTS tenant_llm_credentials (
          tenant_id INTEGER NOT NULL,
          provider TEXT NOT NULL,
-         encrypted_api_key TEXT NOT NULL,
+         encrypted_api_key TEXT,
          model TEXT NOT NULL,
          created_at TEXT NOT NULL,
          updated_at TEXT NOT NULL,
@@ -72,8 +74,8 @@ describe("multi-provider tenant LLM credentials", () => {
     await setTenantLlmCredentials(testEnv as any, 42, "anthropic", "sk-anthropic", "claude-3-5-haiku-latest");
     const list = await listConfiguredProviders(testEnv as any, 42);
     expect(list.sort((a, b) => a.provider.localeCompare(b.provider))).toEqual([
-      { provider: "anthropic", model: "claude-3-5-haiku-latest" },
-      { provider: "openai", model: "gpt-4o-mini" },
+      { provider: "anthropic", model: "claude-3-5-haiku-latest", createdAt: expect.any(String) },
+      { provider: "openai", model: "gpt-4o-mini", createdAt: expect.any(String) },
     ]);
   });
 
@@ -83,5 +85,27 @@ describe("multi-provider tenant LLM credentials", () => {
     await deleteTenantLlmCredentials(testEnv as any, 42, "openai");
     expect(await getTenantLlmCredentials(testEnv as any, 42, "openai")).toBeNull();
     expect(await getTenantLlmCredentials(testEnv as any, 42, "anthropic")).toEqual({ apiKey: "sk-anthropic", model: "claude-3-5-haiku-latest" });
+  });
+
+  it("getDefaultModel returns the hardcoded fallback when the tenant never set one", async () => {
+    expect(await getDefaultModel(testEnv as any, 42)).toBe("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+  });
+
+  it("setDefaultModel persists a model choice with no API key, getDefaultModel returns it", async () => {
+    await setDefaultModel(testEnv as any, 42, "@cf/meta/llama-4-scout-17b-16e-instruct");
+    expect(await getDefaultModel(testEnv as any, 42)).toBe("@cf/meta/llama-4-scout-17b-16e-instruct");
+
+    const row = await env.CONTENT_DB.prepare(
+      `SELECT encrypted_api_key FROM tenant_llm_credentials WHERE tenant_id = 42 AND provider = 'default'`
+    ).first<{ encrypted_api_key: string | null }>();
+    expect(row?.encrypted_api_key).toBeNull();
+  });
+
+  it("listConfiguredProviders excludes 'default' even when a default model is set, and includes createdAt for openai/anthropic", async () => {
+    await setTenantLlmCredentials(testEnv as any, 42, "openai", "sk-openai", "gpt-4o-mini");
+    await setDefaultModel(testEnv as any, 42, "@cf/meta/llama-4-scout-17b-16e-instruct");
+    const list = await listConfiguredProviders(testEnv as any, 42);
+    expect(list.find((p) => p.provider === "default")).toBeUndefined();
+    expect(list).toEqual([{ provider: "openai", model: "gpt-4o-mini", createdAt: expect.any(String) }]);
   });
 });

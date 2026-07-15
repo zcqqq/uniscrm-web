@@ -13,7 +13,8 @@ export interface GenerateParams {
 
 export async function generateContent(env: Env, params: GenerateParams): Promise<string> {
   if (params.provider === "default") {
-    return new WorkersAiProvider(env.AI).generate(params.prompt);
+    const model = await credentialsModule.getDefaultModel(env, params.tenantId);
+    return new WorkersAiProvider(env.AI).generate(params.prompt, model);
   }
 
   const credentials = await credentialsModule.getTenantLlmCredentials(env, params.tenantId, params.provider);

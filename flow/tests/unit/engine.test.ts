@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { executeFlow, type FlowGraph } from "../../src/engine";
+import { executeFlow, resumeFromNode, type FlowGraph } from "../../src/engine";
 
 describe("executeFlow: contentTrigger", () => {
   function graphWithContentTrigger(conditions: { field: string; operator: string; value: string }[]): FlowGraph {
@@ -87,6 +87,41 @@ describe("collectActions: new content-domain action types", () => {
     expect(result.actions).toEqual([
       { type: "updateContentStatus", nodeId: "a1", hasBranches: false, status: "published" },
       { type: "updateContentStatus", nodeId: "a2", hasBranches: false, status: "ignored" },
+    ]);
+  });
+});
+
+describe("resumeFromNode: action branch targets get full actionData", () => {
+  it("populates status on an updateContentStatus branch target (not just {type})", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "a1", type: "action", data: { actionType: "aiRewritePublish", channelId: "chan-1", skillId: "punchy-social" }, position: { x: 0, y: 0 } },
+        { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "a1", target: "a2", sourceHandle: "success" }],
+    };
+    const result = resumeFromNode(graph, "a1", {}, "success");
+    expect(result.actions).toEqual([
+      { type: "updateContentStatus", nodeId: "a2", hasBranches: false, status: "published" },
+    ]);
+  });
+
+  it("continues traversal past a non-branching action branch target", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "a1", type: "action", data: { actionType: "aiRewritePublish", channelId: "chan-1" }, position: { x: 0, y: 0 } },
+        { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
+        { id: "a3", type: "action", data: { actionType: "addToList", listId: "l1" }, position: { x: 400, y: 0 } },
+      ],
+      edges: [
+        { id: "e1", source: "a1", target: "a2", sourceHandle: "success" },
+        { id: "e2", source: "a2", target: "a3" },
+      ],
+    };
+    const result = resumeFromNode(graph, "a1", {}, "success");
+    expect(result.actions).toEqual([
+      { type: "updateContentStatus", nodeId: "a2", hasBranches: false, status: "published" },
+      { type: "addToList", nodeId: "a3", hasBranches: false, listId: "l1" },
     ]);
   });
 });

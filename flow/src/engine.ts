@@ -206,12 +206,12 @@ export function resumeFromNode(
       if (!target) continue;
       if (target.type === "action") {
         nodeLogs.push({ nodeId: target.id, direction: "enter" });
-        const actionType = target.data.actionType as string;
-        const actionData: ActionResult = { type: actionType };
-        if (actionType === "addToList") actionData.listId = target.data.listId as string;
-        if (actionType === "xAction") { actionData.xEvent = target.data.xEvent as string; actionData.channelId = target.data.channelId as string; if (target.data.messageText) actionData.messageText = target.data.messageText as string; }
+        const actionData = buildActionData(target);
         actions.push(actionData);
         nodeLogs.push({ nodeId: target.id, direction: "exit" });
+        if (!actionData.hasBranches) {
+          collectActions(graph, target.id, payload, actions, pendingWaits, nodeLogs);
+        }
       } else {
         collectActions(graph, target.id, payload, actions, pendingWaits, nodeLogs);
       }
@@ -232,6 +232,26 @@ function durationToMs(duration: number, unit: string): number {
   }
 }
 
+function buildActionData(targetNode: FlowNode): ActionResult {
+  const actionType = targetNode.data.actionType as string;
+  const isExternalApi = actionType === "xAction" || actionType === "repost" || actionType === "aiRewritePublish";
+  const actionData: ActionResult = { type: actionType, nodeId: targetNode.id, hasBranches: isExternalApi };
+  if (actionType === "addToList") actionData.listId = targetNode.data.listId as string;
+  if (actionType === "xAction") {
+    actionData.xEvent = targetNode.data.xEvent as string;
+    actionData.channelId = targetNode.data.channelId as string;
+    if (targetNode.data.messageText) actionData.messageText = targetNode.data.messageText as string;
+  }
+  if (actionType === "aiRewritePublish") {
+    actionData.targetChannelId = targetNode.data.channelId as string;
+    actionData.skillId = targetNode.data.skillId as string;
+  }
+  if (actionType === "updateContentStatus") {
+    actionData.status = targetNode.data.status as string;
+  }
+  return actionData;
+}
+
 function collectActions(
   graph: FlowGraph,
   nodeId: string,
@@ -249,26 +269,11 @@ function collectActions(
     nodeLogs.push({ nodeId: targetNode.id, direction: "enter" });
 
     if (targetNode.type === "action") {
-      const actionType = targetNode.data.actionType as string;
-      const isExternalApi = actionType === "xAction" || actionType === "repost" || actionType === "aiRewritePublish";
-      const actionData: ActionResult = { type: actionType, nodeId: targetNode.id, hasBranches: isExternalApi };
-      if (actionType === "addToList") actionData.listId = targetNode.data.listId as string;
-      if (actionType === "xAction") {
-        actionData.xEvent = targetNode.data.xEvent as string;
-        actionData.channelId = targetNode.data.channelId as string;
-        if (targetNode.data.messageText) actionData.messageText = targetNode.data.messageText as string;
-      }
-      if (actionType === "aiRewritePublish") {
-        actionData.targetChannelId = targetNode.data.channelId as string;
-        actionData.skillId = targetNode.data.skillId as string;
-      }
-      if (actionType === "updateContentStatus") {
-        actionData.status = targetNode.data.status as string;
-      }
+      const actionData = buildActionData(targetNode);
       actions.push(actionData);
       nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
 
-      if (!isExternalApi) {
+      if (!actionData.hasBranches) {
         collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
       }
       continue;

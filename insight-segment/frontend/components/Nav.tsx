@@ -5,6 +5,7 @@ const urls = {
   link: import.meta.env.VITE_LINK_URL,
   insightSegment: "",
   flow: import.meta.env.VITE_FLOW_URL,
+  content: import.meta.env.VITE_CONTENT_URL,
 };
 
 export function Nav() {

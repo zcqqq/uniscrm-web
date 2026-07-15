@@ -6,4 +6,5 @@ export const URLS = {
   flow: isDev ? "https://flow-dev.uni-scrm.com" : "https://flow.uni-scrm.com",
   analytics: isDev ? "https://analytics-dev.uni-scrm.com" : "https://analytics.uni-scrm.com",
   segment: isDev ? "https://segment-dev.uni-scrm.com" : "https://segment.uni-scrm.com",
+  content: isDev ? "https://content-dev.uni-scrm.com" : "https://content.uni-scrm.com",
 };

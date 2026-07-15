@@ -11,6 +11,7 @@ export interface SidebarUrls {
   insightSegment: string;
   analytics: string;
   flow: string;
+  content: string;
 }
 
 export type CurrentModule = "social" | "profile" | "content" | "commerce" | "insight" | "settings";
@@ -116,6 +117,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
       items: [
         { id: "recommendations", label: "Recommendation", href: `${urls.web}/recommendations` },
         { id: "content", label: "Content Library", href: `${urls.link}/content` },
+        { id: "ai-generation", label: "AI Generation Settings", href: urls.content },
       ],
     },
     { id: "commerce", label: "Commerce", icon: Icons.ShoppingBag, href: `${urls.link}/commerce` },

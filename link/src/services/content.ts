@@ -244,7 +244,7 @@ export class ContentService {
     channelType: ChannelType,
     sourceContentId: string,
     contentText: string,
-    ref: { generatedFromContentId: string; skillId: string }
+    ref: { generatedFromContentId: string; flowId: string }
   ): Promise<void> {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();

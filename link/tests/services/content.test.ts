@@ -342,12 +342,12 @@ describe("recordPublishedContent", () => {
     vectorize = createMockVectorize();
   });
 
-  it("inserts a published content row referencing the source content and skill", async () => {
+  it("inserts a published content row referencing the source content and flow", async () => {
     const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42);
 
     await svc.recordPublishedContent("target-chan-1", "X", "tweet-123", "generated post text", {
       generatedFromContentId: "source-content-1",
-      skillId: "punchy-social",
+      flowId: "flow-1",
     });
 
     expect(tenantDb.run).toHaveBeenCalledWith(
@@ -356,6 +356,6 @@ describe("recordPublishedContent", () => {
     );
     const [, params] = tenantDb.run.mock.calls[tenantDb.run.mock.calls.length - 1];
     const rawData = JSON.parse(params.find((p: unknown) => typeof p === "string" && p.startsWith("{")) || "{}");
-    expect(rawData).toEqual({ generatedFromContentId: "source-content-1", skillId: "punchy-social" });
+    expect(rawData).toEqual({ generatedFromContentId: "source-content-1", flowId: "flow-1" });
   });
 });

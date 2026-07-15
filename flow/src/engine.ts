@@ -260,6 +260,7 @@ function collectActions(
       }
       if (actionType === "aiRewritePublish") {
         actionData.targetChannelId = targetNode.data.channelId as string;
+        actionData.skillId = targetNode.data.skillId as string;
       }
       if (actionType === "updateContentStatus") {
         actionData.status = targetNode.data.status as string;

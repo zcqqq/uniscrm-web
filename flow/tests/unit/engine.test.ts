@@ -57,17 +57,17 @@ describe("collectActions: new content-domain action types", () => {
     expect(result.actions).toEqual([{ type: "repost", nodeId: "a1", hasBranches: true }]);
   });
 
-  it("collects an aiRewritePublish action carrying its target channel", () => {
+  it("collects an aiRewritePublish action carrying its target channel and skill", () => {
     const graph: FlowGraph = {
       nodes: [
         { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
-        { id: "a1", type: "action", data: { actionType: "aiRewritePublish", channelId: "tiktok-chan-1" }, position: { x: 200, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "aiRewritePublish", channelId: "tiktok-chan-1", skillId: "punchy-social" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
     };
     const result = executeFlow(graph, "content.created", {});
     expect(result.actions).toEqual([
-      { type: "aiRewritePublish", nodeId: "a1", hasBranches: true, targetChannelId: "tiktok-chan-1" },
+      { type: "aiRewritePublish", nodeId: "a1", hasBranches: true, targetChannelId: "tiktok-chan-1", skillId: "punchy-social" },
     ]);
   });
 

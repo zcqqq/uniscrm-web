@@ -128,7 +128,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
       } else if (type === "repost") {
         data = { actionType: type };
       } else if (type === "aiRewritePublish") {
-        data = { actionType: type, channelType: "", channelId: "" };
+        data = { actionType: type, channelType: "", channelId: "", skillId: "" };
       } else if (type === "updateContentStatus") {
         data = { actionType: type, status: "" };
       }

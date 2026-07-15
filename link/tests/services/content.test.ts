@@ -307,6 +307,19 @@ describe("ContentService.upsertContentFromMetadata", () => {
       expect(isNewA).toBe(true);
       expect(isNewB).toBe(true);
       expect(tenantDb.run).toHaveBeenCalledTimes(2);
+
+      // Prove the two upserts were genuinely scoped to different lists, not just called twice
+      // with the same effective query — each call's SELECT must be bound to its own listId, and
+      // each INSERT must write list_id = that same value.
+      expect(tenantDb.query.mock.calls[0][1]).toEqual(["chan1", "t3", "listA"]);
+      expect(tenantDb.query.mock.calls[1][1]).toEqual(["chan1", "t3", "listB"]);
+
+      const [, insertParamsA] = tenantDb.run.mock.calls[0];
+      const [, insertParamsB] = tenantDb.run.mock.calls[1];
+      expect(insertParamsA).toContain("listA");
+      expect(insertParamsB).toContain("listB");
+      expect(insertParamsA).not.toContain("listB");
+      expect(insertParamsB).not.toContain("listA");
     });
 
     it("includes listId in the emitted content.created message when provided", async () => {

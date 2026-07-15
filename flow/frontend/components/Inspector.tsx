@@ -8,6 +8,8 @@ import { Input } from "../../../shared/frontend/ui/input";
 import { Select } from "../../../shared/frontend/ui/select";
 import { Textarea } from "../../../shared/frontend/ui/textarea";
 import { Label } from "../../../shared/frontend/ui/label";
+import { ContentActionMetadata_X } from "../../../metadata/x";
+import { t as localizeLabel } from "../../../metadata/locale";
 
 type SelectChange = React.ChangeEvent<HTMLSelectElement>;
 type InputChange = React.ChangeEvent<HTMLInputElement>;
@@ -394,8 +396,8 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
     );
   }
 
-  if (actionType === "aiRewritePublish") {
-    return <AiRewritePublishInspector nodeId={nodeId} data={data} />;
+  if (actionType === "xContentAction") {
+    return <XContentActionInspector nodeId={nodeId} data={data} />;
   }
 
   if (actionType === "updateContentStatus") {
@@ -479,11 +481,13 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
 
 const CONTENT_CHANNEL_TYPES = ["X", "TIKTOK"];
 
-function AiRewritePublishInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+const CONTENT_ACTION_OPERATIONS = ContentActionMetadata_X.filter((m) => m.flowType === "action");
+
+function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
   const [channelType, setChannelType] = useState<string>(data.channelType || "");
   const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
-  const [skills, setSkills] = useState<{ id: string; label: string }[]>([]);
+  const [providers, setProviders] = useState<{ provider: string; model: string }[]>([]);
 
   useEffect(() => {
     if (!channelType) { setChannels([]); return; }
@@ -491,27 +495,51 @@ function AiRewritePublishInspector({ nodeId, data }: { nodeId: string; data: Rec
   }, [channelType]);
 
   useEffect(() => {
-    api.skills.list().then((res) => setSkills(res.skills)).catch(() => setSkills([]));
+    api.llmProviders.list().then((res) => setProviders(res.providers)).catch(() => setProviders([]));
   }, []);
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">AI Rewrite &amp; Publish</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">X Content Action</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Skill</Label>
-          {skills.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">Loading skills...</p>
-          ) : (
-            <Select
-              value={data.skillId || ""}
-              onChange={(e: SelectChange) => updateNodeData(nodeId, { skillId: e.target.value })}
-              className="w-full text-sm"
-            >
-              <option value="">Select skill...</option>
-              {skills.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-            </Select>
-          )}
+          <Label className="text-xs block mb-1">Operation</Label>
+          <Select
+            value={data.operation || "create-post"}
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { operation: e.target.value })}
+            className="w-full text-sm"
+          >
+            {CONTENT_ACTION_OPERATIONS.map((op) => (
+              <option key={op.sourceContentType} value={op.sourceContentType}>
+                {op.label ? localizeLabel(op.label, "en") : op.sourceContentType}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs block mb-1">Prompt</Label>
+          <Textarea
+            value={data.prompt || ""}
+            onChange={(e: TextareaChange) => updateNodeData(nodeId, { prompt: e.target.value })}
+            placeholder="Rewrite this in a punchy tone: $content.content_text"
+            rows={5}
+            className="w-full text-sm font-mono"
+          />
+          <p className="text-xs text-muted-foreground mt-1">Use $content.title, $content.content_text etc.</p>
+        </div>
+        <div>
+          <Label className="text-xs block mb-1">Provider</Label>
+          <Select
+            value={data.provider || "default"}
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { provider: e.target.value })}
+            className="w-full text-sm"
+          >
+            <option value="default">Default (free built-in model)</option>
+            {providers.map((p) => (
+              <option key={p.provider} value={p.provider}>{p.provider === "openai" ? "OpenAI" : "Anthropic"} ({p.model})</option>
+            ))}
+            <option value="none">None (post prompt text as-is)</option>
+          </Select>
         </div>
         <div>
           <Label className="text-xs block mb-1">Target Platform</Label>

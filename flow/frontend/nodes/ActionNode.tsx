@@ -1,7 +1,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
 
-const EXTERNAL_API_ACTIONS = ["xAction", "repost", "aiRewritePublish"];
+const EXTERNAL_API_ACTIONS = ["xAction", "repost", "xContentAction"];
 
 export default function ActionNode({ data, selected }: NodeProps) {
   const actionType = data.actionType as string;
@@ -29,9 +29,9 @@ export default function ActionNode({ data, selected }: NodeProps) {
     label = "Repost";
     description = "Repost this content on the same channel";
     icon = "🔁";
-  } else if (actionType === "aiRewritePublish") {
+  } else if (actionType === "xContentAction") {
     const channelId = data.channelId as string;
-    label = "AI Rewrite & Publish";
+    label = "X Content Action";
     description = channelId ? "Target channel selected" : "Select a target channel...";
     icon = "✨";
   } else if (actionType === "updateContentStatus") {

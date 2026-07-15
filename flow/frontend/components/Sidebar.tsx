@@ -88,7 +88,7 @@ export default function Sidebar() {
           <DraggableItem type="repost" label="Repost" description="Repost this content on the same channel" color="border-accent bg-accent/50" icon="🔁" />
         )}
         {visible("content") && (
-          <DraggableItem type="aiRewritePublish" label="AI Rewrite & Publish" description="Rewrite and publish to another channel" color="border-accent bg-accent/50" icon="✨" />
+          <DraggableItem type="xContentAction" label="X Content Action" description="Generate (or post as-is) and publish to another channel" color="border-accent bg-accent/50" icon="✨" />
         )}
         {visible("content") && (
           <DraggableItem type="updateContentStatus" label="Update Content Status" description="Set this content's status" color="border-accent bg-accent/50" icon="🏷️" />

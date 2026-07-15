@@ -246,7 +246,8 @@ describe("queue(): xContentAction branch resolution", () => {
       env
     );
 
-    const [, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("/internal/content/create-post");
     const body = JSON.parse(init.body as string);
     expect(body.interpolatedPrompt).toBe("Rewrite: original post text");
 

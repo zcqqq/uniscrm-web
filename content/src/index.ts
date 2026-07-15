@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Env } from "./types";
 import { internalRoutes } from "./routes-internal";
-import { setTenantLlmCredentials, listConfiguredProviders, deleteTenantLlmCredentials } from "./services/llm-credentials";
+import { setTenantLlmCredentials, listConfiguredProviders, deleteTenantLlmCredentials, getDefaultModel, setDefaultModel } from "./services/llm-credentials";
 import { listOpenAiModels, listAnthropicModels, listWorkersAiModels } from "./services/model-catalog";
 
 type HonoEnv = { Bindings: Env; Variables: { tenantId: string } };
@@ -48,13 +48,19 @@ app.use("/api/llm-credentials/*", sessionAuth);
 app.get("/api/llm-credentials", async (c) => {
   const tenantId = Number(c.get("tenantId"));
   const providers = await listConfiguredProviders(c.env, tenantId);
-  return c.json({ providers });
+  const defaultModel = await getDefaultModel(c.env, tenantId);
+  return c.json({ providers, defaultModel });
 });
 
 app.put("/api/llm-credentials", async (c) => {
   const tenantId = Number(c.get("tenantId"));
-  const { provider, apiKey, model } = await c.req.json<{ provider: "openai" | "anthropic"; apiKey: string; model: string }>();
-  if (!provider || !apiKey || !model) return c.json({ error: "provider, apiKey, model required" }, 400);
+  const { provider, apiKey, model } = await c.req.json<{ provider: "openai" | "anthropic" | "default"; apiKey?: string; model: string }>();
+  if (!provider || !model) return c.json({ error: "provider, model required" }, 400);
+  if (provider === "default") {
+    await setDefaultModel(c.env, tenantId, model);
+    return c.json({ ok: true });
+  }
+  if (!apiKey) return c.json({ error: "apiKey required for this provider" }, 400);
   await setTenantLlmCredentials(c.env, tenantId, provider, apiKey, model);
   return c.json({ ok: true });
 });

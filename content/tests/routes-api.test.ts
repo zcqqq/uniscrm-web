@@ -45,7 +45,7 @@ describe("/api/llm-credentials", () => {
       env
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ providers: [] });
+    expect(await res.json()).toEqual({ providers: [], defaultModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" });
   });
 
   it("PUT saves a provider, GET lists it (with model, never the key)", async () => {
@@ -81,7 +81,7 @@ describe("/api/llm-credentials", () => {
       new Request("https://content-dev.uni-scrm.com/api/llm-credentials", { headers: { Cookie: "session=ok" } }),
       testEnv
     );
-    expect(await getRes.json()).toEqual({ providers: [{ provider: "openai", model: "gpt-4o-mini", createdAt: expect.any(String) }] });
+    expect(await getRes.json()).toEqual({ providers: [{ provider: "openai", model: "gpt-4o-mini", createdAt: expect.any(String) }], defaultModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" });
   });
 
   it("DELETE removes a provider", async () => {

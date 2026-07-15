@@ -1,7 +1,7 @@
 // https://docs.x.com/x-api/activity/introduction
 import type { EventMetadata, ContentMetadata } from "./dataTypes";
 
-export const ContentMetadata_X: ContentMetadata[] = [
+export const ContentActionMetadata_X: ContentMetadata[] = [
   {
     sourceContentType: "create-post", // https://docs.x.com/x-api/posts/create-post
     flowType: "action",

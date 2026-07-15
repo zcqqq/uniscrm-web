@@ -5,6 +5,7 @@
 # Code
 uniscrm-web库是多租户SaaS，分多个模块/worker：
 - admin: 租户管理，billing。
+- content: 租户BYOK LLM key管理 + 内置skill配方 + 内容生成(/internal/generate)，供flow的aiRewritePublish action调用。
 - flow: 基于reactflow的事件触发工作流。
 - analytics: 多种SQL即席分析、和可视化报表。
 - insight-segment: 基于profile的SQL规则分群。

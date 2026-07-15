@@ -1,11 +1,9 @@
 import type { LlmProvider } from "./interface";
 
-const MODEL = "claude-3-5-haiku-latest";
-
 export class AnthropicProvider implements LlmProvider {
   constructor(private apiKey: string) {}
 
-  async generate(prompt: string): Promise<string> {
+  async generate(prompt: string, model: string): Promise<string> {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -14,7 +12,7 @@ export class AnthropicProvider implements LlmProvider {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         max_tokens: 1024,
         messages: [{ role: "user", content: prompt }],
       }),

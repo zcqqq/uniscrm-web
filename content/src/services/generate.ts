@@ -26,5 +26,5 @@ export async function generateContent(env: Env, params: GenerateParams): Promise
       ? new OpenAiProvider(credentials.apiKey)
       : new AnthropicProvider(credentials.apiKey);
 
-  return provider.generate(params.prompt);
+  return provider.generate(params.prompt, credentials.model);
 }

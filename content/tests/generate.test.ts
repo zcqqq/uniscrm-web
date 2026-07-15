@@ -28,6 +28,8 @@ describe("generateContent", () => {
 
     expect(text).toBe("openai text");
     expect(credentialsModule.getTenantLlmCredentials).toHaveBeenCalledWith(expect.anything(), 1, "openai");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.model).toBe("gpt-4o-mini");
     vi.unstubAllGlobals();
   });
 
@@ -41,6 +43,8 @@ describe("generateContent", () => {
     const text = await generateContent({} as any, { ...baseParams, provider: "anthropic" });
 
     expect(text).toBe("anthropic text");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.model).toBe("claude-3-5-haiku-latest");
     vi.unstubAllGlobals();
   });
 

@@ -1,11 +1,9 @@
 import type { LlmProvider } from "./interface";
 
-const MODEL = "gpt-4o-mini";
-
 export class OpenAiProvider implements LlmProvider {
   constructor(private apiKey: string) {}
 
-  async generate(prompt: string): Promise<string> {
+  async generate(prompt: string, model: string): Promise<string> {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -13,7 +11,7 @@ export class OpenAiProvider implements LlmProvider {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         messages: [{ role: "user", content: prompt }],
       }),
     });

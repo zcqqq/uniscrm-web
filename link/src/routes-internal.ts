@@ -6,6 +6,8 @@ import { TenantDataDB } from "../../shared/tenant-data-db";
 import { CreditService, getActiveSubscriptionTier } from "../../shared/credit-service";
 import { EventMetadata_X } from "../../metadata/x";
 import { dollarsToMicros } from "../../shared/credit";
+import { ContentService } from "./services/content";
+import { createPost } from "./services/x-posts-api";
 
 const ACTION_TO_EVENT_TYPE: Record<string, string> = {
   follow: "follow-user",
@@ -203,14 +205,70 @@ export function internalRoutes() {
     return c.json({ ok: false, notImplemented: true }, 501);
   });
 
-  // Stub: real TikTok Content Posting API (and X post-creation for the reverse
-  // direction) not implemented yet — same reasoning as /x/repost above.
+  // Real X publish path: content-ai's generated text gets posted to the target channel.
+  // TikTok publish is out of scope this phase (see design spec's non-goals) — targetChannelId
+  // resolving to a TIKTOK channel_type falls through to the generic ok:false path below.
   router.post("/content/ai-rewrite-publish", async (c) => {
-    const { contentId, sourceChannelId, targetChannelId } = await c.req.json<{
-      contentId: string; sourceChannelId: string; targetChannelId: string; flowId?: string | null;
+    const { contentId, sourceChannelId, targetChannelId, skillId } = await c.req.json<{
+      contentId: string; sourceChannelId: string; targetChannelId: string; skillId?: string; flowId?: string | null;
     }>();
-    console.log(JSON.stringify({ event: "ai_rewrite_publish_stub_called", contentId, sourceChannelId, targetChannelId }));
-    return c.json({ ok: false, notImplemented: true }, 501);
+
+    const targetChannel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
+      .bind(targetChannelId).first<{ config: string; channel_type: string; tenant_id: number }>();
+    if (!targetChannel) return c.json({ ok: false }, 200);
+
+    const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+      .bind(targetChannel.tenant_id).first<{ d1_database_id: string | null }>();
+    if (!tenantRow?.d1_database_id) return c.json({ ok: false }, 200);
+
+    const tenantDataDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
+    const sourceRows = await tenantDataDb.query<{ title: string | null; content_text: string | null; summary: string | null }>(
+      "SELECT title, content_text, summary FROM content WHERE id = ?",
+      [contentId]
+    );
+    const material = sourceRows[0] || {};
+
+    const genRes = await fetch(`${c.env.CONTENT_URL}/internal/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Internal-Secret": c.env.INTERNAL_SECRET },
+      body: JSON.stringify({
+        tenantId: targetChannel.tenant_id,
+        skillId,
+        material: { title: material.title, content_text: material.content_text, summary: material.summary },
+        targetPlatform: targetChannel.channel_type,
+      }),
+    });
+    if (!genRes.ok) {
+      console.error(JSON.stringify({ event: "ai_rewrite_publish_generate_failed", contentId, targetChannelId, status: genRes.status }));
+      return c.json({ ok: false }, 200);
+    }
+    const { text } = await genRes.json<{ text: string }>();
+
+    if (targetChannel.channel_type !== "X") {
+      console.log(JSON.stringify({ event: "ai_rewrite_publish_unsupported_platform", contentId, targetChannelId, channelType: targetChannel.channel_type }));
+      return c.json({ ok: false }, 200);
+    }
+
+    const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
+    const accessToken = await tokenService.getValidToken(targetChannelId);
+    const postResult = await createPost(accessToken, text);
+
+    console.log(JSON.stringify({ event: "ai_rewrite_publish_x_post", contentId, targetChannelId, ok: postResult.ok, rateLimited: !!postResult.rateLimited }));
+
+    if (postResult.rateLimited) {
+      return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+    }
+    if (!postResult.ok || !postResult.id) {
+      return c.json({ ok: false }, 200);
+    }
+
+    const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, targetChannel.tenant_id);
+    await contentService.recordPublishedContent(targetChannelId, "X", postResult.id, text, {
+      generatedFromContentId: contentId,
+      skillId: skillId || "",
+    });
+
+    return c.json({ ok: true });
   });
 
   // TikTok content sync (internal, no session)

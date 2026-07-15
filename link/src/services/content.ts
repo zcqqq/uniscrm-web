@@ -143,15 +143,21 @@ export class ContentService {
     resolvedProps: Record<string, unknown>,
     channelId: string,
     channelType: ChannelType,
-    emitFlowEvent: boolean
+    emitFlowEvent: boolean,
+    listId?: string
   ): Promise<boolean> {
     const sourceContentId = String(resolvedProps.source_content_id ?? "");
     if (!sourceContentId) throw new Error("upsertContentFromMetadata: missing source_content_id");
 
-    const existing = await this.tenantDb.query<Record<string, unknown> & { id: string }>(
-      `SELECT id, ${CONTENT_TABLE_COLUMNS.join(", ")} FROM content WHERE channel_id = ? AND source_content_id = ?`,
-      [channelId, sourceContentId]
-    );
+    const existing = listId
+      ? await this.tenantDb.query<Record<string, unknown> & { id: string }>(
+          `SELECT id, ${CONTENT_TABLE_COLUMNS.join(", ")} FROM content WHERE channel_id = ? AND source_content_id = ? AND list_id = ?`,
+          [channelId, sourceContentId, listId]
+        )
+      : await this.tenantDb.query<Record<string, unknown> & { id: string }>(
+          `SELECT id, ${CONTENT_TABLE_COLUMNS.join(", ")} FROM content WHERE channel_id = ? AND source_content_id = ? AND list_id IS NULL`,
+          [channelId, sourceContentId]
+        );
     const isNew = existing.length === 0;
     const id = isNew ? crypto.randomUUID() : existing[0].id;
     const now = new Date().toISOString();
@@ -169,19 +175,22 @@ export class ContentService {
     // Iceberg sink; see docs/adr/0002-r2-data-catalog-dedup-via-periodic-compaction.md).
     const unchanged = !isNew && dynamicCols.every((c) => String(columnValues[c]) === String(existing[0][c] ?? ""));
 
-    const insertCols = ["id", "channel_id", "channel_type", "source_content_id", "raw_data", ...dynamicCols, "created_at", "updated_at"];
-    const insertPlaceholders = ["?", "?", "?", "?", "?", ...dynamicCols.map(() => "?"), "?", "?"];
-    const insertParams = [id, channelId, channelType, sourceContentId, rawData, ...dynamicCols.map((c) => columnValues[c]), now, now];
+    const insertCols = ["id", "channel_id", "channel_type", "source_content_id", "list_id", "raw_data", ...dynamicCols, "created_at", "updated_at"];
+    const insertPlaceholders = ["?", "?", "?", "?", "?", "?", ...dynamicCols.map(() => "?"), "?", "?"];
+    const insertParams = [id, channelId, channelType, sourceContentId, listId ?? null, rawData, ...dynamicCols.map((c) => columnValues[c]), now, now];
     const updateSets = [
       "raw_data = json_patch(content.raw_data, excluded.raw_data)",
       "updated_at = excluded.updated_at",
       ...dynamicCols.map((c) => `${c} = excluded.${c}`),
     ];
+    const conflictTarget = listId
+      ? "(channel_id, list_id, source_content_id) WHERE list_id IS NOT NULL"
+      : "(channel_id, source_content_id) WHERE list_id IS NULL";
 
     await this.tenantDb.run(
       `INSERT INTO content (${insertCols.join(", ")})
        VALUES (${insertPlaceholders.join(", ")})
-       ON CONFLICT(channel_id, source_content_id) DO UPDATE SET
+       ON CONFLICT${conflictTarget} DO UPDATE SET
          ${updateSets.join(",\n         ")}`,
       insertParams
     );
@@ -216,6 +225,9 @@ export class ContentService {
       };
       // Only isInsight-marked props reach R2 — free-text fields like title/content_text
       // stay D1-only (raw_data), same rule x-users.ts follows for the user pipeline.
+      // list_id intentionally does not join this record — R2 analytics collapses the same
+      // tweet seen via two lists into one row, which is accepted for this phase (see plan's
+      // Global Constraints).
       for (const prop of INSIGHT_PROPS) {
         if (prop.propId in resolvedProps) record[prop.propId] = resolvedProps[prop.propId];
       }
@@ -230,6 +242,7 @@ export class ContentService {
         eventType: "content.created",
         contentId: id,
         channelId,
+        ...(listId ? { listId } : {}),
         payload: { channel_type: channelType, ...resolvedProps },
       }).catch((err) => {
         console.error(JSON.stringify({ event: "content_flow_queue_send_error", contentId: id, error: String(err) }));

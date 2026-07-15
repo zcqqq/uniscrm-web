@@ -53,8 +53,8 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     expect(isNew).toBe(false);
     expect(tenantDb.run).toHaveBeenCalledWith(
-      expect.stringContaining("ON CONFLICT(channel_id, source_content_id) DO UPDATE SET"),
-      expect.arrayContaining(["existing-uuid"])
+      expect.stringContaining("ON CONFLICT(channel_id, source_content_id) WHERE list_id IS NULL DO UPDATE SET"),
+      expect.arrayContaining(["t1"])
     );
   });
 
@@ -270,6 +270,66 @@ describe("ContentService.upsertContentFromMetadata", () => {
       await expect(
         svc.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1" }, "chan1", "X", true)
       ).resolves.not.toThrow();
+    });
+  });
+
+  describe("per-list dedup (listId param)", () => {
+    it("omits list_id from the SQL and matches today's dedup exactly when listId is not passed", async () => {
+      tenantDb.query.mockResolvedValue([]);
+      await service.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1" }, "chan1", "X", false);
+
+      const [querySql, queryParams] = tenantDb.query.mock.calls[0];
+      expect(querySql).toContain("list_id IS NULL");
+      expect(queryParams).toEqual(["chan1", "t1"]);
+
+      const [insertSql] = tenantDb.run.mock.calls[0];
+      expect(insertSql).toContain("ON CONFLICT(channel_id, source_content_id) WHERE list_id IS NULL DO UPDATE SET");
+    });
+
+    it("scopes the existing-row lookup and conflict target by listId when provided", async () => {
+      tenantDb.query.mockResolvedValue([]);
+      await service.upsertContentFromMetadata({ id: "t2" }, { source_content_id: "t2" }, "chan1", "X", false, "listA");
+
+      const [querySql, queryParams] = tenantDb.query.mock.calls[0];
+      expect(querySql).toContain("list_id = ?");
+      expect(queryParams).toEqual(["chan1", "t2", "listA"]);
+
+      const [insertSql, insertParams] = tenantDb.run.mock.calls[0];
+      expect(insertSql).toContain("ON CONFLICT(channel_id, list_id, source_content_id) WHERE list_id IS NOT NULL DO UPDATE SET");
+      expect(insertParams).toEqual(expect.arrayContaining(["listA"]));
+    });
+
+    it("treats the same source_content_id in two different lists as two separate new rows", async () => {
+      tenantDb.query.mockResolvedValue([]); // both lookups find nothing existing
+      const isNewA = await service.upsertContentFromMetadata({ id: "t3" }, { source_content_id: "t3" }, "chan1", "X", false, "listA");
+      const isNewB = await service.upsertContentFromMetadata({ id: "t3" }, { source_content_id: "t3" }, "chan1", "X", false, "listB");
+
+      expect(isNewA).toBe(true);
+      expect(isNewB).toBe(true);
+      expect(tenantDb.run).toHaveBeenCalledTimes(2);
+    });
+
+    it("includes listId in the emitted content.created message when provided", async () => {
+      const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
+      tenantDb.query.mockResolvedValue([]);
+
+      await svc.upsertContentFromMetadata({ id: "t4" }, { source_content_id: "t4" }, "chan1", "X", true, "listA");
+
+      expect(flowQueue.send).toHaveBeenCalledTimes(1);
+      const [msg] = flowQueue.send.mock.calls[0];
+      expect(msg).toMatchObject({ eventType: "content.created", channelId: "chan1", listId: "listA" });
+    });
+
+    it("omits listId from the emitted message entirely when not provided (not just undefined)", async () => {
+      const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
+      tenantDb.query.mockResolvedValue([]);
+
+      await svc.upsertContentFromMetadata({ id: "t5" }, { source_content_id: "t5" }, "chan1", "X", true);
+
+      const [msg] = flowQueue.send.mock.calls[0];
+      expect("listId" in msg).toBe(false);
     });
   });
 });

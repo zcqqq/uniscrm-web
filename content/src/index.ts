@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import type { Env } from "./types";
 import { internalRoutes } from "./routes-internal";
 import { setTenantLlmCredentials, listConfiguredProviders, deleteTenantLlmCredentials } from "./services/llm-credentials";
+import { listOpenAiModels, listAnthropicModels, listWorkersAiModels } from "./services/model-catalog";
 
 type HonoEnv = { Bindings: Env; Variables: { tenantId: string } };
 
@@ -63,6 +64,25 @@ app.delete("/api/llm-credentials/:provider", async (c) => {
   const provider = c.req.param("provider") as "openai" | "anthropic";
   await deleteTenantLlmCredentials(c.env, tenantId, provider);
   return c.json({ ok: true });
+});
+
+app.use("/api/llm-models", sessionAuth);
+
+app.post("/api/llm-models", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
+  const { provider, apiKey } = await c.req.json<{ provider: "openai" | "anthropic" | "default"; apiKey?: string }>();
+
+  try {
+    if (provider === "default") {
+      return c.json({ models: await listWorkersAiModels(c.env) });
+    }
+    if (!apiKey) return c.json({ error: "apiKey required for this provider" }, 400);
+    const models = provider === "openai" ? await listOpenAiModels(apiKey) : await listAnthropicModels(apiKey);
+    return c.json({ models });
+  } catch (err) {
+    console.error(JSON.stringify({ event: "llm_models_list_failed", tenantId, provider, error: String(err) }));
+    return c.json({ error: "Could not fetch model list" }, 502);
+  }
 });
 
 export default {

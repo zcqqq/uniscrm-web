@@ -306,6 +306,41 @@ app.post("/internal/trigger", async (c) => {
   return c.json({ triggered: results.length, results });
 });
 
+// Internal: which (channel, list) pairs any published flow's xContentTrigger List Posts
+// node currently wants polled. link's cron pulls this before each polling cycle — flow's
+// graph_json is the sole source of truth, nothing is persisted on link's side for this.
+app.get("/internal/list-watches", async (c) => {
+  const secret = c.req.header("X-Internal-Secret");
+  if (secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
+
+  const rows = await c.env.FLOW_DB.prepare(
+    `SELECT graph_json FROM flows WHERE status = 'published' AND graph_json LIKE '%xContentTrigger%'`
+  ).all<{ graph_json: string }>();
+
+  const seen = new Set<string>();
+  const watches: { channelId: string; listId: string }[] = [];
+  for (const row of rows.results) {
+    let graph: FlowGraph;
+    try {
+      graph = JSON.parse(row.graph_json);
+    } catch {
+      continue;
+    }
+    for (const node of graph.nodes) {
+      if (node.type !== "xContentTrigger" || node.data.mode !== "list_posts") continue;
+      const channelId = node.data.channelId as string;
+      const listId = node.data.listId as string;
+      if (!channelId || !listId) continue;
+      const key = `${channelId}:${listId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      watches.push({ channelId, listId });
+    }
+  }
+
+  return c.json({ watches });
+});
+
 // Auth proxy
 app.get("/api/auth/me", async (c) => {
   const webUrl = c.env.WEB_URL;

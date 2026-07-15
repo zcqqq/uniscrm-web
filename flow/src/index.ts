@@ -345,6 +345,15 @@ app.get("/api/channels", async (c) => {
   });
 });
 
+// Proxy skills from content worker
+app.get("/api/skills", async (c) => {
+  const res = await fetch(`${c.env.CONTENT_URL}/api/skills`);
+  return new Response(await res.text(), {
+    status: res.status,
+    headers: { "Content-Type": "application/json" },
+  });
+});
+
 // List flows
 app.get("/api/flows", async (c) => {
   const tenantId = c.get("tenantId");

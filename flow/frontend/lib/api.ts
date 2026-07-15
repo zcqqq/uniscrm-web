@@ -37,6 +37,11 @@ export interface ChannelOption {
   username: string;
 }
 
+export interface SkillOption {
+  id: string;
+  label: string;
+}
+
 // Per-channelType cache so the "auto-fill the only connected account" logic (template load,
 // manual node add, Inspector open) doesn't fire a redundant /api/channels request each time.
 const channelListCache: Record<string, Promise<ChannelOption[]>> = {};
@@ -89,5 +94,8 @@ export const api = {
   lists: {
     list: () =>
       request<{ lists: { id: string; name: string; user_count: number }[] }>(`/api/lists`),
+  },
+  skills: {
+    list: () => request<{ skills: SkillOption[] }>("/api/skills"),
   },
 };

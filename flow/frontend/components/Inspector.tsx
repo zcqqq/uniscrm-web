@@ -483,16 +483,36 @@ function AiRewritePublishInspector({ nodeId, data }: { nodeId: string; data: Rec
   const { updateNodeData } = useFlowEditor();
   const [channelType, setChannelType] = useState<string>(data.channelType || "");
   const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
+  const [skills, setSkills] = useState<{ id: string; label: string }[]>([]);
 
   useEffect(() => {
     if (!channelType) { setChannels([]); return; }
     api.channels.list(channelType).then(setChannels).catch(() => setChannels([]));
   }, [channelType]);
 
+  useEffect(() => {
+    api.skills.list().then((res) => setSkills(res.skills)).catch(() => setSkills([]));
+  }, []);
+
   return (
     <div>
       <h4 className="text-sm font-semibold text-primary mb-3">AI Rewrite &amp; Publish</h4>
       <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Skill</Label>
+          {skills.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">Loading skills...</p>
+          ) : (
+            <Select
+              value={data.skillId || ""}
+              onChange={(e: SelectChange) => updateNodeData(nodeId, { skillId: e.target.value })}
+              className="w-full text-sm"
+            >
+              <option value="">Select skill...</option>
+              {skills.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </Select>
+          )}
+        </div>
         <div>
           <Label className="text-xs block mb-1">Target Platform</Label>
           <Select

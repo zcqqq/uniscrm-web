@@ -5,58 +5,52 @@ import * as credentialsModule from "../src/services/llm-credentials";
 describe("generateContent", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  const material = { title: "Big launch", content_text: "We shipped a thing today.", summary: undefined };
-  const baseParams = { tenantId: 1, skillId: "punchy-social", material, targetPlatform: "X" as const };
+  const baseParams = { tenantId: 1, prompt: "Rewrite this in a punchy tone: We shipped a thing today.", provider: "default" as const };
 
-  it("throws for an unknown skillId", async () => {
-    await expect(
-      generateContent({} as any, { ...baseParams, skillId: "nope" })
-    ).rejects.toThrow("Unknown skill: nope");
+  it("uses Workers AI for provider: 'default'", async () => {
+    const aiRun = vi.fn().mockResolvedValue({ response: "punchy text" });
+    const text = await generateContent({ AI: { run: aiRun } } as any, baseParams);
+    expect(text).toBe("punchy text");
+    expect(aiRun).toHaveBeenCalledWith(
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      expect.objectContaining({ messages: expect.arrayContaining([{ role: "user", content: baseParams.prompt }]) })
+    );
   });
 
-  it("uses the tenant's BYOK provider when credentials exist", async () => {
-    vi.spyOn(credentialsModule, "getTenantLlmCredentials").mockResolvedValue({ provider: "openai", apiKey: "sk-test" });
+  it("uses the tenant's OpenAI BYOK credentials for provider: 'openai'", async () => {
+    vi.spyOn(credentialsModule, "getTenantLlmCredentials").mockResolvedValue({ apiKey: "sk-test", model: "gpt-4o-mini" });
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ choices: [{ message: { content: "byok text" } }] }), { status: 200 })
+      new Response(JSON.stringify({ choices: [{ message: { content: "openai text" } }] }), { status: 200 })
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const text = await generateContent({} as any, baseParams);
+    const text = await generateContent({} as any, { ...baseParams, provider: "openai" });
 
-    expect(text).toBe("byok text");
-    expect(fetchMock).toHaveBeenCalledWith("https://api.openai.com/v1/chat/completions", expect.anything());
+    expect(text).toBe("openai text");
+    expect(credentialsModule.getTenantLlmCredentials).toHaveBeenCalledWith(expect.anything(), 1, "openai");
     vi.unstubAllGlobals();
   });
 
-  it("falls back to Workers AI when the tenant has no BYOK credentials", async () => {
-    vi.spyOn(credentialsModule, "getTenantLlmCredentials").mockResolvedValue(null);
-    const aiRun = vi.fn().mockResolvedValue({ response: "fallback text" });
+  it("uses the tenant's Anthropic BYOK credentials for provider: 'anthropic'", async () => {
+    vi.spyOn(credentialsModule, "getTenantLlmCredentials").mockResolvedValue({ apiKey: "sk-ant-test", model: "claude-3-5-haiku-latest" });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ content: [{ type: "text", text: "anthropic text" }] }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
 
-    const text = await generateContent({ AI: { run: aiRun } } as any, baseParams);
+    const text = await generateContent({} as any, { ...baseParams, provider: "anthropic" });
 
-    expect(text).toBe("fallback text");
-  });
-
-  it("falls back to Workers AI when the BYOK call throws", async () => {
-    vi.spyOn(credentialsModule, "getTenantLlmCredentials").mockResolvedValue({ provider: "openai", apiKey: "sk-bad" });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("unauthorized", { status: 401 })));
-    const aiRun = vi.fn().mockResolvedValue({ response: "fallback text" });
-
-    const text = await generateContent({ AI: { run: aiRun } } as any, baseParams);
-
-    expect(text).toBe("fallback text");
+    expect(text).toBe("anthropic text");
     vi.unstubAllGlobals();
   });
 
-  it("includes the skill's systemPrompt and the material as the user prompt", async () => {
+  it("throws clearly (no silent fallback) when provider: 'openai' has no configured credentials", async () => {
     vi.spyOn(credentialsModule, "getTenantLlmCredentials").mockResolvedValue(null);
-    const aiRun = vi.fn().mockResolvedValue({ response: "text" });
+    await expect(generateContent({} as any, { ...baseParams, provider: "openai" })).rejects.toThrow(/No openai credentials configured/);
+  });
 
-    await generateContent({ AI: { run: aiRun } } as any, baseParams);
-
-    const [, callArgs] = aiRun.mock.calls[0];
-    expect(callArgs.messages[0].content).toContain("punchy");
-    expect(callArgs.messages[1].content).toContain("Big launch");
-    expect(callArgs.messages[1].content).toContain("We shipped a thing today.");
+  it("throws clearly (no silent fallback) when provider: 'anthropic' has no configured credentials", async () => {
+    vi.spyOn(credentialsModule, "getTenantLlmCredentials").mockResolvedValue(null);
+    await expect(generateContent({} as any, { ...baseParams, provider: "anthropic" })).rejects.toThrow(/No anthropic credentials configured/);
   });
 });

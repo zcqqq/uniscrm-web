@@ -1,3 +1,3 @@
 export interface LlmProvider {
-  generate(systemPrompt: string, userPrompt: string): Promise<string>;
+  generate(prompt: string): Promise<string>;
 }

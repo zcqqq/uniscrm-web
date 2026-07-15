@@ -6,16 +6,13 @@ describe("WorkersAiProvider", () => {
     const aiRun = vi.fn().mockResolvedValue({ response: "generated text" });
     const provider = new WorkersAiProvider({ run: aiRun } as any);
 
-    const text = await provider.generate("system prompt", "user prompt");
+    const text = await provider.generate("user prompt");
 
     expect(text).toBe("generated text");
     expect(aiRun).toHaveBeenCalledWith(
       "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
       {
-        messages: [
-          { role: "system", content: "system prompt" },
-          { role: "user", content: "user prompt" },
-        ],
+        messages: [{ role: "user", content: "user prompt" }],
         stream: false,
       }
     );

@@ -11,22 +11,19 @@ describe("OpenAiProvider", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const provider = new OpenAiProvider("sk-test");
-    const text = await provider.generate("system prompt", "user prompt");
+    const text = await provider.generate("user prompt");
 
     expect(text).toBe("generated text");
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.openai.com/v1/chat/completions");
     expect(init.headers.Authorization).toBe("Bearer sk-test");
     const body = JSON.parse(init.body);
-    expect(body.messages).toEqual([
-      { role: "system", content: "system prompt" },
-      { role: "user", content: "user prompt" },
-    ]);
+    expect(body.messages).toEqual([{ role: "user", content: "user prompt" }]);
   });
 
   it("throws with the response body on a non-ok response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("bad key", { status: 401 })));
     const provider = new OpenAiProvider("sk-bad");
-    await expect(provider.generate("s", "u")).rejects.toThrow("OpenAI generate failed: 401");
+    await expect(provider.generate("u")).rejects.toThrow("OpenAI generate failed: 401");
   });
 });

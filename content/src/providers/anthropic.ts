@@ -5,7 +5,7 @@ const MODEL = "claude-3-5-haiku-latest";
 export class AnthropicProvider implements LlmProvider {
   constructor(private apiKey: string) {}
 
-  async generate(systemPrompt: string, userPrompt: string): Promise<string> {
+  async generate(prompt: string): Promise<string> {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -16,8 +16,7 @@ export class AnthropicProvider implements LlmProvider {
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 1024,
-        system: systemPrompt,
-        messages: [{ role: "user", content: userPrompt }],
+        messages: [{ role: "user", content: prompt }],
       }),
     });
 

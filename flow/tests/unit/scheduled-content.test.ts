@@ -139,10 +139,12 @@ describe("scheduled(): content_flow_pending retry_action handling", () => {
       { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
       { id: "a1", type: "action", data: { actionType: "aiRewritePublish", channelId: "chan-1", skillId: "punchy-social" }, position: { x: 200, y: 0 } },
       { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 400, y: 0 } },
+      { id: "a3", type: "action", data: { actionType: "updateContentStatus", status: "ignored" }, position: { x: 400, y: 100 } },
     ],
     edges: [
       { id: "e1", source: "t1", target: "a1" },
       { id: "e2", source: "a1", target: "a2", sourceHandle: "success" },
+      { id: "e3", source: "a1", target: "a3", sourceHandle: "failed" },
     ],
   });
 
@@ -192,6 +194,36 @@ describe("scheduled(): content_flow_pending retry_action handling", () => {
     expect(remaining).toBeNull();
 
     const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-retry1' AND content_id = 'content-retry-2'`).first<{ c: number }>();
+    expect(execCount?.c).toBeGreaterThanOrEqual(1);
+  });
+
+  it("resolves the failed branch once rate-limit retries are exhausted (retry_count >= 5)", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-retry1', 1, 'retry flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBranches).run();
+
+    const action = { type: "aiRewritePublish", nodeId: "a1", hasBranches: true, targetChannelId: "chan-1", skillId: "punchy-social" };
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+       VALUES ('pend-retry-3', 'flow-retry1', '', 'content-retry-3', 1, '{}', ?, datetime('now'), ?, 5)`
+    ).bind(past, JSON.stringify(action)).run();
+
+    // Still rate-limited on this final attempt too — retry_count (5) is no longer < 5, so this
+    // must exhaust and resolve the "failed" branch (a3: updateContentStatus status:"ignored"),
+    // not just silently delete the row.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, rateLimited: true, rateLimitReset: "2099-01-01T00:00:00.000Z" }), { status: 429 }))
+    );
+
+    await worker.scheduled({} as any, env);
+
+    const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE id = 'pend-retry-3'`).first();
+    expect(remaining).toBeNull();
+
+    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-retry1' AND content_id = 'content-retry-3'`).first<{ c: number }>();
     expect(execCount?.c).toBeGreaterThanOrEqual(1);
   });
 });

@@ -959,10 +959,35 @@ export default {
             ).bind(rateLimited[0].retryAt, row.retry_count + 1, row.id).run();
             console.log(JSON.stringify({ event: "content_flow_retry_rescheduled", id: row.id, retryCount: row.retry_count + 1 }));
           } else {
-            await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE id = ?`).bind(row.id).run();
             if (rateLimited.length > 0) {
+              // Retries exhausted (retry_count >= 5, still rate-limited): resolve the "failed"
+              // branch downstream of the retried action, mirroring the resolved-branch handling
+              // below (lines ~983-1004) — mustn't just drop the row per flow/CLAUDE.md's
+              // "Rate limit重试耗尽后才走failed分支" rule.
+              const failedResult = resumeFromNode(graph, action.nodeId as string, payload, "failed");
+              if (failedResult.actions.length > 0) {
+                const { rateLimited: nestedRateLimited } = await executeContentActions(graph, failedResult.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
+                await env.FLOW_DB.prepare(
+                  `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+                   VALUES (?, ?, ?, ?, 1, ?)`
+                ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, now).run();
+                for (const rl of nestedRateLimited) {
+                  await env.FLOW_DB.prepare(
+                    `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+                     VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 0)`
+                  ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, row.payload, rl.retryAt, now, JSON.stringify(rl.action)).run();
+                }
+              }
+              for (const wait of failedResult.pendingWaits) {
+                const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
+                await env.FLOW_DB.prepare(
+                  `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                ).bind(crypto.randomUUID(), row.flow_id, wait.nodeId, row.content_id, row.tenant_id, row.payload, executeAt, now, wait.awaitingEvent || "").run();
+              }
               console.log(JSON.stringify({ event: "content_flow_retry_exhausted", id: row.id, retryCount: row.retry_count }));
             }
+            await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE id = ?`).bind(row.id).run();
           }
           continue;
         }

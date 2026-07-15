@@ -71,7 +71,7 @@ sequenceDiagram
     LW-->>FW: { ok:true } | { ok:false } | { ok:false, rateLimited:true, rateLimitReset }
     alt rateLimited
         FW->>CFP: INSERT content_flow_pending (retry_action, retry_count: 0)
-        Note over FW,CFP: scheduled() sweep retries at rateLimitReset;<br/>retry_count < 5 reschedules, otherwise row is deleted with no failed-branch dispatch<br/>(NB: diverges from flow/CLAUDE.md's "重试耗尽后才走failed分支" rule — exhaustion currently gives up silently instead)
+        Note over FW,CFP: scheduled() sweep retries at rateLimitReset;<br/>retry_count < 5 reschedules;<br/>retry_count >= 5 resolves resumeFromNode(graph, nodeId, payload, "failed") before deleting the row<br/>(per flow/CLAUDE.md's "重试耗尽后才走failed分支" rule)
     else resolved (ok or non-rate-limited failure)
         FW->>FW: resumeFromNode(graph, nodeId, payload, ok ? "success" : "failed")
         opt resumed branch includes updateContentStatus action

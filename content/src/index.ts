@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import type { Env } from "./types";
 import { internalRoutes } from "./routes-internal";
 import { SKILL_CATALOG } from "./skills";
-import { getTenantLlmCredentials, setTenantLlmCredentials, hasTenantLlmCredentials } from "./services/llm-credentials";
+import { setTenantLlmCredentials, hasTenantLlmCredentials } from "./services/llm-credentials";
 
 type HonoEnv = { Bindings: Env; Variables: { tenantId: string } };
 

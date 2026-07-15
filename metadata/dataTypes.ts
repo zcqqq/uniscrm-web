@@ -52,6 +52,10 @@ export interface UserMetadata {
 export interface ContentMetadata {
   linkPrefix?: string; //返回body嵌套太复杂时使用，少点代码
   sourceContentType: string;
+  flowType?: string; //trigger or action
+  price?: number; //价格/官方费用
+  label?: LocalizedString;
+  description?: LocalizedString;
   contentProps: PropMapping[];
 }
 

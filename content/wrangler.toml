@@ -1,0 +1,61 @@
+name = "content"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "none"
+run_worker_first = true
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+invocation_logs = true
+
+[env.dev]
+name = "content-dev"
+routes = [{ pattern = "content-dev.uni-scrm.com", custom_domain = true }]
+
+[env.dev.vars]
+WEB_URL = "https://web-dev.uni-scrm.com"
+INTERNAL_SECRET = "dev-internal-secret"
+
+[[env.dev.d1_databases]]
+binding = "CONTENT_DB"
+database_name = "uniscrm-content-dev"
+database_id = "e359f919-c260-43ce-98a8-7db1e3845c7d"
+migrations_dir = "migrations"
+
+[env.dev.ai]
+binding = "AI"
+
+[[env.dev.secrets_store_secrets]]
+binding = "ENCRYPTION_KEY"
+store_id = "358a0014b2254c2eafb877e4182fd977"
+secret_name = "uniscrm-content-encryption-key-dev"
+
+[env.production]
+name = "content"
+routes = [{ pattern = "content.uni-scrm.com", custom_domain = true }]
+
+[env.production.vars]
+WEB_URL = "https://web.uni-scrm.com"
+INTERNAL_SECRET = "prod-internal-secret-change-me"
+
+[[env.production.d1_databases]]
+binding = "CONTENT_DB"
+database_name = "uniscrm-content"
+database_id = "4816dc5e-1e6e-40b3-b24e-16469f1d7542"
+migrations_dir = "migrations"
+
+[env.production.ai]
+binding = "AI"
+
+[[env.production.secrets_store_secrets]]
+binding = "ENCRYPTION_KEY"
+store_id = "358a0014b2254c2eafb877e4182fd977"
+secret_name = "uniscrm-content-encryption-key"

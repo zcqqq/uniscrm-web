@@ -1421,7 +1421,7 @@ git commit -m "feat(flow): interpolate \$content.xxx into xContentAction's promp
 - Modify: `flow/frontend/lib/api.ts`
 
 **Interfaces:**
-- Consumes: `GET /api/llm-providers` (Task 8), `ContentMetadata_X` (Task 1, imported directly).
+- Consumes: `GET /api/llm-providers` (Task 8), `ContentActionMetadata_X` (Task 1, imported directly).
 - Produces: a working `xContentAction` node + Inspector with Operation/Prompt/Provider/Target Platform/Target Account fields. Leaf task for this plan's frontend surface.
 
 - [ ] **Step 1: Rename in `flow/frontend/nodes/ActionNode.tsx`**
@@ -1541,10 +1541,10 @@ Replace with:
 Find the whole `AiRewritePublishInspector` function and replace it with:
 
 ```tsx
-import { ContentMetadata_X } from "../../../metadata/x";
+import { ContentActionMetadata_X } from "../../../metadata/x";
 import { t as localizeLabel } from "../../../metadata/locale";
 
-const CONTENT_ACTION_OPERATIONS = ContentMetadata_X.filter((m) => m.flowType === "action");
+const CONTENT_ACTION_OPERATIONS = ContentActionMetadata_X.filter((m) => m.flowType === "action");
 
 function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();

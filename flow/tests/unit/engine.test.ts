@@ -57,17 +57,17 @@ describe("collectActions: new content-domain action types", () => {
     expect(result.actions).toEqual([{ type: "repost", nodeId: "a1", hasBranches: true }]);
   });
 
-  it("collects an aiRewritePublish action carrying its target channel and skill", () => {
+  it("collects an xContentAction action carrying its target channel, prompt, and provider", () => {
     const graph: FlowGraph = {
       nodes: [
         { id: "t1", type: "contentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
-        { id: "a1", type: "action", data: { actionType: "aiRewritePublish", channelId: "tiktok-chan-1", skillId: "punchy-social" }, position: { x: 200, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "tiktok-chan-1", prompt: "Rewrite this: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
     };
     const result = executeFlow(graph, "content.created", {});
     expect(result.actions).toEqual([
-      { type: "aiRewritePublish", nodeId: "a1", hasBranches: true, targetChannelId: "tiktok-chan-1", skillId: "punchy-social" },
+      { type: "xContentAction", nodeId: "a1", hasBranches: true, targetChannelId: "tiktok-chan-1", prompt: "Rewrite this: $content.content_text", provider: "default" },
     ]);
   });
 
@@ -95,7 +95,7 @@ describe("resumeFromNode: action branch targets get full actionData", () => {
   it("populates status on an updateContentStatus branch target (not just {type})", () => {
     const graph: FlowGraph = {
       nodes: [
-        { id: "a1", type: "action", data: { actionType: "aiRewritePublish", channelId: "chan-1", skillId: "punchy-social" }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-1", prompt: "Rewrite this: $content.content_text", provider: "default" }, position: { x: 0, y: 0 } },
         { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "a1", target: "a2", sourceHandle: "success" }],
@@ -109,7 +109,7 @@ describe("resumeFromNode: action branch targets get full actionData", () => {
   it("continues traversal past a non-branching action branch target", () => {
     const graph: FlowGraph = {
       nodes: [
-        { id: "a1", type: "action", data: { actionType: "aiRewritePublish", channelId: "chan-1" }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-1" }, position: { x: 0, y: 0 } },
         { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
         { id: "a3", type: "action", data: { actionType: "addToList", listId: "l1" }, position: { x: 400, y: 0 } },
       ],

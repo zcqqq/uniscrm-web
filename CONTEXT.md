@@ -35,3 +35,11 @@ _Avoid_: assuming all sortable tables in this codebase manage their own state th
 **Compaction**:
 The periodic job (in `analytics/compactor`, run daily from the `analytics` Worker's cron) that rewrites an R2 Data Catalog table down to one row per business key (e.g. `tenant_id`+`channel_id`+`source_user_id` for `uniscrm.user`, `tenant_id`+`channel_id`+`source_content_id` for `uniscrm.content`), keeping the latest by `updated_at`. Exists because R2 Pipelines sinks are append-only (no upsert/merge on write) — every poller/webhook write that resends an unchanged row becomes a duplicate row in the Iceberg table, so periodic compaction is the only place dedup actually happens for these tables.
 _Avoid_: dedup job, cleanup job. Also distinct from Cloudflare's native R2 Data Catalog "compaction" feature (`wrangler r2 bucket catalog compaction enable`), which only merges small Parquet files for query performance and does not do row-level dedup.
+
+**`flow_log` / `content_flow_log`**:
+R2 Data Catalog (Iceberg) tables, one row per node enter/exit event during a flow's execution — `flow_log` keyed by `user_id` (user-domain flows), `content_flow_log` keyed by `content_id` (content-domain flows). Both are shared, multi-tenant tables (`tenant_id` is a plain filterable column, like `uniscrm.user`/`uniscrm.content`), not per-tenant. These are the detail/event-level record — R2-only, no D1 counterpart.
+_Avoid_: flow_node_log, node log (the table name is exactly `flow_log`/`content_flow_log`, not a longer descriptive name).
+
+**`flow_counts` / `content_flow_counts`**:
+Per-tenant D1 tables holding precomputed, all-time totals — one row per `(flow_id, node_id, direction)` — recomputed every minute by re-aggregating the entirety of `flow_log`/`content_flow_log` (full history, overwrite, not incremental) and fanning the results out to each active tenant's own D1. Exists purely so a flow editor's live per-node badges can be a cheap D1 read instead of a live R2 aggregation query on every page load.
+_Avoid_: flow_log_counts, analytics table — these are counts, not logs; keep the two concepts (event detail vs. precomputed aggregate) named distinctly.

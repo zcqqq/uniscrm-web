@@ -278,6 +278,7 @@ const authMiddleware = async (c: any, next: any) => {
 app.use("/api/flows", authMiddleware);
 app.use("/api/flows/*", authMiddleware);
 app.use("/api/channels", authMiddleware);
+app.use("/api/channels/*", authMiddleware);
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
@@ -377,6 +378,19 @@ app.get("/api/channels", async (c) => {
   const linkUrl = c.env.LINK_URL;
   const type = c.req.query("type") || "";
   const res = await fetch(`${linkUrl}/api/channels?type=${type}`, {
+    headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
+  });
+  return new Response(await res.text(), {
+    status: res.status,
+    headers: { "Content-Type": "application/json" },
+  });
+});
+
+// Proxy X owned-lists lookup from link worker (for the xContentTrigger List Posts dropdown)
+app.get("/api/channels/:channelId/x-lists", async (c) => {
+  const linkUrl = c.env.LINK_URL;
+  const channelId = c.req.param("channelId");
+  const res = await fetch(`${linkUrl}/api/channels/x/${channelId}/lists`, {
     headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
   });
   return new Response(await res.text(), {

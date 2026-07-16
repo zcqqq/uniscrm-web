@@ -11,6 +11,8 @@ import {
 } from "./channels/shopify";
 import { encrypt } from "./services/crypto";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
+import { XTokenService } from "./services/x-token";
+import { fetchOwnedLists } from "./services/x-posts-api";
 
 export function channelsRoutes() {
   const router = new Hono<{ Bindings: Env }>();
@@ -43,6 +45,30 @@ export function channelsRoutes() {
     if (!row) return c.json({ connected: false, has_byok: hasByok });
     const config = JSON.parse(row.config) as { x_username?: string };
     return c.json({ connected: true, username: config.x_username, channel_id: row.id, created_at: row.created_at, has_byok: hasByok });
+  });
+
+  router.get("/x/:channelId/lists", async (c) => {
+    const tenantId = c.get("tenantId" as never) as number;
+    const channelId = c.req.param("channelId");
+    const row = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE id = ? AND tenant_id = ? AND channel_type = 'X' AND is_active = 1")
+      .bind(channelId, tenantId)
+      .first<{ config: string }>();
+    if (!row) return c.json({ error: "Channel not found" }, 404);
+
+    const config = JSON.parse(row.config) as ByokConfig & { x_user_id?: string };
+    if (!config.is_byok || !config.x_user_id) return c.json({ lists: [] });
+
+    try {
+      const creds = await getAppCredentials(c.env, config);
+      const tokenService = new XTokenService(c.env.LINK_DB, creds.clientId, creds.clientSecret);
+      const accessToken = await tokenService.getValidToken(channelId);
+      const lists = await fetchOwnedLists(accessToken, config.x_user_id);
+      return c.json({ lists });
+    } catch (e) {
+      console.error(JSON.stringify({ event: "fetch_owned_lists_error", channel_id: channelId, error: String(e) }));
+      return c.json({ lists: [] });
+    }
   });
 
   router.delete("/x", async (c) => {

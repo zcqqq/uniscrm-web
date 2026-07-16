@@ -338,3 +338,85 @@ describe("queue(): xContentAction branch resolution", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("queue(): tiktokContentAction dispatch", () => {
+  afterEach(async () => {
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-tiktok1'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-tiktok1'`).run();
+    vi.unstubAllGlobals();
+  });
+
+  it("interpolates $content.xxx fields and calls link's /internal/tiktok/photo-post with all node fields", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const graphWithTikTok = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        {
+          id: "a1", type: "action",
+          data: {
+            actionType: "tiktokContentAction", channelId: "tiktok-chan-1",
+            prompts: { title: "Title: $content.title", description: "Desc: $content.content_text", message_image: "Photo of: $content.title" },
+            textProvider: "default", imageCount: 3, imageProvider: "default",
+          },
+          position: { x: 200, y: 0 },
+        },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-tiktok1', 1, 'tiktok flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithTikTok).run();
+
+    await worker.queue(
+      makeBatch({
+        tenantId: "1", eventType: "content.created", contentId: "content-tt-1", channelId: "src-chan",
+        payload: { title: "Original Title", content_text: "original body text" },
+      }),
+      env
+    );
+
+    const call = fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/internal/tiktok/photo-post"));
+    expect(call).toBeDefined();
+    const body = JSON.parse(call![1].body as string);
+    expect(body.prompts.title).toBe("Title: Original Title");
+    expect(body.prompts.description).toBe("Desc: original body text");
+    expect(body.prompts.message_image).toBe("Photo of: Original Title");
+    expect(body.imageCount).toBe(3);
+    expect(body.imageProvider).toBe("default");
+    expect(body.channelId).toBe("tiktok-chan-1");
+  });
+
+  it("schedules a content_flow_pending retry row when link reports rateLimited", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, rateLimited: true, rateLimitReset: "2099-01-01T00:00:00.000Z" }), { status: 429 }))
+    );
+
+    const graphWithTikTok = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "tiktokContentAction", channelId: "tiktok-chan-1", prompts: { title: "t", description: "d", message_image: "i" }, textProvider: "none", imageProvider: "default" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-tiktok1', 1, 'tiktok flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithTikTok).run();
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-tt-2", channelId: "src-chan", payload: {} }),
+      env
+    );
+
+    const pending = await env.FLOW_DB.prepare(
+      `SELECT retry_action FROM content_flow_pending WHERE flow_id = 'flow-tiktok1' AND content_id = 'content-tt-2'`
+    ).first<{ retry_action: string }>();
+    expect(JSON.parse(pending?.retry_action || "{}")).toMatchObject({ type: "tiktokContentAction" });
+
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-tiktok1'`).run();
+  });
+});

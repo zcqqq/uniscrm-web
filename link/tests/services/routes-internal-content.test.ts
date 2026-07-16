@@ -152,12 +152,13 @@ describe("stub content-flow action endpoints", () => {
     expect(tenantDataDbRunMock).toHaveBeenCalledTimes(1); // recordPublishedContent wrote the new content row
     const [insertSql, insertParams] = tenantDataDbRunMock.mock.calls[0] as [string, unknown[]];
     expect(insertSql).toMatch(/INSERT INTO content/);
-    // [id, channelId, channelType, sourceContentId, contentText, status, raw_data, created_at, updated_at]
+    // [id, channelId, channelType, contentType, sourceContentId, contentText, status, raw_data, created_at, updated_at]
     expect(insertParams[1]).toBe("tgt-chan"); // target channel id
     expect(insertParams[2]).toBe("X"); // channel_type
-    expect(insertParams[3]).toBe("tweet-999"); // source_content_id = new tweet's id
-    expect(insertParams[4]).toBe("generated post text"); // content_text
-    expect(JSON.parse(insertParams[6] as string)).toEqual({
+    expect(insertParams[3]).toBe("TWEET"); // content_type (default value)
+    expect(insertParams[4]).toBe("tweet-999"); // source_content_id = new tweet's id
+    expect(insertParams[5]).toBe("generated post text"); // content_text
+    expect(JSON.parse(insertParams[7] as string)).toEqual({
       generatedFromContentId: "content-1",
       flowId: "flow-1",
     });

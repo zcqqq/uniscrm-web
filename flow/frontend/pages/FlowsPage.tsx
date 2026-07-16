@@ -19,7 +19,7 @@ import { XIcon } from "../../../shared/frontend/ui/icons";
 
 function getNodeIcon(type: string, data: Record<string, unknown>) {
   if (type === "xTrigger") return XIcon;
-  if (type === "contentTrigger") return FileTextIcon;
+  if (type === "xContentTrigger") return FileTextIcon;
   if (type === "waitForEvent") return SearchIcon;
   if (type === "wait") return ClockIcon;
   if (type === "action") {

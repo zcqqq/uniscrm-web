@@ -34,7 +34,7 @@ function DraggableItem({ type, label, description, color, icon }: DraggableItemP
 
 export default function Sidebar() {
   const nodes = useFlowEditor((s) => s.nodes);
-  const domain: Domain = nodes.some((n) => n.type === "contentTrigger") ? "content" : "user";
+  const domain: Domain = nodes.some((n) => n.type === "xContentTrigger") ? "content" : "user";
   const visible = (itemDomain: Domain) => itemDomain === "both" || itemDomain === domain;
 
   return (
@@ -55,7 +55,7 @@ export default function Sidebar() {
           <DraggableItem type="cronTrigger" label="Cron Trigger" description="Trigger on a schedule" color="border-primary/30 bg-primary/5" icon="⏰" />
         )}
         {visible("content") && (
-          <DraggableItem type="contentTrigger" label="Content Trigger" description="Trigger on new content" color="border-primary/30 bg-primary/5" icon="📄" />
+          <DraggableItem type="xContentTrigger" label="X Content Trigger" description="Trigger on new X content" color="border-primary/30 bg-primary/5" icon="𝕏" />
         )}
       </div>
 

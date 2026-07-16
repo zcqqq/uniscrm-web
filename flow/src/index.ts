@@ -403,7 +403,7 @@ app.get("/api/flows", async (c) => {
   const limit = Math.min(50, Math.max(1, parseInt(c.req.query("limit") || "10", 10)));
   const offset = (page - 1) * limit;
   const domain = c.req.query("domain") === "content" ? "content" : "user";
-  const domainClause = domain === "content" ? "AND f.graph_json LIKE '%contentTrigger%'" : "AND f.graph_json NOT LIKE '%contentTrigger%'";
+  const domainClause = domain === "content" ? "AND f.graph_json LIKE '%xContentTrigger%'" : "AND f.graph_json NOT LIKE '%xContentTrigger%'";
 
   const countRow = await c.env.FLOW_DB.prepare(
     `SELECT COUNT(*) as total FROM flows f WHERE f.tenant_id = ? ${domainClause}`
@@ -968,7 +968,7 @@ export default {
     }
 
     // content_flow_pending sweep: resumes wait/timeCondition/abSplit nodes downstream of a
-    // contentTrigger, mirroring the flow_pending sweep below but for the content domain (Task 5's
+    // xContentTrigger, mirroring the flow_pending sweep below but for the content domain (Task 5's
     // executeContentActions + content_flow_executions, keyed by content_id instead of user_id).
     // Placed before the flow_pending sweep (rather than strictly after it, per the plan) so that
     // the flow_pending sweep's own early return on an empty flow_pending table can't skip this

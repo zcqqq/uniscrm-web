@@ -52,9 +52,9 @@ function isValidConnection(source: Node | undefined, target: Node | undefined): 
   if (!source || !target) return false;
   const targetType = target.type;
   const sourceType = source.type;
-  if (targetType === "xTrigger" || targetType === "cronTrigger" || targetType === "contentTrigger") return false;
+  if (targetType === "xTrigger" || targetType === "cronTrigger" || targetType === "xContentTrigger") return false;
   const validTargets = ["action", "wait", "waitForEvent", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps"];
-  const validSources = ["xTrigger", "cronTrigger", "contentTrigger", "wait", "waitForEvent", "action", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps"];
+  const validSources = ["xTrigger", "cronTrigger", "xContentTrigger", "wait", "waitForEvent", "action", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps"];
   if (validSources.includes(sourceType!) && validTargets.includes(targetType!)) return true;
   return false;
 }
@@ -132,9 +132,9 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
       } else if (type === "updateContentStatus") {
         data = { actionType: type, status: "" };
       }
-    } else if (type === "contentTrigger") {
-      nodeType = "contentTrigger";
-      data = { conditions: [] };
+    } else if (type === "xContentTrigger") {
+      nodeType = "xContentTrigger";
+      data = { channelId: "", mode: "my_posts", listId: "", listName: "", conditions: [] };
     } else {
       return;
     }

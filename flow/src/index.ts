@@ -20,6 +20,21 @@ async function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string,
   await env.PIPELINE_FLOW_LOG?.send(records).catch(() => {});
 }
 
+async function emitContentNodeLogs(nodeLogs: NodeLog[], flowId: string, contentId: string, tenantId: string, env: Env): Promise<void> {
+  if (nodeLogs.length === 0) return;
+  const timestamp = new Date().toISOString();
+  const records = nodeLogs.map((log) => ({
+    tenant_id: Number(tenantId),
+    id: crypto.randomUUID(),
+    flow_id: flowId,
+    node_id: log.nodeId,
+    content_id: contentId,
+    direction: log.direction,
+    created_at: timestamp,
+  }));
+  await env.PIPELINE_CONTENT_FLOW_LOG?.send(records).catch(() => {});
+}
+
 function shouldCronFire(data: Record<string, unknown>, now: Date): boolean {
   const type = data.scheduleType as string;
   const minute = now.getUTCMinutes();
@@ -725,10 +740,7 @@ export default {
           for (const flow of rows.results) {
             const graph: FlowGraph = JSON.parse(flow.graph_json);
             const result = executeFlow(graph, eventType, matchPayload);
-            // Content-domain execution intentionally skips emitNodeLogs/PIPELINE_FLOW_LOG —
-            // that sink's schema is fixed and keyed on user_id; adding a content_id variant
-            // is a Pipeline-schema migration out of scope here. content_flow_executions is
-            // this domain's only execution history for now.
+            if (result.nodeLogs.length > 0) await emitContentNodeLogs(result.nodeLogs, flow.id, contentId, tenantId, env);
             if (result.actions.length > 0) {
               const { rateLimited } = await executeContentActions(graph, result.actions, contentId, channelId, tenantId, env, payload, flow.id);
               await env.FLOW_DB.prepare(
@@ -986,6 +998,7 @@ export default {
         const payload = JSON.parse(row.payload);
         const branch = row.awaiting_event ? "no" : undefined;
         const result = resumeFromNode(graph, row.node_id, payload, branch);
+        if (result.nodeLogs.length > 0) await emitContentNodeLogs(result.nodeLogs, row.flow_id, row.content_id, row.tenant_id, env);
 
         if (result.actions.length > 0) {
           const channelId = String(payload.channel_id ?? "");

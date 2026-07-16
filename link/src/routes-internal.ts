@@ -7,7 +7,7 @@ import { CreditService, getActiveSubscriptionTier } from "../../shared/credit-se
 import { EventMetadata_X } from "../../metadata/x";
 import { dollarsToMicros } from "../../shared/credit";
 import { ContentService } from "./services/content";
-import { createPost } from "./services/x-posts-api";
+import { createPost, repostPost } from "./services/x-posts-api";
 
 const ACTION_TO_EVENT_TYPE: Record<string, string> = {
   follow: "follow-user",
@@ -196,13 +196,32 @@ export function internalRoutes() {
     return c.json({ channel_id: actualChannelId });
   });
 
-  // Stub: real X repost API not implemented yet. Content-flow's `repost` action
-  // calls this so the flow-engine framework (Task 5/6 in the content-flow-triggers
-  // plan) can be built and tested end-to-end without waiting on the real API.
+  // Reposts contentId's originating tweet via the channel that ingested it. channelId is
+  // always the flow's triggering channel (never a user-picked target) — the Repost Operation
+  // has no account picker. tweetId comes from the flow engine's payload.source_content_id.
   router.post("/x/repost", async (c) => {
-    const { channelId, contentId } = await c.req.json<{ channelId: string; contentId: string; flowId?: string | null }>();
-    console.log(JSON.stringify({ event: "repost_stub_called", channelId, contentId }));
-    return c.json({ ok: false, notImplemented: true }, 501);
+    const { channelId, contentId, tweetId, flowId } = await c.req.json<{
+      channelId: string; contentId: string; tweetId: string; flowId?: string | null;
+    }>();
+
+    const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id FROM channels WHERE id = ?")
+      .bind(channelId).first<{ config: string; tenant_id: number }>();
+    if (!channel) return c.json({ ok: false }, 200);
+
+    const config = JSON.parse(channel.config);
+    const sourceUserId = config.x_user_id;
+    if (!sourceUserId) return c.json({ ok: false }, 200);
+
+    const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
+    const accessToken = await tokenService.getValidToken(channelId);
+    const repostResult = await repostPost(accessToken, sourceUserId, tweetId);
+
+    console.log(JSON.stringify({ event: "x_repost", contentId, channelId, flowId: flowId || null, ok: repostResult.ok, rateLimited: !!repostResult.rateLimited }));
+
+    if (repostResult.rateLimited) {
+      return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+    }
+    return c.json({ ok: repostResult.ok });
   });
 
   // Real X publish path: content's generated (or literal, for provider:"none") text gets

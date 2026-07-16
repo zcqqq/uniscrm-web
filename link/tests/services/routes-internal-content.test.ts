@@ -48,18 +48,78 @@ describe("stub content-flow action endpoints", () => {
   const testEnv = { ...env, INTERNAL_SECRET: "test-internal-secret" };
   const testSecret = "test-internal-secret";
 
-  it("POST /internal/x/repost returns 501 not-implemented", async () => {
+  it("POST /internal/x/repost looks up the channel's X user id and reposts the given tweet", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-src-1", access_token: "tok", refresh_token: null }),
+      channel_type: "X",
+      tenant_id: 1,
+    };
+
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { retweeted: true } }), { status: 200 })); // X /2/users/:id/repost
+    vi.stubGlobal("fetch", fetchMock);
+
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/x/repost", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
-        body: JSON.stringify({ channelId: "chan-1", contentId: "content-1" }),
+        body: JSON.stringify({ channelId: "src-chan", contentId: "content-1", tweetId: "tweet-999", flowId: "flow-1" }),
       }),
-      testEnv
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow) }
     );
-    expect(res.status).toBe(501);
-    const body = await res.json();
-    expect(body).toMatchObject({ ok: false, notImplemented: true });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe("https://api.x.com/2/users/x-user-src-1/repost");
+    expect(JSON.parse((init as Record<string, any>).body)).toEqual({ tweet_id: "tweet-999" });
+    vi.unstubAllGlobals();
+  });
+
+  it("returns rateLimited response when X repost is rate-limited", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-src-1", access_token: "tok", refresh_token: null }),
+      channel_type: "X",
+      tenant_id: 1,
+    };
+
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ title: "Too Many Requests" }), { status: 429 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/x/repost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ channelId: "src-chan", contentId: "content-1", tweetId: "tweet-999" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow) }
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string };
+    expect(body.ok).toBe(false);
+    expect(body.rateLimited).toBe(true);
+    expect(typeof body.rateLimitReset).toBe("string");
+    vi.unstubAllGlobals();
+  });
+
+  it("returns ok:false without calling X when the channel has no X user id", async () => {
+    const channelRow = { config: JSON.stringify({ access_token: "tok" }), channel_type: "X", tenant_id: 1 };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/x/repost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ channelId: "src-chan", contentId: "content-1", tweetId: "tweet-999" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 
   it("POST /internal/content/create-post generates, posts to X, and records the new content row", async () => {

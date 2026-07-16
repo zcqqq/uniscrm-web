@@ -30,7 +30,7 @@ sequenceDiagram
     CS->>CS: isNew && emitFlowEvent?
     CS->>EQ: content.created { contentId, channelId, payload }
     EQ->>FW: queue() dispatches on contentId
-    FW->>FW: executeFlow (contentTrigger match)
+    FW->>FW: executeFlow (xContentTrigger match)
     alt has wait/timeCondition/abSplit downstream
         FW->>CFP: INSERT content_flow_pending
         Note over FW,CFP: resumed later by scheduled() sweep

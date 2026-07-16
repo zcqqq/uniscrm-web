@@ -107,7 +107,7 @@ describe("queue(): content.created dispatch", () => {
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-c1'`).run();
   });
 
-  it("matches a published flow with a contentTrigger and records content_flow_executions keyed by content_id", async () => {
+  it("matches a published flow with an xContentTrigger and records content_flow_executions keyed by content_id", async () => {
     await worker.queue(
       makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-abc", channelId: "chan-1", payload: {} }),
       env

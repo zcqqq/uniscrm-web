@@ -18,6 +18,7 @@
 - Source method is **`PULL_FROM_URL`** — TikTok's photo-post API has no `FILE_UPLOAD` option (that's video-only). Every image needs a publicly reachable URL.
 - Success/failed branching is decided purely by the `init` call's HTTP response (`2xx` + `error.code === "ok"` → success) — no status polling, matching `flow/CLAUDE.md`'s existing third-party-action convention.
 - Fixed model constants for MVP, no per-tenant settings-page configuration: Workers AI default = `@cf/black-forest-labs/flux-1-schnell` (4 steps, its documented default), OpenAI BYOK = `gpt-image-1` (never send `response_format` to this model — it always returns `b64_json` and 400s on that param, unlike dall-e-2/3).
+- TikTok's photo-post API accepts JPEG/WEBP but rejects PNG. flux-1-schnell already outputs JPEG natively. `gpt-image-1` defaults to PNG output — request `output_format: "jpeg"` explicitly on every call.
 - Skill content (if selected) is folded into prompts uncapped, no truncation — a too-long skill for an image provider simply surfaces as a generation failure, handled like any other.
 - No proactive "needs reconnect" detection for TikTok channels missing the new `video.upload` scope — a photo-post attempt against one just fails at TikTok's API and takes the normal failed-branch path.
 - `xContentAction` (X-only) is not touched by this plan — `tiktokContentAction` is a new, standalone action type.
@@ -128,24 +129,24 @@ import { OpenAiImageProvider } from "../../src/providers/openai-image";
 describe("OpenAiImageProvider", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("calls the images/generations endpoint with the given key/prompt/model, never sending response_format", async () => {
-    const base64Png = btoa("fake-png-bytes");
+  it("calls the images/generations endpoint requesting jpeg output (TikTok rejects PNG photos), never sending response_format", async () => {
+    const base64Jpeg = btoa("fake-jpeg-bytes");
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: [{ b64_json: base64Png }] }), { status: 200 })
+      new Response(JSON.stringify({ data: [{ b64_json: base64Jpeg }] }), { status: 200 })
     );
     vi.stubGlobal("fetch", fetchMock);
 
     const provider = new OpenAiImageProvider("sk-test");
     const result = await provider.generate("a cyberpunk lizard", "gpt-image-1");
 
-    expect(result.contentType).toBe("image/png");
-    expect(new TextDecoder().decode(result.bytes)).toBe("fake-png-bytes");
+    expect(result.contentType).toBe("image/jpeg");
+    expect(new TextDecoder().decode(result.bytes)).toBe("fake-jpeg-bytes");
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.openai.com/v1/images/generations");
     expect(init.headers.Authorization).toBe("Bearer sk-test");
     const body = JSON.parse(init.body);
-    expect(body).toEqual({ model: "gpt-image-1", prompt: "a cyberpunk lizard", size: "1024x1024" });
+    expect(body).toEqual({ model: "gpt-image-1", prompt: "a cyberpunk lizard", size: "1024x1024", output_format: "jpeg" });
     expect(body.response_format).toBeUndefined();
   });
 
@@ -174,14 +175,16 @@ export class OpenAiImageProvider implements ImageProvider {
 
   async generate(prompt: string, model: string): Promise<{ bytes: ArrayBuffer; contentType: string }> {
     // gpt-image-1 does not accept response_format (400s "Unknown parameter") -- unlike
-    // dall-e-2/3, it always returns b64_json unconditionally.
+    // dall-e-2/3, it always returns b64_json unconditionally. output_format defaults to
+    // "png", but TikTok's photo-post API rejects PNG (accepts only JPEG/WEBP) -- request
+    // jpeg explicitly.
     const res = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify({ model, prompt, size: "1024x1024" }),
+      body: JSON.stringify({ model, prompt, size: "1024x1024", output_format: "jpeg" }),
     });
 
     if (!res.ok) {
@@ -189,7 +192,7 @@ export class OpenAiImageProvider implements ImageProvider {
     }
 
     const body = (await res.json()) as { data: { b64_json: string }[] };
-    return { bytes: base64ToBytes(body.data[0].b64_json), contentType: "image/png" };
+    return { bytes: base64ToBytes(body.data[0].b64_json), contentType: "image/jpeg" };
   }
 }
 ```
@@ -244,13 +247,13 @@ describe("generateImage", () => {
 
   it("uses the tenant's OpenAI BYOK credentials for provider: 'openai', with the fixed gpt-image-1 model (not the tenant's configured text model)", async () => {
     vi.spyOn(credentialsModule, "getTenantLlmCredentials").mockResolvedValue({ apiKey: "sk-test", model: "gpt-4o-mini" });
-    const base64Png = btoa("png-bytes");
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: base64Png }] }), { status: 200 }));
+    const base64Jpeg = btoa("jpeg-bytes");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: base64Jpeg }] }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await generateImage({} as any, { ...baseParams, provider: "openai" });
 
-    expect(result.contentType).toBe("image/png");
+    expect(result.contentType).toBe("image/jpeg");
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.model).toBe("gpt-image-1");
     vi.unstubAllGlobals();

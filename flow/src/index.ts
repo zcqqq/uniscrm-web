@@ -1,33 +1,23 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import type { Env, FlowQueueMessage, FlowLogMessage } from "./types";
+import type { Env, FlowQueueMessage } from "./types";
 import { executeFlow, resumeFromNode, evaluateCondition, type FlowGraph, type ActionResult, type NodeLog } from "./engine";
 import { EventMetadata_X } from "../../metadata/x";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 
 async function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenantId: number, env: Env): Promise<void> {
+  if (nodeLogs.length === 0) return;
   const timestamp = new Date().toISOString();
-  if (nodeLogs.length > 0) {
-    const records = nodeLogs.map((log) => ({
-      tenant_id: tenantId,
-      id: crypto.randomUUID(),
-      flow_id: flowId,
-      node_id: log.nodeId,
-      user_id: userId,
-      direction: log.direction,
-      created_at: timestamp,
-    }));
-    await Promise.all([
-      env.PIPELINE_FLOW_LOG?.send(records).catch(() => {}),
-      env.FLOW_LOG_QUEUE?.send({
-        flowId,
-        userId,
-        tenantId,
-        timestamp,
-        logs: nodeLogs,
-      }).catch(() => {}),
-    ]);
-  }
+  const records = nodeLogs.map((log) => ({
+    tenant_id: tenantId,
+    id: crypto.randomUUID(),
+    flow_id: flowId,
+    node_id: log.nodeId,
+    user_id: userId,
+    direction: log.direction,
+    created_at: timestamp,
+  }));
+  await env.PIPELINE_FLOW_LOG?.send(records).catch(() => {});
 }
 
 function shouldCronFire(data: Record<string, unknown>, now: Date): boolean {
@@ -689,65 +679,6 @@ app.post("/api/flows/generate", async (c) => {
   }
 });
 
-const FLOW_NODE_LOG_SCHEMA = `CREATE TABLE IF NOT EXISTS flow_log (
-  id TEXT PRIMARY KEY,
-  flow_id TEXT NOT NULL,
-  node_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  direction TEXT NOT NULL,
-  created_at TEXT NOT NULL
-)`;
-const FLOW_NODE_LOG_INDEX = `CREATE INDEX IF NOT EXISTS idx_fnl_flow_node ON flow_log(flow_id, node_id)`;
-
-async function deterministicId(parts: string[]): Promise<string> {
-  const data = new TextEncoder().encode(parts.join("|"));
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
-}
-
-async function handleLogQueue(batch: MessageBatch<any>, env: Env): Promise<void> {
-  const logsByTenant = new Map<number, { flowId: string; nodeId: string; userId: string; direction: string; timestamp: string }[]>();
-
-  for (const message of batch.messages) {
-    const { tenantId, flowId, userId, timestamp, logs } = message.body as {
-      tenantId: number; flowId: string; userId: string; timestamp?: string; logs: { nodeId: string; direction: string }[];
-    };
-    const ts = timestamp || new Date().toISOString();
-    if (!logsByTenant.has(tenantId)) logsByTenant.set(tenantId, []);
-    for (const log of logs) {
-      logsByTenant.get(tenantId)!.push({ flowId, nodeId: log.nodeId, userId, direction: log.direction, timestamp: ts });
-    }
-  }
-
-  for (const [tenantId, logs] of logsByTenant) {
-    try {
-      const row = await env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-        .bind(tenantId).first<{ d1_database_id: string | null }>();
-      if (!row?.d1_database_id) continue;
-
-      const tdb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, row.d1_database_id);
-
-      await tdb.run(FLOW_NODE_LOG_SCHEMA);
-      await tdb.run(FLOW_NODE_LOG_INDEX);
-
-      for (const log of logs) {
-        const id = await deterministicId([log.flowId, log.nodeId, log.userId, log.direction, log.timestamp]);
-        await tdb.run(
-          `INSERT OR IGNORE INTO flow_log (id, flow_id, node_id, user_id, direction, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-          [id, log.flowId, log.nodeId, log.userId, log.direction, log.timestamp]
-        );
-      }
-      console.log(JSON.stringify({ event: "flow_log_written", tenantId, count: logs.length }));
-    } catch (e) {
-      console.error(JSON.stringify({ event: "flow_log_error", tenantId, error: String(e) }));
-    }
-  }
-
-  for (const message of batch.messages) {
-    message.ack();
-  }
-}
-
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -779,12 +710,6 @@ export default {
   },
 
   async queue(batch: MessageBatch<any>, env: Env): Promise<void> {
-    // Route by queue name
-    if (batch.queue === "uniscrm-flow-log-dev" || batch.queue === "uniscrm-flow-log") {
-      await handleLogQueue(batch, env);
-      return;
-    }
-
     for (const message of batch.messages) {
       try {
         const { tenantId, eventType, userId, contentId, channelId, listId, payload } = message.body as FlowQueueMessage;

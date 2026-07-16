@@ -10,7 +10,6 @@ export interface Env {
   AI: Ai;
   WEB_URL: string;
   FLOW_QUEUE: Queue;
-  FLOW_LOG_QUEUE?: Queue;
   PIPELINE_FLOW_LOG?: Pipeline;
   PIPELINE_CONTENT_FLOW_LOG?: Pipeline;
   R2_SQL_TOKEN: string;
@@ -21,15 +20,6 @@ export interface Env {
   INTERNAL_SECRET: string;
   CF_ACCOUNT_ID: string;
   CF_D1_API_TOKEN: string;
-}
-
-export interface FlowLogMessage {
-  flowId: string;
-  nodeId: string;
-  userId: string;
-  direction: "enter" | "exit";
-  tenantId: number;
-  d1DatabaseId: string;
 }
 
 export interface FlowQueueMessage {

@@ -4,16 +4,14 @@ sequenceDiagram
     participant EQ as Queue: uniscrm-event
     participant FW as flow Worker
     participant PLG as Pipeline: PIPELINE_FLOW_LOG
-    participant LQ as Queue: uniscrm-flow-log
-    participant TDB as Tenant D1
 
     LW->>EQ: 事件入队
     EQ->>FW: 消费事件，执行flow
-    FW->>PLG: 节点日志写入 R2 Iceberg
-    FW->>LQ: 节点日志入队
-    LQ->>FW: 批量消费日志
-    FW->>TDB: 写入 flow_log 表
+    FW->>PLG: emitNodeLogs 直接写入 R2 Pipeline（节点日志）
 ```
+
+`FLOW_LOG_QUEUE`/`handleLogQueue`（批量写入租户 D1 `flow_log` 表）已移除 —
+`emitNodeLogs` 现在只调用 `env.PIPELINE_FLOW_LOG.send(...)`，不再有中间队列/D1落地这一跳。
 
 ## Content-triggered flows
 

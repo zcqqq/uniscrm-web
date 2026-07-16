@@ -30,6 +30,11 @@ export async function initPhotoPost(
     body = undefined;
   }
 
+  if (body === undefined) {
+    // Body isn't parseable JSON at all — fall back to HTTP status.
+    return { ok: false };
+  }
+
   const errorCode = body?.error?.code;
   if (errorCode === "rate_limit_exceeded") {
     return { ok: false, rateLimited: true };

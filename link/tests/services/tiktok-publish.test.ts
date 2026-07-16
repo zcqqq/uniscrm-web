@@ -48,4 +48,14 @@ describe("initPhotoPost", () => {
 
     expect(result).toEqual({ ok: false });
   });
+
+  it("returns ok: false when response body is not valid JSON, even with 2xx status", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response("not json", { status: 200 })
+    ));
+
+    const result = await initPhotoPost("access-token-1", ["https://link-dev.uni-scrm.com/public/media/a"], "T", "D");
+
+    expect(result).toEqual({ ok: false });
+  });
 });

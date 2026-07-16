@@ -652,10 +652,16 @@ app.post("/api/flows/:id/unpublish", async (c) => {
   return c.json({ ok: true });
 });
 
-// Analytics: node counts (from tenant D1 flow_log)
+// Analytics: node counts (from precomputed flow_counts/content_flow_counts)
 app.get("/api/flows/:id/analytics", async (c) => {
   const flowId = c.req.param("id");
   const tenantId = c.get("tenantId");
+
+  const flowRow = await c.env.FLOW_DB.prepare("SELECT graph_json FROM flows WHERE id = ? AND tenant_id = ?")
+    .bind(flowId, tenantId).first<{ graph_json: string }>();
+  if (!flowRow) return c.json({ nodes: {} });
+  const isContentDomain = flowRow.graph_json.includes("xContentTrigger");
+  const table = isContentDomain ? "content_flow_counts" : "flow_counts";
 
   const row = await c.env.WEB_DB.prepare(
     "SELECT d1_database_id FROM tenants WHERE tenant_id = ?"
@@ -666,7 +672,7 @@ app.get("/api/flows/:id/analytics", async (c) => {
 
   try {
     const rows = await tdb.query<{ node_id: string; direction: string; count: number }>(
-      "SELECT node_id, direction, COUNT(*) as count FROM flow_log WHERE flow_id = ? GROUP BY node_id, direction",
+      `SELECT node_id, direction, count FROM ${table} WHERE flow_id = ?`,
       [flowId]
     );
     const nodes: Record<string, { enter: number; exit: number }> = {};

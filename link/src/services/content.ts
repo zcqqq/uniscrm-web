@@ -257,14 +257,15 @@ export class ContentService {
     channelType: ChannelType,
     sourceContentId: string,
     contentText: string,
-    ref: { generatedFromContentId: string; flowId: string }
+    ref: { generatedFromContentId: string; flowId: string },
+    contentType: string = "TWEET"
   ): Promise<void> {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     await this.tenantDb.run(
       `INSERT INTO content (id, channel_id, channel_type, content_type, source_content_id, content_text, status, raw_data, created_at, updated_at)
-       VALUES (?, ?, ?, 'TWEET', ?, ?, ?, ?, ?, ?)`,
-      [id, channelId, channelType, sourceContentId, contentText, "published", JSON.stringify(ref), now, now]
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, channelId, channelType, contentType, sourceContentId, contentText, "published", JSON.stringify(ref), now, now]
     );
   }
 

@@ -431,4 +431,33 @@ describe("recordPublishedContent", () => {
     const rawData = JSON.parse(params.find((p: unknown) => typeof p === "string" && p.startsWith("{")) || "{}");
     expect(rawData).toEqual({ generatedFromContentId: "source-content-1", flowId: "flow-1" });
   });
+
+  it("stores an explicit contentType when given (e.g. TikTok's PHOTO_POST), instead of the hardcoded TWEET default", async () => {
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42);
+
+    await svc.recordPublishedContent(
+      "channel-1", "TIKTOK", "publish-id-1", "a caption",
+      { generatedFromContentId: "content-1", flowId: "flow-1" },
+      "PHOTO_POST"
+    );
+
+    expect(tenantDb.run).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO content"),
+      expect.arrayContaining(["channel-1", "TIKTOK", "PHOTO_POST", "publish-id-1", "a caption", "published"])
+    );
+  });
+
+  it("still defaults to TWEET when contentType is omitted (existing X call sites unaffected)", async () => {
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42);
+
+    await svc.recordPublishedContent("channel-2", "X", "tweet-id-1", "a tweet", {
+      generatedFromContentId: "content-2",
+      flowId: "flow-1",
+    });
+
+    expect(tenantDb.run).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO content"),
+      expect.arrayContaining(["channel-2", "X", "TWEET", "tweet-id-1", "a tweet", "published"])
+    );
+  });
 });

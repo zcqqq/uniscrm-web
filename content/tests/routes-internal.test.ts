@@ -142,3 +142,50 @@ describe("POST /internal/skills/:id/refresh", () => {
     expect(res.status).toBe(502);
   });
 });
+
+describe("POST /internal/generate-image", () => {
+  const testEnv = {
+    ...env,
+    INTERNAL_SECRET: "test-internal-secret",
+    AI: { run: async () => ({ image: btoa("fake-jpeg-bytes") }) } as unknown as Ai,
+  };
+
+  it("rejects requests missing the internal secret", async () => {
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId: 1, prompt: "a lizard", provider: "default" }),
+      }),
+      testEnv
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("returns image bytes with the right content-type on success (default provider, Workers AI)", async () => {
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
+        body: JSON.stringify({ tenantId: 999, prompt: "a lizard", provider: "default" }),
+      }),
+      testEnv
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("image/jpeg");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect(new TextDecoder().decode(bytes)).toBe("fake-jpeg-bytes");
+  });
+
+  it("returns 502 when provider: 'openai' has no configured credentials", async () => {
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
+        body: JSON.stringify({ tenantId: 999, prompt: "a lizard", provider: "openai" }),
+      }),
+      testEnv
+    );
+    expect(res.status).toBe(502);
+  });
+});

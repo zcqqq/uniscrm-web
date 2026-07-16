@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
 import { generateContent } from "./services/generate";
+import { generateImage } from "./services/generate-image";
 import { refreshSkillContent } from "./services/skill-content";
 
 export function internalRoutes() {
@@ -27,6 +28,27 @@ export function internalRoutes() {
       }
       console.error(JSON.stringify({ event: "generate_failed", tenantId, provider, error: String(err) }));
       return c.json({ error: "Generation failed" }, 502);
+    }
+  });
+
+  router.post("/generate-image", async (c) => {
+    const { tenantId, prompt, provider, skillId } = await c.req.json<{
+      tenantId: number;
+      prompt: string;
+      provider: "default" | "openai";
+      skillId?: string;
+    }>();
+
+    if (!tenantId || !prompt || !provider) {
+      return c.json({ error: "tenantId, prompt, provider required" }, 400);
+    }
+
+    try {
+      const { bytes, contentType } = await generateImage(c.env, { tenantId, prompt, provider, skillId });
+      return new Response(bytes, { status: 200, headers: { "Content-Type": contentType } });
+    } catch (err) {
+      console.error(JSON.stringify({ event: "generate_image_failed", tenantId, provider, error: String(err) }));
+      return c.json({ error: "Image generation failed" }, 502);
     }
   });
 

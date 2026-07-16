@@ -226,20 +226,101 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
 }
 
 
-function ContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
   const conditions: Condition[] = data.conditions || [];
-  const fields = CONTENT_TRIGGER_FIELDS;
+  const mode = (data.mode as string) || "my_posts";
+  const channelId = data.channelId as string;
+  const [channels, setChannels] = useState<ChannelOption[]>([]);
+  const [lists, setLists] = useState<{ id: string; name: string }[]>([]);
+  const [loadingLists, setLoadingLists] = useState(false);
+
+  useEffect(() => {
+    api.channels.list("X").then(setChannels).catch(() => setChannels([]));
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "list_posts" || !channelId) { setLists([]); return; }
+    setLoadingLists(true);
+    api.channels.xLists(channelId)
+      .then((res) => setLists(res.lists || []))
+      .catch(() => setLists([]))
+      .finally(() => setLoadingLists(false));
+  }, [mode, channelId]);
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">Content Trigger</h4>
-      <p className="text-xs text-muted-foreground mb-3">Fires when a new item is ingested from one of your own connected channels.</p>
-      <ConditionsEditor
-        conditions={conditions}
-        fields={fields}
-        onChange={(c) => updateNodeData(nodeId, { conditions: c })}
-      />
+      <h4 className="text-sm font-semibold text-primary mb-3">X Content Trigger</h4>
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Account</Label>
+          {channels.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">No X accounts linked</p>
+          ) : (
+            <Select
+              value={channelId || ""}
+              onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value, listId: "", listName: "" })}
+              className="w-full text-sm"
+            >
+              <option value="">Select account...</option>
+              {channels.map((ch) => (
+                <option key={ch.id} value={ch.id}>@{ch.username}</option>
+              ))}
+            </Select>
+          )}
+        </div>
+
+        <div>
+          <Label className="text-xs block mb-1">Source</Label>
+          <Select
+            value={mode}
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { mode: e.target.value, listId: "", listName: "" })}
+            className="w-full text-sm"
+          >
+            <option value="my_posts">My Posts</option>
+            <option value="list_posts">List Posts</option>
+          </Select>
+        </div>
+
+        {mode === "list_posts" && (
+          <div>
+            <Label className="text-xs block mb-1">List</Label>
+            {!channelId ? (
+              <p className="text-xs text-muted-foreground italic">Select an account first</p>
+            ) : loadingLists ? (
+              <p className="text-xs text-muted-foreground">Loading...</p>
+            ) : lists.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">No owned Lists found on this account</p>
+            ) : (
+              <Select
+                value={data.listId || ""}
+                onChange={(e: SelectChange) => {
+                  const list = lists.find((l) => l.id === e.target.value);
+                  updateNodeData(nodeId, { listId: e.target.value, listName: list?.name || "" });
+                }}
+                className="w-full text-sm"
+              >
+                <option value="">Select list...</option>
+                {lists.map((l) => (
+                  <option key={l.id} value={l.id}>{l.name}</option>
+                ))}
+              </Select>
+            )}
+          </div>
+        )}
+
+        <p className="text-xs text-muted-foreground">
+          {mode === "list_posts"
+            ? "Fires when a new post appears in this X List (from any account)."
+            : "Fires when a new item is ingested from this account's own posts."}
+        </p>
+
+        <ConditionsEditor
+          conditions={conditions}
+          fields={CONTENT_TRIGGER_FIELDS}
+          onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+        />
+      </div>
     </div>
   );
 }
@@ -820,8 +901,8 @@ export default function Inspector() {
       {node.type === "xTrigger" && (
         <XTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />
       )}
-      {node.type === "contentTrigger" && (
-        <ContentTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />
+      {node.type === "xContentTrigger" && (
+        <XContentTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />
       )}
       {node.type === "cronTrigger" && (
         <CronTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />

@@ -85,6 +85,8 @@ export const api = {
       }
       return channelListCache[channelType];
     },
+    xLists: (channelId: string) =>
+      request<{ lists: { id: string; name: string }[] }>(`/api/channels/${channelId}/x-lists`),
   },
   lists: {
     list: () =>

@@ -469,15 +469,6 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
     return <XActionInspector nodeId={nodeId} data={data} />;
   }
 
-  if (actionType === "repost") {
-    return (
-      <div>
-        <h4 className="text-sm font-semibold text-primary mb-3">Repost</h4>
-        <p className="text-xs text-muted-foreground">Reposts this content on the same channel it was ingested from. No configuration needed.</p>
-      </div>
-    );
-  }
-
   if (actionType === "xContentAction") {
     return <XContentActionInspector nodeId={nodeId} data={data} />;
   }

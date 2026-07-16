@@ -25,7 +25,7 @@ function getNodeIcon(type: string, data: Record<string, unknown>) {
   if (type === "action") {
     const at = data.actionType as string;
     if (at === "addToList") return ListIcon;
-    if (at === "repost" || at === "xContentAction") return FileTextIcon;
+    if (at === "xContentAction") return FileTextIcon;
     if (at === "updateContentStatus") return ListIcon;
     return XIcon;
   }

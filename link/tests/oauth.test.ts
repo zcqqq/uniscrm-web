@@ -318,3 +318,21 @@ describe("TikTok OAuth callback", () => {
     expect(pollChannelOnceMock).toHaveBeenCalledWith(expect.anything(), "TIKTOK", existingChannelId);
   });
 });
+
+describe("TikTok OAuth connect", () => {
+  it("includes video.upload in the scope (required for photo-post's MEDIA_UPLOAD mode)", async () => {
+    const app = buildApp();
+    const res = await app.request(
+      "/tiktok/connect",
+      {},
+      { KV: { put: vi.fn().mockResolvedValue(undefined) }, TIKTOK_CLIENT_KEY: "test-client-key" } as any
+    );
+
+    expect(res.status).toBe(302);
+    const location = res.headers.get("Location") || "";
+    // The connect URL is built as a plain (unencoded) template literal -- see the existing
+    // line below being changed in Step 3 -- so the comma-separated scope list appears in the
+    // Location header literally, not percent-encoded.
+    expect(location).toContain("scope=user.info.basic,video.list,video.upload");
+  });
+});

@@ -279,7 +279,7 @@ export function oauthRoutes() {
     await c.env.KV.put(`oauth_state:${state}`, JSON.stringify({ tenantId, memberId, provider: "tiktok" }), { expirationTtl: 300 });
 
     const redirectUri = encodeURIComponent(`${url.origin}/api/auth/tiktok/callback`);
-    const tiktokUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${c.env.TIKTOK_CLIENT_KEY}&scope=user.info.basic,video.list&response_type=code&redirect_uri=${redirectUri}&state=${state}`;
+    const tiktokUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${c.env.TIKTOK_CLIENT_KEY}&scope=user.info.basic,video.list,video.upload&response_type=code&redirect_uri=${redirectUri}&state=${state}`;
     return c.redirect(tiktokUrl, 302);
   });
 

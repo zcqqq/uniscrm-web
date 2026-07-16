@@ -35,6 +35,80 @@ async function emitContentNodeLogs(nodeLogs: NodeLog[], flowId: string, contentI
   await env.PIPELINE_CONTENT_FLOW_LOG?.send(records).catch(() => {});
 }
 
+interface CountRow {
+  tenant_id: number;
+  flow_id: string;
+  node_id: string;
+  direction: string;
+  cnt: number;
+}
+
+async function queryR2Counts(env: Env, table: string): Promise<CountRow[]> {
+  const res = await fetch(
+    `https://api.sql.cloudflarestorage.com/api/v1/accounts/${env.CF_ACCOUNT_ID}/r2-sql/query/${env.R2_BUCKET}`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.R2_SQL_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        warehouse: env.R2_WAREHOUSE,
+        query: `SELECT tenant_id, flow_id, node_id, direction, COUNT(*) as cnt FROM ${table} GROUP BY tenant_id, flow_id, node_id, direction`,
+      }),
+    }
+  );
+  // .clone() before .json(): under test mocks a single Response instance may be shared across
+  // multiple fetch() callers within one scheduled() tick; reading via a clone avoids consuming
+  // that shared body. No behavior change against real fetch() responses (always distinct objects).
+  const data = await res.clone().json() as { result?: { rows: CountRow[] }; success: boolean };
+  if (!data.success) return [];
+  return data.result?.rows || [];
+}
+
+export async function recomputeFlowCounts(env: Env): Promise<void> {
+  const [flowRows, contentFlowRows] = await Promise.all([
+    queryR2Counts(env, "uniscrm.flow_log"),
+    queryR2Counts(env, "uniscrm.content_flow_log"),
+  ]);
+
+  const byTenant = new Map<number, { flow: CountRow[]; content: CountRow[] }>();
+  for (const row of flowRows) {
+    if (!byTenant.has(row.tenant_id)) byTenant.set(row.tenant_id, { flow: [], content: [] });
+    byTenant.get(row.tenant_id)!.flow.push(row);
+  }
+  for (const row of contentFlowRows) {
+    if (!byTenant.has(row.tenant_id)) byTenant.set(row.tenant_id, { flow: [], content: [] });
+    byTenant.get(row.tenant_id)!.content.push(row);
+  }
+
+  for (const [tenantId, rows] of byTenant) {
+    try {
+      const tenantRow = await env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+        .bind(tenantId).first<{ d1_database_id: string | null }>();
+      if (!tenantRow?.d1_database_id) continue;
+
+      const tdb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
+      const now = new Date().toISOString();
+
+      for (const r of rows.flow) {
+        await tdb.run(
+          `INSERT INTO flow_counts (flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(flow_id, node_id, direction) DO UPDATE SET count = excluded.count, updated_at = excluded.updated_at`,
+          [r.flow_id, r.node_id, r.direction, r.cnt, now]
+        );
+      }
+      for (const r of rows.content) {
+        await tdb.run(
+          `INSERT INTO content_flow_counts (flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(flow_id, node_id, direction) DO UPDATE SET count = excluded.count, updated_at = excluded.updated_at`,
+          [r.flow_id, r.node_id, r.direction, r.cnt, now]
+        );
+      }
+      console.log(JSON.stringify({ event: "flow_counts_recomputed", tenantId, flowRows: rows.flow.length, contentFlowRows: rows.content.length }));
+    } catch (e) {
+      console.error(JSON.stringify({ event: "flow_counts_recompute_error", tenantId, error: String(e) }));
+    }
+  }
+}
+
 function shouldCronFire(data: Record<string, unknown>, now: Date): boolean {
   const type = data.scheduleType as string;
   const minute = now.getUTCMinutes();
@@ -889,6 +963,10 @@ export default {
 
   async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
     const now = new Date().toISOString();
+
+    await recomputeFlowCounts(env).catch((e) => {
+      console.error(JSON.stringify({ event: "flow_counts_recompute_fatal", error: String(e) }));
+    });
 
     // Cron trigger: check published flows with cronTrigger nodes
     const cronFlows = await env.FLOW_DB.prepare(

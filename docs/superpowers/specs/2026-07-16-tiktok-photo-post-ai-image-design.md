@@ -18,20 +18,18 @@ TikTok's photo-post publish path (`/v2/post/publish/content/init/`) is entirely 
 
 ## 1. Node: `tiktokContentAction`
 
-New, standalone action type (not a variant of `xContentAction`). Node data shape:
+New, standalone action type (not a variant of `xContentAction`). **Metadata-driven fields**: rather than hardcoding Title/Description/Image as fixed node fields, the Inspector renders one prompt input per entry in `metadata/tiktok.ts`'s `photo-post` `contentProps` (`title`/TEXT, `description`/TEXT, `message_image`/IMAGE), typed by each entry's `aiType`. This keeps the node in step with the project's metadata-driven convention — adding/removing a TEXT or IMAGE prop on that metadata entry changes the Inspector without touching component code. Node data shape:
 
 ```ts
 {
   actionType: "tiktokContentAction",
   channelId: string,           // TikTok channel to post from
 
-  titlePrompt: string,         // $content.xxx interpolation, like xContentAction's prompt
-  descriptionPrompt: string,
+  prompts: Record<string, string>,   // keyed by contentProps propId, e.g. { title: "...", description: "...", message_image: "..." } — $content.xxx interpolation, like xContentAction's prompt
   textProvider: "default" | "openai" | "anthropic" | "none",
-  textSkillId: string,         // "none" or a content skill catalog id
+  textSkillId: string,         // "none" or a content skill catalog id — applies to every TEXT-typed prop
 
-  imagePrompt: string,
-  imageCount: number,          // 1-9
+  imageCount: number,          // 1-9 — applies to the (one) IMAGE-typed prop
   imageProvider: "default" | "openai",   // no "anthropic" (no image API), no "none" (a post needs an image)
   imageSkillId: string,        // "none" or a content skill catalog id
 }
@@ -40,13 +38,14 @@ New, standalone action type (not a variant of `xContentAction`). Node data shape
 **Inspector panel** (`TikTokContentActionInspector`, new component alongside `XContentActionInspector` in `Inspector.tsx`):
 
 1. **Target Account** — channel picker filtered to `channelType: "TIKTOK"` (`api.channels.list("TIKTOK")`), same pattern as `xContentAction`'s Target Account.
-2. **Title Prompt** / **Description Prompt** — two `Textarea`s, `$content.xxx` interpolation hint, same style as `xContentAction`'s Prompt field.
-3. **Text Provider** — `Select`: `default` (Cloudflare Workers AI) / `openai` / `anthropic` (only BYOK providers actually configured for the tenant appear, via the existing `api.llmProviders.list()`) / `none` (post interpolated prompt text literally). Identical semantics to `xContentAction`'s Provider.
-4. **Text Skill** — `Select`, reusing the existing `api.skills.list()` catalog and `none` default. Applies to both Title and Description generation calls (one shared value, not per-field).
-5. **Image Prompt** — `Textarea`, `$content.xxx` interpolation.
-6. **Image Count** — numeric input, 1-9, default 1.
-7. **Image Provider** — `Select`: `default` (Cloudflare Workers AI, flux-1-schnell) / `openai` (BYOK, gpt-image-1). No `none` option — an image field can't be satisfied by literal text.
-8. **Image Skill** — independent `Select` from Text Skill, same catalog. Its cached content (if any) is folded directly into the image prompt string, uncapped — a skill whose content is too long for the image provider simply produces a provider error, handled like any other generation failure (explicit accepted tradeoff, no special-casing).
+2. For each entry in `ContentMetadata_TikTok.find(m => m.sourceContentType === "photo-post")!.contentProps`: a `Textarea` labeled with that prop's `label` (looked up from `metadata/props.ts`'s `PROPS` registry by `propId`), bound to `data.prompts[propId]`, `$content.xxx` interpolation hint — same style as `xContentAction`'s Prompt field, rendered once per prop rather than as fixed Title/Description/Image fields.
+3. **Text Provider** — `Select`: `default` (Cloudflare Workers AI) / `openai` / `anthropic` (only BYOK providers actually configured for the tenant appear, via the existing `api.llmProviders.list()`) / `none` (post interpolated prompt text literally). Applies to every `aiType: "TEXT"` prop's generation call. Identical semantics to `xContentAction`'s Provider.
+4. **Text Skill** — `Select`, reusing the existing `api.skills.list()` catalog and `none` default. Applies to every TEXT prop (one shared value, not per-field).
+5. **Image Count** — numeric input, 1-9, default 1. Applies to the `aiType: "IMAGE"` prop (`message_image` today — photo-post has exactly one image prop; a future metadata entry with multiple image props is out of scope, YAGNI).
+6. **Image Provider** — `Select`: `default` (Cloudflare Workers AI, flux-1-schnell) / `openai` (BYOK, gpt-image-1). No `none` option — an image field can't be satisfied by literal text.
+7. **Image Skill** — independent `Select` from Text Skill, same catalog. Its cached content (if any) is folded directly into the image prop's prompt string, uncapped — a skill whose content is too long for the image provider simply produces a provider error, handled like any other generation failure (explicit accepted tradeoff, no special-casing).
+
+`link`'s new `/internal/tiktok/photo-post` route (§3) is not fully metadata-generic — it's inherently specific to the `photo-post` operation already, so it reads `prompts.title`/`prompts.description`/`prompts.message_image` by their known propIds (matching TikTok's actual `post_info.title`/`post_info.description`/`source_info.photo_images` fields) rather than re-deriving field names from metadata at the `link` layer. The metadata-driven behavior is scoped to the flow node's UI and data shape, not threaded further into `link`'s TikTok-specific publish logic.
 
 `hasBranches: true` for this action type (calls a third-party API) — add `"tiktokContentAction"` alongside `"xAction"`/`"xContentAction"` wherever `isExternalApi`/branch-rendering is checked (`flow/src/engine.ts`'s `buildActionData`, and the node-rendering code that draws success/failed output handles).
 
@@ -108,13 +107,14 @@ All external-channel interaction lives in `link`, per this repo's module boundar
   Calls `POST https://open.tiktokapis.com/v2/post/publish/content/init/` with `media_type: "PHOTO"`, `post_mode: "MEDIA_UPLOAD"`, `source_info: { source: "PULL_FROM_URL", photo_images: photoUrls, photo_cover_index: 0 }`, `post_info: { title, description }`. `ok` reflects `error.code === "ok"` in the response; a `rate_limit_exceeded` error code maps to `rateLimited: true` (six requests/minute per TikTok's docs), same pattern `x-repost` already uses for X's rate limits.
 - **New internal route** `POST /internal/tiktok/photo-post` in `link/src/routes-internal.ts`:
   ```
-  Body: { contentId, channelId, titlePrompt, descriptionPrompt, textProvider, textSkillId,
-          imagePrompt, imageCount, imageProvider, imageSkillId, flowId }
+  Body: { contentId, channelId, prompts: { title, description, message_image },
+          textProvider, textSkillId, imageCount, imageProvider, imageSkillId, flowId }
   ```
+  `prompts` is keyed by `metadata/tiktok.ts`'s `photo-post` propIds (already interpolated by `flow` before this call) — this route reads `prompts.title`/`prompts.description`/`prompts.message_image` directly by those known names rather than re-deriving field names from metadata (see §1's closing note).
   Handler steps:
-  1. Load the channel row (must be `channel_type: "TIKTOK"`), get `tenant_id` and a valid access token (new `TikTokTokenService.getValidToken`, mirroring `XTokenService`).
-  2. Resolve title text: if `textProvider === "none"`, use `titlePrompt` literally; else call `content`'s `/internal/generate` with `{tenantId, prompt: titlePrompt, provider: textProvider, skillId: textSkillId}`. Same for description.
-  3. Generate `imageCount` images: `imageCount` independent calls to `content`'s `/internal/generate-image` with `{tenantId, prompt: imagePrompt, provider: imageProvider, skillId: imageSkillId}`. Best-effort — a failed call is dropped, not retried.
+  1. Load the channel row (must be `channel_type: "TIKTOK"`), get `tenant_id` and a valid access token (existing `TikTokTokenService.getValidToken`, `link/src/services/tiktok-token.ts`).
+  2. Resolve title text: if `textProvider === "none"`, use `prompts.title` literally; else call `content`'s `/internal/generate` with `{tenantId, prompt: prompts.title, provider: textProvider, skillId: textSkillId}`. Same for `prompts.description`.
+  3. Generate `imageCount` images: `imageCount` independent calls to `content`'s `/internal/generate-image` with `{tenantId, prompt: prompts.message_image, provider: imageProvider, skillId: imageSkillId}`. Best-effort — a failed call is dropped, not retried.
   4. If zero images succeeded → return `{ ok: false }` (failed branch), do not call TikTok at all.
   5. Store each successful image's bytes into `MEDIA_BUCKET` under a fresh UUID key, build its public URL (`${LINK_URL}/public/media/:key`).
   6. Call `initPhotoPost` with the public URLs + generated title/description.
@@ -122,8 +122,8 @@ All external-channel interaction lives in `link`, per this repo's module boundar
 
 ## 4. Flow wiring
 
-- `flow/src/engine.ts`'s `buildActionData`: new branch for `actionType === "tiktokContentAction"`, copying all node-data fields listed in §1 onto `actionData` (mirroring the existing `xContentAction` branch), plus adding `"tiktokContentAction"` to the `isExternalApi` check.
-- `flow/src/index.ts`'s `executeContentActions`: new `else if (action.type === "tiktokContentAction")` branch (parallel to the existing `xContentAction` one), builds the request body from `action.*` fields (interpolating `$content.xxx` in `titlePrompt`/`descriptionPrompt`/`imagePrompt` the same way the existing code interpolates `prompt`), calls `link`'s new `/internal/tiktok/photo-post`, and branches success/failed exactly like the existing code path (same `rateLimited` handling, same `resumeFromNode`/`emitContentNodeLogs` flow).
+- `flow/src/engine.ts`'s `buildActionData`: new branch for `actionType === "tiktokContentAction"`, copying `channelId`, the `prompts` record (as-is, un-interpolated — engine.ts doesn't need to know propId names, it's just a nested object), `textProvider`, `textSkillId`, `imageCount`, `imageProvider`, `imageSkillId` onto `actionData` (mirroring the existing `xContentAction` branch), plus adding `"tiktokContentAction"` to the `isExternalApi` check.
+- `flow/src/index.ts`'s `executeContentActions`: new `else if (action.type === "tiktokContentAction")` branch (parallel to the existing `xContentAction` one). Interpolates `$content.xxx` into every value inside `action.prompts` (same regex the existing code uses for `prompt`), builds the request body as `{contentId, channelId, prompts: {...interpolated}, textProvider, textSkillId, imageCount, imageProvider, imageSkillId, flowId}`, calls `link`'s new `/internal/tiktok/photo-post`, and branches success/failed exactly like the existing code path (same `rateLimited` handling, same `resumeFromNode`/`emitContentNodeLogs` flow).
 
 ## 5. OAuth scope
 

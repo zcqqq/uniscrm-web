@@ -322,6 +322,10 @@ async function executeContentActions(
       const branch = body.ok ? "success" : "failed";
       const nodeId = action.nodeId as string;
       const resumed = resumeFromNode(graph, nodeId, payload, branch);
+      // resumed.nodeLogs[0] is always a duplicate exit for `nodeId` itself (already logged when
+      // this xContentAction node was first collected as an action) — everything from index 1
+      // onward is the genuinely new downstream enter/exit reached by resolving this branch.
+      if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
       if (resumed.actions.length > 0) {
         const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
         rateLimited.push(...nested.rateLimited);
@@ -1098,6 +1102,10 @@ export default {
               // below (lines ~983-1004) — mustn't just drop the row per flow/CLAUDE.md's
               // "Rate limit重试耗尽后才走failed分支" rule.
               const failedResult = resumeFromNode(graph, action.nodeId as string, payload, "failed");
+              // failedResult.nodeLogs[0] is always a duplicate exit for the retried action node
+              // itself — everything from index 1 onward is the genuinely new downstream enter/exit
+              // reached by resolving the "failed" branch.
+              if (failedResult.nodeLogs.length > 1) await emitContentNodeLogs(failedResult.nodeLogs.slice(1), row.flow_id, row.content_id, row.tenant_id, env);
               if (failedResult.actions.length > 0) {
                 const { rateLimited: nestedRateLimited } = await executeContentActions(graph, failedResult.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
                 await env.FLOW_DB.prepare(

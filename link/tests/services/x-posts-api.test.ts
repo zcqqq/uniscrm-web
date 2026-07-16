@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fetchPostsPage, createPost, fetchOwnedLists, fetchListPostsPage } from "../../src/services/x-posts-api";
+import { fetchPostsPage, createPost, repostPost, fetchOwnedLists, fetchListPostsPage } from "../../src/services/x-posts-api";
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -89,6 +89,32 @@ describe("createPost", () => {
 
     const result = await createPost("tok", "hello world");
 
+    expect(result).toEqual({ ok: false });
+  });
+});
+
+describe("repostPost", () => {
+  it("posts tweet_id to /2/users/:id/repost and returns ok:true", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ data: { retweeted: true } }), { status: 200 }));
+
+    const result = await repostPost("tok", "x-user-1", "tweet-999");
+
+    expect(result).toEqual({ ok: true });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.x.com/2/users/x-user-1/repost");
+    expect((init as Record<string, any>).headers.Authorization).toBe("Bearer tok");
+    expect(JSON.parse((init as Record<string, any>).body)).toEqual({ tweet_id: "tweet-999" });
+  });
+
+  it("returns rateLimited:true on 429 without throwing", async () => {
+    fetchMock.mockResolvedValue(new Response("{}", { status: 429 }));
+    const result = await repostPost("tok", "x-user-1", "tweet-999");
+    expect(result).toEqual({ ok: false, rateLimited: true });
+  });
+
+  it("returns ok:false on other non-ok statuses without throwing", async () => {
+    fetchMock.mockResolvedValue(new Response("server error", { status: 500 }));
+    const result = await repostPost("tok", "x-user-1", "tweet-999");
     expect(result).toEqual({ ok: false });
   });
 });

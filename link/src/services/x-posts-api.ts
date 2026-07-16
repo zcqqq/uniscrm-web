@@ -145,3 +145,29 @@ export async function createPost(accessToken: string, text: string): Promise<Cre
   const body = (await res.json()) as { data: { id: string; text: string } };
   return { ok: true, id: body.data.id };
 }
+
+export interface RepostResult {
+  ok: boolean;
+  rateLimited?: boolean;
+}
+
+// https://docs.x.com/x-api/users/repost-post
+export async function repostPost(accessToken: string, sourceUserId: string, tweetId: string): Promise<RepostResult> {
+  const res = await fetch(`https://api.x.com/2/users/${sourceUserId}/repost`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ tweet_id: tweetId }),
+  });
+
+  if (res.status === 429) {
+    return { ok: false, rateLimited: true };
+  }
+  if (!res.ok) {
+    return { ok: false };
+  }
+
+  return { ok: true };
+}

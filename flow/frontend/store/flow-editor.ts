@@ -39,7 +39,7 @@ export interface FlowEditorState {
   autoFillChannelIds: () => Promise<void>;
 }
 
-const ACTION_TYPES = ["addToList", "xAction", "repost", "xContentAction", "updateContentStatus"];
+const ACTION_TYPES = ["addToList", "xAction", "xContentAction", "updateContentStatus"];
 
 // Action types that operate on a specific channel account (need `data.channelId`), mapped to
 // the channelType used to fetch that account list. Add an entry here whenever a new
@@ -125,12 +125,12 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
         data = { actionType: type, listId: "", listName: "" };
       } else if (type === "xAction") {
         data = { actionType: type, xEvent: "", channelId: "" };
-      } else if (type === "repost") {
-        data = { actionType: type };
       } else if (type === "xContentAction") {
-        data = { actionType: type, channelType: "", channelId: "", prompt: "", provider: "default" };
+        data = { actionType: type, channelId: "", prompt: "", provider: "default" };
       } else if (type === "updateContentStatus") {
         data = { actionType: type, status: "" };
+      } else {
+        throw new Error(`Unexpected action type: ${type}`);
       }
     } else if (type === "xContentTrigger") {
       nodeType = "xContentTrigger";

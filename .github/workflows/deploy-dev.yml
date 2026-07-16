@@ -115,8 +115,30 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
+  migrate-tenant-dbs:
+    needs: [sync-secrets]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install wrangler
+        run: npm ci
+
+      - name: Install operation dependencies
+        run: cd operation && npm ci
+
+      - name: Migrate tenant DBs
+        run: node --experimental-strip-types operation/migrate-tenant-dbs.ts dev
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
   deploy:
-    needs: [migrate, changes]
+    needs: [migrate, migrate-tenant-dbs, changes]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

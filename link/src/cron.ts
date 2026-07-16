@@ -11,7 +11,7 @@ import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { TikTokTokenService } from "./services/tiktok-token";
-import { pollChannelOnce } from "./services/pollers/poll-channel";
+import { pollChannelOnce, pollXListPosts } from "./services/pollers/poll-channel";
 
 export async function handleCron(env: Env): Promise<void> {
   await Promise.allSettled([
@@ -164,5 +164,28 @@ export async function handlePolling(env: Env): Promise<void> {
       break;
     }
     await pollChannelOnce(env, row.channel_type, row.id);
+  }
+
+  if (Date.now() < runDeadline) {
+    try {
+      const res = await fetch(`${env.FLOW_URL}/internal/list-watches`, {
+        headers: { "X-Internal-Secret": env.INTERNAL_SECRET },
+      });
+      if (res.ok) {
+        const { watches } = await res.json() as { watches: { channelId: string; listId: string }[] };
+        console.log(JSON.stringify({ event: "list_watches_fetched", count: watches.length }));
+        for (const w of watches) {
+          if (Date.now() >= runDeadline) {
+            console.log(JSON.stringify({ event: "polling_cron_budget_exhausted", channel_id: w.channelId, list_id: w.listId }));
+            break;
+          }
+          await pollXListPosts(env, w.channelId, w.listId);
+        }
+      } else {
+        console.error(JSON.stringify({ event: "list_watches_fetch_failed", status: res.status }));
+      }
+    } catch (e) {
+      console.error(JSON.stringify({ event: "list_watches_fetch_error", error: String(e) }));
+    }
   }
 }

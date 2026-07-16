@@ -5,6 +5,7 @@ import { TikTokUnauthorizedError } from "../../../src/services/tiktok-errors";
 const runFollowersPollerMock = vi.fn().mockResolvedValue(undefined);
 const runPostsPollerMock = vi.fn().mockResolvedValue(undefined);
 const runTikTokContentPollerMock = vi.fn().mockResolvedValue(undefined);
+const runListPostsPollerMock = vi.fn().mockResolvedValue(undefined);
 const getAppCredentialsMock = vi.fn().mockResolvedValue({ clientId: "cid", clientSecret: "csecret" });
 const getValidTokenMock = vi.fn().mockResolvedValue("tok");
 const refreshAccessTokenMock = vi.fn().mockResolvedValue("refreshed-tok");
@@ -19,6 +20,9 @@ vi.mock("../../../src/services/pollers/x-posts", () => ({
 }));
 vi.mock("../../../src/services/pollers/tiktok-content", () => ({
   runTikTokContentPoller: (...args: unknown[]) => runTikTokContentPollerMock(...args),
+}));
+vi.mock("../../../src/services/pollers/x-list-posts", () => ({
+  runListPostsPoller: (...args: unknown[]) => runListPostsPollerMock(...args),
 }));
 vi.mock("../../../src/services/app-credentials", () => ({
   getAppCredentials: (...args: unknown[]) => getAppCredentialsMock(...args),
@@ -37,7 +41,7 @@ vi.mock("../../../src/services/tiktok-token", () => ({
 }));
 vi.mock("../../../../shared/tenant-data-db", () => ({ TenantDataDB: class {} }));
 
-import { pollChannelOnce } from "../../../src/services/pollers/poll-channel";
+import { pollChannelOnce, pollXListPosts } from "../../../src/services/pollers/poll-channel";
 
 function baseEnv(linkDb: unknown, webDb: unknown) {
   return {
@@ -67,6 +71,7 @@ describe("pollChannelOnce", () => {
     runFollowersPollerMock.mockClear().mockResolvedValue(undefined);
     runPostsPollerMock.mockClear().mockResolvedValue(undefined);
     runTikTokContentPollerMock.mockClear().mockResolvedValue(undefined);
+    runListPostsPollerMock.mockClear().mockResolvedValue(undefined);
     getAppCredentialsMock.mockClear();
     getValidTokenMock.mockClear().mockResolvedValue("tok");
     refreshAccessTokenMock.mockClear().mockResolvedValue("refreshed-tok");
@@ -205,5 +210,97 @@ describe("pollChannelOnce", () => {
     // being capped by a shared run-level deadline, so posts still gets ~20s here.
     expect(postsDeadline - Date.now()).toBeGreaterThan(15_000);
     vi.useRealTimers();
+  });
+});
+
+describe("pollXListPosts", () => {
+  beforeEach(() => {
+    runListPostsPollerMock.mockClear().mockResolvedValue(undefined);
+    getAppCredentialsMock.mockClear();
+    getValidTokenMock.mockClear().mockResolvedValue("tok");
+  });
+
+  it("no-ops when the channel is not found", async () => {
+    const linkDb = { prepare: vi.fn().mockReturnValue({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(null) }) }) };
+    await pollXListPosts(baseEnv(linkDb, mockWebDb()), "chan1", "listA");
+    expect(runListPostsPollerMock).not.toHaveBeenCalled();
+  });
+
+  it("no-ops when the channel is not BYOK-active", async () => {
+    const linkDb = {
+      prepare: vi.fn().mockReturnValue({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({
+        id: "chan1", tenant_id: 1, config: JSON.stringify({ is_byok: false, x_user_id: "xu1" }),
+      }) }) }),
+    };
+    await pollXListPosts(baseEnv(linkDb, mockWebDb()), "chan1", "listA");
+    expect(runListPostsPollerMock).not.toHaveBeenCalled();
+  });
+
+  it("find-or-creates the channel_poll_state row for 'list_posts:{listId}', then calls runListPostsPoller with the channel's token", async () => {
+    const linkDb = {
+      prepare: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes("FROM channels")) {
+          return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({
+            id: "chan1", tenant_id: 1, config: JSON.stringify({ is_byok: true, x_user_id: "xu1" }),
+          }) }) };
+        }
+        if (sql.includes("INSERT OR IGNORE INTO channel_poll_state")) {
+          return { bind: vi.fn().mockReturnValue({ run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }) }) };
+        }
+        // shouldPoll's SELECT FROM channel_poll_state — no prior last_polled_at, always allowed through
+        return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({ backfill_complete: 0, last_polled_at: null }) }) };
+      }),
+    };
+
+    await pollXListPosts(baseEnv(linkDb, mockWebDb()), "chan1", "listA");
+
+    const insertIgnoreCall = linkDb.prepare.mock.calls.find((c: unknown[]) => (c[0] as string).includes("INSERT OR IGNORE INTO channel_poll_state"));
+    expect(insertIgnoreCall).toBeTruthy();
+    expect(runListPostsPollerMock).toHaveBeenCalledWith(expect.objectContaining({ channelId: "chan1", listId: "listA", accessToken: "tok" }));
+  });
+
+  it("skips polling when shouldPoll's repoll gate says too recent, but the poll_state row was still seeded", async () => {
+    const linkDb = {
+      prepare: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes("FROM channels")) {
+          return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({
+            id: "chan1", tenant_id: 1, config: JSON.stringify({ is_byok: true, x_user_id: "xu1" }),
+          }) }) };
+        }
+        if (sql.includes("INSERT OR IGNORE INTO channel_poll_state")) {
+          return { bind: vi.fn().mockReturnValue({ run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 0 } }) }) };
+        }
+        return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({ backfill_complete: 1, last_polled_at: new Date().toISOString() }) }) };
+      }),
+    };
+
+    await pollXListPosts(baseEnv(linkDb, mockWebDb()), "chan1", "listA");
+
+    expect(runListPostsPollerMock).not.toHaveBeenCalled();
+  });
+
+  it("force-refreshes and retries once on XUnauthorizedError", async () => {
+    runListPostsPollerMock
+      .mockRejectedValueOnce(new XUnauthorizedError("expired"))
+      .mockResolvedValueOnce(undefined);
+    const linkDb = {
+      prepare: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes("FROM channels")) {
+          return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({
+            id: "chan1", tenant_id: 1, config: JSON.stringify({ is_byok: true, x_user_id: "xu1" }),
+          }) }) };
+        }
+        if (sql.includes("INSERT OR IGNORE INTO channel_poll_state")) {
+          return { bind: vi.fn().mockReturnValue({ run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }) }) };
+        }
+        return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({ backfill_complete: 0, last_polled_at: null }) }) };
+      }),
+    };
+
+    await pollXListPosts(baseEnv(linkDb, mockWebDb()), "chan1", "listA");
+
+    expect(refreshAccessTokenMock).toHaveBeenCalledWith("chan1");
+    expect(runListPostsPollerMock).toHaveBeenCalledTimes(2);
+    expect(runListPostsPollerMock.mock.calls[1][0]).toMatchObject({ accessToken: "refreshed-tok" });
   });
 });

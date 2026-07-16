@@ -21,6 +21,7 @@ export interface Env {
   LINK_URL: string;
   CONTENT_URL: string;
   WEB_URL: string;
+  FLOW_URL: string;
   R2_SQL_TOKEN: string;
   R2_BUCKET: string;
   R2_WAREHOUSE: string;

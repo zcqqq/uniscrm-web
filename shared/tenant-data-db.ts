@@ -7,13 +7,15 @@ interface D1QueryResult<T = Record<string, unknown>> {
 }
 
 export class TenantDataDB {
+  private accountId: string;
+  private apiToken: string;
+  private dbId: string;
   private baseUrl: string;
 
-  constructor(
-    private accountId: string,
-    private apiToken: string,
-    private dbId: string
-  ) {
+  constructor(accountId: string, apiToken: string, dbId: string) {
+    this.accountId = accountId;
+    this.apiToken = apiToken;
+    this.dbId = dbId;
     this.baseUrl = `${CF_API_BASE}/accounts/${accountId}/d1/database/${dbId}`;
   }
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { generateContent } from "../src/services/generate";
 import * as credentialsModule from "../src/services/llm-credentials";
+import * as skillContentModule from "../src/services/skill-content";
 
 describe("generateContent", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -64,5 +65,48 @@ describe("generateContent", () => {
   it("throws clearly (no silent fallback) when provider: 'anthropic' has no configured credentials", async () => {
     vi.spyOn(credentialsModule, "getTenantLlmCredentials").mockResolvedValue(null);
     await expect(generateContent({} as any, { ...baseParams, provider: "anthropic" })).rejects.toThrow(/No anthropic credentials configured/);
+  });
+
+  it("passes the cached skill content as a system prompt when skillId is set", async () => {
+    vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("Skill guidance here");
+    const aiRun = vi.fn().mockResolvedValue({ response: "punchy text" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+
+    await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, { ...baseParams, skillId: "marketingskills-social" });
+
+    expect(skillContentModule.getSkillContent).toHaveBeenCalledWith(expect.anything(), "marketingskills-social");
+    expect(aiRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        messages: expect.arrayContaining([{ role: "system", content: "Skill guidance here" }]),
+      })
+    );
+  });
+
+  it("omits the system prompt when skillId is 'none' or absent, unchanged from before", async () => {
+    const getSkillContentSpy = vi.spyOn(skillContentModule, "getSkillContent");
+    const aiRun = vi.fn().mockResolvedValue({ response: "punchy text" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+
+    await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, { ...baseParams, skillId: "none" });
+
+    expect(getSkillContentSpy).not.toHaveBeenCalled();
+    expect(aiRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ messages: [{ role: "user", content: baseParams.prompt }] })
+    );
+  });
+
+  it("omits the system prompt when the skill was never fetched (getSkillContent returns null)", async () => {
+    vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue(null);
+    const aiRun = vi.fn().mockResolvedValue({ response: "punchy text" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+
+    await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, { ...baseParams, skillId: "marketingskills-social" });
+
+    expect(aiRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ messages: [{ role: "user", content: baseParams.prompt }] })
+    );
   });
 });

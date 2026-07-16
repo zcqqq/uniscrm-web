@@ -129,6 +129,8 @@ interface ByokChannel {
 
 function XByokChannelCard({ locale }: { locale: Locale }) {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingChannelId, setEditingChannelId] = useState<string | null>(null);
+  const [reauthOpen, setReauthOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [channels, setChannels] = useState<ByokChannel[]>([]);
   const [clientId, setClientId] = useState("");
@@ -137,7 +139,8 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
   const [error, setError] = useState("");
 
   const preChannelId = useMemo(() => crypto.randomUUID(), []);
-  const webhookUrl = `${window.location.origin}/x/webhook/${preChannelId}`;
+  const targetChannelId = editingChannelId ?? preChannelId;
+  const webhookUrl = `${window.location.origin}/x/webhook/${targetChannelId}`;
   const redirectUrl = `${window.location.origin}/api/auth/x/callback`;
 
   useEffect(() => { loadChannels(); }, []);
@@ -149,12 +152,30 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
     } catch { /* ignore */ }
   }
 
+  function openCreateDialog() {
+    setEditingChannelId(null);
+    setClientId("");
+    setClientSecret("");
+    setConsumerSecret("");
+    setError("");
+    setDialogOpen(true);
+  }
+
+  function openEditDialog(channelId: string) {
+    setEditingChannelId(channelId);
+    setClientId("");
+    setClientSecret("");
+    setConsumerSecret("");
+    setError("");
+    setDialogOpen(true);
+  }
+
   async function handleSaveAndAuthorize() {
     setError("");
     setSaving(true);
     try {
       const result = await api.channels.byokCreate({
-        channel_id: preChannelId,
+        channel_id: targetChannelId,
         client_id: clientId,
         client_secret: clientSecret,
         consumer_secret: consumerSecret,
@@ -195,7 +216,7 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
         createdAt={activeChannel?.created_at}
         actions={
           !activeChannel ? (
-            <Button className="w-full" variant="outline" onClick={() => setDialogOpen(true)}>
+            <Button className="w-full" variant="outline" onClick={openCreateDialog}>
               Add App
             </Button>
           ) : pendingChannel ? (
@@ -206,27 +227,55 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
               Authorize
             </Button>
           ) : (
-            <Button
-              variant="destructive"
-              className="w-full"
-              onClick={() => handleDelete(connectedChannel!.id)}
-            >
-              Disconnect
-            </Button>
+            <div className="flex flex-col gap-2 w-full">
+              <Button variant="outline" className="w-full" onClick={() => setReauthOpen(true)}>
+                重新授权
+              </Button>
+              <Button variant="outline" className="w-full" onClick={() => openEditDialog(connectedChannel!.id)}>
+                编辑凭证
+              </Button>
+              <Button
+                variant="destructive"
+                className="w-full"
+                onClick={() => handleDelete(connectedChannel!.id)}
+              >
+                Disconnect
+              </Button>
+            </div>
           )
         }
       />
+
+      <AlertDialog open={reauthOpen} onOpenChange={setReauthOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>重新授权 X (BYOK)</AlertDialogTitle>
+            <AlertDialogDescription>
+              适用于刷新令牌已失效（如需要重新登录）等情况。将使用已保存的 App 凭证重新跳转到 X OAuth，继续？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { window.location.href = `/api/auth/x/connect?channelId=${connectedChannel!.id}`; }}
+            >
+              继续
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <XLogo />
-              X (BYOK) — New App
+              {editingChannelId ? "X (BYOK) — 编辑凭证" : "X (BYOK) — New App"}
             </DialogTitle>
             <DialogDescription>
-              输入你的 X Developer App 凭证以连接自己的应用。
-              如果该 X 账号已通过其他方式连接（如托管应用），授权后会自动切换为此 BYOK 连接。
+              {editingChannelId
+                ? "更新此 App 的凭证（无法回显已保存的旧值，需重新填写全部三项）。保存后需重新授权才能生效。"
+                : "输入你的 X Developer App 凭证以连接自己的应用。如果该 X 账号已通过其他方式连接（如托管应用），授权后会自动切换为此 BYOK 连接。"}
             </DialogDescription>
           </DialogHeader>
 

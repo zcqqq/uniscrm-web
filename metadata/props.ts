@@ -116,7 +116,17 @@ export const PROPS = definePropDefinitions([
     propId: "message_text",
     isInsight: true,
     dataType: "TEXT",
-    label: { en: "Message text", zh: "消息文本" },
+    label: { en: "Text", zh: "文本" },
+  },
+  {
+    propId: "message_image",
+    dataType: "IMAGE",
+    label: { en: "Image", zh: "图片" },
+  },
+  {
+    propId: "message_video",
+    dataType: "VIDEO",
+    label: { en: "Video", zh: "视频" },
   },
   {
     propId: "source_created_at",

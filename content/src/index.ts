@@ -4,6 +4,7 @@ import type { Env } from "./types";
 import { internalRoutes } from "./routes-internal";
 import { setTenantLlmCredentials, listConfiguredProviders, deleteTenantLlmCredentials, getDefaultModel, setDefaultModel } from "./services/llm-credentials";
 import { listOpenAiModels, listAnthropicModels, listWorkersAiModels } from "./services/model-catalog";
+import { SKILL_CATALOG } from "./skills/catalog";
 
 type HonoEnv = { Bindings: Env; Variables: { tenantId: string } };
 
@@ -70,6 +71,15 @@ app.delete("/api/llm-credentials/:provider", async (c) => {
   const provider = c.req.param("provider") as "openai" | "anthropic";
   await deleteTenantLlmCredentials(c.env, tenantId, provider);
   return c.json({ ok: true });
+});
+
+app.use("/api/skills/*", sessionAuth);
+
+app.get("/api/skills", async (c) => {
+  const cached = await c.env.CONTENT_DB.prepare("SELECT skill_id FROM skill_content_cache").all<{ skill_id: string }>();
+  const cachedIds = new Set(cached.results.map((r) => r.skill_id));
+  const skills = SKILL_CATALOG.map((s) => ({ id: s.id, label: s.label, hasCachedContent: cachedIds.has(s.id) }));
+  return c.json({ skills });
 });
 
 app.use("/api/llm-models", sessionAuth);

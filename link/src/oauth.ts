@@ -180,22 +180,31 @@ export function oauthRoutes() {
           .run();
       }
 
-      try {
-        await pollChannelOnce(c.env, "X", byokChannelId);
-      } catch (e) {
-        console.error("X BYOK instant poll failed:", e);
-      }
-
-      // Setup subscriptions using BYOK channel's own webhook URL
+      // The channel row itself is already updated above, so the browser can be
+      // redirected back immediately — the instant backfill poll and webhook
+      // subscription setup below can each take up to the poller's own 20s
+      // budget, and awaiting them here would leave the user staring at a
+      // blank redirect for that whole time for no benefit (the frontend just
+      // re-reads the channel row, not these background side effects).
       const tokenService = new XTokenService(c.env.LINK_DB, clientId, clientSecret);
-      try {
-        const webhookUrl = `${url.origin}/x/webhook/${byokChannelId}`;
-        const userService = new XActivityService(tokens.accessToken());
-        const ids = await userService.setupAllSubscriptions(xUser.id, webhookUrl);
-        await tokenService.updateConfig(byokChannelId, { subscription_ids: ids });
-      } catch (e) {
-        console.error("BYOK XAA subscription setup failed:", e);
-      }
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            await pollChannelOnce(c.env, "X", byokChannelId);
+          } catch (e) {
+            console.error("X BYOK instant poll failed:", e);
+          }
+
+          try {
+            const webhookUrl = `${url.origin}/x/webhook/${byokChannelId}`;
+            const userService = new XActivityService(tokens.accessToken());
+            const ids = await userService.setupAllSubscriptions(xUser.id, webhookUrl);
+            await tokenService.updateConfig(byokChannelId, { subscription_ids: ids });
+          } catch (e) {
+            console.error("BYOK XAA subscription setup failed:", e);
+          }
+        })()
+      );
     } else {
       // System App: existing flow — abuse-only gate, normal users never reach this
       // because the Connect button is already disabled by tier in the frontend.
@@ -229,21 +238,27 @@ export function oauthRoutes() {
         .first<{ id: string }>();
       const actualChannelId = row?.id || channelId;
 
+      // Same reasoning as the BYOK branch above: don't block the redirect on
+      // webhook/subscription setup.
       const tokenService = new XTokenService(c.env.LINK_DB, clientId, clientSecret);
-      try {
-        const webhookUrl = `${url.origin}/x/webhook`;
-        const bearerService = new XActivityService(c.env.X_BEARER_TOKEN);
-        let webhook = await bearerService.getWebhook();
-        if (!webhook || webhook.url !== webhookUrl) {
-          const whId = await bearerService.createWebhook(webhookUrl);
-          webhook = { webhook_id: whId, url: webhookUrl };
-        }
-        const userService = new XActivityService(tokens.accessToken());
-        const ids = await userService.setupAllSubscriptions(xUser.id, webhookUrl, webhook.webhook_id);
-        await tokenService.updateConfig(actualChannelId, { subscription_ids: ids });
-      } catch (e) {
-        console.error("XAA subscription setup failed:", e);
-      }
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const webhookUrl = `${url.origin}/x/webhook`;
+            const bearerService = new XActivityService(c.env.X_BEARER_TOKEN);
+            let webhook = await bearerService.getWebhook();
+            if (!webhook || webhook.url !== webhookUrl) {
+              const whId = await bearerService.createWebhook(webhookUrl);
+              webhook = { webhook_id: whId, url: webhookUrl };
+            }
+            const userService = new XActivityService(tokens.accessToken());
+            const ids = await userService.setupAllSubscriptions(xUser.id, webhookUrl, webhook.webhook_id);
+            await tokenService.updateConfig(actualChannelId, { subscription_ids: ids });
+          } catch (e) {
+            console.error("XAA subscription setup failed:", e);
+          }
+        })()
+      );
     }
 
     return c.redirect(url.origin, 302);

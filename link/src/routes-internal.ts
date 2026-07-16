@@ -229,8 +229,8 @@ export function internalRoutes() {
   // spec's non-goals) — targetChannelId resolving to a TIKTOK channel_type falls through
   // to the generic ok:false path below.
   router.post("/content/create-post", async (c) => {
-    const { contentId, interpolatedPrompt, provider, targetChannelId, flowId } = await c.req.json<{
-      contentId: string; interpolatedPrompt: string; provider: "default" | "openai" | "anthropic" | "none"; targetChannelId: string; flowId?: string | null;
+    const { contentId, interpolatedPrompt, provider, targetChannelId, flowId, skillId } = await c.req.json<{
+      contentId: string; interpolatedPrompt: string; provider: "default" | "openai" | "anthropic" | "none"; targetChannelId: string; flowId?: string | null; skillId?: string;
     }>();
 
     const targetChannel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
@@ -247,7 +247,7 @@ export function internalRoutes() {
       const genRes = await fetch(`${c.env.CONTENT_URL}/internal/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": c.env.INTERNAL_SECRET },
-        body: JSON.stringify({ tenantId: targetChannel.tenant_id, prompt: interpolatedPrompt, provider }),
+        body: JSON.stringify({ tenantId: targetChannel.tenant_id, prompt: interpolatedPrompt, provider, skillId }),
       });
       if (!genRes.ok) {
         console.error(JSON.stringify({ event: "create_post_generate_failed", contentId, targetChannelId, provider, status: genRes.status }));

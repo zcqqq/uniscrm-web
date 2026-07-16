@@ -21,4 +21,14 @@ export const ContentMetadata_TikTok: ContentMetadata[] = [
       { propId: "view_count", dataId: "{linkPrefix}.view_count" },
     ],
   },
+  {
+    sourceContentType: "photo-post", // https://developers.tiktok.com/doc/content-posting-api-reference-photo-post
+    flowType: "action",
+    label: {"en":"Photo Posting", "zh":"发布图文"},
+    contentProps: [
+        {propId: "title", dataId:"post_info.title", aiType:"TEXT"},
+        {propId: "description", dataId:"post_info.description", aiType:"TEXT"},
+        {propId: "message_image", dataId:"source_info.photo_images[]", aiType:"IMAGE"},
+    ],
+  },
 ];

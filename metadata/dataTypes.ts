@@ -1,4 +1,4 @@
-export type PropDataType = "INT" | "TEXT" | "ENUM_INT" | "ENUM_TEXT" | "DATETIME";
+export type PropDataType = "INT" | "TEXT" | "ENUM_INT" | "ENUM_TEXT" | "DATETIME" | "IMAGE" | "VIDEO";
 export type PropFieldType = "IMAGE";
 
 export type LocalizedString = { en: string; zh: string };
@@ -41,6 +41,7 @@ export interface PropMapping {
   propId: string;
   dataId?: string;
   value?: string | number;
+  aiType?: "TEXT" | "IMAGE" | "VIDEO";
 }
 
 export interface UserMetadata {

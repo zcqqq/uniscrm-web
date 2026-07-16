@@ -1,15 +1,6 @@
 // https://docs.x.com/x-api/activity/introduction
 import type { EventMetadata, ContentMetadata } from "./dataTypes";
 
-export const ContentActionMetadata_X: ContentMetadata[] = [
-  {
-    sourceContentType: "create-post", // https://docs.x.com/x-api/posts/create-post
-    flowType: "action",
-    label: { en: "Create Post", zh: "新建推文" },
-    contentProps: [],
-  },
-];
-
 export const EventMetadata_X: EventMetadata[] = [
   {
     eventType: "follow.follow",

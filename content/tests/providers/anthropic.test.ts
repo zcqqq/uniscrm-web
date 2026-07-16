@@ -28,4 +28,18 @@ describe("AnthropicProvider", () => {
     const provider = new AnthropicProvider("sk-ant-bad");
     await expect(provider.generate("u", "claude-3-5-haiku-latest")).rejects.toThrow("Anthropic generate failed: 401");
   });
+
+  it("sends the skill content as a top-level system field, not a messages entry", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ content: [{ type: "text", text: "generated text" }] }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new AnthropicProvider("sk-ant-test");
+    await provider.generate("user prompt", "claude-3-5-haiku-latest", "Skill guidance here");
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.system).toBe("Skill guidance here");
+    expect(body.messages).toEqual([{ role: "user", content: "user prompt" }]);
+  });
 });

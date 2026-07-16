@@ -92,8 +92,32 @@ describe("collectActions: new content-domain action types", () => {
     };
     const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
     expect(result.actions).toEqual([
-      { type: "xContentAction", nodeId: "a1", hasBranches: true, operation: "repost-post", targetChannelId: "tiktok-chan-1", prompt: "Rewrite this: $content.content_text", provider: "default" },
+      { type: "xContentAction", nodeId: "a1", hasBranches: true, operation: "repost-post", targetChannelId: "tiktok-chan-1", prompt: "Rewrite this: $content.content_text", provider: "default", skillId: "none" },
     ]);
+  });
+
+  it("defaults skillId to 'none' when not set on an xContentAction node", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-2" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
+    expect(result.actions[0]).toMatchObject({ skillId: "none" });
+  });
+
+  it("carries a set skillId through", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-2", skillId: "marketingskills-social" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
+    expect(result.actions[0]).toMatchObject({ skillId: "marketingskills-social" });
   });
 
   it("defaults operation to 'create-post' when not set on an xContentAction node", () => {

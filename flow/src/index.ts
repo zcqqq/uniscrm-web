@@ -313,14 +313,15 @@ async function executeContentActions(
       } else {
         const targetChannelId = action.targetChannelId as string;
         const provider = action.provider as string;
+        const skillId = (action.skillId as string) || "none";
         const interpolatedPrompt = String(action.prompt || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""));
         res = await fetch(`${env.LINK_URL}/internal/content/create-post`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
-          body: JSON.stringify({ contentId, interpolatedPrompt, provider, targetChannelId, flowId: flowId || null }),
+          body: JSON.stringify({ contentId, interpolatedPrompt, provider, targetChannelId, flowId: flowId || null, skillId }),
         });
         logEvent = "content_action_x_content_action";
-        logExtra = { targetChannelId, provider };
+        logExtra = { targetChannelId, provider, skillId };
       }
 
       const body = await res.json().catch(() => ({ ok: false })) as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string };
@@ -523,6 +524,17 @@ app.get("/api/channels/:channelId/x-lists", async (c) => {
 // Proxy configured LLM providers from content worker (tenant-scoped, forwards the session cookie)
 app.get("/api/llm-providers", async (c) => {
   const res = await fetch(`${c.env.CONTENT_URL}/api/llm-credentials`, {
+    headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
+  });
+  return new Response(await res.text(), {
+    status: res.status,
+    headers: { "Content-Type": "application/json" },
+  });
+});
+
+// Proxy the skill catalog from content worker (for the xContentAction Skill dropdown)
+app.get("/api/skills", async (c) => {
+  const res = await fetch(`${c.env.CONTENT_URL}/api/skills`, {
     headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
   });
   return new Response(await res.text(), {

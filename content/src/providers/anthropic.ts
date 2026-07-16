@@ -3,7 +3,7 @@ import type { LlmProvider } from "./interface";
 export class AnthropicProvider implements LlmProvider {
   constructor(private apiKey: string) {}
 
-  async generate(prompt: string, model: string): Promise<string> {
+  async generate(prompt: string, model: string, systemPrompt?: string): Promise<string> {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -14,6 +14,7 @@ export class AnthropicProvider implements LlmProvider {
       body: JSON.stringify({
         model,
         max_tokens: 1024,
+        ...(systemPrompt?.trim() ? { system: systemPrompt } : {}),
         messages: [{ role: "user", content: prompt }],
       }),
     });

@@ -1,5 +1,5 @@
 // https://docs.x.com/x-api/activity/introduction
-import type { UserMetadata , ContentMetadata} from "./dataTypes";
+import type { UserMetadata, ContentMetadata } from "./dataTypes";
 
 export const UserMetadata_X: UserMetadata[] = [
   {
@@ -43,6 +43,7 @@ export const ContentMetadata_X: ContentMetadata[] = [
   {
     sourceContentType: "get-list-posts", // https://docs.x.com/x-api/lists/get-list-posts
     linkPrefix: "data[]",
+    flowType: "trigger",
     contentProps: [
       { propId: "content_type", value: "TWEET" },
       { propId: "source_content_id", dataId: "{linkPrefix}.id" },
@@ -55,6 +56,21 @@ export const ContentMetadata_X: ContentMetadata[] = [
       { propId: "quote_count", dataId: "{linkPrefix}.public_metrics.quote_count" },
       { propId: "reply_count", dataId: "{linkPrefix}.public_metrics.reply_count" },
       { propId: "repost_count", dataId: "{linkPrefix}.public_metrics.retweet_count" },
+    ],
+  },
+  {
+    sourceContentType: "create-post", // https://docs.x.com/x-api/posts/create-post
+    flowType: "action",
+    label: {"en":"Create Post", "zh":"发推文"},
+    contentProps: [
+      {propId: "message_text", aiType:"TEXT"}
+    ],
+  },
+  {
+    sourceContentType: "repost-post", // https://docs.x.com/x-api/users/repost-post
+    flowType: "action",
+    label: {"en":"Repost", "zh":"转发"},
+    contentProps: [
     ],
   },
 ];

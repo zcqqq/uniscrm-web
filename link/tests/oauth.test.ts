@@ -91,6 +91,18 @@ function buildApp() {
   return app;
 }
 
+// The callback backgrounds the instant poll + subscription setup via
+// c.executionCtx.waitUntil so the redirect isn't blocked on them. Hono's test
+// request() has no real ExecutionContext, and asserting on the backgrounded
+// mocks requires explicitly awaiting whatever was handed to waitUntil first.
+function createMockExecutionCtx() {
+  const promises: Promise<unknown>[] = [];
+  return {
+    ctx: { waitUntil: (p: Promise<unknown>) => { promises.push(p); }, passThroughOnException: () => {} },
+    flush: () => Promise.all(promises),
+  };
+}
+
 describe("X BYOK OAuth callback — channel conflict handling", () => {
   beforeEach(() => {
     validateAuthorizationCodeMock.mockReset().mockResolvedValue({
@@ -122,11 +134,14 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     ]);
 
     const app = buildApp();
+    const { ctx, flush } = createMockExecutionCtx();
     const res = await app.request(
       "/x/callback?code=abc&state=state123",
       {},
-      { KV: kv, LINK_DB: linkDb } as any
+      { KV: kv, LINK_DB: linkDb } as any,
+      ctx as any
     );
+    await flush();
 
     expect(res.status).toBe(302);
 
@@ -155,6 +170,37 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     expect(updateConfigMock).toHaveBeenCalledWith(byokChannelId, { subscription_ids: ["sub-1"] });
   });
 
+  it("redirects without waiting for the instant poll and subscription setup — they run via executionCtx.waitUntil after the response", async () => {
+    const byokChannelId = "placeholder-chan";
+    const kv = createMockKv(byokChannelId);
+    const linkDb = createMockLinkDb([
+      ["WHERE id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
+      ["SELECT config, tenant_id FROM channels WHERE id = ?", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }), tenant_id: 5 }],
+      ["channel_type = 'X' AND source_channel_id", null],
+    ]);
+
+    // Never resolves for the duration of this test — if the handler awaited
+    // this before redirecting, `app.request()` itself would hang.
+    pollChannelOnceMock.mockReturnValue(new Promise(() => {}));
+
+    try {
+      const app = buildApp();
+      const { ctx } = createMockExecutionCtx();
+      const res = await app.request(
+        "/x/callback?code=abc&state=state123",
+        {},
+        { KV: kv, LINK_DB: linkDb } as any,
+        ctx as any
+      );
+
+      expect(res.status).toBe(302);
+    } finally {
+      // Restore for subsequent tests — mockClear() in beforeEach only clears
+      // call history, not this returnValue override.
+      pollChannelOnceMock.mockResolvedValue(undefined);
+    }
+  });
+
   it("updates the placeholder row itself (and sets is_byok=1) when no other channel claims that X account", async () => {
     const byokChannelId = "placeholder-chan";
     const kv = createMockKv(byokChannelId);
@@ -165,11 +211,14 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     ]);
 
     const app = buildApp();
+    const { ctx, flush } = createMockExecutionCtx();
     const res = await app.request(
       "/x/callback?code=abc&state=state123",
       {},
-      { KV: kv, LINK_DB: linkDb } as any
+      { KV: kv, LINK_DB: linkDb } as any,
+      ctx as any
     );
+    await flush();
 
     expect(res.status).toBe(302);
 

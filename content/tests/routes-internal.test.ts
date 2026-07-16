@@ -85,3 +85,60 @@ describe("POST /internal/generate", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("POST /internal/skills/:id/refresh", () => {
+  const testEnv = { ...env, INTERNAL_SECRET: "test-internal-secret" };
+
+  beforeEach(async () => {
+    await env.CONTENT_DB.prepare(
+      `CREATE TABLE IF NOT EXISTS skill_content_cache (
+         skill_id TEXT PRIMARY KEY,
+         content TEXT NOT NULL,
+         source_url TEXT NOT NULL,
+         fetched_at TEXT NOT NULL
+       )`
+    ).run();
+    await env.CONTENT_DB.prepare("DELETE FROM skill_content_cache").run();
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("rejects requests missing the internal secret", async () => {
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/skills/marketingskills-social/refresh", { method: "POST" }),
+      testEnv
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("fetches and caches the skill content on success", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("# Latest guide", { status: 200 })));
+
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/skills/marketingskills-social/refresh", {
+        method: "POST",
+        headers: { "X-Internal-Secret": "test-internal-secret" },
+      }),
+      testEnv
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json<{ ok: boolean }>();
+    expect(body.ok).toBe(true);
+
+    const row = await env.CONTENT_DB.prepare("SELECT content FROM skill_content_cache WHERE skill_id = ?")
+      .bind("marketingskills-social").first<{ content: string }>();
+    expect(row?.content).toBe("# Latest guide");
+  });
+
+  it("returns 502 for an unknown skill id", async () => {
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/skills/not-a-real-skill/refresh", {
+        method: "POST",
+        headers: { "X-Internal-Secret": "test-internal-secret" },
+      }),
+      testEnv
+    );
+    expect(res.status).toBe(502);
+  });
+});

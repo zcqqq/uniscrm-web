@@ -251,6 +251,7 @@ function buildActionData(targetNode: FlowNode): ActionResult {
     actionData.targetChannelId = targetNode.data.channelId as string;
     actionData.prompt = targetNode.data.prompt as string;
     actionData.provider = targetNode.data.provider as string;
+    actionData.skillId = (targetNode.data.skillId as string) || "none";
   }
   if (actionType === "updateContentStatus") {
     actionData.status = targetNode.data.status as string;

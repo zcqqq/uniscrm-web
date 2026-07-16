@@ -139,7 +139,7 @@ describe("stub content-flow action endpoints", () => {
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
-        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", targetChannelId: "tgt-chan", flowId: "flow-1" }),
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", targetChannelId: "tgt-chan", flowId: "flow-1", skillId: "marketingskills-social" }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
     );
@@ -147,6 +147,8 @@ describe("stub content-flow action endpoints", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({ ok: true });
+    const generateCallBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(generateCallBody.skillId).toBe("marketingskills-social"); // forwarded through to content's /internal/generate
     expect(tenantDataDbRunMock).toHaveBeenCalledTimes(1); // recordPublishedContent wrote the new content row
     const [insertSql, insertParams] = tenantDataDbRunMock.mock.calls[0] as [string, unknown[]];
     expect(insertSql).toMatch(/INSERT INTO content/);

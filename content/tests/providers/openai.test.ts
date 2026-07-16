@@ -27,4 +27,33 @@ describe("OpenAiProvider", () => {
     const provider = new OpenAiProvider("sk-bad");
     await expect(provider.generate("u", "gpt-4o-mini")).rejects.toThrow("OpenAI generate failed: 401");
   });
+
+  it("prepends a system message when skill content is given", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: "generated text" } }] }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new OpenAiProvider("sk-test");
+    await provider.generate("user prompt", "gpt-4o", "Skill guidance here");
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.messages).toEqual([
+      { role: "system", content: "Skill guidance here" },
+      { role: "user", content: "user prompt" },
+    ]);
+  });
+
+  it("omits the system message when skill content is blank", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: "generated text" } }] }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new OpenAiProvider("sk-test");
+    await provider.generate("user prompt", "gpt-4o", "   ");
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.messages).toEqual([{ role: "user", content: "user prompt" }]);
+  });
 });

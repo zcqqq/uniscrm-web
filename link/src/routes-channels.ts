@@ -79,6 +79,12 @@ export function channelsRoutes() {
   });
 
   // --- X BYOK ---
+  // Handles both creating a new app (channel_id absent, or present-but-unclaimed
+  // — the frontend pre-generates the id so it can show the webhook URL before
+  // saving) and editing an already-connected app's credentials (channel_id
+  // matches an existing row owned by this tenant). Re-authorization after an
+  // edit is a separate step (GET /auth/x/connect?channelId=...) since the old
+  // OAuth tokens may no longer be valid for the new app credentials.
   router.post("/x/byok", async (c) => {
     const tenantId = c.get("tenantId" as never) as number;
     const memberId = c.get("memberId" as never) as string;
@@ -97,6 +103,49 @@ export function channelsRoutes() {
       encrypt(consumer_secret, masterKey),
     ]);
 
+    const url = new URL(c.req.url);
+    const existing = channel_id
+      ? await c.env.LINK_DB
+          .prepare("SELECT config FROM channels WHERE id = ? AND tenant_id = ? AND channel_type = 'X' AND is_byok = 1")
+          .bind(channel_id, tenantId)
+          .first<{ config: string }>()
+      : null;
+
+    if (existing) {
+      // Editing an existing app: only the credential fields change — everything
+      // else (x_user_id, tokens, subscription_ids, ...) is left as-is until the
+      // user re-authorizes.
+      const updatedConfig = JSON.stringify({
+        ...JSON.parse(existing.config),
+        is_byok: true,
+        app_client_id: encClientId,
+        app_client_secret: encClientSecret,
+        app_consumer_secret: encConsumerSecret,
+      });
+      await c.env.LINK_DB
+        .prepare("UPDATE channels SET config = ?, updated_at = datetime('now') WHERE id = ?")
+        .bind(updatedConfig, channel_id)
+        .run();
+
+      return c.json({
+        channel_id,
+        webhook_url: `${url.origin}/x/webhook/${channel_id}`,
+        redirect_url: `${url.origin}/api/auth/x/callback`,
+      });
+    }
+
+    if (channel_id) {
+      // Not this tenant's channel — reject rather than falling through to
+      // INSERT, which would either collide on the primary key or (if some
+      // future change made the insert an upsert) silently overwrite someone
+      // else's row.
+      const claimedElsewhere = await c.env.LINK_DB
+        .prepare("SELECT id FROM channels WHERE id = ?")
+        .bind(channel_id)
+        .first<{ id: string }>();
+      if (claimedElsewhere) return c.json({ error: "Channel not found" }, 404);
+    }
+
     const channelId = channel_id || crypto.randomUUID();
     const config = JSON.stringify({
       is_byok: true,
@@ -111,7 +160,6 @@ export function channelsRoutes() {
       .bind(channelId, config, tenantId, memberId)
       .run();
 
-    const url = new URL(c.req.url);
     return c.json({
       channel_id: channelId,
       webhook_url: `${url.origin}/x/webhook/${channelId}`,

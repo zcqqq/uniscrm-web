@@ -87,3 +87,43 @@ sequenceDiagram
         end
     end
 ```
+
+## X List Posts trigger: demand-sync + per-list dedup
+
+`link`'s cron has no direct visibility into `flow`'s `graph_json` (separate DB) — it pulls
+current demand from `flow` before each polling cycle, rather than `flow` pushing state into
+`link` on publish/unpublish.
+
+```mermaid
+sequenceDiagram
+    participant Cron as link Worker (cron)
+    participant FW as flow Worker
+    participant PC as poll-channel.ts
+    participant CPS as channel_poll_state
+    participant LP as x-list-posts.ts
+    participant XAPI as X API
+    participant CS as ContentService
+    participant EQ as Queue: uniscrm-event
+
+    Cron->>FW: GET /internal/list-watches
+    FW->>FW: scan published flows' graph_json for xContentTrigger (mode=list_posts) nodes
+    FW-->>Cron: { watches: [{ channelId, listId }, ...] }
+    loop each watched (channel, list) pair
+        Cron->>PC: pollXListPosts(env, channelId, listId)
+        PC->>CPS: INSERT OR IGNORE (channel_id, "list_posts:{listId}") — first-seen watch has no OAuth-connect moment to seed this row
+        PC->>LP: runListPostsPoller(...)
+        LP->>XAPI: GET /2/lists/:id/tweets
+        LP->>CS: upsertContentFromMetadata(..., listId)
+        CS->>CS: dedup key: (channel_id, list_id, source_content_id) when list_id set
+        CS->>EQ: content.created { contentId, channelId, listId, payload }
+    end
+    EQ->>FW: queue() dispatches on contentId
+    FW->>FW: executeFlow — xContentTrigger requires payload.channel_id + (mode=list_posts ? payload.list_id === node.listId : payload.list_id nullish)
+```
+
+Same tweet appearing in two different monitored Lists produces two separate `content` rows
+(one per list) and fires both lists' flows independently — this is intentional (see the
+design spec's "Cross-list dedup" decision), not a duplicate-trigger bug. `list_id` does not
+join the R2 analytics pipeline in this phase (see the design spec's Global Constraints) —
+analytics collapses both rows to one via the existing `(tenant_id, channel_id,
+source_content_id)` compactor key.

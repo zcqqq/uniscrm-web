@@ -11,6 +11,7 @@ import { Label } from "../../../shared/frontend/ui/label";
 import { ContentMetadata_X } from "../../../metadata/x-byok";
 import { PROPS } from "../../../metadata/props";
 import { t as localizeLabel } from "../../../metadata/locale";
+import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
 
 type SelectChange = React.ChangeEvent<HTMLSelectElement>;
 type InputChange = React.ChangeEvent<HTMLInputElement>;
@@ -473,6 +474,10 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
     return <XContentActionInspector nodeId={nodeId} data={data} />;
   }
 
+  if (actionType === "tiktokContentAction") {
+    return <TikTokContentActionInspector nodeId={nodeId} data={data} />;
+  }
+
   if (actionType === "updateContentStatus") {
     return <UpdateContentStatusInspector nodeId={nodeId} data={data} />;
   }
@@ -553,6 +558,13 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
 }
 
 const CONTENT_ACTION_OPERATIONS = ContentMetadata_X.filter((m) => m.flowType === "action");
+
+const TIKTOK_PHOTO_POST_PROPS = ContentMetadata_TikTok.find((m) => m.sourceContentType === "photo-post")!.contentProps;
+
+function propLabel(propId: string): string {
+  const def = PROPS.find((p) => p.propId === propId);
+  return def ? localizeLabel(def.label, "en") : propId;
+}
 
 function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
@@ -653,6 +665,144 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
             </div>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+  const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
+  const [providers, setProviders] = useState<{ provider: string; model: string }[]>([]);
+  const [skills, setSkills] = useState<{ id: string; label: string; hasCachedContent: boolean }[]>([]);
+
+  useEffect(() => {
+    api.channels.list("TIKTOK").then(setChannels).catch(() => setChannels([]));
+  }, []);
+
+  useEffect(() => {
+    api.llmProviders.list().then((res) => setProviders(res.providers)).catch(() => setProviders([]));
+  }, []);
+
+  useEffect(() => {
+    api.skills.list().then((res) => setSkills(res.skills)).catch(() => setSkills([]));
+  }, []);
+
+  const prompts = (data.prompts as Record<string, string>) || {};
+  const updatePrompt = (propId: string, value: string) => updateNodeData(nodeId, { prompts: { ...prompts, [propId]: value } });
+  const textProps = TIKTOK_PHOTO_POST_PROPS.filter((p) => p.aiType === "TEXT");
+  const imageProps = TIKTOK_PHOTO_POST_PROPS.filter((p) => p.aiType === "IMAGE");
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">TikTok Photo Post</h4>
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Target Account</Label>
+          {channels.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">No TikTok accounts linked</p>
+          ) : (
+            <Select
+              value={data.channelId || ""}
+              onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
+              className="w-full text-sm"
+            >
+              <option value="">Select account...</option>
+              {channels.map((ch) => <option key={ch.id} value={ch.id}>@{ch.username}</option>)}
+            </Select>
+          )}
+        </div>
+
+        {textProps.map((prop) => (
+          <div key={prop.propId}>
+            <Label className="text-xs block mb-1">{propLabel(prop.propId)} Prompt</Label>
+            <Textarea
+              value={prompts[prop.propId] || ""}
+              onChange={(e: TextareaChange) => updatePrompt(prop.propId, e.target.value)}
+              placeholder={`Write the ${propLabel(prop.propId).toLowerCase()}: $content.title`}
+              rows={prop.propId === "title" ? 2 : 3}
+              className="w-full text-sm font-mono"
+            />
+          </div>
+        ))}
+        <p className="text-xs text-muted-foreground -mt-2">Use $content.title, $content.content_text etc.</p>
+        <div>
+          <Label className="text-xs block mb-1">Text Provider</Label>
+          <Select
+            value={data.textProvider || "default"}
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { textProvider: e.target.value })}
+            className="w-full text-sm"
+          >
+            <option value="default">Default (free built-in model)</option>
+            {providers.map((p) => (
+              <option key={p.provider} value={p.provider}>{p.provider === "openai" ? "OpenAI" : "Anthropic"} ({p.model})</option>
+            ))}
+            <option value="none">None (post prompt text as-is)</option>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs block mb-1">Text Skill</Label>
+          <Select
+            value={data.textSkillId || "none"}
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { textSkillId: e.target.value })}
+            className="w-full text-sm"
+          >
+            <option value="none">None (current behavior)</option>
+            {skills.map((s) => (
+              <option key={s.id} value={s.id}>{s.label}{!s.hasCachedContent ? " (not yet fetched)" : ""}</option>
+            ))}
+          </Select>
+        </div>
+
+        {imageProps.map((prop) => (
+          <div key={prop.propId}>
+            <Label className="text-xs block mb-1">{propLabel(prop.propId)} Prompt</Label>
+            <Textarea
+              value={prompts[prop.propId] || ""}
+              onChange={(e: TextareaChange) => updatePrompt(prop.propId, e.target.value)}
+              placeholder="A photo of: $content.title"
+              rows={3}
+              className="w-full text-sm font-mono"
+            />
+          </div>
+        ))}
+        <div>
+          <Label className="text-xs block mb-1">Image Count</Label>
+          <Input
+            type="number"
+            min={1}
+            max={9}
+            value={data.imageCount || 1}
+            onChange={(e: InputChange) => updateNodeData(nodeId, { imageCount: Math.max(1, Math.min(9, parseInt(e.target.value) || 1)) })}
+            className="w-24 text-sm"
+          />
+        </div>
+        <div>
+          <Label className="text-xs block mb-1">Image Provider</Label>
+          <Select
+            value={data.imageProvider || "default"}
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { imageProvider: e.target.value })}
+            className="w-full text-sm"
+          >
+            <option value="default">Default (Cloudflare Workers AI)</option>
+            {providers.filter((p) => p.provider === "openai").map((p) => (
+              <option key={p.provider} value="openai">OpenAI (gpt-image-1)</option>
+            ))}
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs block mb-1">Image Skill</Label>
+          <Select
+            value={data.imageSkillId || "none"}
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { imageSkillId: e.target.value })}
+            className="w-full text-sm"
+          >
+            <option value="none">None (current behavior)</option>
+            {skills.map((s) => (
+              <option key={s.id} value={s.id}>{s.label}{!s.hasCachedContent ? " (not yet fetched)" : ""}</option>
+            ))}
+          </Select>
+        </div>
       </div>
     </div>
   );

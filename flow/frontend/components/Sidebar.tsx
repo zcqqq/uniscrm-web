@@ -88,6 +88,9 @@ export default function Sidebar() {
           <DraggableItem type="xContentAction" label="X Content Action" description="Generate (or post as-is) and publish to another channel" color="border-accent bg-accent/50" icon="✨" />
         )}
         {visible("content") && (
+          <DraggableItem type="tiktokContentAction" label="TikTok Photo Post" description="Generate images + caption and send to TikTok as a draft" color="border-accent bg-accent/50" icon="📸" />
+        )}
+        {visible("content") && (
           <DraggableItem type="updateContentStatus" label="Update Content Status" description="Set this content's status" color="border-accent bg-accent/50" icon="🏷️" />
         )}
       </div>

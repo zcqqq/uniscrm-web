@@ -26,6 +26,7 @@ function getNodeIcon(type: string, data: Record<string, unknown>) {
     const at = data.actionType as string;
     if (at === "addToList") return ListIcon;
     if (at === "xContentAction") return FileTextIcon;
+    if (at === "tiktokContentAction") return FileTextIcon;
     if (at === "updateContentStatus") return ListIcon;
     return XIcon;
   }

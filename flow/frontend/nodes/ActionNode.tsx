@@ -1,7 +1,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
 
-const EXTERNAL_API_ACTIONS = ["xAction", "xContentAction"];
+const EXTERNAL_API_ACTIONS = ["xAction", "xContentAction", "tiktokContentAction"];
 
 export default function ActionNode({ data, selected }: NodeProps) {
   const actionType = data.actionType as string;
@@ -33,6 +33,11 @@ export default function ActionNode({ data, selected }: NodeProps) {
       ? "Reposts via the triggering channel"
       : channelId ? "Target channel selected" : "Select a target channel...";
     icon = "✨";
+  } else if (actionType === "tiktokContentAction") {
+    const channelId = data.channelId as string;
+    label = "TikTok Photo Post";
+    description = channelId ? "Target channel selected" : "Select a target channel...";
+    icon = "📸";
   } else if (actionType === "updateContentStatus") {
     const status = data.status as string;
     label = "Update Content Status";

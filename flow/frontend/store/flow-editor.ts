@@ -39,13 +39,14 @@ export interface FlowEditorState {
   autoFillChannelIds: () => Promise<void>;
 }
 
-const ACTION_TYPES = ["addToList", "xAction", "xContentAction", "updateContentStatus"];
+const ACTION_TYPES = ["addToList", "xAction", "xContentAction", "tiktokContentAction", "updateContentStatus"];
 
 // Action types that operate on a specific channel account (need `data.channelId`), mapped to
 // the channelType used to fetch that account list. Add an entry here whenever a new
 // channel-scoped action is introduced (e.g. a future "tiktokAction" -> "TIKTOK").
 export const ACTION_CHANNEL_TYPE: Record<string, string> = {
   xAction: "X",
+  tiktokContentAction: "TIKTOK",
 };
 
 function isValidConnection(source: Node | undefined, target: Node | undefined): boolean {
@@ -127,6 +128,12 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
         data = { actionType: type, xEvent: "", channelId: "" };
       } else if (type === "xContentAction") {
         data = { actionType: type, channelId: "", prompt: "", provider: "default" };
+      } else if (type === "tiktokContentAction") {
+        data = {
+          actionType: type, channelId: "", prompts: {},
+          textProvider: "default", textSkillId: "none",
+          imageCount: 1, imageProvider: "default", imageSkillId: "none",
+        };
       } else if (type === "updateContentStatus") {
         data = { actionType: type, status: "" };
       } else {

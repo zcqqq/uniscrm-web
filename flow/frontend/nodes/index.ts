@@ -1,5 +1,5 @@
 import XTriggerNode from "./XTriggerNode";
-import ContentTriggerNode from "./ContentTriggerNode";
+import XContentTriggerNode from "./XContentTriggerNode";
 import CronTriggerNode from "./CronTriggerNode";
 import ActionNode from "./ActionNode";
 import WaitNode from "./WaitNode";
@@ -12,7 +12,7 @@ import ChangeUserPropsNode from "./ChangeUserPropsNode";
 
 export const nodeTypes = {
   xTrigger: XTriggerNode,
-  contentTrigger: ContentTriggerNode,
+  xContentTrigger: XContentTriggerNode,
   cronTrigger: CronTriggerNode,
   action: ActionNode,
   wait: WaitNode,

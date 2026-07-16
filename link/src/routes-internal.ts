@@ -8,6 +8,8 @@ import { EventMetadata_X } from "../../metadata/x";
 import { dollarsToMicros } from "../../shared/credit";
 import { ContentService } from "./services/content";
 import { createPost, repostPost } from "./services/x-posts-api";
+import { TikTokTokenService } from "./services/tiktok-token";
+import { initPhotoPost } from "./services/tiktok-publish";
 
 const ACTION_TO_EVENT_TYPE: Record<string, string> = {
   follow: "follow-user",
@@ -280,6 +282,98 @@ export function internalRoutes() {
       generatedFromContentId: contentId,
       flowId: flowId || "",
     });
+
+    return c.json({ ok: true });
+  });
+
+  router.post("/tiktok/photo-post", async (c) => {
+    const {
+      contentId, channelId, prompts, textProvider, textSkillId,
+      imageCount, imageProvider, imageSkillId, flowId,
+    } = await c.req.json<{
+      contentId: string; channelId: string;
+      prompts: { title: string; description: string; message_image: string };
+      textProvider: "default" | "openai" | "anthropic" | "none"; textSkillId?: string;
+      imageCount: number;
+      imageProvider: "default" | "openai"; imageSkillId?: string;
+      flowId?: string | null;
+    }>();
+
+    const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
+      .bind(channelId).first<{ config: string; channel_type: string; tenant_id: number }>();
+    if (!channel || channel.channel_type !== "TIKTOK") return c.json({ ok: false }, 200);
+
+    const tenantId = channel.tenant_id;
+
+    const generateText = async (prompt: string): Promise<string | null> => {
+      if (textProvider === "none") return prompt;
+      const res = await fetch(`${c.env.CONTENT_URL}/internal/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": c.env.INTERNAL_SECRET },
+        body: JSON.stringify({ tenantId, prompt, provider: textProvider, skillId: textSkillId }),
+      });
+      if (!res.ok) return null;
+      const body = await res.json<{ text: string }>();
+      return body.text;
+    };
+
+    const [title, description] = await Promise.all([generateText(prompts.title), generateText(prompts.description)]);
+    if (title === null || description === null) {
+      console.error(JSON.stringify({ event: "tiktok_photo_post_text_failed", contentId, channelId }));
+      return c.json({ ok: false }, 200);
+    }
+
+    const requestedCount = Math.max(1, Math.min(9, imageCount || 1));
+    const photoUrls: string[] = [];
+    for (let i = 0; i < requestedCount; i++) {
+      const res = await fetch(`${c.env.CONTENT_URL}/internal/generate-image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": c.env.INTERNAL_SECRET },
+        body: JSON.stringify({ tenantId, prompt: prompts.message_image, provider: imageProvider, skillId: imageSkillId }),
+      });
+      if (!res.ok) continue;
+      const bytes = await res.arrayBuffer();
+      const contentType = res.headers.get("Content-Type") || "image/jpeg";
+      const key = crypto.randomUUID();
+      await c.env.MEDIA_BUCKET.put(key, bytes, { httpMetadata: { contentType } });
+      photoUrls.push(`${c.env.LINK_URL}/public/media/${key}`);
+    }
+
+    console.log(JSON.stringify({
+      event: "tiktok_photo_post_images", contentId, channelId,
+      imagesRequested: requestedCount, imagesSucceeded: photoUrls.length,
+    }));
+
+    if (photoUrls.length === 0) {
+      return c.json({ ok: false }, 200);
+    }
+
+    const tokenService = new TikTokTokenService(c.env.LINK_DB, c.env.TIKTOK_CLIENT_KEY, c.env.TIKTOK_CLIENT_SECRET);
+    const accessToken = await tokenService.getValidToken(channelId);
+    const publishResult = await initPhotoPost(accessToken, photoUrls, title, description);
+
+    console.log(JSON.stringify({
+      event: "tiktok_photo_post", contentId, channelId,
+      ok: publishResult.ok, rateLimited: !!publishResult.rateLimited,
+    }));
+
+    if (publishResult.rateLimited) {
+      return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+    }
+    if (!publishResult.ok) {
+      return c.json({ ok: false }, 200);
+    }
+
+    const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+      .bind(tenantId).first<{ d1_database_id: string | null }>();
+    if (tenantRow?.d1_database_id) {
+      const tenantDataDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
+      const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);
+      await contentService.recordPublishedContent(
+        channelId, "TIKTOK", publishResult.publishId || crypto.randomUUID(), description,
+        { generatedFromContentId: contentId, flowId: flowId || "" }, "PHOTO_POST"
+      );
+    }
 
     return c.json({ ok: true });
   });

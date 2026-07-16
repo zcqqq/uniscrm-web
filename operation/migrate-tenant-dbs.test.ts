@@ -32,8 +32,8 @@ describe("listTenants", () => {
 
     expect(tenants).toEqual([{ tenant_id: 1, d1_database_id: "db-1" }, { tenant_id: 2, d1_database_id: "db-2" }]);
     expect(execFileSync).toHaveBeenCalledWith(
-      "wrangler",
-      expect.arrayContaining(["d1", "execute", "uniscrm-web-dev", "--env", "dev", "--remote", "--json"]),
+      "npx",
+      expect.arrayContaining(["wrangler", "d1", "execute", "uniscrm-web-dev", "--env", "dev", "--remote", "--json"]),
       expect.objectContaining({ encoding: "utf-8" })
     );
   });
@@ -41,6 +41,11 @@ describe("listTenants", () => {
   it("returns an empty array when there are no tenants with a d1_database_id", () => {
     (execFileSync as any).mockReturnValue(JSON.stringify([{ results: [] }]));
     expect(listTenants("production")).toEqual([]);
+  });
+
+  it("throws a diagnosable error including the raw output when wrangler output is not valid JSON", () => {
+    (execFileSync as any).mockReturnValue("not json at all");
+    expect(() => listTenants("dev")).toThrow("not json at all");
   });
 });
 

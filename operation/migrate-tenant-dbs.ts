@@ -21,8 +21,9 @@ export function resolveWebDbName(env: string): string {
 export function listTenants(env: string): TenantRow[] {
   const dbName = resolveWebDbName(env);
   const output = execFileSync(
-    "wrangler",
+    "npx",
     [
+      "wrangler",
       "d1", "execute", dbName,
       "--config", "web/wrangler.toml",
       "--env", env,
@@ -32,7 +33,14 @@ export function listTenants(env: string): TenantRow[] {
     ],
     { encoding: "utf-8" }
   );
-  const parsed = JSON.parse(output) as { results: TenantRow[] }[];
+  let parsed: { results: TenantRow[] }[];
+  try {
+    parsed = JSON.parse(output);
+  } catch (e) {
+    throw new Error(
+      `Failed to parse wrangler d1 execute output as JSON: ${String(e)}. Raw output (first 500 chars): ${output.slice(0, 500)}`
+    );
+  }
   return parsed[0]?.results || [];
 }
 

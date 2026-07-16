@@ -254,4 +254,38 @@ describe("queue(): xContentAction branch resolution", () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-interp'`).run();
     vi.unstubAllGlobals();
   });
+
+  it("routes a repost-post operation to /internal/x/repost with the source channel and the payload's source_content_id as tweetId", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const graphWithRepostOp = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "repost-post" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-repost-op', 1, 'repost op flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithRepostOp).run();
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-repost-1", channelId: "src-chan", payload: { source_content_id: "tweet-abc-1" } }),
+      env
+    );
+
+    // NOTE: the describe-level beforeEach also has 'flow-branch1' (same trigger channelId
+    // "src-chan") live in FLOW_DB for every test in this block, so this content.created event
+    // matches BOTH flow-branch1 and flow-repost-op — calls[0] is not reliably the repost call.
+    // Find the /internal/x/repost call explicitly rather than assuming call order.
+    const repostCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/internal/x/repost"));
+    expect(repostCall, "expected a fetch to /internal/x/repost").toBeDefined();
+    const body = JSON.parse((repostCall![1] as RequestInit).body as string);
+    expect(body).toMatchObject({ channelId: "src-chan", contentId: "content-repost-1", tweetId: "tweet-abc-1" });
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-repost-op'`).run();
+    vi.unstubAllGlobals();
+  });
 });

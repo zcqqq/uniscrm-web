@@ -295,24 +295,36 @@ async function executeContentActions(
   const rateLimited: { action: ActionResult; retryAt: string }[] = [];
 
   for (const action of actions) {
-    if (action.type === "repost") {
-      const res = await fetch(`${env.LINK_URL}/internal/x/repost`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
-        body: JSON.stringify({ channelId, contentId, flowId: flowId || null }),
-      });
-      console.log(JSON.stringify({ event: "content_action_repost", contentId, channelId, status: res.status }));
-    } else if (action.type === "xContentAction") {
-      const targetChannelId = action.targetChannelId as string;
-      const provider = action.provider as string;
-      const interpolatedPrompt = String(action.prompt || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""));
-      const res = await fetch(`${env.LINK_URL}/internal/content/create-post`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
-        body: JSON.stringify({ contentId, interpolatedPrompt, provider, targetChannelId, flowId: flowId || null }),
-      });
+    if (action.type === "xContentAction") {
+      const operation = (action.operation as string) || "create-post";
+      let res: Response;
+      let logEvent: string;
+      let logExtra: Record<string, unknown>;
+
+      if (operation === "repost-post") {
+        const tweetId = String(payload?.source_content_id ?? "");
+        res = await fetch(`${env.LINK_URL}/internal/x/repost`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+          body: JSON.stringify({ channelId, contentId, tweetId, flowId: flowId || null }),
+        });
+        logEvent = "content_action_repost";
+        logExtra = { channelId, tweetId };
+      } else {
+        const targetChannelId = action.targetChannelId as string;
+        const provider = action.provider as string;
+        const interpolatedPrompt = String(action.prompt || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""));
+        res = await fetch(`${env.LINK_URL}/internal/content/create-post`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+          body: JSON.stringify({ contentId, interpolatedPrompt, provider, targetChannelId, flowId: flowId || null }),
+        });
+        logEvent = "content_action_x_content_action";
+        logExtra = { targetChannelId, provider };
+      }
+
       const body = await res.json().catch(() => ({ ok: false })) as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string };
-      console.log(JSON.stringify({ event: "content_action_x_content_action", contentId, targetChannelId, provider, status: res.status, ok: body.ok }));
+      console.log(JSON.stringify({ event: logEvent, contentId, status: res.status, ok: body.ok, ...logExtra }));
 
       if (body.rateLimited) {
         rateLimited.push({ action, retryAt: body.rateLimitReset || new Date(Date.now() + 15 * 60 * 1000).toISOString() });

@@ -714,6 +714,12 @@ app.get("/api/flows/:id/analytics", async (c) => {
   }
 });
 
+// flowId/nodeId are always crypto.randomUUID() values in this codebase (see flow creation and
+// flow-editor.ts addNode()). queryNodeLogRows interpolates them directly into an R2 SQL string,
+// so route params are validated against this shape before reaching it — a non-UUID value can
+// only be a forged/malicious request, never a legitimate one.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Node logs: list which users/content items entered a specific node (two-step: R2 for the
 // log rows, then a D1 lookup for names — cross-table JOIN in R2 SQL is untested in this
 // codebase, so this avoids relying on it).
@@ -721,6 +727,7 @@ app.get("/api/flows/:id/nodes/:nodeId/logs", async (c) => {
   const tenantId = c.get("tenantId");
   const flowId = c.req.param("id");
   const nodeId = c.req.param("nodeId");
+  if (!UUID_RE.test(flowId) || !UUID_RE.test(nodeId)) return c.json({ logs: [] });
 
   try {
     const flowRow = await c.env.FLOW_DB.prepare("SELECT graph_json FROM flows WHERE id = ? AND tenant_id = ?")

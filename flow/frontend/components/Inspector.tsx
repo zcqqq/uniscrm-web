@@ -8,7 +8,8 @@ import { Input } from "../../../shared/frontend/ui/input";
 import { Select } from "../../../shared/frontend/ui/select";
 import { Textarea } from "../../../shared/frontend/ui/textarea";
 import { Label } from "../../../shared/frontend/ui/label";
-import { ContentActionMetadata_X } from "../../../metadata/x";
+import { ContentMetadata_X } from "../../../metadata/x-byok";
+import { PROPS } from "../../../metadata/props";
 import { t as localizeLabel } from "../../../metadata/locale";
 
 type SelectChange = React.ChangeEvent<HTMLSelectElement>;
@@ -560,24 +561,32 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
   );
 }
 
-const CONTENT_CHANNEL_TYPES = ["X", "TIKTOK"];
-
-const CONTENT_ACTION_OPERATIONS = ContentActionMetadata_X.filter((m) => m.flowType === "action");
+const CONTENT_ACTION_OPERATIONS = ContentMetadata_X.filter((m) => m.flowType === "action");
 
 function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
-  const [channelType, setChannelType] = useState<string>(data.channelType || "");
   const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
   const [providers, setProviders] = useState<{ provider: string; model: string }[]>([]);
+  const [skills, setSkills] = useState<{ id: string; label: string; hasCachedContent: boolean }[]>([]);
+
+  const selectedOperation = CONTENT_ACTION_OPERATIONS.find((op) => op.sourceContentType === (data.operation || "create-post"));
+  const aiProp = selectedOperation?.contentProps.find((p) => p.aiType);
 
   useEffect(() => {
-    if (!channelType) { setChannels([]); return; }
-    api.channels.list(channelType).then(setChannels).catch(() => setChannels([]));
-  }, [channelType]);
+    if (!aiProp) { setChannels([]); return; }
+    api.channels.list("X").then(setChannels).catch(() => setChannels([]));
+  }, [aiProp]);
 
   useEffect(() => {
+    if (!aiProp) return;
     api.llmProviders.list().then((res) => setProviders(res.providers)).catch(() => setProviders([]));
+  }, [aiProp]);
+
+  useEffect(() => {
+    api.skills.list().then((res) => setSkills(res.skills)).catch(() => setSkills([]));
   }, []);
+
+  const promptLabel = aiProp ? PROPS.find((p) => p.propId === aiProp.propId)?.label : undefined;
 
   return (
     <div>
@@ -597,58 +606,61 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
             ))}
           </Select>
         </div>
-        <div>
-          <Label className="text-xs block mb-1">Prompt</Label>
-          <Textarea
-            value={data.prompt || ""}
-            onChange={(e: TextareaChange) => updateNodeData(nodeId, { prompt: e.target.value })}
-            placeholder="Rewrite this in a punchy tone: $content.content_text"
-            rows={5}
-            className="w-full text-sm font-mono"
-          />
-          <p className="text-xs text-muted-foreground mt-1">Use $content.title, $content.content_text etc.</p>
-        </div>
-        <div>
-          <Label className="text-xs block mb-1">Provider</Label>
-          <Select
-            value={data.provider || "default"}
-            onChange={(e: SelectChange) => updateNodeData(nodeId, { provider: e.target.value })}
-            className="w-full text-sm"
-          >
-            <option value="default">Default (free built-in model)</option>
-            {providers.map((p) => (
-              <option key={p.provider} value={p.provider}>{p.provider === "openai" ? "OpenAI" : "Anthropic"} ({p.model})</option>
-            ))}
-            <option value="none">None (post prompt text as-is)</option>
-          </Select>
-        </div>
-        <div>
-          <Label className="text-xs block mb-1">Target Platform</Label>
-          <Select
-            value={channelType}
-            onChange={(e: SelectChange) => { setChannelType(e.target.value); updateNodeData(nodeId, { channelType: e.target.value, channelId: "" }); }}
-            className="w-full text-sm"
-          >
-            <option value="">Select platform...</option>
-            {CONTENT_CHANNEL_TYPES.map((ct) => <option key={ct} value={ct}>{ct}</option>)}
-          </Select>
-        </div>
-        {channelType && (
-          <div>
-            <Label className="text-xs block mb-1">Target Account</Label>
-            {channels.length === 0 ? (
-              <p className="text-xs text-muted-foreground italic">No accounts linked for this platform</p>
-            ) : (
+        {aiProp && (
+          <>
+            <div>
               <Select
-                value={data.channelId || ""}
-                onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
+                value={data.provider || "default"}
+                onChange={(e: SelectChange) => updateNodeData(nodeId, { provider: e.target.value })}
                 className="w-full text-sm"
               >
-                <option value="">Select account...</option>
-                {channels.map((ch) => <option key={ch.id} value={ch.id}>@{ch.username}</option>)}
+                <option value="default">Default (free built-in model)</option>
+                {providers.map((p) => (
+                  <option key={p.provider} value={p.provider}>{p.provider === "openai" ? "OpenAI" : "Anthropic"} ({p.model})</option>
+                ))}
+                <option value="none">None (post prompt text as-is)</option>
               </Select>
-            )}
-          </div>
+            </div>
+            <div>
+              <Label className="text-xs block mb-1">{promptLabel ? localizeLabel(promptLabel, "en") : "Prompt"}</Label>
+              <Textarea
+                value={data.prompt || ""}
+                onChange={(e: TextareaChange) => updateNodeData(nodeId, { prompt: e.target.value })}
+                placeholder="Rewrite this in a punchy tone: $content.content_text"
+                rows={5}
+                className="w-full text-sm font-mono"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Use $content.title, $content.content_text etc.</p>
+            </div>
+            <div>
+              <Label className="text-xs block mb-1">Skill</Label>
+              <Select
+                value={data.skillId || "none"}
+                onChange={(e: SelectChange) => updateNodeData(nodeId, { skillId: e.target.value })}
+                className="w-full text-sm"
+              >
+                <option value="none">None (current behavior)</option>
+                {skills.map((s) => (
+                  <option key={s.id} value={s.id}>{s.label}{!s.hasCachedContent ? " (not yet fetched)" : ""}</option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs block mb-1">Target Account</Label>
+              {channels.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic">No accounts linked for this platform</p>
+              ) : (
+                <Select
+                  value={data.channelId || ""}
+                  onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
+                  className="w-full text-sm"
+                >
+                  <option value="">Select account...</option>
+                  {channels.map((ch) => <option key={ch.id} value={ch.id}>@{ch.username}</option>)}
+                </Select>
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>

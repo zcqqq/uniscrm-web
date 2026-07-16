@@ -902,7 +902,7 @@ export default {
                 await env.FLOW_DB.prepare(
                   `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
                    VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 0)`
-                ).bind(crypto.randomUUID(), flow.id, contentId, tenantId, JSON.stringify(payload), rl.retryAt, new Date().toISOString(), JSON.stringify(rl.action)).run();
+                ).bind(crypto.randomUUID(), flow.id, contentId, tenantId, JSON.stringify(matchPayload), rl.retryAt, new Date().toISOString(), JSON.stringify(rl.action)).run();
               }
               console.log(JSON.stringify({ event: "content_flow_matched", flowId: flow.id, contentId, eventType, actions: result.actions, rateLimited: rateLimited.length }));
             }

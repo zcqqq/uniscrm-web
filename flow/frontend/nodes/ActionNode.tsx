@@ -27,8 +27,11 @@ export default function ActionNode({ data, selected }: NodeProps) {
     icon = "𝕏";
   } else if (actionType === "xContentAction") {
     const channelId = data.channelId as string;
+    const operation = data.operation as string;
     label = "X Content Action";
-    description = channelId ? "Target channel selected" : "Select a target channel...";
+    description = operation === "repost-post"
+      ? "Reposts via the triggering channel"
+      : channelId ? "Target channel selected" : "Select a target channel...";
     icon = "✨";
   } else if (actionType === "updateContentStatus") {
     const status = data.status as string;

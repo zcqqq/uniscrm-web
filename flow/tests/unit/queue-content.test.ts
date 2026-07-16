@@ -288,4 +288,53 @@ describe("queue(): xContentAction branch resolution", () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-repost-op'`).run();
     vi.unstubAllGlobals();
   });
+
+  it("schedules a content_flow_pending retry row for a rate-limited repost-post whose persisted payload still carries the triggering channel_id", async () => {
+    // Regression test: the rate-limited-retry insert used to persist the raw `payload` (no
+    // channel_id) instead of `matchPayload` (channel_id + optional list_id). scheduled()'s
+    // retry path reads `payload.channel_id` back out of this stored JSON to know which channel
+    // to repost from; a missing channel_id resolves to "" there, which link resolves to
+    // "channel not found" -> ok:false (not rateLimited) -> the retry is wrongly abandoned as a
+    // permanent failure instead of actually retrying. Asserting on the stored payload's
+    // channel_id (not retry_action, which never carried this bug) proves the fix.
+    // NOTE: flow-branch1 (from the describe-level beforeEach, same trigger channelId
+    // "src-chan") also matches this content.created event, so two fetch calls occur. A shared
+    // mockResolvedValue Response instance can only have its body read once (Response.json()
+    // consumes the stream) — the second call would silently fall through to the `.catch(() =>
+    // ({ ok: false }))` fallback with rateLimited undefined. Use mockImplementation to hand back
+    // a fresh Response per call instead.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(
+        async () => new Response(JSON.stringify({ ok: false, rateLimited: true, rateLimitReset: "2099-01-01T00:00:00.000Z" }), { status: 429 })
+      )
+    );
+
+    const graphWithRepostOp = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "repost-post" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-repost-rl', 1, 'repost rate-limited flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithRepostOp).run();
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-repost-rl-1", channelId: "src-chan", payload: { source_content_id: "tweet-rl-1" } }),
+      env
+    );
+
+    const pending = await env.FLOW_DB.prepare(
+      `SELECT payload FROM content_flow_pending WHERE flow_id = 'flow-repost-rl' AND content_id = 'content-repost-rl-1'`
+    ).first<{ payload: string }>();
+    expect(pending).toBeTruthy();
+    expect(JSON.parse(pending!.payload).channel_id).toBe("src-chan");
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-repost-rl'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-repost-rl'`).run();
+    vi.unstubAllGlobals();
+  });
 });

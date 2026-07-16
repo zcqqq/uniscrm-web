@@ -74,7 +74,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
     graph: {
       nodes: [
         { id: "t1", type: "xContentTrigger", position: { x: 0, y: 0 }, data: { channelId: "", mode: "my_posts", listId: "", listName: "", conditions: [] } },
-        { id: "a1", type: "action", position: { x: 320, y: 0 }, data: { actionType: "xContentAction", operation: "create-post", prompt: "$content.content_text", provider: "default", channelType: "", channelId: "" } },
+        { id: "a1", type: "action", position: { x: 320, y: 0 }, data: { actionType: "xContentAction", operation: "create-post", prompt: "$content.content_text", provider: "default", channelId: "" } },
       ],
       edges: [
         { id: "e1", source: "t1", target: "a1" },

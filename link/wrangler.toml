@@ -49,6 +49,10 @@ binding = "ADMIN_DB"
 database_name = "uniscrm-admin-dev"
 database_id = "e82f67f3-3571-473f-abf4-fa0ad5a309a2"
 
+[[env.dev.r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "uniscrm-link-media-dev"
+
 [[env.dev.kv_namespaces]]
 binding = "KV"
 id = "9f65b37e6ac94f81948a0018f816f89f"
@@ -119,6 +123,10 @@ database_id = "98ea05ba-91de-423d-9126-aa3cd9b42382"
 binding = "ADMIN_DB"
 database_name = "uniscrm-admin"
 database_id = "ecf7a3be-2457-4e40-a537-bab4cc0ec281"
+
+[[env.production.r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "uniscrm-link-media"
 
 [[env.production.kv_namespaces]]
 binding = "KV"

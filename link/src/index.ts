@@ -19,6 +19,15 @@ const app = new Hono<{ Bindings: Env }>();
 app.use("/*", cors({ origin: "*", credentials: true }));
 app.get("/health", (c) => c.json({ status: "ok" }));
 
+app.get("/public/media/:key", async (c) => {
+  const object = await c.env.MEDIA_BUCKET.get(c.req.param("key"));
+  if (!object) return c.notFound();
+  return new Response(object.body, {
+    status: 200,
+    headers: { "Content-Type": object.httpMetadata?.contentType || "application/octet-stream" },
+  });
+});
+
 // Public: X webhook
 app.route("/x", webhookRoutes());
 

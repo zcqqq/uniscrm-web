@@ -238,7 +238,7 @@ function durationToMs(duration: number, unit: string): number {
 
 function buildActionData(targetNode: FlowNode): ActionResult {
   const actionType = targetNode.data.actionType as string;
-  const isExternalApi = actionType === "xAction" || actionType === "xContentAction";
+  const isExternalApi = actionType === "xAction" || actionType === "xContentAction" || actionType === "tiktokContentAction";
   const actionData: ActionResult = { type: actionType, nodeId: targetNode.id, hasBranches: isExternalApi };
   if (actionType === "addToList") actionData.listId = targetNode.data.listId as string;
   if (actionType === "xAction") {
@@ -252,6 +252,15 @@ function buildActionData(targetNode: FlowNode): ActionResult {
     actionData.prompt = targetNode.data.prompt as string;
     actionData.provider = targetNode.data.provider as string;
     actionData.skillId = (targetNode.data.skillId as string) || "none";
+  }
+  if (actionType === "tiktokContentAction") {
+    actionData.channelId = targetNode.data.channelId as string;
+    actionData.prompts = (targetNode.data.prompts as Record<string, string>) || {};
+    actionData.textProvider = targetNode.data.textProvider as string;
+    actionData.textSkillId = (targetNode.data.textSkillId as string) || "none";
+    actionData.imageCount = (targetNode.data.imageCount as number) || 1;
+    actionData.imageProvider = targetNode.data.imageProvider as string;
+    actionData.imageSkillId = (targetNode.data.imageSkillId as string) || "none";
   }
   if (actionType === "updateContentStatus") {
     actionData.status = targetNode.data.status as string;

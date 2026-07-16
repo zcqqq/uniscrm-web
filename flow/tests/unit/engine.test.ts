@@ -150,6 +150,54 @@ describe("collectActions: new content-domain action types", () => {
       { type: "updateContentStatus", nodeId: "a2", hasBranches: false, status: "ignored" },
     ]);
   });
+
+  it("collects a tiktokContentAction action carrying its prompts record and other fields, defaulting textSkillId/imageSkillId to 'none' and imageCount to 1 when unset", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        {
+          id: "a1", type: "action",
+          data: {
+            actionType: "tiktokContentAction", channelId: "tiktok-chan-1",
+            prompts: { title: "Write a title: $content.title", description: "Write a caption: $content.content_text", message_image: "A photo of: $content.title" },
+            textProvider: "default", imageProvider: "default",
+          },
+          position: { x: 200, y: 0 },
+        },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
+    expect(result.actions).toEqual([
+      {
+        type: "tiktokContentAction", nodeId: "a1", hasBranches: true, channelId: "tiktok-chan-1",
+        prompts: { title: "Write a title: $content.title", description: "Write a caption: $content.content_text", message_image: "A photo of: $content.title" },
+        textProvider: "default", textSkillId: "none",
+        imageCount: 1, imageProvider: "default", imageSkillId: "none",
+      },
+    ]);
+  });
+
+  it("carries a set imageCount/textSkillId/imageSkillId through for tiktokContentAction", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        {
+          id: "a1", type: "action",
+          data: {
+            actionType: "tiktokContentAction", channelId: "tiktok-chan-1",
+            prompts: { title: "t", description: "d", message_image: "i" },
+            textProvider: "default", textSkillId: "marketingskills-social",
+            imageCount: 5, imageProvider: "openai", imageSkillId: "marketingskills-social",
+          },
+          position: { x: 200, y: 0 },
+        },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
+    expect(result.actions[0]).toMatchObject({ imageCount: 5, textSkillId: "marketingskills-social", imageSkillId: "marketingskills-social" });
+  });
 });
 
 describe("resumeFromNode: action branch targets get full actionData", () => {

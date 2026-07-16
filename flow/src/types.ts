@@ -12,6 +12,10 @@ export interface Env {
   FLOW_QUEUE: Queue;
   FLOW_LOG_QUEUE?: Queue;
   PIPELINE_FLOW_LOG?: Pipeline;
+  PIPELINE_CONTENT_FLOW_LOG?: Pipeline;
+  R2_SQL_TOKEN: string;
+  R2_BUCKET: string;
+  R2_WAREHOUSE: string;
   LINK_URL: string;
   CONTENT_URL: string;
   INTERNAL_SECRET: string;

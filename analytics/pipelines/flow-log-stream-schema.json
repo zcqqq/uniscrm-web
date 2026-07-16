@@ -1,0 +1,11 @@
+{
+  "fields": [
+    { "name": "tenant_id", "type": "int32", "required": true },
+    { "name": "id", "type": "string", "required": true },
+    { "name": "flow_id", "type": "string", "required": true },
+    { "name": "node_id", "type": "string", "required": true },
+    { "name": "user_id", "type": "string", "required": true },
+    { "name": "direction", "type": "string", "required": true },
+    { "name": "created_at", "type": "string", "required": true }
+  ]
+}

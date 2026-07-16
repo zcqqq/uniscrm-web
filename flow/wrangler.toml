@@ -26,6 +26,8 @@ LINK_URL = "https://link-dev.uni-scrm.com"
 CONTENT_URL = "https://content-dev.uni-scrm.com"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 INTERNAL_SECRET = "dev-internal-secret"
+R2_BUCKET = "uniscrm-dev"
+R2_WAREHOUSE = "b34f3ff4aec4c36584672d5bf1320757_uniscrm-dev"
 
 [[env.dev.d1_databases]]
 binding = "WEB_DB"
@@ -57,9 +59,13 @@ max_batch_timeout = 10
 binding = "FLOW_LOG_QUEUE"
 queue = "uniscrm-flow-log-dev"
 
-# [[env.dev.pipelines]]
-# binding = "PIPELINE_FLOW_LOG"
-# pipeline = "d3d880e6c0ab44ef947d0d3d63d6a01d"
+[[env.dev.pipelines]]
+binding = "PIPELINE_FLOW_LOG"
+stream = "cf0fca6467a043ec952b1a901ea62661"
+
+[[env.dev.pipelines]]
+binding = "PIPELINE_CONTENT_FLOW_LOG"
+stream = "2549560664bf4351b132f860a30c3d0c"
 
 [env.dev.ai]
 binding = "AI"
@@ -76,6 +82,8 @@ WEB_URL = "https://web.uni-scrm.com"
 LINK_URL = "https://link.uni-scrm.com"
 CONTENT_URL = "https://content.uni-scrm.com"
 INTERNAL_SECRET = "prod-internal-secret-change-me"
+R2_BUCKET = "uniscrm"
+R2_WAREHOUSE = "b34f3ff4aec4c36584672d5bf1320757_uniscrm"
 
 [[env.production.d1_databases]]
 binding = "WEB_DB"
@@ -109,7 +117,11 @@ queue = "uniscrm-flow-log"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_FLOW_LOG"
-stream = "64ad6d8c53ed4d179de5036524f755d5"
+stream = "7a87df632dd84ccb93084ce938714ab8"
+
+[[env.production.pipelines]]
+binding = "PIPELINE_CONTENT_FLOW_LOG"
+stream = "3268a0ab5a8c4263aa9e92cd119f4c79"
 
 [env.production.ai]
 binding = "AI"

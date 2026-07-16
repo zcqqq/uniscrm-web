@@ -63,6 +63,32 @@ async function queryR2Counts(env: Env, table: string): Promise<CountRow[]> {
   return data.result?.rows || [];
 }
 
+export async function queryNodeLogRows(
+  env: Env,
+  table: "uniscrm.flow_log" | "uniscrm.content_flow_log",
+  subjectColumn: "user_id" | "content_id",
+  tenantId: number,
+  flowId: string,
+  nodeId: string
+): Promise<{ subjectId: string; created_at: string }[]> {
+  const res = await fetch(
+    `https://api.sql.cloudflarestorage.com/api/v1/accounts/${env.CF_ACCOUNT_ID}/r2-sql/query/${env.R2_BUCKET}`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.R2_SQL_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        warehouse: env.R2_WAREHOUSE,
+        query: `SELECT ${subjectColumn}, created_at FROM ${table}
+                WHERE tenant_id = ${tenantId} AND flow_id = '${flowId}' AND node_id = '${nodeId}' AND direction = 'enter'
+                ORDER BY created_at DESC LIMIT 50`,
+      }),
+    }
+  );
+  const data = await res.json() as { result?: { rows: Record<string, unknown>[] }; success: boolean };
+  if (!data.success) return [];
+  return (data.result?.rows || []).map((r) => ({ subjectId: String(r[subjectColumn]), created_at: String(r.created_at) }));
+}
+
 export async function recomputeFlowCounts(env: Env): Promise<void> {
   const [flowRows, contentFlowRows] = await Promise.all([
     queryR2Counts(env, "uniscrm.flow_log"),
@@ -688,27 +714,49 @@ app.get("/api/flows/:id/analytics", async (c) => {
   }
 });
 
-// Node logs: list users who entered a specific node
+// Node logs: list which users/content items entered a specific node (two-step: R2 for the
+// log rows, then a D1 lookup for names — cross-table JOIN in R2 SQL is untested in this
+// codebase, so this avoids relying on it).
 app.get("/api/flows/:id/nodes/:nodeId/logs", async (c) => {
   const tenantId = c.get("tenantId");
   const flowId = c.req.param("id");
   const nodeId = c.req.param("nodeId");
 
   try {
-    const row = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-      .bind(tenantId).first<{ d1_database_id: string | null }>();
-    if (!row?.d1_database_id) return c.json({ logs: [] });
+    const flowRow = await c.env.FLOW_DB.prepare("SELECT graph_json FROM flows WHERE id = ? AND tenant_id = ?")
+      .bind(flowId, tenantId).first<{ graph_json: string }>();
+    if (!flowRow) return c.json({ logs: [] });
+    const isContentDomain = flowRow.graph_json.includes("xContentTrigger");
 
-    const tdb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, row.d1_database_id);
-    const logs = await tdb.query<{ user_id: string; name: string | null; created_at: string }>(
-      `SELECT l.user_id, u.name, l.created_at
-       FROM flow_log l LEFT JOIN user u ON u.id = l.user_id
-       WHERE l.flow_id = ? AND l.node_id = ? AND l.direction = 'enter'
-       GROUP BY l.user_id, l.created_at
-       ORDER BY l.created_at DESC LIMIT 50`,
-      [flowId, nodeId]
+    const rows = await queryNodeLogRows(
+      c.env,
+      isContentDomain ? "uniscrm.content_flow_log" : "uniscrm.flow_log",
+      isContentDomain ? "content_id" : "user_id",
+      Number(tenantId),
+      flowId,
+      nodeId
     );
+    if (rows.length === 0) return c.json({ logs: [] });
 
+    const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+      .bind(tenantId).first<{ d1_database_id: string | null }>();
+    if (!tenantRow?.d1_database_id) {
+      return c.json({ logs: rows.map((r) => ({ [isContentDomain ? "content_id" : "user_id"]: r.subjectId, name: null, created_at: r.created_at })) });
+    }
+
+    const tdb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
+    const ids = [...new Set(rows.map((r) => r.subjectId))];
+    const placeholders = ids.map(() => "?").join(",");
+    const nameRows = isContentDomain
+      ? await tdb.query<{ id: string; title: string | null }>(`SELECT id, title FROM content WHERE id IN (${placeholders})`, ids)
+      : await tdb.query<{ id: string; name: string | null }>(`SELECT id, name FROM user WHERE id IN (${placeholders})`, ids);
+    const nameMap = new Map(nameRows.map((r) => [r.id, isContentDomain ? (r as any).title : (r as any).name]));
+
+    const logs = rows.map((r) => ({
+      [isContentDomain ? "content_id" : "user_id"]: r.subjectId,
+      name: nameMap.get(r.subjectId) ?? null,
+      created_at: r.created_at,
+    }));
     return c.json({ logs });
   } catch (e) {
     console.error(JSON.stringify({ event: "node_logs_error", tenantId, flowId, nodeId, error: String(e) }));

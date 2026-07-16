@@ -238,7 +238,7 @@ function durationToMs(duration: number, unit: string): number {
 
 function buildActionData(targetNode: FlowNode): ActionResult {
   const actionType = targetNode.data.actionType as string;
-  const isExternalApi = actionType === "xAction" || actionType === "repost" || actionType === "xContentAction";
+  const isExternalApi = actionType === "xAction" || actionType === "xContentAction";
   const actionData: ActionResult = { type: actionType, nodeId: targetNode.id, hasBranches: isExternalApi };
   if (actionType === "addToList") actionData.listId = targetNode.data.listId as string;
   if (actionType === "xAction") {
@@ -247,6 +247,7 @@ function buildActionData(targetNode: FlowNode): ActionResult {
     if (targetNode.data.messageText) actionData.messageText = targetNode.data.messageText as string;
   }
   if (actionType === "xContentAction") {
+    actionData.operation = (targetNode.data.operation as string) || "create-post";
     actionData.targetChannelId = targetNode.data.channelId as string;
     actionData.prompt = targetNode.data.prompt as string;
     actionData.provider = targetNode.data.provider as string;

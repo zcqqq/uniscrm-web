@@ -70,7 +70,7 @@ describe("executeFlow: xContentTrigger", () => {
 });
 
 describe("collectActions: new content-domain action types", () => {
-  it("collects a repost action with hasBranches true", () => {
+  it("no longer grants hasBranches to a bare 'repost' actionType (the standalone repost node type has been removed; it now behaves like any unrecognized actionType)", () => {
     const graph: FlowGraph = {
       nodes: [
         { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
@@ -79,21 +79,33 @@ describe("collectActions: new content-domain action types", () => {
       edges: [{ id: "e1", source: "t1", target: "a1" }],
     };
     const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
-    expect(result.actions).toEqual([{ type: "repost", nodeId: "a1", hasBranches: true }]);
+    expect(result.actions).toEqual([{ type: "repost", nodeId: "a1", hasBranches: false }]);
   });
 
-  it("collects an xContentAction action carrying its target channel, prompt, and provider", () => {
+  it("collects an xContentAction action carrying its operation, target channel, prompt, and provider", () => {
     const graph: FlowGraph = {
       nodes: [
         { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
-        { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "tiktok-chan-1", prompt: "Rewrite this: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "repost-post", channelId: "tiktok-chan-1", prompt: "Rewrite this: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
     };
     const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
     expect(result.actions).toEqual([
-      { type: "xContentAction", nodeId: "a1", hasBranches: true, targetChannelId: "tiktok-chan-1", prompt: "Rewrite this: $content.content_text", provider: "default" },
+      { type: "xContentAction", nodeId: "a1", hasBranches: true, operation: "repost-post", targetChannelId: "tiktok-chan-1", prompt: "Rewrite this: $content.content_text", provider: "default" },
     ]);
+  });
+
+  it("defaults operation to 'create-post' when not set on an xContentAction node", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-2" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
+    expect(result.actions[0]).toMatchObject({ operation: "create-post" });
   });
 
   it("collects an updateContentStatus action and continues traversal past it", () => {

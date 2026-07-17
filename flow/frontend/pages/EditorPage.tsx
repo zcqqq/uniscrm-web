@@ -4,6 +4,7 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { useFlowEditor } from "../store/flow-editor";
 import { api } from "../lib/api";
 import { FLOW_TEMPLATES } from "../config/templates";
+import { generatableKeysForDomain, type FlowDomain } from "../../nodeTypeRegistry";
 import AiGenerateBar from "../../../shared/frontend/components/BarAiGenerate";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
@@ -83,6 +84,12 @@ function EditorToolbar() {
       <AiGenerateBar
         endpoint="/api/flows/generate"
         context={(() => { const { nodes, edges } = useFlowEditor.getState(); return { nodes, edges }; })()}
+        extraBody={{
+          domain: (useFlowEditor.getState().nodes.some((n) => n.type === "xContentTrigger") ? "content" : "user") satisfies FlowDomain,
+        }}
+        allowedNodeTypes={generatableKeysForDomain(
+          useFlowEditor.getState().nodes.some((n) => n.type === "xContentTrigger") ? "content" : "user"
+        )}
         placeholder="Describe your flow..."
         onResult={(graph) => {
           if (Array.isArray(graph.nodes) && Array.isArray(graph.edges)) {

@@ -11,7 +11,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
-import { useFlowEditor } from "../store/flow-editor";
+import { useFlowEditor, isValidConnection as isValidNodeConnection } from "../store/flow-editor";
 import { Button } from "../../../shared/frontend/ui/button";
 import DeletableEdge from "../edges/DeletableEdge";
 
@@ -58,12 +58,7 @@ export default function Canvas() {
     (connection: Edge | Connection) => {
       const source = nodes.find((n) => n.id === connection.source);
       const target = nodes.find((n) => n.id === connection.target);
-      if (!source || !target) return false;
-      if (target.type === "xTrigger") return false;
-      const validTargets = ["action", "wait", "waitForEvent"];
-      const validSources = ["xTrigger", "wait", "waitForEvent", "action"];
-      if (validSources.includes(source.type!) && validTargets.includes(target.type!)) return true;
-      return false;
+      return isValidNodeConnection(source, target);
     },
     [nodes]
   );

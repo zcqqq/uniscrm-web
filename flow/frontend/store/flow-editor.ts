@@ -49,7 +49,10 @@ export const ACTION_CHANNEL_TYPE: Record<string, string> = {
   tiktokContentAction: "TIKTOK",
 };
 
-function isValidConnection(source: Node | undefined, target: Node | undefined): boolean {
+// Shared by the store's onConnect below and by Canvas.tsx's isValidConnection prop
+// (React Flow gates connection drags with that prop before onConnect ever runs) --
+// keep this the single copy so the two never drift apart again.
+export function isValidConnection(source: Node | undefined, target: Node | undefined): boolean {
   if (!source || !target) return false;
   const targetType = target.type;
   const sourceType = source.type;

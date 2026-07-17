@@ -1,6 +1,6 @@
 import { useFlowEditor } from "../store/flow-editor";
 import { CHANNEL_TYPES } from "../config/trigger-fields";
-import { NODE_TYPE_REGISTRY, type FlowDomain } from "../../nodeTypeRegistry";
+import { NODE_TYPE_REGISTRY, USER_FLOW_SIDEBAR_ORDER, CONTENT_FLOW_SIDEBAR_ORDER, type FlowDomain } from "../../nodeTypeRegistry";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
 
 interface DraggableItemProps {
@@ -34,19 +34,17 @@ function DraggableItem({ type, label, description, color, icon }: DraggableItemP
   );
 }
 
-// Declaration order in NODE_TYPE_REGISTRY is the single source of truth for Sidebar item
-// order within each section — sort each section's items by their registry key's index so a
-// future reorder of the registry doesn't require a second, manually-synced edit here.
-const REGISTRY_ORDER = Object.keys(NODE_TYPE_REGISTRY);
-
 interface SectionItem {
   key: string;
   el: React.ReactNode;
 }
 
-function sortByRegistryOrder(items: SectionItem[]): React.ReactNode[] {
+// USER_FLOW_SIDEBAR_ORDER / CONTENT_FLOW_SIDEBAR_ORDER (nodeTypeRegistry.ts) are each domain's
+// single source of truth for item order within a section — sort by the current domain's order
+// so user-flow and content-flow Sidebars can be reordered independently of one another.
+function sortByOrder(items: SectionItem[], order: string[]): React.ReactNode[] {
   return [...items]
-    .sort((a, b) => REGISTRY_ORDER.indexOf(a.key) - REGISTRY_ORDER.indexOf(b.key))
+    .sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key))
     .map((i) => i.el);
 }
 
@@ -57,7 +55,7 @@ export default function Sidebar() {
     const cfg = NODE_TYPE_REGISTRY[nodeTypeKey];
     return !cfg || cfg.domain === "both" || cfg.domain === domain;
   };
-  const xChannel = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!;
+  const sidebarOrder = domain === "content" ? CONTENT_FLOW_SIDEBAR_ORDER : USER_FLOW_SIDEBAR_ORDER;
 
   const triggerItems: SectionItem[] = [];
   if (visible("xTrigger")) {
@@ -80,7 +78,7 @@ export default function Sidebar() {
   if (visible("cronTrigger")) {
     triggerItems.push({
       key: "cronTrigger",
-      el: <DraggableItem key="cronTrigger" type="cronTrigger" label={NODE_TYPE_REGISTRY.cronTrigger.label!} description="Trigger on a schedule" color="border-primary/30 bg-primary/5" icon="⏰" />,
+      el: <DraggableItem key="cronTrigger" type="cronTrigger" label={NODE_TYPE_REGISTRY.cronTrigger.label!} description={NODE_TYPE_REGISTRY.cronTrigger.description!} color="border-primary/30 bg-primary/5" icon="⏰" />,
     });
   }
   if (visible("xContentTrigger")) {
@@ -94,25 +92,25 @@ export default function Sidebar() {
   if (visible("addToList")) {
     actionItems.push({
       key: "addToList",
-      el: <DraggableItem key="addToList" type="addToList" label={NODE_TYPE_REGISTRY.addToList.label!} description="Add user to a profile list" color="border-accent bg-accent/50" icon="📋" />,
+      el: <DraggableItem key="addToList" type="addToList" label={NODE_TYPE_REGISTRY.addToList.label!} description={NODE_TYPE_REGISTRY.addToList.description!} color="border-accent bg-accent/50" icon="📋" />,
     });
   }
   if (visible("xAction")) {
     actionItems.push({
       key: "xAction",
-      el: <DraggableItem key="xAction" type="xAction" label={NODE_TYPE_REGISTRY.xAction.label!} description={`${xChannel.actions.length} actions`} color="border-accent bg-accent/50" icon="𝕏" />,
+      el: <DraggableItem key="xAction" type="xAction" label={NODE_TYPE_REGISTRY.xAction.label!} description={NODE_TYPE_REGISTRY.xAction.description!} color="border-accent bg-accent/50" icon="𝕏" />,
     });
   }
   if (visible("webhook")) {
     actionItems.push({
       key: "webhook",
-      el: <DraggableItem key="webhook" type="webhook" label={NODE_TYPE_REGISTRY.webhook.label!} description="Send HTTP request" color="border-accent bg-accent/50" icon="🔗" />,
+      el: <DraggableItem key="webhook" type="webhook" label={NODE_TYPE_REGISTRY.webhook.label!} description={NODE_TYPE_REGISTRY.webhook.description!} color="border-accent bg-accent/50" icon="🔗" />,
     });
   }
   if (visible("changeUserProps")) {
     actionItems.push({
       key: "changeUserProps",
-      el: <DraggableItem key="changeUserProps" type="changeUserProps" label={NODE_TYPE_REGISTRY.changeUserProps.label!} description="Update user properties" color="border-accent bg-accent/50" icon="✏️" />,
+      el: <DraggableItem key="changeUserProps" type="changeUserProps" label={NODE_TYPE_REGISTRY.changeUserProps.label!} description={NODE_TYPE_REGISTRY.changeUserProps.description!} color="border-accent bg-accent/50" icon="✏️" />,
     });
   }
   if (visible("xContentAction")) {
@@ -124,13 +122,13 @@ export default function Sidebar() {
   if (visible("tiktokContentAction")) {
     actionItems.push({
       key: "tiktokContentAction",
-      el: <DraggableItem key="tiktokContentAction" type="tiktokContentAction" label={NODE_TYPE_REGISTRY.tiktokContentAction.label!} description="Generate images + caption and send to TikTok as a draft" color="border-accent bg-accent/50" icon="📸" />,
+      el: <DraggableItem key="tiktokContentAction" type="tiktokContentAction" label={NODE_TYPE_REGISTRY.tiktokContentAction.label!} description={NODE_TYPE_REGISTRY.tiktokContentAction.description!} color="border-accent bg-accent/50" icon="📸" />,
     });
   }
   if (visible("updateContentStatus")) {
     actionItems.push({
       key: "updateContentStatus",
-      el: <DraggableItem key="updateContentStatus" type="updateContentStatus" label={NODE_TYPE_REGISTRY.updateContentStatus.label!} description="Set this content's status" color="border-accent bg-accent/50" icon="🏷️" />,
+      el: <DraggableItem key="updateContentStatus" type="updateContentStatus" label={NODE_TYPE_REGISTRY.updateContentStatus.label!} description={NODE_TYPE_REGISTRY.updateContentStatus.description!} color="border-accent bg-accent/50" icon="🏷️" />,
     });
   }
 
@@ -138,31 +136,31 @@ export default function Sidebar() {
   if (visible("waitForEvent")) {
     flowControlItems.push({
       key: "waitForEvent",
-      el: <DraggableItem key="waitForEvent" type="waitForEvent" label={NODE_TYPE_REGISTRY.waitForEvent.label!} description="Check if event has occurred" color="border-secondary bg-secondary/30" icon="🔍" />,
+      el: <DraggableItem key="waitForEvent" type="waitForEvent" label={NODE_TYPE_REGISTRY.waitForEvent.label!} description={NODE_TYPE_REGISTRY.waitForEvent.description!} color="border-secondary bg-secondary/30" icon="🔍" />,
     });
   }
   if (visible("wait")) {
     flowControlItems.push({
       key: "wait",
-      el: <DraggableItem key="wait" type="wait" label={NODE_TYPE_REGISTRY.wait.label!} description="Delay for a specified duration" color="border-secondary bg-secondary/30" icon="⏳" />,
+      el: <DraggableItem key="wait" type="wait" label={NODE_TYPE_REGISTRY.wait.label!} description={NODE_TYPE_REGISTRY.wait.description!} color="border-secondary bg-secondary/30" icon="⏳" />,
     });
   }
   if (visible("timeCondition")) {
     flowControlItems.push({
       key: "timeCondition",
-      el: <DraggableItem key="timeCondition" type="timeCondition" label={NODE_TYPE_REGISTRY.timeCondition.label!} description="Gate by time-of-day / day-of-week" color="border-secondary bg-secondary/30" icon="🕐" />,
+      el: <DraggableItem key="timeCondition" type="timeCondition" label={NODE_TYPE_REGISTRY.timeCondition.label!} description={NODE_TYPE_REGISTRY.timeCondition.description!} color="border-secondary bg-secondary/30" icon="🕐" />,
     });
   }
   if (visible("userPropsCondition")) {
     flowControlItems.push({
       key: "userPropsCondition",
-      el: <DraggableItem key="userPropsCondition" type="userPropsCondition" label={NODE_TYPE_REGISTRY.userPropsCondition.label!} description="Branch by user properties" color="border-secondary bg-secondary/30" icon="👤" />,
+      el: <DraggableItem key="userPropsCondition" type="userPropsCondition" label={NODE_TYPE_REGISTRY.userPropsCondition.label!} description={NODE_TYPE_REGISTRY.userPropsCondition.description!} color="border-secondary bg-secondary/30" icon="👤" />,
     });
   }
   if (visible("abSplit")) {
     flowControlItems.push({
       key: "abSplit",
-      el: <DraggableItem key="abSplit" type="abSplit" label={NODE_TYPE_REGISTRY.abSplit.label!} description="Split traffic by % or condition" color="border-secondary bg-secondary/30" icon="⚡" />,
+      el: <DraggableItem key="abSplit" type="abSplit" label={NODE_TYPE_REGISTRY.abSplit.label!} description={NODE_TYPE_REGISTRY.abSplit.description!} color="border-secondary bg-secondary/30" icon="⚡" />,
     });
   }
 
@@ -170,13 +168,13 @@ export default function Sidebar() {
     <TooltipProvider>
       <aside className="w-60 border-r border-border bg-background p-4 overflow-y-auto">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Triggers</h3>
-        <div className="grid grid-cols-2 gap-2 mb-6">{sortByRegistryOrder(triggerItems)}</div>
+        <div className="grid grid-cols-2 gap-2 mb-6">{sortByOrder(triggerItems, sidebarOrder)}</div>
 
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Actions</h3>
-        <div className="grid grid-cols-2 gap-2 mb-6">{sortByRegistryOrder(actionItems)}</div>
+        <div className="grid grid-cols-2 gap-2 mb-6">{sortByOrder(actionItems, sidebarOrder)}</div>
 
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Flow Control</h3>
-        <div className="grid grid-cols-2 gap-2">{sortByRegistryOrder(flowControlItems)}</div>
+        <div className="grid grid-cols-2 gap-2">{sortByOrder(flowControlItems, sidebarOrder)}</div>
       </aside>
     </TooltipProvider>
   );

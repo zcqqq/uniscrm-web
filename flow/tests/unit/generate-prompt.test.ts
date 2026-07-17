@@ -1,38 +1,33 @@
 import { describe, it, expect } from "vitest";
 import { buildFlowGenerateSystemPrompt } from "../../src/generate-prompt";
-
-const EXISTING_USER_PROMPT = `You are a workflow graph generator for a social CRM.
-
-Available node types:
-1. xTrigger - triggers on X (Twitter) events
-   data: { channelType: "X", eventType: string }
-   eventTypes: "follow.followed" (someone follows you), "follow.follow" (you follow someone), "follow.unfollowed" (someone unfollows you), "follow.unfollow" (you unfollow someone), "dm.received", "post.create", "like.create"
-
-2. wait - delay execution
-   data: { duration: number, unit: "minutes"|"hours"|"days" }
-
-3. waitForEvent - wait for an event within a time window, has "yes"/"no" branches
-   data: { eventType: string, duration: number, unit: "minutes"|"hours"|"days", conditions: [] }
-
-4. action - perform an action
-   For X actions: data: { actionType: "xAction", xEvent: string }
-   xEvents: "follow-user", "unfollow-user", "create-dm", "mute-user"
-   For list actions: data: { actionType: "addToList", listId: "", listName: "" }
-
-Rules:
-- Each node needs: id (UUID format like "a1b2c3d4-..."), type, position: {x:0,y:0}, data
-- Edges: { id: string, source: nodeId, target: nodeId, sourceHandle?: string }
-- xAction nodes have sourceHandle "success" or "failed" for branching
-- waitForEvent nodes have sourceHandle "yes" or "no"
-- Flow must start with exactly one xTrigger node
-- Generate UUIDs for all ids (8-4-4-4-12 format)
-
-Think step by step about what nodes and connections are needed. Your thinking is shown to the user as a progress log.
-End your response with ONLY the JSON object on a new line: {"nodes":[...],"edges":[...]}`;
+import { CHANNEL_TYPES } from "../../frontend/config/trigger-fields";
 
 describe("buildFlowGenerateSystemPrompt", () => {
-  it("user domain: byte-for-byte identical to today's prompt (frozen, not rebuilt from the registry)", () => {
-    expect(buildFlowGenerateSystemPrompt("user")).toBe(EXISTING_USER_PROMPT);
+  it("user domain: documents the static structure (wait/waitForEvent/action fragments, rules, closing instructions)", () => {
+    const prompt = buildFlowGenerateSystemPrompt("user");
+    expect(prompt).toContain("You are a workflow graph generator for a social CRM.");
+    expect(prompt).toContain("xTrigger - triggers on X (Twitter) events");
+    expect(prompt).toContain("wait - delay execution");
+    expect(prompt).toContain('waitForEvent - wait for an event within a time window, has "yes"/"no" branches');
+    expect(prompt).toContain('For X actions: data: { actionType: "xAction", xEvent: string }');
+    expect(prompt).toContain('For list actions: data: { actionType: "addToList", listId: "", listName: "" }');
+    // "For X actions" must precede "For list actions" — xAction is declared before addToList
+    // in the registry specifically to preserve this order.
+    expect(prompt.indexOf('actionType: "xAction"')).toBeLessThan(prompt.indexOf('actionType: "addToList"'));
+    expect(prompt).toContain("Flow must start with exactly one xTrigger node");
+    expect(prompt).toContain('End your response with ONLY the JSON object on a new line: {"nodes":[...],"edges":[...]}');
+  });
+
+  it("user domain: xTrigger's eventTypes list is derived from CHANNEL_TYPES' X entry, not hand-typed", () => {
+    const prompt = buildFlowGenerateSystemPrompt("user");
+    const xEvents = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!.events;
+    for (const ev of xEvents) {
+      expect(prompt).toContain(`"${ev.eventType}" (${ev.description})`);
+    }
+    // post.create/like.create lack flowType:"trigger" in metadata/x.ts, so CHANNEL_TYPES.events
+    // excludes them — the prompt must not offer the LLM an eventType nothing else recognizes.
+    expect(prompt).not.toContain("post.create");
+    expect(prompt).not.toContain("like.create");
   });
 
   it("content domain: documents all 5 functional content node types via the type:\"action\" convention", () => {

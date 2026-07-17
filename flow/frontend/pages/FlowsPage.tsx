@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFlows } from "../hooks/useFlows";
 import { api } from "../lib/api";
+import { validateFlowGraph } from "../lib/validate-flow-graph";
+import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { FLOW_TEMPLATES, type FlowTemplate } from "../config/templates";
 import { Nav } from "../components/Nav";
 import { DateCell } from "../../../shared/frontend/components/CellDate";
@@ -52,6 +54,7 @@ export default function FlowsPage() {
   const { flows, loading, page, total, totalPages, setPage, createFlow, deleteFlow, refresh } = useFlows(domain);
   const { timezone } = useLocale();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [sortKey, setSortKey] = useState<SortKey>("updated_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -202,7 +205,21 @@ export default function FlowsPage() {
                               draft: {
                                 primary: { icon: <EditIcon className="w-5 h-5" />, title: "Edit", onClick: () => navigate(`/flows/${flow.id}`) },
                                 menu: [
-                                  { label: "Publish", onClick: () => api.flows.publish(flow.id).then(() => refresh()) },
+                                  {
+                                    label: "Publish",
+                                    onClick: async () => {
+                                      const { flow: detail } = await api.flows.get(flow.id);
+                                      const graph = JSON.parse(detail.graph_json || '{"nodes":[],"edges":[]}');
+                                      const { valid, orphanNodeIds } = validateFlowGraph(graph.nodes || [], graph.edges || []);
+                                      if (!valid) {
+                                        toast({ title: `${orphanNodeIds.length} 个节点未连接，无法发布`, variant: "destructive" });
+                                        navigate(`/flows/${flow.id}`);
+                                        return;
+                                      }
+                                      await api.flows.publish(flow.id);
+                                      refresh();
+                                    },
+                                  },
                                   { label: "Delete", onClick: () => { if (confirm("Delete this flow?")) deleteFlow(flow.id); }, destructive: true },
                                 ],
                               },

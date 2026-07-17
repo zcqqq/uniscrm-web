@@ -19,6 +19,7 @@ export interface FlowEditorState {
   edges: Edge[];
   selectedNodeId: string | null;
   isDirty: boolean;
+  errorNodeIds: string[];
 
   setFlow: (id: string | null, name: string, enabled: boolean, nodes: Node[], edges: Edge[]) => void;
   onNodesChange: OnNodesChange;
@@ -37,6 +38,7 @@ export interface FlowEditorState {
   // and still has no channelId, provided the tenant has exactly one connected account for
   // that channelType. No-ops (and skips the API call) if nothing needs filling.
   autoFillChannelIds: () => Promise<void>;
+  setErrorNodeIds: (ids: string[]) => void;
 }
 
 const ACTION_TYPES = ["addToList", "xAction", "xContentAction", "tiktokContentAction", "updateContentStatus"];
@@ -71,6 +73,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
   edges: [],
   selectedNodeId: null,
   isDirty: false,
+  errorNodeIds: [],
 
   setFlow: (id, name, enabled, nodes, edges) =>
     set({ flowId: id, flowName: name, flowEnabled: enabled, nodes, edges, isDirty: false, selectedNodeId: null }),
@@ -89,6 +92,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
     set((state) => ({
       edges: addEdge({ ...connection, id: crypto.randomUUID() }, state.edges),
       isDirty: true,
+      errorNodeIds: [],
     }));
   },
 
@@ -180,6 +184,8 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
   },
 
   setSelectedNode: (nodeId) => set({ selectedNodeId: nodeId }),
+
+  setErrorNodeIds: (ids) => set({ errorNodeIds: ids }),
 
   setFlowName: (name) => set({ flowName: name, isDirty: true }),
 

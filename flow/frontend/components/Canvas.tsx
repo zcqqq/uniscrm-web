@@ -20,7 +20,7 @@ import { nodeTypes } from "../nodes";
 
 export default function Canvas() {
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode, setSelectedNode } =
+  const { nodes, edges, errorNodeIds, onNodesChange, onEdgesChange, onConnect, addNode, setSelectedNode } =
     useFlowEditor();
 
   const onDragOver = useCallback((e: React.DragEvent) => {
@@ -63,10 +63,14 @@ export default function Canvas() {
     [nodes]
   );
 
+  const displayNodes = errorNodeIds.length === 0
+    ? nodes
+    : nodes.map((n) => errorNodeIds.includes(n.id) ? { ...n, className: "flow-node-error" } : n);
+
   return (
     <div className="flex-1 h-full">
       <ReactFlow
-        nodes={nodes}
+        nodes={displayNodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}

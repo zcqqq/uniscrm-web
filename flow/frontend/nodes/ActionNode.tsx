@@ -1,7 +1,10 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
+import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
+import { CHANNEL_TYPES } from "../config/trigger-fields";
 
 const EXTERNAL_API_ACTIONS = ["xAction", "xContentAction", "tiktokContentAction"];
+const X_ACTION_COUNT = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!.actions.length;
 
 export default function ActionNode({ data, selected }: NodeProps) {
   const actionType = data.actionType as string;
@@ -13,34 +16,34 @@ export default function ActionNode({ data, selected }: NodeProps) {
 
   if (actionType === "addToList") {
     const listName = data.listName as string;
-    label = "Add to List";
+    label = NODE_TYPE_REGISTRY.addToList.label!;
     description = listName || "Select a list...";
     icon = "📋";
   } else if (actionType === "xAction") {
     const xEvent = data.xEvent as string;
-    label = "X Action";
+    label = NODE_TYPE_REGISTRY.xAction.label!;
     description = xEvent === "follow-user" ? "Follow User"
       : xEvent === "unfollow-user" ? "Unfollow User"
       : xEvent === "create-dm" ? "Direct Message"
       : xEvent === "mute-user" ? "Mute User"
-      : "4 actions";
+      : `${X_ACTION_COUNT} actions`;
     icon = "𝕏";
   } else if (actionType === "xContentAction") {
     const channelId = data.channelId as string;
     const operation = data.operation as string;
-    label = "X Content Action";
+    label = NODE_TYPE_REGISTRY.xContentAction.label!;
     description = operation === "repost-post"
       ? "Reposts via the triggering channel"
       : channelId ? "Target channel selected" : "Select a target channel...";
     icon = "✨";
   } else if (actionType === "tiktokContentAction") {
     const channelId = data.channelId as string;
-    label = "TikTok Photo Post";
+    label = NODE_TYPE_REGISTRY.tiktokContentAction.label!;
     description = channelId ? "Target channel selected" : "Select a target channel...";
     icon = "📸";
   } else if (actionType === "updateContentStatus") {
     const status = data.status as string;
-    label = "Update Content Status";
+    label = NODE_TYPE_REGISTRY.updateContentStatus.label!;
     description = status ? `Set status to "${status}"` : "Select a status...";
     icon = "🏷️";
   } else {

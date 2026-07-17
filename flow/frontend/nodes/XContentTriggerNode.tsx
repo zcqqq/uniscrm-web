@@ -1,5 +1,6 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
+import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 
 export default function XContentTriggerNode({ data, selected }: NodeProps) {
   const conditions = (data.conditions as unknown[]) || [];
@@ -18,7 +19,7 @@ export default function XContentTriggerNode({ data, selected }: NodeProps) {
       <div className="flex items-center gap-2">
         <span className="text-lg">𝕏</span>
         <div>
-          <span className="font-semibold text-sm text-purple-700">X Content Trigger</span>
+          <span className="font-semibold text-sm text-purple-700">{NODE_TYPE_REGISTRY.xContentTrigger.label}</span>
           <p className="text-xs text-gray-500">{subtitle}</p>
           {condCount > 0 && (
             <p className="text-xs text-purple-500">{condCount} condition{condCount > 1 ? "s" : ""}</p>

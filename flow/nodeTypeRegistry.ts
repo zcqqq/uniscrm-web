@@ -1,8 +1,18 @@
+import { ContentMetadata_X } from "../metadata/x-byok";
+
 export type FlowDomain = "user" | "content";
 
 export interface NodeTypeConfig {
   /** The React Flow `node.type` this entry corresponds to ("action" for every actionType variant). */
   reactFlowType: string;
+  /**
+   * Display name shown in Sidebar, the canvas node, and the Inspector heading — the single
+   * source of truth for this type's name so the three surfaces can't drift apart. Omitted only
+   * for xTrigger, whose label is dynamic per channelType and sourced from CHANNEL_TYPES instead.
+   */
+  label?: string;
+  /** Sidebar description. Only set for xContentTrigger/xContentAction today (a metadata-derived "N triggers"/"N actions" count) — every other entry keeps its description as a literal in Sidebar.tsx. */
+  description?: string;
   domain: FlowDomain | "both";
   /** Whether the AI generate feature may produce this node type/actionType. */
   generatable: boolean;
@@ -17,19 +27,24 @@ export interface NodeTypeConfig {
   promptFragment?: string;
 }
 
+const CONTENT_X_TRIGGER_COUNT = ContentMetadata_X.filter((m) => m.flowType === "trigger").length;
+const CONTENT_X_ACTION_COUNT = ContentMetadata_X.filter((m) => m.flowType === "action").length;
+
 export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
   // --- user-domain triggers/flow-control/actions ---
   xTrigger: { reactFlowType: "xTrigger", domain: "user", generatable: true },
-  cronTrigger: { reactFlowType: "cronTrigger", domain: "user", generatable: false },
-  waitForEvent: { reactFlowType: "waitForEvent", domain: "user", generatable: true },
-  userPropsCondition: { reactFlowType: "userPropsCondition", domain: "user", generatable: false },
-  changeUserProps: { reactFlowType: "changeUserProps", domain: "user", generatable: false },
-  addToList: { reactFlowType: "action", domain: "user", generatable: true },
-  xAction: { reactFlowType: "action", domain: "user", generatable: true },
+  cronTrigger: { reactFlowType: "cronTrigger", label: "Cron Trigger", domain: "user", generatable: false },
+  waitForEvent: { reactFlowType: "waitForEvent", label: "Wait for Event", domain: "user", generatable: true },
+  userPropsCondition: { reactFlowType: "userPropsCondition", label: "User Props", domain: "user", generatable: false },
+  changeUserProps: { reactFlowType: "changeUserProps", label: "Change User Props", domain: "user", generatable: false },
+  addToList: { reactFlowType: "action", label: "Add to List", domain: "user", generatable: true },
+  xAction: { reactFlowType: "action", label: "X Action", domain: "user", generatable: true },
 
   // --- content-domain triggers/actions ---
   xContentTrigger: {
     reactFlowType: "xContentTrigger",
+    label: "X Trigger",
+    description: `${CONTENT_X_TRIGGER_COUNT} triggers`,
     domain: "content",
     generatable: true,
     promptFragment: `xContentTrigger - triggers when new content arrives on an X channel
@@ -39,6 +54,8 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
   },
   xContentAction: {
     reactFlowType: "action",
+    label: "X Action",
+    description: `${CONTENT_X_ACTION_COUNT} actions`,
     domain: "content",
     generatable: true,
     // Leading 3-space indent on the first line matches the frozen user-domain prompt's
@@ -50,6 +67,7 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
   },
   tiktokContentAction: {
     reactFlowType: "action",
+    label: "TikTok Action",
     domain: "content",
     generatable: true,
     promptFragment: `   For TikTok photo-post actions: data: { actionType: "tiktokContentAction", channelId: "", prompts: {}, textProvider: "default", textSkillId: "none", imageCount: 1, imageProvider: "default", imageSkillId: "none" }
@@ -57,6 +75,7 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
   },
   updateContentStatus: {
     reactFlowType: "action",
+    label: "Update Content Status",
     domain: "content",
     generatable: true,
     promptFragment: `   For status-update actions: data: { actionType: "updateContentStatus", status: "" }
@@ -66,14 +85,15 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
   // --- shared across both domains ---
   wait: {
     reactFlowType: "wait",
+    label: "Wait",
     domain: "both",
     generatable: true,
     promptFragment: `wait - delay execution
    data: { duration: number, unit: "minutes"|"hours"|"days" }`,
   },
-  timeCondition: { reactFlowType: "timeCondition", domain: "both", generatable: false },
-  abSplit: { reactFlowType: "abSplit", domain: "both", generatable: false },
-  webhook: { reactFlowType: "webhook", domain: "both", generatable: false },
+  timeCondition: { reactFlowType: "timeCondition", label: "Time Condition", domain: "both", generatable: false },
+  abSplit: { reactFlowType: "abSplit", label: "A/B Split", domain: "both", generatable: false },
+  webhook: { reactFlowType: "webhook", label: "Webhook", domain: "both", generatable: false },
 };
 
 export function generatableKeysForDomain(domain: FlowDomain): string[] {

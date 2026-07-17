@@ -12,6 +12,7 @@ import { ContentMetadata_X } from "../../../metadata/x-byok";
 import { PROPS } from "../../../metadata/props";
 import { t as localizeLabel } from "../../../metadata/locale";
 import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
+import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 
 type SelectChange = React.ChangeEvent<HTMLSelectElement>;
 type InputChange = React.ChangeEvent<HTMLInputElement>;
@@ -252,7 +253,7 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">X Content Trigger</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.xContentTrigger.label}</h4>
       <div className="space-y-3">
         <div>
           <Label className="text-xs block mb-1">Account</Label>
@@ -332,7 +333,7 @@ function WaitInspector({ nodeId, data }: { nodeId: string; data: Record<string, 
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">Wait</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.wait.label}</h4>
       <div className="space-y-3">
         <div>
           <Label className="text-xs block mb-1">Duration</Label>
@@ -370,7 +371,7 @@ function WaitForEventInspector({ nodeId, data }: { nodeId: string; data: Record<
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">Wait for Event</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.waitForEvent.label}</h4>
       <div className="space-y-3">
         <div>
           <Label className="text-xs block mb-1">Wait for event</Label>
@@ -439,7 +440,7 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
   if (actionType === "addToList") {
     return (
       <div>
-        <h4 className="text-sm font-semibold text-primary mb-3">Add to List</h4>
+        <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.addToList.label}</h4>
         <div>
           <Label className="text-xs block mb-1">List</Label>
           {loading ? (
@@ -506,7 +507,7 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">X Action</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.xAction.label}</h4>
       <div className="space-y-3">
         <div>
           <Label className="text-xs block mb-1">Action</Label>
@@ -593,7 +594,7 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">X Content Action</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.xContentAction.label}</h4>
       <div className="space-y-3">
         <div>
           <Label className="text-xs block mb-1">Operation</Label>
@@ -695,7 +696,7 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">TikTok Photo Post</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.tiktokContentAction.label}</h4>
       <div className="space-y-3">
         <div>
           <Label className="text-xs block mb-1">Target Account</Label>
@@ -812,7 +813,7 @@ function UpdateContentStatusInspector({ nodeId, data }: { nodeId: string; data: 
   const { updateNodeData } = useFlowEditor();
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">Update Content Status</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.updateContentStatus.label}</h4>
       <div>
         <Label className="text-xs block mb-1">New Status</Label>
         <Select
@@ -833,7 +834,7 @@ function CronTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<s
   const { updateNodeData } = useFlowEditor();
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">Cron Trigger</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.cronTrigger.label}</h4>
       <div className="space-y-3">
         <div>
           <Label className="text-xs block mb-1">Schedule Type</Label>
@@ -881,7 +882,7 @@ function TimeConditionInspector({ nodeId, data }: { nodeId: string; data: Record
   };
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">Time Condition</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.timeCondition.label}</h4>
       <div className="space-y-3">
         <div className="flex gap-2">
           <div className="flex-1">
@@ -918,7 +919,7 @@ function UserPropsConditionInspector({ nodeId, data }: { nodeId: string; data: R
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">User Props Condition</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.userPropsCondition.label}</h4>
       <div className="flex items-center justify-between mb-2">
         <Label className="text-xs">Conditions (all must pass → Yes)</Label>
         <button type="button" onClick={addCondition} className="text-xs text-primary hover:underline">+ Add</button>
@@ -944,7 +945,7 @@ function AbSplitInspector({ nodeId, data }: { nodeId: string; data: Record<strin
   const { updateNodeData } = useFlowEditor();
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">A/B Split</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.abSplit.label}</h4>
       <div className="space-y-3">
         <div>
           <Label className="text-xs block mb-1">Mode</Label>
@@ -976,7 +977,7 @@ function WebhookInspector({ nodeId, data }: { nodeId: string; data: Record<strin
   const { updateNodeData } = useFlowEditor();
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">Webhook</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.webhook.label}</h4>
       <div className="space-y-3">
         <div>
           <Label className="text-xs block mb-1">Method</Label>
@@ -1012,7 +1013,7 @@ function ChangeUserPropsInspector({ nodeId, data }: { nodeId: string; data: Reco
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">Change User Props</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.changeUserProps.label}</h4>
       <div className="flex items-center justify-between mb-2">
         <Label className="text-xs">Fields to update</Label>
         <button type="button" onClick={addUpdate} className="text-xs text-primary hover:underline">+ Add</button>

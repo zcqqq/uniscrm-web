@@ -26,6 +26,7 @@ export const ContentMetadata_X: ContentMetadata[] = [
   {
     sourceContentType: "get-posts", // https://docs.x.com/x-api/users/get-posts author_id=source_channel_id
     linkPrefix: "data[]",
+    flowType: "trigger",
     contentProps: [
       { propId: "content_type", value: "TWEET" },  //ARTICLE，参见uniscrm-web/_reference/x/post.json
       { propId: "source_content_id", dataId: "{linkPrefix}.id" },

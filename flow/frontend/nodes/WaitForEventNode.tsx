@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { CHANNEL_TYPES } from "../config/trigger-fields";
 import AnalyticsBadges from "./AnalyticsBadges";
+import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 
 export default function EventHistoryNode({ data, selected }: NodeProps) {
   const eventType = data.eventType as string;
@@ -27,7 +28,7 @@ export default function EventHistoryNode({ data, selected }: NodeProps) {
       <Handle type="target" position={Position.Left} className="!bg-indigo-500 !w-3 !h-3" />
       <div className="flex items-center gap-2 mb-1">
         <span className="text-lg">🔍</span>
-        <span className="font-semibold text-sm text-indigo-700">Wait for Event</span>
+        <span className="font-semibold text-sm text-indigo-700">{NODE_TYPE_REGISTRY.waitForEvent.label}</span>
       </div>
       <p className={`text-xs ${eventType ? "text-gray-700" : "text-gray-400 italic"}`}>
         {summary}

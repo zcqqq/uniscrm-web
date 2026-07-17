@@ -1,5 +1,6 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
+import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 
 export default function AbSplitNode({ data, selected }: NodeProps) {
   const mode = data.mode as string;
@@ -11,7 +12,7 @@ export default function AbSplitNode({ data, selected }: NodeProps) {
       <Handle type="target" position={Position.Left} className="!bg-indigo-500 !w-3 !h-3" />
       <div className="flex items-center gap-2 mb-1">
         <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" /></svg>
-        <span className="font-semibold text-sm text-indigo-700">A/B Split</span>
+        <span className="font-semibold text-sm text-indigo-700">{NODE_TYPE_REGISTRY.abSplit.label}</span>
       </div>
       <p className={`text-xs ${mode ? "text-gray-700" : "text-gray-400 italic"}`}>{summary}</p>
       <AnalyticsBadges analytics={data._analytics as any} />

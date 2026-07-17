@@ -22,6 +22,8 @@ export interface ChannelTypeDefinition {
   label: string;
   icon: string;
   events: EventDefinition[];
+  /** flowType:"action" entries for this channel — mirrors `events`, which is flowType:"trigger". */
+  actions: EventDefinition[];
 }
 
 const NUMBER_OPS = [">", "<", ">=", "<=", "=="];
@@ -70,12 +72,25 @@ export function getChannelTypes(locale: Locale = "en"): ChannelTypeDefinition[] 
       ].filter(Boolean) as TriggerFieldDefinition[],
     }));
 
+  const xActions = EventMetadata_X
+    .filter((m) => m.flowType === "action")
+    .map((m) => ({
+      eventType: m.eventType,
+      label: t(m.label, locale),
+      description: m.description ? t(m.description, locale) : "",
+      contextFields: [
+        ...m.eventProps.map((p) => propToField(p.propId, locale, "event")),
+        ...m.userProps.map((p) => propToField(p.propId, locale, "user")),
+      ].filter(Boolean) as TriggerFieldDefinition[],
+    }));
+
   return [
     {
       channelType: "X",
       label: "X",
       icon: "𝕏",
       events: xEvents,
+      actions: xActions,
     },
   ];
 }

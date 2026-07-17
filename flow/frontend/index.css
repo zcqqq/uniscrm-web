@@ -4,7 +4,7 @@
 @import "@xyflow/react/dist/style.css";
 
 .react-flow__node.flow-node-error {
-  outline: 2px solid #ef4444;
+  outline: 2px solid var(--destructive, #ef4444);
   outline-offset: 2px;
   border-radius: 8px;
 }

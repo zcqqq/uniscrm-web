@@ -76,7 +76,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
   errorNodeIds: [],
 
   setFlow: (id, name, enabled, nodes, edges) =>
-    set({ flowId: id, flowName: name, flowEnabled: enabled, nodes, edges, isDirty: false, selectedNodeId: null }),
+    set({ flowId: id, flowName: name, flowEnabled: enabled, nodes, edges, isDirty: false, selectedNodeId: null, errorNodeIds: [] }),
 
   onNodesChange: (changes) =>
     set((state) => ({ nodes: applyNodeChanges(changes, state.nodes), isDirty: true })),

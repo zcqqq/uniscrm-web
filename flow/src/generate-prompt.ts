@@ -34,8 +34,9 @@ End your response with ONLY the JSON object on a new line: {"nodes":[...],"edges
 function buildContentDomainPrompt(): string {
   const trigger = NODE_TYPE_REGISTRY.xContentTrigger.promptFragment;
   const wait = NODE_TYPE_REGISTRY.wait.promptFragment;
-  const actionFragments = ["xContentAction", "tiktokContentAction", "updateContentStatus"]
-    .map((key) => NODE_TYPE_REGISTRY[key].promptFragment)
+  const actionFragments = Object.values(NODE_TYPE_REGISTRY)
+    .filter((cfg) => cfg.reactFlowType === "action" && cfg.generatable && (cfg.domain === "content" || cfg.domain === "both"))
+    .map((cfg) => cfg.promptFragment)
     .join("\n");
 
   return `You are a workflow graph generator for a social CRM.

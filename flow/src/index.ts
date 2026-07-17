@@ -4,6 +4,7 @@ import type { Env, FlowQueueMessage } from "./types";
 import { executeFlow, resumeFromNode, evaluateCondition, type FlowGraph, type ActionResult, type NodeLog } from "./engine";
 import { EventMetadata_X } from "../../metadata/x";
 import { TenantDataDB } from "../../shared/tenant-data-db";
+import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
 
 async function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenantId: number, env: Env): Promise<void> {
   if (nodeLogs.length === 0) return;
@@ -853,39 +854,16 @@ app.get("/api/flows/:id/nodes/:nodeId/logs", async (c) => {
   }
 });
 
-const FLOW_GENERATE_SYSTEM_PROMPT = `You are a workflow graph generator for a social CRM.
-
-Available node types:
-1. xTrigger - triggers on X (Twitter) events
-   data: { channelType: "X", eventType: string }
-   eventTypes: "follow.followed" (someone follows you), "follow.follow" (you follow someone), "follow.unfollowed" (someone unfollows you), "follow.unfollow" (you unfollow someone), "dm.received", "post.create", "like.create"
-
-2. wait - delay execution
-   data: { duration: number, unit: "minutes"|"hours"|"days" }
-
-3. waitForEvent - wait for an event within a time window, has "yes"/"no" branches
-   data: { eventType: string, duration: number, unit: "minutes"|"hours"|"days", conditions: [] }
-
-4. action - perform an action
-   For X actions: data: { actionType: "xAction", xEvent: string }
-   xEvents: "follow-user", "unfollow-user", "create-dm", "mute-user"
-   For list actions: data: { actionType: "addToList", listId: "", listName: "" }
-
-Rules:
-- Each node needs: id (UUID format like "a1b2c3d4-..."), type, position: {x:0,y:0}, data
-- Edges: { id: string, source: nodeId, target: nodeId, sourceHandle?: string }
-- xAction nodes have sourceHandle "success" or "failed" for branching
-- waitForEvent nodes have sourceHandle "yes" or "no"
-- Flow must start with exactly one xTrigger node
-- Generate UUIDs for all ids (8-4-4-4-12 format)
-
-Think step by step about what nodes and connections are needed. Your thinking is shown to the user as a progress log.
-End your response with ONLY the JSON object on a new line: {"nodes":[...],"edges":[...]}`;
-
 app.post("/api/flows/generate", async (c) => {
-  const { prompt, currentContext, currentGraph } = await c.req.json<{ prompt: string; currentContext?: any; currentGraph?: any }>();
+  const { prompt, currentContext, currentGraph, domain } = await c.req.json<{
+    prompt: string;
+    currentContext?: any;
+    currentGraph?: any;
+    domain?: string;
+  }>();
   if (!prompt) return c.json({ error: "prompt required" }, 400);
 
+  const flowDomain: FlowDomain = domain === "content" ? "content" : "user";
   const ctx = currentContext || currentGraph;
   const hasContext = ctx && (Array.isArray(ctx.nodes) ? ctx.nodes.length > 0 : Object.keys(ctx).length > 0);
   const userMessage = hasContext
@@ -895,7 +873,7 @@ app.post("/api/flows/generate", async (c) => {
   try {
     const stream = await c.env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast" as any, {
       messages: [
-        { role: "system", content: FLOW_GENERATE_SYSTEM_PROMPT },
+        { role: "system", content: buildFlowGenerateSystemPrompt(flowDomain) },
         { role: "user", content: userMessage },
       ],
       max_tokens: 2048,

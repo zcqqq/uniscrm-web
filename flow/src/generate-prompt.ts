@@ -1,5 +1,7 @@
 import { NODE_TYPE_REGISTRY, type FlowDomain } from "../nodeTypeRegistry";
 
+export type { FlowDomain };
+
 const USER_DOMAIN_PROMPT = `You are a workflow graph generator for a social CRM.
 
 Available node types:

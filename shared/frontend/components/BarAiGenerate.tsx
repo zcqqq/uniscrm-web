@@ -1,13 +1,16 @@
 import { useRef, useState } from "react";
+import { findInvalidNodeType } from "../lib/validate-generated-graph";
 
 interface AiGenerateBarProps {
   endpoint: string;
   context?: any;
   placeholder?: string;
   onResult: (json: any) => void;
+  extraBody?: Record<string, unknown>;
+  allowedNodeTypes?: string[];
 }
 
-export default function AiGenerateBar({ endpoint, context, placeholder = "Describe...", onResult }: AiGenerateBarProps) {
+export default function AiGenerateBar({ endpoint, context, placeholder = "Describe...", onResult, extraBody, allowedNodeTypes }: AiGenerateBarProps) {
   const [prompt, setPrompt] = useState("");
   const [log, setLog] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -27,7 +30,7 @@ export default function AiGenerateBar({ endpoint, context, placeholder = "Descri
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: input, currentContext: context }),
+        body: JSON.stringify({ prompt: input, currentContext: context, ...extraBody }),
       });
 
       if (!res.ok || !res.body) {
@@ -69,6 +72,11 @@ export default function AiGenerateBar({ endpoint, context, placeholder = "Descri
           if (jsonStr.includes('\\"')) jsonStr = jsonStr.replace(/\\"/g, '"');
           try {
             const parsed = JSON.parse(jsonStr);
+            const invalidType = allowedNodeTypes ? findInvalidNodeType(parsed.nodes, allowedNodeTypes) : null;
+            if (invalidType !== null) {
+              setLog(full + `\n\n[Generated an invalid node type "${invalidType}" for this flow — please try again]`);
+              return;
+            }
             onResult(parsed);
           } catch {
             setLog(full + "\n\n[Failed to parse JSON from response]");

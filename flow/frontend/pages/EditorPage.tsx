@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useFlowEditor } from "../store/flow-editor";
+import { validateFlowGraph } from "../lib/validate-flow-graph";
+import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { api } from "../lib/api";
 import { FLOW_TEMPLATES } from "../config/templates";
 import { generatableKeysForDomain, type FlowDomain } from "../../nodeTypeRegistry";
@@ -20,6 +22,7 @@ function EditorToolbar() {
   const { flowId, flowName, isDirty, setFlowName, markClean, toGraphJson, replaceGraph } =
     useFlowEditor();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -102,6 +105,15 @@ function EditorToolbar() {
       <Button
         size="sm"
         onClick={async () => {
+          const { nodes, edges } = useFlowEditor.getState();
+          const { valid, orphanNodeIds } = validateFlowGraph(nodes, edges);
+          // Always resolve against the current graph first, so a second Publish click
+          // after a partial fix doesn't compound a stale highlight from the first click.
+          useFlowEditor.getState().setErrorNodeIds(orphanNodeIds);
+          if (!valid) {
+            toast({ title: `${orphanNodeIds.length} 个节点未连接，无法发布`, variant: "destructive" });
+            return;
+          }
           await handleSave();
           const id = useFlowEditor.getState().flowId;
           if (id) {

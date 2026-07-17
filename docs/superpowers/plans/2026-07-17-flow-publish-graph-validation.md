@@ -232,15 +232,9 @@ Add the setter implementation (anywhere among the other action implementations, 
   setErrorNodeIds: (ids) => set({ errorNodeIds: ids }),
 ```
 
-Clear `errorNodeIds` whenever the graph is edited, so a stale highlight never survives a fix. Update the three existing mutators:
+Clear `errorNodeIds` in `onConnect` — the action that actually fixes an orphan node — and leave `onNodesChange`/`onEdgesChange` untouched. Do **not** clear on `onNodesChange`: in `@xyflow/react` v12 that handler also fires on node *selection* and *dimension re-measurement* (e.g. the click a user makes to inspect the very node you just highlighted, or the re-render triggered by adding `className` in Task 2 Step 2), which would wipe the highlight before the user ever sees it. Only `onConnect` gets the reset:
 
 ```ts
-  onNodesChange: (changes) =>
-    set((state) => ({ nodes: applyNodeChanges(changes, state.nodes), isDirty: true, errorNodeIds: [] })),
-
-  onEdgesChange: (changes) =>
-    set((state) => ({ edges: applyEdgeChanges(changes, state.edges), isDirty: true, errorNodeIds: [] })),
-
   onConnect: (connection) => {
     const { nodes } = get();
     const source = nodes.find((n) => n.id === connection.source);
@@ -254,7 +248,9 @@ Clear `errorNodeIds` whenever the graph is edited, so a stale highlight never su
   },
 ```
 
-(These replace the existing bodies of `onNodesChange`, `onEdgesChange`, and `onConnect` — same logic, `errorNodeIds: []` added to each returned/set object.)
+(This replaces the existing body of `onConnect` only — same logic, `errorNodeIds: []` added to the returned/set object. `onNodesChange` and `onEdgesChange` are NOT modified in this task.)
+
+The highlight is also reset at the start of every Publish click regardless of outcome (see Task 3 Step 3), so a second Publish attempt always reflects the current graph rather than compounding a stale highlight.
 
 - [ ] **Step 2: Highlight `errorNodeIds` in Canvas**
 
@@ -383,9 +379,11 @@ with:
         onClick={async () => {
           const { nodes, edges } = useFlowEditor.getState();
           const { valid, orphanNodeIds } = validateFlowGraph(nodes, edges);
+          // Always resolve against the current graph first, so a second Publish click
+          // after a partial fix doesn't compound a stale highlight from the first click.
+          useFlowEditor.getState().setErrorNodeIds(orphanNodeIds);
           if (!valid) {
             toast({ title: `${orphanNodeIds.length} 个节点未连接，无法发布`, variant: "destructive" });
-            useFlowEditor.getState().setErrorNodeIds(orphanNodeIds);
             return;
           }
           await handleSave();
@@ -412,8 +410,9 @@ From `flow/`, run the worker backend and Vite frontend together (two terminals):
 In a browser:
 1. Open a flow with a trigger node and one unconnected action node (or create one via a template then delete its connecting edge).
 2. Click Publish. Expected: a destructive toast reading "1 个节点未连接，无法发布"; the action node gets a red outline; the page does **not** navigate to `/flows/:id/analytics`; the flow's status stays "draft" (verify via the flow list or by reloading).
-3. Connect the node, click Publish again. Expected: toast does not appear, page navigates to `/flows/:id/analytics`, flow status is now "published".
-4. Disconnect a node, click Publish (red outline appears), then drag any node or add an edge. Expected: the red outline clears immediately (per the `errorNodeIds: []` reset wired in Task 2).
+3. With the red outline showing, click the highlighted node to select/inspect it. Expected: the red outline stays visible (selecting a node must NOT clear the highlight — this is the case the highlight-clear logic in Task 2 is designed to survive).
+4. Connect the node, click Publish again. Expected: toast does not appear, page navigates to `/flows/:id/analytics`, flow status is now "published".
+5. Disconnect a node, click Publish (red outline appears), then draw a new valid edge via drag-connect. Expected: the red outline clears immediately (the `errorNodeIds: []` reset in `onConnect` from Task 2).
 
 - [ ] **Step 6: Commit**
 

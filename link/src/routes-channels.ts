@@ -13,7 +13,8 @@ import { encrypt } from "./services/crypto";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { XTokenService } from "./services/x-token";
 import { fetchOwnedLists } from "./services/x-posts-api";
-import { resolveYouTubeChannelId, subscribeWebSub, fetchChannelSnippet } from "./services/youtube-api";
+import { resolveYouTubeChannelId, fetchChannelSnippet } from "./services/youtube-api";
+import { findOrCreateWatchedChannel } from "./services/youtube-account";
 
 export function channelsRoutes() {
   const router = new Hono<{ Bindings: Env }>();
@@ -248,43 +249,8 @@ export function channelsRoutes() {
       }
     }
 
-    // Tenant-scoped, since the shared channels(channel_type, source_channel_id) unique index
-    // (link/migrations/0001_initial_schema.sql) is global — two tenants watching the same
-    // external YouTube channel must not collide on that index.
-    const sourceChannelId = `${tenantId}:${resolved.channelId}`;
-    const config = { youtube_channel_id: resolved.channelId, channel_name: channelName, thumbnail_url: thumbnailUrl };
-    const now = new Date().toISOString();
-
-    const existing = await c.env.LINK_DB
-      .prepare("SELECT id FROM channels WHERE channel_type = 'YOUTUBE' AND source_channel_id = ? AND is_active = 1")
-      .bind(sourceChannelId)
-      .first<{ id: string }>();
-
-    let channelId: string;
-    if (existing) {
-      channelId = existing.id;
-      await c.env.LINK_DB
-        .prepare("UPDATE channels SET config = ?, updated_at = ? WHERE id = ?")
-        .bind(JSON.stringify(config), now, channelId)
-        .run();
-    } else {
-      channelId = crypto.randomUUID();
-      await c.env.LINK_DB
-        .prepare(
-          `INSERT INTO channels (id, channel_type, config, source_channel_id, tenant_id, member_id, created_at, updated_at)
-           VALUES (?, 'YOUTUBE', ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(channelId, JSON.stringify(config), sourceChannelId, tenantId, memberId, now, now)
-        .run();
-
-      try {
-        await subscribeWebSub(`${c.env.LINK_URL}/youtube/websub/${channelId}`, resolved.channelId);
-      } catch (e) {
-        console.error(JSON.stringify({ event: "youtube_websub_subscribe_error", channel_id: channelId, error: String(e) }));
-      }
-    }
-
-    return c.json({ channelId, channelName, thumbnailUrl });
+    const result = await findOrCreateWatchedChannel(c.env, tenantId, memberId, resolved.channelId, channelName, thumbnailUrl);
+    return c.json(result);
   });
 
   // --- Notion ---

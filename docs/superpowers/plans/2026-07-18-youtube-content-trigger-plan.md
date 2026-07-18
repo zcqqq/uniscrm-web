@@ -1344,10 +1344,22 @@ Expected: FAIL — `subscribeWebSub`/`unsubscribeWebSub` never called (renewal l
 
 - [ ] **Step 3: Implement `handleYouTubeRenewal` in `link/src/cron.ts`**
 
+> **Corrected after Task 8 code review (Critical defect, user-approved fix):** the
+> original spec below unsubscribed and set `is_active = 0` for any unreferenced
+> channel, mirroring the analogous X List Posts trigger pattern. That analogy doesn't
+> hold here: a channel is subscribed the moment it's bound (`POST /youtube/watch`),
+> but only becomes "referenced" once its owning flow is *published*, and publishing
+> normally takes longer than the hourly cron interval — so a channel got deactivated
+> before the tenant finished wiring it up, and the `is_active = 1` filter then
+> permanently excluded it from all future renewal runs with no self-heal. The
+> unreferenced branch below now just skips renewal for the cycle; the WebSub lease
+> lapses naturally near its ~10-day expiry if the channel truly stays unreferenced
+> forever, and publishing the flow later self-heals renewal on the very next cron run.
+
 Add the import at the top:
 
 ```ts
-import { subscribeWebSub, unsubscribeWebSub } from "./services/youtube-api";
+import { subscribeWebSub } from "./services/youtube-api";
 ```
 
 Add the function (place it after `handlePolling`):
@@ -1378,16 +1390,14 @@ async function handleYouTubeRenewal(env: Env): Promise<void> {
   for (const row of rows.results) {
     const config = JSON.parse(row.config) as { youtube_channel_id: string; websub_lease_expires_at?: string };
 
+    // Not referenced by any published flow yet — skip renewal this cycle rather than
+    // tearing the subscription down. A tenant may still be mid-build on the flow that
+    // will reference this channel (binding happens before publish), and deactivating
+    // here would permanently exclude the row from future runs (the query above only
+    // selects is_active = 1), with no self-heal even after the flow is published.
+    // If it truly stays unreferenced forever, the WebSub lease simply lapses on its
+    // own near its ~10-day expiry.
     if (!referencedIds.has(row.id)) {
-      try {
-        await unsubscribeWebSub(`${env.LINK_URL}/youtube/websub/${row.id}`, config.youtube_channel_id);
-      } catch (e) {
-        console.error(JSON.stringify({ event: "youtube_unsubscribe_error", channel_id: row.id, error: String(e) }));
-      }
-      await env.LINK_DB
-        .prepare("UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE id = ?")
-        .bind(row.id)
-        .run();
       continue;
     }
 

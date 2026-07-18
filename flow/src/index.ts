@@ -541,6 +541,41 @@ app.get("/internal/list-watches", async (c) => {
   return c.json({ watches });
 });
 
+// Internal: which YouTube channelIds any published flow's youtubeContentTrigger node
+// currently wants watched. link's renewal cron pulls this to decide which WebSub
+// subscriptions to renew vs. let lapse — same "graph_json is the sole source of truth"
+// pattern as /internal/list-watches above.
+app.get("/internal/youtube-watches", async (c) => {
+  const secret = c.req.header("X-Internal-Secret");
+  if (secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
+
+  const rows = await c.env.FLOW_DB.prepare(
+    `SELECT graph_json FROM flows WHERE status = 'published' AND graph_json LIKE '%youtubeContentTrigger%'`
+  ).all<{ graph_json: string }>();
+
+  const seen = new Set<string>();
+  const watches: { channelId: string }[] = [];
+  for (const row of rows.results) {
+    let graph: FlowGraph;
+    try {
+      graph = JSON.parse(row.graph_json);
+    } catch {
+      continue;
+    }
+    if (!graph || !Array.isArray(graph.nodes)) continue;
+    for (const node of graph.nodes) {
+      if (!node.data) continue;
+      if (node.type !== "youtubeContentTrigger") continue;
+      const channelId = node.data.channelId as string;
+      if (!channelId || seen.has(channelId)) continue;
+      seen.add(channelId);
+      watches.push({ channelId });
+    }
+  }
+
+  return c.json({ watches });
+});
+
 // Auth proxy
 app.get("/api/auth/me", async (c) => {
   const webUrl = c.env.WEB_URL;

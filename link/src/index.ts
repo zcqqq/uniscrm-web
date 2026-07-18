@@ -10,6 +10,7 @@ import { listsRoutes } from "./routes-lists";
 import { internalRoutes } from "./routes-internal";
 import { oauthRoutes } from "./oauth";
 import { webhookRoutes } from "./webhook";
+import { youtubeWebhookRoutes } from "./webhook-youtube";
 import { handleCron } from "./cron";
 import { createModuleGuard } from "../../shared/plan-guard";
 import { getActiveSubscriptionTier } from "../../shared/credit-service";
@@ -30,6 +31,9 @@ app.get("/public/media/:key", async (c) => {
 
 // Public: X webhook
 app.route("/x", webhookRoutes());
+
+// Public: YouTube WebSub push notifications
+app.route("/youtube", youtubeWebhookRoutes());
 
 // Public: OAuth connect/callback flows (e.g. /api/auth/x/connect, /api/auth/x/callback)
 app.route("/api/auth", oauthRoutes());

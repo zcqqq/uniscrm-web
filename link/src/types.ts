@@ -47,6 +47,12 @@ export interface Env {
   // YouTube (system-shared, no OAuth — public Data API reads only)
   YOUTUBE_API_KEY: string;
 
+  // Google OAuth (reuses the same Google Cloud OAuth client already registered for
+  // "Sign in with Google" in the web module — see web/worker/types.ts's identically-named
+  // fields — not a new client. Distinct from YOUTUBE_API_KEY, which is a separate Data API key.
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
+
   // Notion
   NOTION_CLIENT_ID: string;
   NOTION_CLIENT_SECRET: string;
@@ -69,7 +75,7 @@ export interface Session {
 }
 
 // Content types
-export type ChannelType = "LOCAL" | "NOTION" | "TIKTOK" | "X" | "YOUTUBE";
+export type ChannelType = "LOCAL" | "NOTION" | "TIKTOK" | "X" | "YOUTUBE" | "YOUTUBE_ACCOUNT";
 export type ContentStatus = "new" | "pending" | "published" | "ignored";
 
 export interface ContentRow {

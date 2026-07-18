@@ -18,13 +18,16 @@ import { resolveYouTubeChannelId, subscribeWebSub, fetchChannelSnippet } from ".
 export function channelsRoutes() {
   const router = new Hono<{ Bindings: Env }>();
 
-  // List channels by type
+  // List channels by type. type=X also includes the legacy 'TWITTER' alias
+  // (pre-migration rows) — every other type queries only its own exact value.
   router.get("/", async (c) => {
     const tenantId = c.get("tenantId" as never) as number;
     const type = (c.req.query("type") || "").toUpperCase();
+    const types = type === "X" ? [type, "TWITTER"] : [type];
+    const placeholders = types.map(() => "?").join(", ");
     const rows = await c.env.LINK_DB.prepare(
-      "SELECT id, config FROM channels WHERE tenant_id = ? AND channel_type IN (?, 'TWITTER') AND is_active = 1"
-    ).bind(tenantId, type).all<{ id: string; config: string }>();
+      `SELECT id, config FROM channels WHERE tenant_id = ? AND channel_type IN (${placeholders}) AND is_active = 1`
+    ).bind(tenantId, ...types).all<{ id: string; config: string }>();
     const channels = rows.results.map((r) => {
       const config = JSON.parse(r.config || "{}");
       return { id: r.id, username: config.x_username || config.display_name || config.channel_name || "" };

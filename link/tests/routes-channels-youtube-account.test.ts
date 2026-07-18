@@ -130,3 +130,23 @@ describe("POST /api/channels/youtube/subscriptions/:id/watch", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("DELETE /api/channels/youtube_account (disconnect isolation)", () => {
+  it("only deactivates the YOUTUBE_ACCOUNT row — never touches YOUTUBE watched-channel rows or WebSub", async () => {
+    const runMock = vi.fn().mockResolvedValue({ success: true });
+    const bindSpy = vi.fn().mockReturnValue({ run: runMock });
+    const linkDb = { prepare: vi.fn().mockReturnValue({ bind: bindSpy }) };
+    const { app, env } = buildApp({ LINK_DB: linkDb });
+
+    const res = await app.request("/api/channels/youtube_account", { method: "DELETE" }, env);
+
+    expect(res.status).toBe(200);
+    const updateSql = linkDb.prepare.mock.calls.find((c: unknown[]) => (c[0] as string).startsWith("UPDATE channels"))![0] as string;
+    expect(updateSql).toContain("channel_type = ?");
+    const bindArgs = bindSpy.mock.calls.find((c: unknown[]) => c.includes("YOUTUBE_ACCOUNT"));
+    expect(bindArgs).toBeTruthy();
+    // Only one UPDATE call total — nothing separately touches channel_type = 'YOUTUBE' rows.
+    const allUpdateCalls = linkDb.prepare.mock.calls.filter((c: unknown[]) => (c[0] as string).startsWith("UPDATE channels"));
+    expect(allUpdateCalls).toHaveLength(1);
+  });
+});

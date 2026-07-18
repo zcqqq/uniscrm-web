@@ -9,7 +9,7 @@ The just-shipped YouTube content trigger ([2026-07-18-youtube-content-trigger-de
 - **Full replacement**, not a dual-mode: the URL-paste UI and `POST /youtube/watch` route are deleted, not kept alongside the new flow.
 - **Tenant picks from the discovered list** — connecting OAuth only fetches and caches the subscription list; it does not auto-subscribe WebSub for everything (a tenant could be subscribed to hundreds of channels).
 - **One-time sync**, no periodic re-sync cron in v1 — the cached list refreshes only when the tenant re-runs OAuth connect. Picking up newly-subscribed channels requires a manual re-connect. This is an accepted v1 limitation, not silently designed around.
-- **System-shared OAuth client** (like TikTok, not BYOK like X) — one Google Cloud OAuth client for the whole system, distinct from the existing `YOUTUBE_API_KEY`.
+- **System-shared OAuth client** (like TikTok, not BYOK like X) — reuses the Google Cloud OAuth client already registered for "Sign in with Google" member login (`web/worker/api/oauth.ts`'s `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`), rather than registering a new one. This mirrors an existing, verified precedent in this codebase: `X_CLIENT_ID`/`X_CLIENT_SECRET` are literally the same registered X (Twitter) app, duplicated as identical values into both `web/wrangler.toml` (member login via X) and `link/wrangler.toml` (channel connect via X) — confirmed by comparing the actual values in both files. The only new manual step is adding `link`'s new redirect URI to that Google Cloud OAuth client's existing "Authorized redirect URIs" allowlist — no new OAuth client/app registration, no new consent-screen setup. `YOUTUBE_API_KEY` (the separate, non-OAuth Data API key) is untouched.
 - **No refresh token / `access_type=offline`** — the access token is used exactly once, synchronously, inside the OAuth callback's background sync task, and never touched again. Requesting offline access would mean storing a long-lived credential that's never used, for no benefit under the one-time-sync decision above.
 - **Silent overwrite on re-connect**, matching X/TikTok's existing plain-connect behavior (not the extra same-account-different-tenant guard that only exists on X's *BYOK* path) — no new confirmation UX.
 - **Unbounded subscription-list pagination** for v1 — quota cost is low (1 unit/page regardless of page size), and this repo has no real customers yet. A pathologically large account could run long inside the background task; accepted as a v1 tradeoff, not solved here.
@@ -25,9 +25,9 @@ New `channels.channel_type` value: **`YOUTUBE_ACCOUNT`** — one row per tenant,
 
 ## API surface (`link` module)
 
-**`link/src/oauth.ts`** (mirrors the existing X PKCE flow, since `arctic`'s `Google` provider has an identical shape to `Twitter`'s — verified via `arcticjs.dev`, not guessed):
-- `GET /youtube/connect` — state+KV, `Google(clientId, clientSecret, redirectURI).createAuthorizationURL(state, codeVerifier, ["openid", "email", "https://www.googleapis.com/auth/youtube.readonly"])`, redirect.
-- `GET /youtube/callback` — exchange code, fetch identity (`GET https://www.googleapis.com/oauth2/v3/userinfo`, access-token-authenticated — same pattern as X's `/2/users/me` call, not id_token JWT-decoding), upsert `YOUTUBE_ACCOUNT` row with `sync_status: "pending"`, redirect immediately, then in `c.executionCtx.waitUntil(...)`: paginate `subscriptions.list?mine=true&part=snippet&maxResults=50` to completion, write `config.subscriptions`/`sync_status: "done"` (or `"error"`). Backgrounding this removes any need for token-refresh handling — the token's only use is inside this one task, right after minting.
+**`link/src/oauth.ts`** (mirrors the existing X system-app connect/callback flow — `web/worker/api/oauth.ts`'s `/google` route already shows `arctic`'s `Google` provider in use in this codebase, via `decodeIdToken(tokens.idToken())` for identity, so this isn't new library territory either):
+- `GET /youtube/connect` — state+KV, `new Google(c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, "{linkOrigin}/api/auth/youtube/callback").createAuthorizationURL(state, codeVerifier, ["openid", "email", "https://www.googleapis.com/auth/youtube.readonly"])`, redirect.
+- `GET /youtube/callback` — exchange code, decode identity from the id token (`decodeIdToken(tokens.idToken())` for `sub`/`email`, same as `web`'s `/google/callback` — no extra userinfo fetch needed), upsert `YOUTUBE_ACCOUNT` row with `sync_status: "pending"`, redirect immediately, then in `c.executionCtx.waitUntil(...)`: paginate `subscriptions.list?mine=true&part=snippet&maxResults=50` to completion, write `config.subscriptions`/`sync_status: "done"` (or `"error"`). Backgrounding this removes any need for token-refresh handling — the token's only use is inside this one task, right after minting.
 
 **`link/src/routes-channels.ts`**, replacing the current `--- YouTube ---` section:
 - `GET /youtube/status` → `{connected, email, sync_status, subscription_count, created_at}`.
@@ -48,9 +48,10 @@ New `channels.channel_type` value: **`YOUTUBE_ACCOUNT`** — one row per tenant,
 
 ## Env / `wrangler.toml`
 
-- `link/src/types.ts` `Env`: add `YOUTUBE_OAUTH_CLIENT_ID: string`, `YOUTUBE_OAUTH_CLIENT_SECRET: string` (distinct from `YOUTUBE_API_KEY`). Add `"YOUTUBE_ACCOUNT"` to `ChannelType`.
-- `link/wrangler.toml`: `YOUTUBE_OAUTH_CLIENT_ID` in `[env.dev.vars]`/`[env.production.vars]` (plaintext, like `X_CLIENT_ID`). `YOUTUBE_OAUTH_CLIENT_SECRET` via `wrangler secret put` (manual step, alongside creating the actual Google Cloud OAuth client — out of scope for code).
-- Redirect URI: `/api/auth/youtube/callback`, matching the `/x/callback` / `/tiktok/callback` convention.
+- `link/src/types.ts` `Env`: add `GOOGLE_CLIENT_ID: string`, `GOOGLE_CLIENT_SECRET: string` (same names `web/worker/types.ts` already uses — same OAuth client, reused, per the Decisions section above; distinct from `YOUTUBE_API_KEY`, which stays as-is). Add `"YOUTUBE_ACCOUNT"` to `ChannelType`.
+- `link/wrangler.toml`: `GOOGLE_CLIENT_ID` in `[env.dev.vars]`/`[env.production.vars]`, copied verbatim from `web/wrangler.toml`'s existing values (plaintext, exactly like the existing `X_CLIENT_ID` duplication). `GOOGLE_CLIENT_SECRET` via `wrangler secret put GOOGLE_CLIENT_SECRET --env dev`/`--env production` on `link`, using the same secret value already set on `web` (manual step — pull the value from wherever it's currently stored/documented for `web`, do not generate a new one).
+- Manual step (not code): add `link`'s two redirect URIs (dev + prod `/api/auth/youtube/callback` origins) to the existing Google Cloud OAuth client's "Authorized redirect URIs" list. No new OAuth client, no new consent-screen setup — but see the Risks section: adding the new `youtube.readonly` sensitive scope to this already-registered client will likely still require Google to review/verify that additional scope, even though the client itself already exists.
+- Redirect URI: `/api/auth/youtube/callback`, matching the `link`-module convention (`/x/callback` / `/tiktok/callback`) — named after the service being connected, consistent with how this module already names things, even though the identity provider is Google.
 
 ## Deleted (dead after this change)
 
@@ -58,7 +59,7 @@ New `channels.channel_type` value: **`YOUTUBE_ACCOUNT`** — one row per tenant,
 
 ## Risks (flagged, not solved here)
 
-- **Google app verification**: `youtube.readonly` is a Google-classified sensitive scope. An unverified OAuth client caps at ~100 total users and shows an "unverified app" warning to every connecting tenant until Google completes verification review (requires a privacy policy URL, homepage, demo video — real lead time). This should be scheduled as a parallel ops task, not discovered after shipping.
+- **Google scope verification**: `youtube.readonly` is a Google-classified sensitive scope. Reusing the existing "Sign in with Google" OAuth client (rather than registering a new one) avoids re-doing app/consent-screen setup, but Google's verification is scope-specific, not app-specific — adding this new sensitive scope to the existing client will likely still trigger a review requirement (and until approved, an unverified-scope warning / ~100-user cap on that scope for connecting tenants). This should be scheduled as a parallel ops task, not discovered after shipping.
 - Large-subscription-count accounts: unbounded pagination inside one `waitUntil` background task could run long for an account with thousands of subscriptions. Accepted v1 tradeoff, flagged for later if it becomes a real problem.
 
 ## Testing

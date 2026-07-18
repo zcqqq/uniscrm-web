@@ -102,6 +102,15 @@ describe("NODE_TYPE_REGISTRY", () => {
     expect(NODE_TYPE_REGISTRY.xContentTrigger.promptFragment).not.toContain("my_posts");
     expect(NODE_TYPE_REGISTRY.xContentTrigger.promptFragment).not.toContain("list_posts");
   });
+
+  it("includes youtubeContentTrigger with domain content and a promptFragment", () => {
+    expect(NODE_TYPE_REGISTRY.youtubeContentTrigger.domain).toBe("content");
+    expect(NODE_TYPE_REGISTRY.youtubeContentTrigger.promptFragment).toContain("youtubeContentTrigger");
+  });
+
+  it("lists youtubeContentTrigger in the content sidebar order", () => {
+    expect(CONTENT_FLOW_SIDEBAR_ORDER).toContain("youtubeContentTrigger");
+  });
 });
 
 describe("USER_FLOW_SIDEBAR_ORDER / CONTENT_FLOW_SIDEBAR_ORDER", () => {
@@ -129,9 +138,9 @@ describe("generatableKeysForDomain", () => {
     );
   });
 
-  it("content domain: exactly the 5 real, functional content types", () => {
+  it("content domain: exactly the 6 real, functional content types", () => {
     expect(generatableKeysForDomain("content").sort()).toEqual(
-      ["tiktokContentAction", "updateContentStatus", "wait", "xContentAction", "xContentTrigger"].sort()
+      ["tiktokContentAction", "updateContentStatus", "wait", "xContentAction", "xContentTrigger", "youtubeContentTrigger"].sort()
     );
   });
 });

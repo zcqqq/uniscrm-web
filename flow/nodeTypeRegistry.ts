@@ -108,6 +108,17 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
    - channelId, listId, listName are left blank ("") — the user fills them in via the Inspector after generation.
    - mode "${CONTENT_X_TRIGGER_MODE_LIST_POSTS}": triggers on posts from a specific X List (leave listId/listName blank).`,
   },
+  youtubeContentTrigger: {
+    reactFlowType: "youtubeContentTrigger",
+    label: "YouTube Trigger",
+    description: "Watches a public YouTube channel",
+    domain: "content",
+    generatable: true,
+    promptFragment: `youtubeContentTrigger - triggers when a watched YouTube channel publishes a new video
+   data: { channelId: "", channelUrl: "", channelName: "", conditions: [] }
+   - channelId/channelUrl/channelName are left blank ("") — the user pastes a channel URL into the Inspector after generation, which resolves and fills these in.
+   - conditions may filter on "duration" (seconds) and "has_face" (0 or 1, computed from the video's thumbnail).`,
+  },
   xContentAction: {
     reactFlowType: "action",
     label: "X Action",
@@ -174,6 +185,6 @@ export const USER_FLOW_SIDEBAR_ORDER: string[] = [
 ];
 
 export const CONTENT_FLOW_SIDEBAR_ORDER: string[] = [
-  "xContentTrigger", "xContentAction", "tiktokContentAction", "webhook",
-  "wait", "timeCondition", "abSplit", 
+  "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "updateContentStatus",
+  "wait", "timeCondition", "abSplit", "webhook",
 ];

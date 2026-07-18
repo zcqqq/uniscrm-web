@@ -69,6 +69,29 @@ describe("executeFlow: xContentTrigger", () => {
   });
 });
 
+describe("executeFlow: youtubeContentTrigger", () => {
+  it("matches a youtubeContentTrigger node on channelId for content.created events", () => {
+    const graph = {
+      nodes: [
+        { id: "t1", type: "youtubeContentTrigger", data: { channelId: "chanY", conditions: [] } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-post" } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph as any, "content.created", { channel_id: "chanY" });
+    expect(result.matched).toBe(true);
+  });
+
+  it("does not match a youtubeContentTrigger node for a different channel", () => {
+    const graph = {
+      nodes: [{ id: "t1", type: "youtubeContentTrigger", data: { channelId: "chanY", conditions: [] } }],
+      edges: [],
+    };
+    const result = executeFlow(graph as any, "content.created", { channel_id: "chanOther" });
+    expect(result.matched).toBe(false);
+  });
+});
+
 describe("collectActions: new content-domain action types", () => {
   it("no longer grants hasBranches to a bare 'repost' actionType (the standalone repost node type has been removed; it now behaves like any unrecognized actionType)", () => {
     const graph: FlowGraph = {

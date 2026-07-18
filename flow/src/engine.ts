@@ -170,6 +170,8 @@ export function executeFlow(
           && (n.data.mode === CONTENT_X_TRIGGER_MODE_LIST_POSTS
               ? n.data.listId === payload.list_id
               : payload.list_id === undefined || payload.list_id === null))
+      || (n.type === "youtubeContentTrigger" && eventType === "content.created"
+          && n.data.channelId === payload.channel_id)
   );
 
   if (triggerNodes.length === 0) return { matched: false, actions: [], pendingWaits: [], nodeLogs: [] };

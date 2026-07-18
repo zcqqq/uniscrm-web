@@ -13,7 +13,6 @@ import { encrypt } from "./services/crypto";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { XTokenService } from "./services/x-token";
 import { fetchOwnedLists } from "./services/x-posts-api";
-import { resolveYouTubeChannelId, fetchChannelSnippet } from "./services/youtube-api";
 import { findOrCreateWatchedChannel } from "./services/youtube-account";
 
 export function channelsRoutes() {
@@ -226,33 +225,6 @@ export function channelsRoutes() {
   });
 
   // --- YouTube ---
-  router.post("/youtube/watch", async (c) => {
-    const tenantId = c.get("tenantId" as never) as number;
-    const memberId = c.get("memberId" as never) as string;
-    const { channelUrl } = await c.req.json<{ channelUrl: string }>();
-    if (!channelUrl) return c.json({ error: "Missing channelUrl" }, 400);
-
-    const resolved = await resolveYouTubeChannelId(c.env.YOUTUBE_API_KEY, channelUrl);
-    if (!resolved) return c.json({ error: "Could not resolve this channel URL" }, 400);
-
-    // resolveYouTubeChannelId's direct /channel/UC... path returns channelName/thumbnailUrl
-    // as "" (no API call needed just to confirm the ID). Backfill display info with one more
-    // Data API call here, since this is the layer that actually persists/returns it to the
-    // client — an empty name would otherwise show up blank in the UI.
-    let channelName = resolved.channelName;
-    let thumbnailUrl = resolved.thumbnailUrl;
-    if (!channelName) {
-      const snippet = await fetchChannelSnippet(c.env.YOUTUBE_API_KEY, resolved.channelId);
-      if (snippet) {
-        channelName = snippet.channelName;
-        thumbnailUrl = snippet.thumbnailUrl;
-      }
-    }
-
-    const result = await findOrCreateWatchedChannel(c.env, tenantId, memberId, resolved.channelId, channelName, thumbnailUrl);
-    return c.json(result);
-  });
-
   router.get("/youtube/status", async (c) => {
     const tenantId = c.get("tenantId" as never) as number;
     const row = await c.env.LINK_DB

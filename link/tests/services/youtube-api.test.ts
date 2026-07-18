@@ -1,9 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   parseISO8601Duration,
-  resolveYouTubeChannelId,
   fetchVideoDetails,
-  fetchChannelSnippet,
   subscribeWebSub,
   unsubscribeWebSub,
   fetchAllSubscriptions,
@@ -40,27 +38,6 @@ describe("youtube-api fetch functions", () => {
     return Promise.resolve(new Response(JSON.stringify(body), { status }));
   }
 
-  it("resolveYouTubeChannelId extracts a /channel/UC... URL without an API call", async () => {
-    const result = await resolveYouTubeChannelId("key", "https://www.youtube.com/channel/UCabc123");
-    expect(result?.channelId).toBe("UCabc123");
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("resolveYouTubeChannelId resolves a @handle via channels.list forHandle", async () => {
-    fetchMock.mockImplementationOnce(() => jsonResponse({
-      items: [{ id: "UCxyz789", snippet: { title: "Example Channel", thumbnails: { default: { url: "https://img/thumb.jpg" } } } }],
-    }));
-    const result = await resolveYouTubeChannelId("key", "https://www.youtube.com/@examplehandle");
-    expect(result).toEqual({ channelId: "UCxyz789", channelName: "Example Channel", thumbnailUrl: "https://img/thumb.jpg" });
-    expect(fetchMock.mock.calls[0][0]).toContain("forHandle=%40examplehandle");
-  });
-
-  it("resolveYouTubeChannelId returns null when the API finds no channel", async () => {
-    fetchMock.mockImplementationOnce(() => jsonResponse({ items: [] }));
-    const result = await resolveYouTubeChannelId("key", "https://www.youtube.com/@nobody");
-    expect(result).toBeNull();
-  });
-
   it("fetchVideoDetails returns the first item", async () => {
     fetchMock.mockImplementationOnce(() => jsonResponse({ items: [{ id: "vid1", snippet: { title: "Video 1" } }] }));
     const result = await fetchVideoDetails("key", "vid1");
@@ -70,22 +47,6 @@ describe("youtube-api fetch functions", () => {
   it("fetchVideoDetails returns null when the video no longer exists", async () => {
     fetchMock.mockImplementationOnce(() => jsonResponse({ items: [] }));
     const result = await fetchVideoDetails("key", "deleted-vid");
-    expect(result).toBeNull();
-  });
-
-  it("fetchChannelSnippet fetches and parses channel name/thumbnail by ID", async () => {
-    fetchMock.mockImplementationOnce(() => jsonResponse({
-      items: [{ id: "UCabc123", snippet: { title: "Example Channel", thumbnails: { default: { url: "https://img/thumb.jpg" } } } }],
-    }));
-    const result = await fetchChannelSnippet("key", "UCabc123");
-    expect(result).toEqual({ channelName: "Example Channel", thumbnailUrl: "https://img/thumb.jpg" });
-    expect(fetchMock.mock.calls[0][0]).toContain("id=UCabc123");
-    expect(fetchMock.mock.calls[0][0]).not.toContain("forHandle");
-  });
-
-  it("fetchChannelSnippet returns null when the API finds no channel", async () => {
-    fetchMock.mockImplementationOnce(() => jsonResponse({ items: [] }));
-    const result = await fetchChannelSnippet("key", "UCnonexistent");
     expect(result).toBeNull();
   });
 

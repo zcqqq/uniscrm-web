@@ -348,7 +348,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 });
 
 describe("CONTENT_COLUMN_MAP coverage", () => {
-  it("maps view_count, share_count, cover_image_url, duration, height, width to matching columns", async () => {
+  it("maps view_count, share_count, cover_image_url, duration, height, width, has_face to matching columns", async () => {
     const tenantDb = createMockTenantDb();
     const ai = createMockAi();
     const vectorize = createMockVectorize();
@@ -366,6 +366,7 @@ describe("CONTENT_COLUMN_MAP coverage", () => {
         duration: 30,
         height: 1920,
         width: 1080,
+        has_face: 1,
       },
       "chan-1",
       "TIKTOK",
@@ -379,6 +380,7 @@ describe("CONTENT_COLUMN_MAP coverage", () => {
     expect(insertCall![0]).toContain("duration");
     expect(insertCall![0]).toContain("height");
     expect(insertCall![0]).toContain("width");
+    expect(insertCall![0]).toContain("has_face");
     expect(insertCall![0]).not.toContain("impression_count");
   });
 });

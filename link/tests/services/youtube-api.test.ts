@@ -6,6 +6,7 @@ import {
   fetchChannelSnippet,
   subscribeWebSub,
   unsubscribeWebSub,
+  fetchAllSubscriptions,
 } from "../../src/services/youtube-api";
 
 describe("parseISO8601Duration", () => {
@@ -108,5 +109,49 @@ describe("youtube-api fetch functions", () => {
     await unsubscribeWebSub("https://link.example/youtube/websub/chan1", "UCabc123");
     const [, init] = fetchMock.mock.calls[0];
     expect(init.body).toContain("hub.mode=unsubscribe");
+  });
+
+  it("fetchAllSubscriptions returns items from a single page", async () => {
+    fetchMock.mockImplementationOnce(() => jsonResponse({
+      items: [
+        { snippet: { resourceId: { channelId: "UCabc" }, title: "Channel A", thumbnails: { default: { url: "https://img/a.jpg" } } } },
+        { snippet: { resourceId: { channelId: "UCdef" }, title: "Channel B", thumbnails: { default: { url: "https://img/b.jpg" } } } },
+      ],
+    }));
+    const result = await fetchAllSubscriptions("access-tok");
+    expect(result).toEqual([
+      { channelId: "UCabc", channelName: "Channel A", thumbnailUrl: "https://img/a.jpg" },
+      { channelId: "UCdef", channelName: "Channel B", thumbnailUrl: "https://img/b.jpg" },
+    ]);
+    expect(fetchMock.mock.calls[0][0]).toContain("mine=true");
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer access-tok");
+  });
+
+  it("fetchAllSubscriptions paginates until nextPageToken is absent", async () => {
+    fetchMock
+      .mockImplementationOnce(() => jsonResponse({
+        items: [{ snippet: { resourceId: { channelId: "UC1" }, title: "One" } }],
+        nextPageToken: "page2",
+      }))
+      .mockImplementationOnce(() => jsonResponse({
+        items: [{ snippet: { resourceId: { channelId: "UC2" }, title: "Two" } }],
+      }));
+    const result = await fetchAllSubscriptions("access-tok");
+    expect(result.map((s) => s.channelId)).toEqual(["UC1", "UC2"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toContain("pageToken=page2");
+  });
+
+  it("fetchAllSubscriptions skips items with no resourceId.channelId", async () => {
+    fetchMock.mockImplementationOnce(() => jsonResponse({
+      items: [{ snippet: { title: "Broken" } }, { snippet: { resourceId: { channelId: "UCok" }, title: "OK" } }],
+    }));
+    const result = await fetchAllSubscriptions("access-tok");
+    expect(result).toEqual([{ channelId: "UCok", channelName: "OK", thumbnailUrl: "" }]);
+  });
+
+  it("fetchAllSubscriptions throws on a non-ok response", async () => {
+    fetchMock.mockImplementationOnce(() => Promise.resolve(new Response("forbidden", { status: 403 })));
+    await expect(fetchAllSubscriptions("access-tok")).rejects.toThrow();
   });
 });

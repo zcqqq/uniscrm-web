@@ -108,3 +108,43 @@ export async function subscribeWebSub(callbackUrl: string, youtubeChannelId: str
 export async function unsubscribeWebSub(callbackUrl: string, youtubeChannelId: string): Promise<void> {
   await callHub("unsubscribe", callbackUrl, youtubeChannelId);
 }
+
+export interface YouTubeSubscription {
+  channelId: string;
+  channelName: string;
+  thumbnailUrl: string;
+}
+
+export async function fetchAllSubscriptions(accessToken: string): Promise<YouTubeSubscription[]> {
+  const subscriptions: YouTubeSubscription[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const apiUrl = new URL(`${DATA_API_BASE}/subscriptions`);
+    apiUrl.searchParams.set("part", "snippet");
+    apiUrl.searchParams.set("mine", "true");
+    apiUrl.searchParams.set("maxResults", "50");
+    if (pageToken) apiUrl.searchParams.set("pageToken", pageToken);
+
+    const res = await fetch(apiUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) throw new Error(`YouTube subscriptions.list failed: ${res.status} ${await res.text()}`);
+    const body = (await res.json()) as {
+      items?: { snippet?: { resourceId?: { channelId?: string }; title?: string; thumbnails?: { default?: { url?: string } } } }[];
+      nextPageToken?: string;
+    };
+
+    for (const item of body.items || []) {
+      const channelId = item.snippet?.resourceId?.channelId;
+      if (!channelId) continue;
+      subscriptions.push({
+        channelId,
+        channelName: item.snippet?.title || "",
+        thumbnailUrl: item.snippet?.thumbnails?.default?.url || "",
+      });
+    }
+
+    pageToken = body.nextPageToken;
+  } while (pageToken);
+
+  return subscriptions;
+}

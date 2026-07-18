@@ -1,4 +1,4 @@
-export const TRIGGER_NODE_TYPES = ["xTrigger", "cronTrigger", "xContentTrigger"];
+export const TRIGGER_NODE_TYPES = ["xTrigger", "cronTrigger", "xContentTrigger", "youtubeContentTrigger"];
 
 export function findOrphanNodeIds(
   nodes: { id: string; type?: string }[],

@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { findOrphanNodeIds, validateFlowGraph, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
 
 describe("TRIGGER_NODE_TYPES", () => {
-  it("lists the three flow-execution entry-point node types", () => {
-    expect(TRIGGER_NODE_TYPES).toEqual(["xTrigger", "cronTrigger", "xContentTrigger"]);
+  it("lists the flow-execution entry-point node types", () => {
+    expect(TRIGGER_NODE_TYPES).toEqual(["xTrigger", "cronTrigger", "xContentTrigger", "youtubeContentTrigger"]);
   });
 });
 
@@ -60,6 +60,15 @@ describe("findOrphanNodeIds", () => {
       { source: "orphan1", target: "orphan2" },
     ];
     expect(findOrphanNodeIds(nodes, edges).sort()).toEqual(["orphan1", "orphan2"]);
+  });
+
+  it("recognizes youtubeContentTrigger as a trigger and reaches its downstream action", () => {
+    const nodes = [
+      { id: "t1", type: "youtubeContentTrigger" },
+      { id: "a1", type: "action" },
+    ];
+    const edges = [{ source: "t1", target: "a1" }];
+    expect(findOrphanNodeIds(nodes, edges)).toEqual([]);
   });
 
   it("reaches nodes downstream of multiple trigger nodes", () => {

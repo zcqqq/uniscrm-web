@@ -315,44 +315,38 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
 function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
   const conditions: Condition[] = data.conditions || [];
-  const [urlInput, setUrlInput] = useState((data.channelUrl as string) || "");
-  const [resolving, setResolving] = useState(false);
-  const [error, setError] = useState("");
+  const channelId = data.channelId as string;
+  const [channels, setChannels] = useState<ChannelOption[]>([]);
 
-  const resolveChannel = async () => {
-    if (!urlInput) return;
-    setResolving(true);
-    setError("");
-    try {
-      const res = await api.channels.youtubeWatch(urlInput);
-      updateNodeData(nodeId, { channelId: res.channelId, channelUrl: urlInput, channelName: res.channelName });
-    } catch {
-      setError("Could not resolve this channel URL");
-    } finally {
-      setResolving(false);
-    }
-  };
+  useEffect(() => {
+    api.channels.list("YOUTUBE").then(setChannels).catch(() => setChannels([]));
+  }, []);
 
   return (
     <div>
       <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.youtubeContentTrigger.label}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Channel URL</Label>
-          <div className="flex gap-1">
-            <Input
-              type="text"
-              value={urlInput}
-              onChange={(e: InputChange) => setUrlInput(e.target.value)}
-              placeholder="https://www.youtube.com/@handle"
-              className="flex-1 h-8 text-sm"
-            />
-            <Button type="button" size="sm" onClick={resolveChannel} disabled={resolving || !urlInput}>
-              {resolving ? "..." : "Watch"}
-            </Button>
-          </div>
-          {error && <p className="text-xs text-destructive mt-1">{error}</p>}
-          {data.channelName && <p className="text-xs text-muted-foreground mt-1">Watching: {data.channelName}</p>}
+          <Label className="text-xs block mb-1">Channel</Label>
+          {channels.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">
+              No watched YouTube channels yet — connect your YouTube account and pick channels to watch from the Social page.
+            </p>
+          ) : (
+            <Select
+              value={channelId || ""}
+              onChange={(e: SelectChange) => {
+                const ch = channels.find((c) => c.id === e.target.value);
+                updateNodeData(nodeId, { channelId: e.target.value, channelName: ch?.username || "" });
+              }}
+              className="w-full text-sm"
+            >
+              <option value="">Select channel...</option>
+              {channels.map((ch) => (
+                <option key={ch.id} value={ch.id}>{ch.username}</option>
+              ))}
+            </Select>
+          )}
         </div>
 
         <p className="text-xs text-muted-foreground">Fires when this channel publishes a new video.</p>

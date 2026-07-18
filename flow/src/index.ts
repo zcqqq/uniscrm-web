@@ -629,21 +629,6 @@ app.get("/api/channels/:channelId/x-lists", async (c) => {
   });
 });
 
-// Proxy YouTube watch-channel from link worker (for the youtubeContentTrigger Inspector)
-app.post("/api/channels/youtube/watch", async (c) => {
-  const linkUrl = c.env.LINK_URL;
-  const body = await c.req.text();
-  const res = await fetch(`${linkUrl}/api/channels/youtube/watch`, {
-    method: "POST",
-    headers: { Cookie: c.req.raw.headers.get("Cookie") || "", "Content-Type": "application/json" },
-    body,
-  });
-  return new Response(await res.text(), {
-    status: res.status,
-    headers: { "Content-Type": "application/json" },
-  });
-});
-
 // Proxy configured LLM providers from content worker (tenant-scoped, forwards the session cookie)
 app.get("/api/llm-providers", async (c) => {
   const res = await fetch(`${c.env.CONTENT_URL}/api/llm-credentials`, {

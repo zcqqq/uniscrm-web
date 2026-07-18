@@ -182,8 +182,8 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
     role: "trigger",
     generatable: true,
     promptFragment: `youtubeContentTrigger - triggers when a watched YouTube channel publishes a new video
-   data: { channelId: "", channelUrl: "", channelName: "", conditions: [] }
-   - channelId/channelUrl/channelName are left blank ("") — the user pastes a channel URL into the Inspector after generation, which resolves and fills these in.
+   data: { channelId: "", channelName: "", conditions: [] }
+   - channelId is left blank ("") — the user picks an already-watched channel from a dropdown in the Inspector after generation. Channels are added by connecting a YouTube account (OAuth) and selecting from discovered subscriptions on the Social page — not typed here.
    - conditions may filter on "duration" (seconds) and "has_face" (0 or 1, computed from the video's thumbnail).`,
   },
   xContentAction: {

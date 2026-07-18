@@ -397,6 +397,10 @@ export function oauthRoutes() {
       "email",
       "https://www.googleapis.com/auth/youtube.readonly",
     ]);
+    // Without this, Google silently reuses the browser's existing session and skips the
+    // account chooser entirely — a tenant wanting to connect a *different* Google account
+    // (e.g. after disconnecting) lands right back on whichever account was used last time.
+    oauthUrl.searchParams.set("prompt", "select_account");
 
     await c.env.KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier, tenantId, memberId }), { expirationTtl: 300 });
     return c.redirect(oauthUrl.toString(), 302);

@@ -83,6 +83,16 @@ describe("GET /youtube/connect", () => {
     expect(res.status).toBe(302);
     expect(kv.put).toHaveBeenCalledWith(expect.stringMatching(/^oauth_state:/), expect.any(String), { expirationTtl: 300 });
   });
+
+  it("requests prompt=select_account so Google always shows the account chooser instead of silently reusing the last session", async () => {
+    const kv = createMockKv(null);
+    const app = buildApp();
+
+    const res = await app.request("/youtube/connect", { redirect: "manual" }, { KV: kv, WEB_DB: { prepare: vi.fn() }, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any);
+
+    const location = res.headers.get("Location")!;
+    expect(new URL(location).searchParams.get("prompt")).toBe("select_account");
+  });
 });
 
 describe("GET /youtube/callback", () => {

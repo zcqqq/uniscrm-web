@@ -21,6 +21,7 @@ import {
 import { ChannelCard } from "./ChannelCard";
 import { useXChannel } from "../hooks/useXChannel";
 import { useSimpleChannel } from "../hooks/useSimpleChannel";
+import { useYouTubeAccount } from "../hooks/useYouTubeAccount";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { SIMPLE_CHANNELS, type SimpleChannelConfig } from "../lib/channelRegistry";
 import { XLogo } from "../lib/channelLogos";
@@ -387,6 +388,72 @@ function SimpleChannelCard({ config, locale }: { config: SimpleChannelConfig; lo
   );
 }
 
+// ─── YouTube — bespoke: OAuth connect + pick-which-subscriptions-to-watch ──
+
+function YouTubeAccountCard({ locale }: { locale: Locale }) {
+  const {
+    connected, email, syncStatus, subscriptions, loadingSubscriptions, createdAt,
+    connect, disconnect, watchChannel,
+  } = useYouTubeAccount();
+
+  const status = !connected ? "disconnected" : syncStatus === "pending" ? "pending" : "connected";
+
+  return (
+    <ChannelCard
+      logo={<span className="text-2xl leading-none">▶️</span>}
+      name="YouTube"
+      tagline={{
+        en: "Connect your YouTube account, then pick which subscribed channels to watch for new videos.",
+        zh: "连接你的YouTube账号，选择要监控新视频的订阅频道。",
+      }}
+      locale={locale}
+      status={status}
+      statusLabel={connected && email ? email : undefined}
+      createdAt={connected ? createdAt : undefined}
+      extra={
+        !connected ? undefined : syncStatus === "pending" ? (
+          <p className="text-xs text-muted-foreground">Syncing your subscriptions…</p>
+        ) : syncStatus === "error" ? (
+          <p className="text-xs text-destructive">Failed to sync subscriptions — try reconnecting.</p>
+        ) : (
+          <div className="space-y-1 max-h-64 overflow-y-auto">
+            {loadingSubscriptions ? (
+              <p className="text-xs text-muted-foreground">Loading subscriptions…</p>
+            ) : subscriptions.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">No subscriptions found</p>
+            ) : (
+              subscriptions.map((s) => (
+                <div key={s.channelId} className="flex items-center justify-between gap-2 py-1">
+                  <span className="text-sm truncate">{s.channelName}</span>
+                  <Button
+                    size="sm"
+                    variant={s.already_watching ? "outline" : "default"}
+                    disabled={s.already_watching}
+                    onClick={() => watchChannel(s.channelId)}
+                  >
+                    {s.already_watching ? "Watching" : "Watch"}
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        )
+      }
+      actions={
+        connected ? (
+          <Button variant="destructive" className="w-full" onClick={disconnect}>
+            Disconnect
+          </Button>
+        ) : (
+          <Button className="w-full" onClick={connect}>
+            Connect YouTube
+          </Button>
+        )
+      }
+    />
+  );
+}
+
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 export function SocialChannels() {
@@ -395,6 +462,7 @@ export function SocialChannels() {
     <>
       <XChannelCard locale={locale} />
       <XByokChannelCard locale={locale} />
+      <YouTubeAccountCard locale={locale} />
       {SIMPLE_CHANNELS.map((cfg) => (
         <SimpleChannelCard key={cfg.type} config={cfg} locale={locale} />
       ))}

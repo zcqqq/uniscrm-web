@@ -155,6 +155,19 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ config }),
       }),
+    youtubeStatus: () =>
+      request<{ connected: boolean; email?: string; sync_status?: string; subscription_count?: number; created_at?: string }>(
+        "/channels/youtube/status"
+      ),
+    youtubeSubscriptions: () =>
+      request<{ subscriptions: { channelId: string; channelName: string; thumbnailUrl: string; already_watching: boolean }[] }>(
+        "/channels/youtube/subscriptions"
+      ),
+    youtubeWatchSubscription: (youtubeChannelId: string) =>
+      request<{ channelId: string; channelName: string; thumbnailUrl: string }>(
+        `/channels/youtube/subscriptions/${youtubeChannelId}/watch`,
+        { method: "POST" }
+      ),
   },
   users: {
     list: () =>

@@ -5,6 +5,7 @@ import { executeFlow, resumeFromNode, evaluateCondition, type FlowGraph, type Ac
 import { EventMetadata_X } from "../../metadata/x";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../nodeTypeRegistry";
 
 async function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenantId: number, env: Env): Promise<void> {
   if (nodeLogs.length === 0) return;
@@ -302,7 +303,25 @@ async function executeContentActions(
       let logEvent: string;
       let logExtra: Record<string, unknown>;
 
-      if (operation === "repost-post") {
+      if (operation === "create-bookmark") {
+        const tweetId = String(payload?.source_content_id ?? "");
+        res = await fetch(`${env.LINK_URL}/internal/x/bookmark`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+          body: JSON.stringify({ channelId, contentId, tweetId, flowId: flowId || null }),
+        });
+        logEvent = "content_action_bookmark";
+        logExtra = { channelId, tweetId };
+      } else if (operation === "like-post") {
+        const tweetId = String(payload?.source_content_id ?? "");
+        res = await fetch(`${env.LINK_URL}/internal/x/like`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+          body: JSON.stringify({ channelId, contentId, tweetId, flowId: flowId || null }),
+        });
+        logEvent = "content_action_like";
+        logExtra = { channelId, tweetId };
+      } else if (operation === "repost-post") {
         const tweetId = String(payload?.source_content_id ?? "");
         res = await fetch(`${env.LINK_URL}/internal/x/repost`, {
           method: "POST",
@@ -312,17 +331,16 @@ async function executeContentActions(
         logEvent = "content_action_repost";
         logExtra = { channelId, tweetId };
       } else {
-        const targetChannelId = action.targetChannelId as string;
         const provider = action.provider as string;
         const skillId = (action.skillId as string) || "none";
         const interpolatedPrompt = String(action.prompt || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""));
         res = await fetch(`${env.LINK_URL}/internal/content/create-post`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
-          body: JSON.stringify({ contentId, interpolatedPrompt, provider, targetChannelId, flowId: flowId || null, skillId }),
+          body: JSON.stringify({ contentId, interpolatedPrompt, provider, channelId, flowId: flowId || null, skillId }),
         });
         logEvent = "content_action_x_content_action";
-        logExtra = { targetChannelId, provider, skillId };
+        logExtra = { channelId, provider, skillId };
       }
 
       const body = await res.json().catch(() => ({ ok: false })) as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string };
@@ -509,7 +527,7 @@ app.get("/internal/list-watches", async (c) => {
     for (const node of graph.nodes) {
       // Guard: node.data must exist before accessing properties
       if (!node.data) continue;
-      if (node.type !== "xContentTrigger" || node.data.mode !== "list_posts") continue;
+      if (node.type !== "xContentTrigger" || node.data.mode !== CONTENT_X_TRIGGER_MODE_LIST_POSTS) continue;
       const channelId = node.data.channelId as string;
       const listId = node.data.listId as string;
       if (!channelId || !listId) continue;

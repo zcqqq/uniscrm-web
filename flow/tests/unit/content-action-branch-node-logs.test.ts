@@ -17,8 +17,8 @@ import worker from "../../src/index";
 // dropped resumed/failedResult.nodeLogs entirely.
 const graphWithBranches = JSON.stringify({
   nodes: [
-    { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
-    { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "target-chan-1", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
+    { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+    { id: "a1", type: "action", data: { actionType: "xContentAction", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
     { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 400, y: 0 } },
     { id: "a3", type: "action", data: { actionType: "updateContentStatus", status: "ignored" }, position: { x: 400, y: 100 } },
   ],
@@ -162,7 +162,7 @@ describe("xContentAction branch resolution: downstream node logs (Site 2 — sch
        VALUES ('flow-nodelog-2', 1, 'retry flow', ?, 'published', datetime('now'), datetime('now'))`
     ).bind(graphWithBranches).run();
 
-    const action = { type: "xContentAction", nodeId: "a1", hasBranches: true, targetChannelId: "target-chan-1", prompt: "Rewrite: $content.content_text", provider: "default" };
+    const action = { type: "xContentAction", nodeId: "a1", hasBranches: true, prompt: "Rewrite: $content.content_text", provider: "default" };
     const past = new Date(Date.now() - 1000).toISOString();
     await env.FLOW_DB.prepare(
       `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)

@@ -31,11 +31,11 @@ describe("GET /internal/list-watches", () => {
 
   it("returns distinct channelId/listId pairs from published xContentTrigger List Posts nodes", async () => {
     const graph1 = JSON.stringify({
-      nodes: [{ id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "list_posts", listId: "listA" }, position: { x: 0, y: 0 } }],
+      nodes: [{ id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "get-list-posts", listId: "listA" }, position: { x: 0, y: 0 } }],
       edges: [],
     });
     const graph2 = JSON.stringify({
-      nodes: [{ id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "list_posts", listId: "listA" }, position: { x: 0, y: 0 } }],
+      nodes: [{ id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "get-list-posts", listId: "listA" }, position: { x: 0, y: 0 } }],
       edges: [],
     }); // duplicate pair — must be deduped
     await env.FLOW_DB.batch([
@@ -51,11 +51,11 @@ describe("GET /internal/list-watches", () => {
 
   it("ignores My Posts mode nodes and draft flows", async () => {
     const myPostsGraph = JSON.stringify({
-      nodes: [{ id: "t1", type: "xContentTrigger", data: { channelId: "chan2", mode: "my_posts" }, position: { x: 0, y: 0 } }],
+      nodes: [{ id: "t1", type: "xContentTrigger", data: { channelId: "chan2", mode: "own:get-posts" }, position: { x: 0, y: 0 } }],
       edges: [],
     });
     const draftGraph = JSON.stringify({
-      nodes: [{ id: "t1", type: "xContentTrigger", data: { channelId: "chan3", mode: "list_posts", listId: "listB" }, position: { x: 0, y: 0 } }],
+      nodes: [{ id: "t1", type: "xContentTrigger", data: { channelId: "chan3", mode: "get-list-posts", listId: "listB" }, position: { x: 0, y: 0 } }],
       edges: [],
     });
     await env.FLOW_DB.batch([
@@ -71,7 +71,7 @@ describe("GET /internal/list-watches", () => {
   it("skips malformed graph_json rows (valid JSON but missing/wrong shape) instead of crashing", async () => {
     // Valid row to ensure we still get results from other rows
     const validGraph = JSON.stringify({
-      nodes: [{ id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "list_posts", listId: "listA" }, position: { x: 0, y: 0 } }],
+      nodes: [{ id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "get-list-posts", listId: "listA" }, position: { x: 0, y: 0 } }],
       edges: [],
     });
     // Malformed: valid JSON but no `nodes` key (yet contains xContentTrigger to pass SQL LIKE filter)

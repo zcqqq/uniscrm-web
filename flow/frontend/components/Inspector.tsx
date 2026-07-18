@@ -12,7 +12,7 @@ import { ContentMetadata_X } from "../../../metadata/x-byok";
 import { PROPS } from "../../../metadata/props";
 import { t as localizeLabel } from "../../../metadata/locale";
 import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
-import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
+import { NODE_TYPE_REGISTRY, CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../../nodeTypeRegistry";
 
 type SelectChange = React.ChangeEvent<HTMLSelectElement>;
 type InputChange = React.ChangeEvent<HTMLInputElement>;
@@ -232,7 +232,6 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
 function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
   const conditions: Condition[] = data.conditions || [];
-  const mode = (data.mode as string) || "my_posts";
   const channelId = data.channelId as string;
   const [channels, setChannels] = useState<ChannelOption[]>([]);
   const [lists, setLists] = useState<{ id: string; name: string }[]>([]);
@@ -243,13 +242,13 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
   }, []);
 
   useEffect(() => {
-    if (mode !== "list_posts" || !channelId) { setLists([]); return; }
+    if (!channelId) { setLists([]); return; }
     setLoadingLists(true);
     api.channels.xLists(channelId)
       .then((res) => setLists(res.lists || []))
       .catch(() => setLists([]))
       .finally(() => setLoadingLists(false));
-  }, [mode, channelId]);
+  }, [channelId]);
 
   return (
     <div>
@@ -262,7 +261,7 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
           ) : (
             <Select
               value={channelId || ""}
-              onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value, listId: "", listName: "" })}
+              onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value, mode: CONTENT_X_TRIGGER_MODE_LIST_POSTS, listId: "", listName: "" })}
               className="w-full text-sm"
             >
               <option value="">Select account...</option>
@@ -274,49 +273,31 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
         </div>
 
         <div>
-          <Label className="text-xs block mb-1">Source</Label>
-          <Select
-            value={mode}
-            onChange={(e: SelectChange) => updateNodeData(nodeId, { mode: e.target.value, listId: "", listName: "" })}
-            className="w-full text-sm"
-          >
-            <option value="my_posts">My Posts</option>
-            <option value="list_posts">List Posts</option>
-          </Select>
+          <Label className="text-xs block mb-1">List</Label>
+          {!channelId ? (
+            <p className="text-xs text-muted-foreground italic">Select an account first</p>
+          ) : loadingLists ? (
+            <p className="text-xs text-muted-foreground">Loading...</p>
+          ) : lists.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">No owned Lists found on this account</p>
+          ) : (
+            <Select
+              value={data.listId || ""}
+              onChange={(e: SelectChange) => {
+                const list = lists.find((l) => l.id === e.target.value);
+                updateNodeData(nodeId, { listId: e.target.value, listName: list?.name || "" });
+              }}
+              className="w-full text-sm"
+            >
+              <option value="">Select list...</option>
+              {lists.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </Select>
+          )}
         </div>
 
-        {mode === "list_posts" && (
-          <div>
-            <Label className="text-xs block mb-1">List</Label>
-            {!channelId ? (
-              <p className="text-xs text-muted-foreground italic">Select an account first</p>
-            ) : loadingLists ? (
-              <p className="text-xs text-muted-foreground">Loading...</p>
-            ) : lists.length === 0 ? (
-              <p className="text-xs text-muted-foreground italic">No owned Lists found on this account</p>
-            ) : (
-              <Select
-                value={data.listId || ""}
-                onChange={(e: SelectChange) => {
-                  const list = lists.find((l) => l.id === e.target.value);
-                  updateNodeData(nodeId, { listId: e.target.value, listName: list?.name || "" });
-                }}
-                className="w-full text-sm"
-              >
-                <option value="">Select list...</option>
-                {lists.map((l) => (
-                  <option key={l.id} value={l.id}>{l.name}</option>
-                ))}
-              </Select>
-            )}
-          </div>
-        )}
-
-        <p className="text-xs text-muted-foreground">
-          {mode === "list_posts"
-            ? "Fires when a new post appears in this X List (from any account)."
-            : "Fires when a new item is ingested from this account's own posts."}
-        </p>
+        <p className="text-xs text-muted-foreground">Fires when a new post appears in this X List (from any account).</p>
 
         <ConditionsEditor
           conditions={conditions}
@@ -569,17 +550,11 @@ function propLabel(propId: string): string {
 
 function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
-  const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
   const [providers, setProviders] = useState<{ provider: string; model: string }[]>([]);
   const [skills, setSkills] = useState<{ id: string; label: string; hasCachedContent: boolean }[]>([]);
 
   const selectedOperation = CONTENT_ACTION_OPERATIONS.find((op) => op.sourceContentType === (data.operation || "create-post"));
   const aiProp = selectedOperation?.contentProps.find((p) => p.aiType);
-
-  useEffect(() => {
-    if (!aiProp) { setChannels([]); return; }
-    api.channels.list("X").then(setChannels).catch(() => setChannels([]));
-  }, [aiProp]);
 
   useEffect(() => {
     if (!aiProp) return;
@@ -648,21 +623,6 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
                   <option key={s.id} value={s.id}>{s.label}{!s.hasCachedContent ? " (not yet fetched)" : ""}</option>
                 ))}
               </Select>
-            </div>
-            <div>
-              <Label className="text-xs block mb-1">Target Account</Label>
-              {channels.length === 0 ? (
-                <p className="text-xs text-muted-foreground italic">No accounts linked for this platform</p>
-              ) : (
-                <Select
-                  value={data.channelId || ""}
-                  onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
-                  className="w-full text-sm"
-                >
-                  <option value="">Select account...</option>
-                  {channels.map((ch) => <option key={ch.id} value={ch.id}>@{ch.username}</option>)}
-                </Select>
-              )}
             </div>
           </>
         )}

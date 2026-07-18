@@ -5,7 +5,7 @@ import { fetchPostsPage } from "../x-posts-api";
 import { resolveProps } from "./resolve-props";
 import { ContentMetadata_X } from "../../../../metadata/x-byok";
 
-const POSTS_METADATA = ContentMetadata_X.find((m) => m.sourceContentType === "get-posts")!;
+const POSTS_METADATA = ContentMetadata_X.find((m) => m.sourceContentType === "own:get-posts")!;
 
 export interface PostsPollerContext {
   channelId: string;

@@ -1,3 +1,5 @@
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../nodeTypeRegistry";
+
 export interface FlowNode {
   id: string;
   type: string;
@@ -165,7 +167,7 @@ export function executeFlow(
       || (n.type === "cronTrigger" && eventType === "cron.trigger")
       || (n.type === "xContentTrigger" && eventType === "content.created"
           && n.data.channelId === payload.channel_id
-          && (n.data.mode === "list_posts"
+          && (n.data.mode === CONTENT_X_TRIGGER_MODE_LIST_POSTS
               ? n.data.listId === payload.list_id
               : payload.list_id === undefined || payload.list_id === null))
   );
@@ -248,7 +250,6 @@ function buildActionData(targetNode: FlowNode): ActionResult {
   }
   if (actionType === "xContentAction") {
     actionData.operation = (targetNode.data.operation as string) || "create-post";
-    actionData.targetChannelId = targetNode.data.channelId as string;
     actionData.prompt = targetNode.data.prompt as string;
     actionData.provider = targetNode.data.provider as string;
     actionData.skillId = (targetNode.data.skillId as string) || "none";

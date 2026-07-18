@@ -122,6 +122,154 @@ describe("stub content-flow action endpoints", () => {
     vi.unstubAllGlobals();
   });
 
+  it("POST /internal/x/bookmark looks up the channel's X user id and bookmarks the given tweet", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-src-1", access_token: "tok", refresh_token: null }),
+      channel_type: "X",
+      tenant_id: 1,
+    };
+
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { bookmarked: true } }), { status: 200 })); // X /2/users/:id/bookmarks
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/x/bookmark", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ channelId: "src-chan", contentId: "content-1", tweetId: "tweet-999", flowId: "flow-1" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe("https://api.x.com/2/users/x-user-src-1/bookmarks");
+    expect(JSON.parse((init as Record<string, any>).body)).toEqual({ tweet_id: "tweet-999" });
+    vi.unstubAllGlobals();
+  });
+
+  it("returns rateLimited response when X bookmark is rate-limited", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-src-1", access_token: "tok", refresh_token: null }),
+      channel_type: "X",
+      tenant_id: 1,
+    };
+
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ title: "Too Many Requests" }), { status: 429 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/x/bookmark", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ channelId: "src-chan", contentId: "content-1", tweetId: "tweet-999" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow) }
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string };
+    expect(body.ok).toBe(false);
+    expect(body.rateLimited).toBe(true);
+    expect(typeof body.rateLimitReset).toBe("string");
+    vi.unstubAllGlobals();
+  });
+
+  it("returns ok:false without calling X when the channel has no X user id (bookmark)", async () => {
+    const channelRow = { config: JSON.stringify({ access_token: "tok" }), channel_type: "X", tenant_id: 1 };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/x/bookmark", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ channelId: "src-chan", contentId: "content-1", tweetId: "tweet-999" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("POST /internal/x/like looks up the channel's X user id and likes the given tweet", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-src-1", access_token: "tok", refresh_token: null }),
+      channel_type: "X",
+      tenant_id: 1,
+    };
+
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { liked: true } }), { status: 200 })); // X /2/users/:id/likes
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/x/like", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ channelId: "src-chan", contentId: "content-1", tweetId: "tweet-999", flowId: "flow-1" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe("https://api.x.com/2/users/x-user-src-1/likes");
+    expect(JSON.parse((init as Record<string, any>).body)).toEqual({ tweet_id: "tweet-999" });
+    vi.unstubAllGlobals();
+  });
+
+  it("returns rateLimited response when X like is rate-limited", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-src-1", access_token: "tok", refresh_token: null }),
+      channel_type: "X",
+      tenant_id: 1,
+    };
+
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ title: "Too Many Requests" }), { status: 429 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/x/like", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ channelId: "src-chan", contentId: "content-1", tweetId: "tweet-999" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow) }
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string };
+    expect(body.ok).toBe(false);
+    expect(body.rateLimited).toBe(true);
+    expect(typeof body.rateLimitReset).toBe("string");
+    vi.unstubAllGlobals();
+  });
+
+  it("returns ok:false without calling X when the channel has no X user id (like)", async () => {
+    const channelRow = { config: JSON.stringify({ access_token: "tok" }), channel_type: "X", tenant_id: 1 };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/x/like", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ channelId: "src-chan", contentId: "content-1", tweetId: "tweet-999" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it("POST /internal/content/create-post generates, posts to X, and records the new content row", async () => {
     const channelRow = {
       config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }),
@@ -139,7 +287,7 @@ describe("stub content-flow action endpoints", () => {
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
-        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", targetChannelId: "tgt-chan", flowId: "flow-1", skillId: "marketingskills-social" }),
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", channelId: "tgt-chan", flowId: "flow-1", skillId: "marketingskills-social" }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
     );
@@ -191,7 +339,7 @@ describe("stub content-flow action endpoints", () => {
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
-        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "plain text post", provider: "none", targetChannelId: "tgt-chan-none" }),
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "plain text post", provider: "none", channelId: "tgt-chan-none" }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
     );
@@ -221,7 +369,7 @@ describe("stub content-flow action endpoints", () => {
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
-        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", targetChannelId: "tgt-chan", flowId: "flow-1" }),
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", channelId: "tgt-chan", flowId: "flow-1" }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
     );
@@ -250,7 +398,7 @@ describe("stub content-flow action endpoints", () => {
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
-        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", targetChannelId: "tgt-chan", flowId: "flow-1" }),
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", channelId: "tgt-chan", flowId: "flow-1" }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
     );
@@ -277,7 +425,7 @@ describe("stub content-flow action endpoints", () => {
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
-        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", targetChannelId: "tgt-chan", flowId: "flow-1" }),
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", channelId: "tgt-chan", flowId: "flow-1" }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
     );

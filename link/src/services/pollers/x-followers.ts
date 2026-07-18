@@ -5,7 +5,7 @@ import { fetchFollowersPage } from "../x-followers-api";
 import { resolveProps } from "./resolve-props";
 import { UserMetadata_X } from "../../../../metadata/x-byok";
 
-const FOLLOWERS_METADATA = UserMetadata_X.find((m) => m.sourceUserType === "get-followers")!;
+const FOLLOWERS_METADATA = UserMetadata_X.find((m) => m.sourceUserType === "own:get-followers")!;
 
 export interface FollowersPollerContext {
   channelId: string;

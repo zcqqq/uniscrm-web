@@ -22,7 +22,6 @@ export interface ListPostsPollerContext {
 }
 
 interface PollStateRow {
-  cursor: string | null;
   backfill_complete: number;
   last_polled_at: string | null;
 }
@@ -34,7 +33,7 @@ function pollerName(listId: string): string {
 export async function runListPostsPoller(ctx: ListPostsPollerContext): Promise<void> {
   const name = pollerName(ctx.listId);
   const state = await ctx.linkDb
-    .prepare("SELECT cursor, backfill_complete, last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = ?")
+    .prepare("SELECT backfill_complete, last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = ?")
     .bind(ctx.channelId, name)
     .first<PollStateRow>();
 
@@ -44,11 +43,11 @@ export async function runListPostsPoller(ctx: ListPostsPollerContext): Promise<v
   }
 
   const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue);
-  const phase = state.backfill_complete ? "incremental" : "backfill";
-  console.log(JSON.stringify({ event: "list_posts_poll_started", channel_id: ctx.channelId, list_id: ctx.listId, phase, cursor: state.cursor }));
+  const phase = state.backfill_complete ? "incremental" : "seed";
+  console.log(JSON.stringify({ event: "list_posts_poll_started", channel_id: ctx.channelId, list_id: ctx.listId, phase }));
 
   if (!state.backfill_complete) {
-    await runBackfill(ctx, contentService, state.cursor);
+    await seedFromLatestPage(ctx, contentService);
   } else {
     await runIncrementalPoll(ctx, contentService);
   }
@@ -73,44 +72,30 @@ async function upsertPage(
   return newCount;
 }
 
-async function runBackfill(
-  ctx: ListPostsPollerContext,
-  contentService: ContentService,
-  startCursor: string | null
-): Promise<void> {
-  let cursor = startCursor || undefined;
-  let pagesFetched = 0;
+async function seedFromLatestPage(ctx: ListPostsPollerContext, contentService: ContentService): Promise<void> {
   const name = pollerName(ctx.listId);
 
-  while (Date.now() < ctx.deadline) {
-    const { page, rateLimited } = await fetchListPostsPage(ctx.accessToken, ctx.listId, cursor);
-    if (rateLimited) {
-      console.log(JSON.stringify({ event: "list_posts_poll_rate_limited", channel_id: ctx.channelId, list_id: ctx.listId, phase: "backfill", pagesFetched }));
-      return;
-    }
-
-    pagesFetched++;
-    await upsertPage(contentService, page.data, ctx.channelId, ctx.listId, false);
-
-    if (!page.nextToken) {
-      await ctx.linkDb
-        .prepare(
-          "UPDATE channel_poll_state SET cursor = NULL, backfill_complete = 1, last_polled_at = datetime('now'), updated_at = datetime('now') WHERE channel_id = ? AND poller_name = ?"
-        )
-        .bind(ctx.channelId, name)
-        .run();
-      console.log(JSON.stringify({ event: "list_posts_poll_backfill_complete", channel_id: ctx.channelId, list_id: ctx.listId, pagesFetched }));
-      return;
-    }
-
-    cursor = page.nextToken;
-    await ctx.linkDb
-      .prepare("UPDATE channel_poll_state SET cursor = ?, updated_at = datetime('now') WHERE channel_id = ? AND poller_name = ?")
-      .bind(cursor, ctx.channelId, name)
-      .run();
+  // List Posts triggers exist to react to NEW content, not to import a list's full history —
+  // a multi-page historical crawl can take hours (X's List Tweets endpoint is tightly rate
+  // limited) and silently keeps the trigger dark the whole time. So the first-ever poll for a
+  // watch fetches only today's latest page (ignoring any older pages via next_token) to seed the
+  // dedup index with what already exists (emitFlowEvent=false), then goes straight to "complete"
+  // so the very next cron cycle is a normal incremental poll.
+  const { page, rateLimited } = await fetchListPostsPage(ctx.accessToken, ctx.listId);
+  if (rateLimited) {
+    console.log(JSON.stringify({ event: "list_posts_poll_rate_limited", channel_id: ctx.channelId, list_id: ctx.listId, phase: "seed" }));
+    return;
   }
 
-  console.log(JSON.stringify({ event: "list_posts_poll_deadline_reached", channel_id: ctx.channelId, list_id: ctx.listId, phase: "backfill", pagesFetched }));
+  await upsertPage(contentService, page.data, ctx.channelId, ctx.listId, false);
+
+  await ctx.linkDb
+    .prepare(
+      "UPDATE channel_poll_state SET cursor = NULL, backfill_complete = 1, last_polled_at = datetime('now'), updated_at = datetime('now') WHERE channel_id = ? AND poller_name = ?"
+    )
+    .bind(ctx.channelId, name)
+    .run();
+  console.log(JSON.stringify({ event: "list_posts_poll_seed_complete", channel_id: ctx.channelId, list_id: ctx.listId, fetched: page.data.length }));
 }
 
 async function runIncrementalPoll(ctx: ListPostsPollerContext, contentService: ContentService): Promise<void> {

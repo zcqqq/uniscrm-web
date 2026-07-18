@@ -10,6 +10,7 @@ import {
   addEdge,
 } from "@xyflow/react";
 import { api } from "../lib/api";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../../nodeTypeRegistry";
 
 export interface FlowEditorState {
   flowId: string | null;
@@ -134,7 +135,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
       } else if (type === "xAction") {
         data = { actionType: type, xEvent: "", channelId: "" };
       } else if (type === "xContentAction") {
-        data = { actionType: type, channelId: "", prompt: "", provider: "default" };
+        data = { actionType: type, prompt: "", provider: "default" };
       } else if (type === "tiktokContentAction") {
         data = {
           actionType: type, channelId: "", prompts: {},
@@ -148,7 +149,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
       }
     } else if (type === "xContentTrigger") {
       nodeType = "xContentTrigger";
-      data = { channelId: "", mode: "my_posts", listId: "", listName: "", conditions: [] };
+      data = { channelId: "", mode: CONTENT_X_TRIGGER_MODE_LIST_POSTS, listId: "", listName: "", conditions: [] };
     } else {
       return;
     }

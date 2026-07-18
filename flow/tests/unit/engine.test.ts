@@ -8,7 +8,7 @@ describe("executeFlow: xContentTrigger", () => {
   ): FlowGraph {
     return {
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions, ...data }, position: { x: 0, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions, ...data }, position: { x: 0, y: 0 } },
         { id: "a1", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
@@ -33,7 +33,7 @@ describe("executeFlow: xContentTrigger", () => {
   });
 
   it("matches a List Posts node only when both channel_id and list_id match", () => {
-    const graph = graphWithXContentTrigger([], { mode: "list_posts", listId: "listA" });
+    const graph = graphWithXContentTrigger([], { mode: "get-list-posts", listId: "listA" });
     const matches = executeFlow(graph, "content.created", { channel_id: "chan1", list_id: "listA", channel_type: "X" });
     expect(matches.matched).toBe(true);
 
@@ -73,7 +73,7 @@ describe("collectActions: new content-domain action types", () => {
   it("no longer grants hasBranches to a bare 'repost' actionType (the standalone repost node type has been removed; it now behaves like any unrecognized actionType)", () => {
     const graph: FlowGraph = {
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
         { id: "a1", type: "action", data: { actionType: "repost" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
@@ -82,25 +82,25 @@ describe("collectActions: new content-domain action types", () => {
     expect(result.actions).toEqual([{ type: "repost", nodeId: "a1", hasBranches: false }]);
   });
 
-  it("collects an xContentAction action carrying its operation, target channel, prompt, and provider", () => {
+  it("collects an xContentAction action carrying its operation, prompt, and provider (no target channel — always acts via the triggering channel)", () => {
     const graph: FlowGraph = {
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
-        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "repost-post", channelId: "tiktok-chan-1", prompt: "Rewrite this: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "repost-post", prompt: "Rewrite this: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
     };
     const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
     expect(result.actions).toEqual([
-      { type: "xContentAction", nodeId: "a1", hasBranches: true, operation: "repost-post", targetChannelId: "tiktok-chan-1", prompt: "Rewrite this: $content.content_text", provider: "default", skillId: "none" },
+      { type: "xContentAction", nodeId: "a1", hasBranches: true, operation: "repost-post", prompt: "Rewrite this: $content.content_text", provider: "default", skillId: "none" },
     ]);
   });
 
   it("defaults skillId to 'none' when not set on an xContentAction node", () => {
     const graph: FlowGraph = {
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
-        { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-2" }, position: { x: 200, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
     };
@@ -111,8 +111,8 @@ describe("collectActions: new content-domain action types", () => {
   it("carries a set skillId through", () => {
     const graph: FlowGraph = {
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
-        { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-2", skillId: "marketingskills-social" }, position: { x: 200, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", skillId: "marketingskills-social" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
     };
@@ -123,8 +123,8 @@ describe("collectActions: new content-domain action types", () => {
   it("defaults operation to 'create-post' when not set on an xContentAction node", () => {
     const graph: FlowGraph = {
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
-        { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-2" }, position: { x: 200, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
     };
@@ -135,7 +135,7 @@ describe("collectActions: new content-domain action types", () => {
   it("collects an updateContentStatus action and continues traversal past it", () => {
     const graph: FlowGraph = {
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
         { id: "a1", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
         { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "ignored" }, position: { x: 400, y: 0 } },
       ],
@@ -154,7 +154,7 @@ describe("collectActions: new content-domain action types", () => {
   it("collects a tiktokContentAction action carrying its prompts record and other fields, defaulting textSkillId/imageSkillId to 'none' and imageCount to 1 when unset", () => {
     const graph: FlowGraph = {
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
         {
           id: "a1", type: "action",
           data: {
@@ -181,7 +181,7 @@ describe("collectActions: new content-domain action types", () => {
   it("carries a set imageCount/textSkillId/imageSkillId through for tiktokContentAction", () => {
     const graph: FlowGraph = {
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
         {
           id: "a1", type: "action",
           data: {

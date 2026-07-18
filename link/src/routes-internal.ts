@@ -7,7 +7,7 @@ import { CreditService, getActiveSubscriptionTier } from "../../shared/credit-se
 import { EventMetadata_X } from "../../metadata/x";
 import { dollarsToMicros } from "../../shared/credit";
 import { ContentService } from "./services/content";
-import { createPost, repostPost } from "./services/x-posts-api";
+import { createPost, repostPost, createBookmark, likePost } from "./services/x-posts-api";
 import { TikTokTokenService } from "./services/tiktok-token";
 import { initPhotoPost } from "./services/tiktok-publish";
 
@@ -226,21 +226,76 @@ export function internalRoutes() {
     return c.json({ ok: repostResult.ok });
   });
 
-  // Real X publish path: content's generated (or literal, for provider:"none") text gets
-  // posted to the target channel. TikTok publish is out of scope this phase (see design
-  // spec's non-goals) — targetChannelId resolving to a TIKTOK channel_type falls through
-  // to the generic ok:false path below.
-  router.post("/content/create-post", async (c) => {
-    const { contentId, interpolatedPrompt, provider, targetChannelId, flowId, skillId } = await c.req.json<{
-      contentId: string; interpolatedPrompt: string; provider: "default" | "openai" | "anthropic" | "none"; targetChannelId: string; flowId?: string | null; skillId?: string;
+  // Bookmarks contentId's originating tweet via the channel that ingested it. Same shape as
+  // /x/repost — channelId is always the flow's triggering channel, no account picker.
+  router.post("/x/bookmark", async (c) => {
+    const { channelId, contentId, tweetId, flowId } = await c.req.json<{
+      channelId: string; contentId: string; tweetId: string; flowId?: string | null;
     }>();
 
-    const targetChannel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
-      .bind(targetChannelId).first<{ config: string; channel_type: string; tenant_id: number }>();
-    if (!targetChannel) return c.json({ ok: false }, 200);
+    const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id FROM channels WHERE id = ?")
+      .bind(channelId).first<{ config: string; tenant_id: number }>();
+    if (!channel) return c.json({ ok: false }, 200);
 
-    if (targetChannel.channel_type !== "X") {
-      console.log(JSON.stringify({ event: "create_post_unsupported_platform", contentId, targetChannelId, channelType: targetChannel.channel_type }));
+    const config = JSON.parse(channel.config);
+    const sourceUserId = config.x_user_id;
+    if (!sourceUserId) return c.json({ ok: false }, 200);
+
+    const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
+    const accessToken = await tokenService.getValidToken(channelId);
+    const bookmarkResult = await createBookmark(accessToken, sourceUserId, tweetId);
+
+    console.log(JSON.stringify({ event: "x_bookmark", contentId, channelId, flowId: flowId || null, ok: bookmarkResult.ok, rateLimited: !!bookmarkResult.rateLimited }));
+
+    if (bookmarkResult.rateLimited) {
+      return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+    }
+    return c.json({ ok: bookmarkResult.ok });
+  });
+
+  // Likes contentId's originating tweet via the channel that ingested it. Same shape as
+  // /x/repost — channelId is always the flow's triggering channel, no account picker.
+  router.post("/x/like", async (c) => {
+    const { channelId, contentId, tweetId, flowId } = await c.req.json<{
+      channelId: string; contentId: string; tweetId: string; flowId?: string | null;
+    }>();
+
+    const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id FROM channels WHERE id = ?")
+      .bind(channelId).first<{ config: string; tenant_id: number }>();
+    if (!channel) return c.json({ ok: false }, 200);
+
+    const config = JSON.parse(channel.config);
+    const sourceUserId = config.x_user_id;
+    if (!sourceUserId) return c.json({ ok: false }, 200);
+
+    const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
+    const accessToken = await tokenService.getValidToken(channelId);
+    const likeResult = await likePost(accessToken, sourceUserId, tweetId);
+
+    console.log(JSON.stringify({ event: "x_like", contentId, channelId, flowId: flowId || null, ok: likeResult.ok, rateLimited: !!likeResult.rateLimited }));
+
+    if (likeResult.rateLimited) {
+      return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+    }
+    return c.json({ ok: likeResult.ok });
+  });
+
+  // Real X publish path: content's generated (or literal, for provider:"none") text gets
+  // posted via the channel that triggered the flow. channelId is always the flow's triggering
+  // channel (never a user-picked target) — TikTok publish is out of scope this phase (see design
+  // spec's non-goals) — channelId resolving to a TIKTOK channel_type falls through to the
+  // generic ok:false path below.
+  router.post("/content/create-post", async (c) => {
+    const { contentId, interpolatedPrompt, provider, channelId, flowId, skillId } = await c.req.json<{
+      contentId: string; interpolatedPrompt: string; provider: "default" | "openai" | "anthropic" | "none"; channelId: string; flowId?: string | null; skillId?: string;
+    }>();
+
+    const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
+      .bind(channelId).first<{ config: string; channel_type: string; tenant_id: number }>();
+    if (!channel) return c.json({ ok: false }, 200);
+
+    if (channel.channel_type !== "X") {
+      console.log(JSON.stringify({ event: "create_post_unsupported_platform", contentId, channelId, channelType: channel.channel_type }));
       return c.json({ ok: false }, 200);
     }
 
@@ -249,10 +304,10 @@ export function internalRoutes() {
       const genRes = await fetch(`${c.env.CONTENT_URL}/internal/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": c.env.INTERNAL_SECRET },
-        body: JSON.stringify({ tenantId: targetChannel.tenant_id, prompt: interpolatedPrompt, provider, skillId }),
+        body: JSON.stringify({ tenantId: channel.tenant_id, prompt: interpolatedPrompt, provider, skillId }),
       });
       if (!genRes.ok) {
-        console.error(JSON.stringify({ event: "create_post_generate_failed", contentId, targetChannelId, provider, status: genRes.status }));
+        console.error(JSON.stringify({ event: "create_post_generate_failed", contentId, channelId, provider, status: genRes.status }));
         return c.json({ ok: false }, 200);
       }
       const generated = await genRes.json<{ text: string }>();
@@ -260,14 +315,14 @@ export function internalRoutes() {
     }
 
     const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-      .bind(targetChannel.tenant_id).first<{ d1_database_id: string | null }>();
+      .bind(channel.tenant_id).first<{ d1_database_id: string | null }>();
     if (!tenantRow?.d1_database_id) return c.json({ ok: false }, 200);
 
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
-    const accessToken = await tokenService.getValidToken(targetChannelId);
+    const accessToken = await tokenService.getValidToken(channelId);
     const postResult = await createPost(accessToken, text);
 
-    console.log(JSON.stringify({ event: "create_post_x_post", contentId, targetChannelId, provider, ok: postResult.ok, rateLimited: !!postResult.rateLimited }));
+    console.log(JSON.stringify({ event: "create_post_x_post", contentId, channelId, provider, ok: postResult.ok, rateLimited: !!postResult.rateLimited }));
 
     if (postResult.rateLimited) {
       return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
@@ -277,8 +332,8 @@ export function internalRoutes() {
     }
 
     const tenantDataDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
-    const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, targetChannel.tenant_id);
-    await contentService.recordPublishedContent(targetChannelId, "X", postResult.id, text, {
+    const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, channel.tenant_id);
+    await contentService.recordPublishedContent(channelId, "X", postResult.id, text, {
       generatedFromContentId: contentId,
       flowId: flowId || "",
     });

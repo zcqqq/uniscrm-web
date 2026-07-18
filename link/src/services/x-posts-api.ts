@@ -151,9 +151,10 @@ export interface RepostResult {
   rateLimited?: boolean;
 }
 
-// https://docs.x.com/x-api/users/repost-post
+// https://docs.x.com/x-api/users/repost-post — the resource is named "retweets", not "repost",
+// despite the doc page's URL/title using X's newer "repost" terminology.
 export async function repostPost(accessToken: string, sourceUserId: string, tweetId: string): Promise<RepostResult> {
-  const res = await fetch(`https://api.x.com/2/users/${sourceUserId}/repost`, {
+  const res = await fetch(`https://api.x.com/2/users/${sourceUserId}/retweets`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -166,6 +167,64 @@ export async function repostPost(accessToken: string, sourceUserId: string, twee
     return { ok: false, rateLimited: true };
   }
   if (!res.ok) {
+    const errorBody = await res.text().catch(() => "");
+    console.error(JSON.stringify({ event: "x_repost_api_error", status: res.status, errorBody }));
+    return { ok: false };
+  }
+
+  return { ok: true };
+}
+
+export interface BookmarkResult {
+  ok: boolean;
+  rateLimited?: boolean;
+}
+
+// https://docs.x.com/x-api/users/create-bookmark
+export async function createBookmark(accessToken: string, sourceUserId: string, tweetId: string): Promise<BookmarkResult> {
+  const res = await fetch(`https://api.x.com/2/users/${sourceUserId}/bookmarks`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ tweet_id: tweetId }),
+  });
+
+  if (res.status === 429) {
+    return { ok: false, rateLimited: true };
+  }
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => "");
+    console.error(JSON.stringify({ event: "x_bookmark_api_error", status: res.status, errorBody }));
+    return { ok: false };
+  }
+
+  return { ok: true };
+}
+
+export interface LikeResult {
+  ok: boolean;
+  rateLimited?: boolean;
+}
+
+// https://docs.x.com/x-api/users/like-post
+export async function likePost(accessToken: string, sourceUserId: string, tweetId: string): Promise<LikeResult> {
+  const res = await fetch(`https://api.x.com/2/users/${sourceUserId}/likes`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ tweet_id: tweetId }),
+  });
+
+  if (res.status === 429) {
+    return { ok: false, rateLimited: true };
+  }
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => "");
+    console.error(JSON.stringify({ event: "x_like_api_error", status: res.status, errorBody }));
     return { ok: false };
   }
 

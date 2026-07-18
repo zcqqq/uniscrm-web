@@ -73,20 +73,36 @@ describe("runListPostsPoller", () => {
     expect(bindCall).toBeTruthy();
   });
 
-  it("backfill: pages until no next_token, then marks backfill_complete, without emitting content.created", async () => {
+  it("first-ever poll (backfill_complete=0): seeds dedup index from ONE latest-page fetch (no historical pagination), without emitting content.created, then marks backfill_complete", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null });
     const tenantDb = createMockTenantDb();
     const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
 
-    fetchMock
-      .mockImplementationOnce(() => jsonResponse({ data: [{ id: "t1", text: "other account's post" }], meta: { next_token: "p2" } }))
-      .mockImplementationOnce(() => jsonResponse({ data: [{ id: "t2", text: "another" }], meta: {} }));
+    // next_token present (more historical pages exist) but must NOT be followed — List Posts
+    // triggers only care about new content going forward, not a full historical import.
+    fetchMock.mockImplementationOnce(() => jsonResponse({ data: [{ id: "t1", text: "existing post" }], meta: { next_token: "p2" } }));
 
     await runListPostsPoller(baseCtx(linkDb, tenantDb, { flowQueue }));
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(tenantDb.run).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(tenantDb.run).toHaveBeenCalledTimes(1);
     expect(flowQueue.send).not.toHaveBeenCalled();
+
+    const updateCall = linkDb.prepare.mock.calls.find((c: unknown[]) => (c[0] as string).includes("UPDATE channel_poll_state"));
+    expect(updateCall![0]).toContain("backfill_complete = 1");
+  });
+
+  it("first-ever poll: rate-limited seed fetch leaves backfill_complete unset so the next cron cycle retries", async () => {
+    const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null });
+    const tenantDb = createMockTenantDb();
+
+    fetchMock.mockImplementationOnce(() => Promise.resolve(new Response(null, { status: 429 })));
+
+    await runListPostsPoller(baseCtx(linkDb, tenantDb));
+
+    expect(tenantDb.run).not.toHaveBeenCalled();
+    const updateCall = linkDb.prepare.mock.calls.find((c: unknown[]) => (c[0] as string).includes("UPDATE channel_poll_state"));
+    expect(updateCall).toBeUndefined();
   });
 
   it("incremental: emits content.created with listId for new list posts", async () => {

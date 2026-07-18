@@ -40,7 +40,7 @@ export const TIERS: Record<Tier, TierConfig> = {
       // Monthly X-action credit allowance, in micros (1,000,000 micros = $1). Resets on the
       // subscription's monthly anniversary. See shared/credit.ts and shared/credit-service.ts.
       // 用6位小数是业界标准
-      //credit: { value: 20_000_000, description: "$5.00/month of credit (for X paid APIs)" },
+      //credit: { value: 20_000_000, description: "$20.00/month of credit (for X paid APIs)" },
     },
   },
   pro: {
@@ -50,9 +50,10 @@ export const TIERS: Record<Tier, TierConfig> = {
     modules: {
     },
     features: {
+      "link.x": { enabled: true },
     },
     limits: {
-      credit: { value: 100_000_000, description: "$20.00/month of credit (for X paid APIs)" },
+      credit: { value: 100_000_000, description: "$100.00/month of credit (for X paid APIs)" },
     },
   },
 };

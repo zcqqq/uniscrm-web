@@ -1,3 +1,5 @@
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../../nodeTypeRegistry";
+
 export interface FlowTemplate {
   id: string;
   name: string;
@@ -68,13 +70,13 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
   },
   {
     id: "tpl-content-rewrite-crosspost",
-    name: "AI-rewrite new posts to another channel",
-    description: "When a new post is ingested from a connected channel, rewrite it with AI and publish it to another connected channel",
+    name: "AI-rewrite new List posts",
+    description: "When a new post is ingested from an X List, rewrite it with AI and publish it via the same channel",
     domain: "content",
     graph: {
       nodes: [
-        { id: "t1", type: "xContentTrigger", position: { x: 0, y: 0 }, data: { channelId: "", mode: "my_posts", listId: "", listName: "", conditions: [] } },
-        { id: "a1", type: "action", position: { x: 320, y: 0 }, data: { actionType: "xContentAction", operation: "create-post", prompt: "$content.content_text", provider: "default", channelId: "" } },
+        { id: "t1", type: "xContentTrigger", position: { x: 0, y: 0 }, data: { channelId: "", mode: CONTENT_X_TRIGGER_MODE_LIST_POSTS, listId: "", listName: "", conditions: [] } },
+        { id: "a1", type: "action", position: { x: 320, y: 0 }, data: { actionType: "xContentAction", operation: "create-post", prompt: "$content.content_text", provider: "default" } },
       ],
       edges: [
         { id: "e1", source: "t1", target: "a1" },

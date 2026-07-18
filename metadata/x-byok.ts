@@ -3,7 +3,7 @@ import type { UserMetadata, ContentMetadata } from "./dataTypes";
 
 export const UserMetadata_X: UserMetadata[] = [
   {
-    sourceUserType: "get-followers", // https://docs.x.com/x-api/users/get-followers
+    sourceUserType: "own:get-followers", // https://docs.x.com/x-api/users/get-followers
     linkPrefix: "data[]",
     userProps: [
       { propId: "source_user_id", dataId: "{linkPrefix}.id" },
@@ -24,9 +24,9 @@ export const UserMetadata_X: UserMetadata[] = [
 
 export const ContentMetadata_X: ContentMetadata[] = [
   {
-    sourceContentType: "get-posts", // https://docs.x.com/x-api/users/get-posts author_id=source_channel_id
+    sourceContentType: "own:get-posts", // https://docs.x.com/x-api/users/get-posts author_id=source_channel_id
     linkPrefix: "data[]",
-    flowType: "trigger",
+    label: {"en":"Own Posts", "zh":"自己的推文"},
     contentProps: [
       { propId: "content_type", value: "TWEET" },  //ARTICLE，参见uniscrm-web/_reference/x/post.json
       { propId: "source_content_id", dataId: "{linkPrefix}.id" },
@@ -45,6 +45,7 @@ export const ContentMetadata_X: ContentMetadata[] = [
     sourceContentType: "get-list-posts", // https://docs.x.com/x-api/lists/get-list-posts
     linkPrefix: "data[]",
     flowType: "trigger",
+    label: {"en":"List Posts", "zh":"列表的推文"},
     contentProps: [
       { propId: "content_type", value: "TWEET" },
       { propId: "source_content_id", dataId: "{linkPrefix}.id" },
@@ -60,18 +61,36 @@ export const ContentMetadata_X: ContentMetadata[] = [
     ],
   },
   {
-    sourceContentType: "create-post", // https://docs.x.com/x-api/posts/create-post
+    sourceContentType: "create-bookmark", // https://docs.x.com/x-api/users/create-bookmark
     flowType: "action",
-    label: {"en":"Create Post", "zh":"发推文"},
+    label: {"en":"Bookmark", "zh":"加入书签"},
+    description: {"en":"Bookmarks via the triggering channel", "zh":"通过触发该内容的账号加入书签"},
     contentProps: [
-      {propId: "message_text", aiType:"TEXT"}
+    ],
+  },
+  {
+    sourceContentType: "like-post", // https://docs.x.com/x-api/users/like-post
+    flowType: "action",
+    label: {"en":"Like", "zh":"点赞"},
+    description: {"en":"Likes via the triggering channel", "zh":"通过触发该内容的账号点赞"},
+    contentProps: [
     ],
   },
   {
     sourceContentType: "repost-post", // https://docs.x.com/x-api/users/repost-post
     flowType: "action",
     label: {"en":"Repost", "zh":"转发"},
+    description: {"en":"Reposts via the triggering channel", "zh":"通过触发该内容的账号转发"},
     contentProps: [
+    ],
+  },
+  {
+    sourceContentType: "create-post", // https://docs.x.com/x-api/posts/create-post
+    flowType: "action",
+    label: {"en":"Create Post", "zh":"发推文"},
+    description: {"en":"Publish a new post via the triggering channel", "zh":"通过触发该内容的账号发布新推文"},
+    contentProps: [
+      {propId: "message_text", aiType:"TEXT"}
     ],
   },
 ];

@@ -94,14 +94,14 @@ describe("createPost", () => {
 });
 
 describe("repostPost", () => {
-  it("posts tweet_id to /2/users/:id/repost and returns ok:true", async () => {
+  it("posts tweet_id to /2/users/:id/retweets and returns ok:true", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ data: { retweeted: true } }), { status: 200 }));
 
     const result = await repostPost("tok", "x-user-1", "tweet-999");
 
     expect(result).toEqual({ ok: true });
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://api.x.com/2/users/x-user-1/repost");
+    expect(url).toBe("https://api.x.com/2/users/x-user-1/retweets");
     expect((init as Record<string, any>).headers.Authorization).toBe("Bearer tok");
     expect(JSON.parse((init as Record<string, any>).body)).toEqual({ tweet_id: "tweet-999" });
   });

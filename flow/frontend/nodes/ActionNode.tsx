@@ -2,16 +2,19 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
 import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 import { CHANNEL_TYPES } from "../config/trigger-fields";
+import { ContentMetadata_X } from "../../../metadata/x-byok";
+import { t as localizeLabel } from "../../../metadata/locale";
 
 const EXTERNAL_API_ACTIONS = ["xAction", "xContentAction", "tiktokContentAction"];
 const X_ACTION_COUNT = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!.actions.length;
+const CONTENT_X_ACTION_OPERATIONS = ContentMetadata_X.filter((m) => m.flowType === "action");
 
 export default function ActionNode({ data, selected }: NodeProps) {
   const actionType = data.actionType as string;
   const isExternalApi = EXTERNAL_API_ACTIONS.includes(actionType);
 
   let label: string;
-  let description: string;
+  let description: string | undefined;
   let icon: string;
 
   if (actionType === "addToList") {
@@ -29,12 +32,10 @@ export default function ActionNode({ data, selected }: NodeProps) {
       : `${X_ACTION_COUNT} actions`;
     icon = "𝕏";
   } else if (actionType === "xContentAction") {
-    const channelId = data.channelId as string;
-    const operation = data.operation as string;
+    const operation = (data.operation as string) || "create-post";
+    const selectedOperation = CONTENT_X_ACTION_OPERATIONS.find((op) => op.sourceContentType === operation);
     label = NODE_TYPE_REGISTRY.xContentAction.label!;
-    description = operation === "repost-post"
-      ? "Reposts via the triggering channel"
-      : channelId ? "Target channel selected" : "Select a target channel...";
+    description = selectedOperation?.description ? localizeLabel(selectedOperation.description, "en") : undefined;
     icon = "✨";
   } else if (actionType === "tiktokContentAction") {
     const channelId = data.channelId as string;
@@ -63,9 +64,11 @@ export default function ActionNode({ data, selected }: NodeProps) {
         <span className="text-lg">{icon}</span>
         <span className="font-semibold text-sm text-green-700">{label}</span>
       </div>
-      <p className={`text-xs ${data.listName || data.xEvent ? "text-gray-500" : "text-gray-400 italic"}`}>
-        {description}
-      </p>
+      {description && (
+        <p className={`text-xs ${data.listName || data.xEvent ? "text-gray-500" : "text-gray-400 italic"}`}>
+          {description}
+        </p>
+      )}
       <AnalyticsBadges analytics={data._analytics as any} />
       {isExternalApi && (
         <>

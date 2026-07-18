@@ -4,6 +4,7 @@ import {
   generatableKeysForDomain,
   USER_FLOW_SIDEBAR_ORDER,
   CONTENT_FLOW_SIDEBAR_ORDER,
+  CONTENT_X_TRIGGER_MODE_LIST_POSTS,
 } from "../../nodeTypeRegistry";
 import { ContentMetadata_X } from "../../../metadata/x-byok";
 import { CHANNEL_TYPES } from "../../frontend/config/trigger-fields";
@@ -73,6 +74,33 @@ describe("NODE_TYPE_REGISTRY", () => {
     }
     expect(fragment).not.toContain("post.create");
     expect(fragment).not.toContain("like.create");
+  });
+
+  it("derives xAction's xEvents list from CHANNEL_TYPES' X entry actions (byte-identical to today's hardcoded list, zero behavior change)", () => {
+    const xActions = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!.actions;
+    expect(xActions.map((a) => a.eventType)).toEqual(["follow-user", "unfollow-user", "create-dm", "mute-user"]);
+    expect(NODE_TYPE_REGISTRY.xAction.promptFragment).toContain(
+      `xEvents: ${xActions.map((a) => `"${a.eventType}"`).join(", ")}`
+    );
+  });
+
+  it("derives xContentAction's operation enum from ContentMetadata_X's flowType:\"action\" entries, in metadata declaration order", () => {
+    const operations = ContentMetadata_X.filter((m) => m.flowType === "action").map((m) => m.sourceContentType);
+    expect(operations).toEqual(["create-bookmark", "like-post", "repost-post", "create-post"]);
+    expect(NODE_TYPE_REGISTRY.xContentAction.promptFragment).toContain(
+      `operation: ${operations.map((op) => `"${op}"`).join("|")}`
+    );
+  });
+
+  it("derives xContentTrigger's mode enum from ContentMetadata_X's flowType:\"trigger\" sourceContentType values, not a hand-typed my_posts/list_posts enum", () => {
+    const modes = ContentMetadata_X.filter((m) => m.flowType === "trigger").map((m) => m.sourceContentType);
+    expect(modes).toEqual(["get-list-posts"]); // own:get-posts is poll-only (no flowType: "trigger")
+    expect(CONTENT_X_TRIGGER_MODE_LIST_POSTS).toBe("get-list-posts");
+    expect(NODE_TYPE_REGISTRY.xContentTrigger.promptFragment).toContain(
+      `mode: ${modes.map((m) => `"${m}"`).join("|")}`
+    );
+    expect(NODE_TYPE_REGISTRY.xContentTrigger.promptFragment).not.toContain("my_posts");
+    expect(NODE_TYPE_REGISTRY.xContentTrigger.promptFragment).not.toContain("list_posts");
   });
 });
 

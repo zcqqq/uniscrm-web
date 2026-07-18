@@ -5,7 +5,7 @@ import { executeFlow } from "../../src/engine";
 
 const graphContentToStatus = JSON.stringify({
   nodes: [
-    { id: "t1", type: "xContentTrigger", data: { channelId: "chan-1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+    { id: "t1", type: "xContentTrigger", data: { channelId: "chan-1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
     { id: "a1", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
   ],
   edges: [{ id: "e1", source: "t1", target: "a1" }],
@@ -136,8 +136,8 @@ describe("queue(): content.created dispatch", () => {
 describe("queue(): xContentAction branch resolution", () => {
   const graphWithBranchesObj = {
     nodes: [
-      { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
-      { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "target-chan-1", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
+      { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+      { id: "a1", type: "action", data: { actionType: "xContentAction", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
       { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 400, y: 0 } },
       { id: "a3", type: "action", data: { actionType: "updateContentStatus", status: "ignored" }, position: { x: 400, y: 100 } },
     ],
@@ -231,8 +231,8 @@ describe("queue(): xContentAction branch resolution", () => {
 
     const graphWithInterpolation = JSON.stringify({
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
-        { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-1", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
     });
@@ -250,6 +250,7 @@ describe("queue(): xContentAction branch resolution", () => {
     expect(url).toContain("/internal/content/create-post");
     const body = JSON.parse(init.body as string);
     expect(body.interpolatedPrompt).toBe("Rewrite: original post text");
+    expect(body.channelId).toBe("src-chan"); // no target-account picker — always the triggering channel
 
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-interp'`).run();
     vi.unstubAllGlobals();
@@ -261,7 +262,7 @@ describe("queue(): xContentAction branch resolution", () => {
 
     const graphWithRepostOp = JSON.stringify({
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
         { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "repost-post" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
@@ -289,6 +290,66 @@ describe("queue(): xContentAction branch resolution", () => {
     vi.unstubAllGlobals();
   });
 
+  it("routes a create-bookmark operation to /internal/x/bookmark with the source channel and the payload's source_content_id as tweetId", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const graphWithBookmarkOp = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-bookmark" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-bookmark-op', 1, 'bookmark op flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBookmarkOp).run();
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-bookmark-1", channelId: "src-chan", payload: { source_content_id: "tweet-abc-2" } }),
+      env
+    );
+
+    const bookmarkCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/internal/x/bookmark"));
+    expect(bookmarkCall, "expected a fetch to /internal/x/bookmark").toBeDefined();
+    const body = JSON.parse((bookmarkCall![1] as RequestInit).body as string);
+    expect(body).toMatchObject({ channelId: "src-chan", contentId: "content-bookmark-1", tweetId: "tweet-abc-2" });
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-bookmark-op'`).run();
+    vi.unstubAllGlobals();
+  });
+
+  it("routes a like-post operation to /internal/x/like with the source channel and the payload's source_content_id as tweetId", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const graphWithLikeOp = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "like-post" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-like-op', 1, 'like op flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithLikeOp).run();
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-like-1", channelId: "src-chan", payload: { source_content_id: "tweet-abc-3" } }),
+      env
+    );
+
+    const likeCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/internal/x/like"));
+    expect(likeCall, "expected a fetch to /internal/x/like").toBeDefined();
+    const body = JSON.parse((likeCall![1] as RequestInit).body as string);
+    expect(body).toMatchObject({ channelId: "src-chan", contentId: "content-like-1", tweetId: "tweet-abc-3" });
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-like-op'`).run();
+    vi.unstubAllGlobals();
+  });
+
   it("schedules a content_flow_pending retry row for a rate-limited repost-post whose persisted payload still carries the triggering channel_id", async () => {
     // Regression test: the rate-limited-retry insert used to persist the raw `payload` (no
     // channel_id) instead of `matchPayload` (channel_id + optional list_id). scheduled()'s
@@ -312,7 +373,7 @@ describe("queue(): xContentAction branch resolution", () => {
 
     const graphWithRepostOp = JSON.stringify({
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
         { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "repost-post" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
@@ -352,7 +413,7 @@ describe("queue(): tiktokContentAction dispatch", () => {
 
     const graphWithTikTok = JSON.stringify({
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
         {
           id: "a1", type: "action",
           data: {
@@ -397,7 +458,7 @@ describe("queue(): tiktokContentAction dispatch", () => {
 
     const graphWithTikTok = JSON.stringify({
       nodes: [
-        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
         { id: "a1", type: "action", data: { actionType: "tiktokContentAction", channelId: "tiktok-chan-1", prompts: { title: "t", description: "d", message_image: "i" }, textProvider: "none", imageProvider: "default" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],

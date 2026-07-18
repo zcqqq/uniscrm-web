@@ -4,7 +4,7 @@ import worker from "../../src/index";
 
 const graphWithXContentTrigger = JSON.stringify({
   nodes: [
-    { id: "t1", type: "xContentTrigger", data: { channelId: "chan-1", mode: "my_posts", conditions: [] }, position: { x: 0, y: 0 } },
+    { id: "t1", type: "xContentTrigger", data: { channelId: "chan-1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
     { id: "a1", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
   ],
   edges: [{ id: "e1", source: "t1", target: "a1" }],

@@ -32,14 +32,27 @@ export interface NodeTypeConfig {
   promptFragment?: string;
 }
 
-const CONTENT_X_TRIGGER_COUNT = ContentMetadata_X.filter((m) => m.flowType === "trigger").length;
-const CONTENT_X_ACTION_COUNT = ContentMetadata_X.filter((m) => m.flowType === "action").length;
+const CONTENT_X_TRIGGER_ENTRIES = ContentMetadata_X.filter((m) => m.flowType === "trigger");
+const CONTENT_X_ACTION_ENTRIES = ContentMetadata_X.filter((m) => m.flowType === "action");
+const CONTENT_X_TRIGGER_COUNT = CONTENT_X_TRIGGER_ENTRIES.length;
+const CONTENT_X_ACTION_COUNT = CONTENT_X_ACTION_ENTRIES.length;
 const X_CHANNEL = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!;
 const X_ACTION_COUNT = X_CHANNEL.actions.length;
-// Derived at module load from CHANNEL_TYPES (itself sourced from EventMetadata_X's
-// flowType:"trigger" entries) rather than hand-typed, so the generate prompt never drifts
-// from the actual set of supported X trigger events.
+// All three derived at module load from metadata rather than hand-typed, so the generate
+// prompt never drifts from the actual set of supported X trigger events / actions / operations.
 const X_TRIGGER_EVENT_LIST = X_CHANNEL.events.map((ev) => `"${ev.eventType}" (${ev.description})`).join(", ");
+const X_ACTION_EVENT_LIST = X_CHANNEL.actions.map((a) => `"${a.eventType}"`).join(", ");
+const CONTENT_X_ACTION_OPERATIONS = CONTENT_X_ACTION_ENTRIES.map((m) => `"${m.sourceContentType}"`).join("|");
+// mode values are ContentMetadata_X's own sourceContentType tokens ("own:get-posts"/"get-list-posts")
+// rather than a separately-named enum, so there's nothing to keep in sync by hand.
+const CONTENT_X_TRIGGER_MODES = CONTENT_X_TRIGGER_ENTRIES.map((m) => `"${m.sourceContentType}"`).join("|");
+
+// Exported so every consumer of the mode field (Inspector, flow-editor default data, the
+// XContentTriggerNode canvas subtitle, templates, and the engine's runtime dispatch) reads the
+// same value instead of re-typing ContentMetadata_X's sourceContentType literal itself.
+// own:get-posts is poll-only (no flowType: "trigger") — it feeds content ingestion but never
+// fires a content flow — so get-list-posts is currently the only content-flow trigger mode.
+export const CONTENT_X_TRIGGER_MODE_LIST_POSTS = CONTENT_X_TRIGGER_ENTRIES.find((m) => m.sourceContentType === "get-list-posts")!.sourceContentType;
 
 export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
   // --- user-domain triggers/flow-control/actions ---
@@ -72,7 +85,7 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
     domain: "user",
     generatable: true,
     promptFragment: `   For X actions: data: { actionType: "xAction", xEvent: string }
-   xEvents: "follow-user", "unfollow-user", "create-dm", "mute-user"`,
+   xEvents: ${X_ACTION_EVENT_LIST}`,
   },
   addToList: {
     reactFlowType: "action",
@@ -91,9 +104,9 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
     domain: "content",
     generatable: true,
     promptFragment: `xContentTrigger - triggers when new content arrives on an X channel
-   data: { channelId: "", mode: "my_posts"|"list_posts", listId: "", listName: "", conditions: [] }
+   data: { channelId: "", mode: ${CONTENT_X_TRIGGER_MODES}, listId: "", listName: "", conditions: [] }
    - channelId, listId, listName are left blank ("") — the user fills them in via the Inspector after generation.
-   - mode "my_posts": triggers on the channel's own posts. mode "list_posts": triggers on posts from a specific X List (leave listId/listName blank).`,
+   - mode "${CONTENT_X_TRIGGER_MODE_LIST_POSTS}": triggers on posts from a specific X List (leave listId/listName blank).`,
   },
   xContentAction: {
     reactFlowType: "action",
@@ -104,9 +117,12 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
     // Leading 3-space indent on the first line matches the user-domain action fragments'
     // (xAction/addToList) "   For X actions: ..." sub-variant style — these fragments are
     // concatenated directly under a numbered "action" item by the prompt builder.
-    promptFragment: `   For content actions: data: { actionType: "xContentAction", operation: "create-post"|"repost-post", channelId: "", prompt: "", provider: "default" }
-   - operation "create-post": generates and publishes a new post (channelId = target account, left blank for the user to pick; prompt = free-text instructions for AI generation, left blank for the user to fill in).
-   - operation "repost-post": reposts the triggering content via the triggering channel's own account — needs no additional fields; leave channelId/prompt/provider at these defaults.`,
+    promptFragment: `   For content actions: data: { actionType: "xContentAction", operation: ${CONTENT_X_ACTION_OPERATIONS}, prompt: "", provider: "default" }
+   - Every operation acts via the triggering channel's own account — there is no target-account picker.
+   - operation "create-bookmark": bookmarks the triggering content — needs no additional fields; leave prompt/provider at these defaults.
+   - operation "like-post": likes the triggering content — needs no additional fields; leave prompt/provider at these defaults.
+   - operation "repost-post": reposts the triggering content — needs no additional fields; leave prompt/provider at these defaults.
+   - operation "create-post": generates and publishes a new post (prompt = free-text instructions for AI generation, left blank for the user to fill in).`,
   },
   tiktokContentAction: {
     reactFlowType: "action",

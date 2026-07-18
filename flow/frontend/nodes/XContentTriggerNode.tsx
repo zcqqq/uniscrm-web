@@ -1,12 +1,12 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
-import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
+import { NODE_TYPE_REGISTRY, CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../../nodeTypeRegistry";
 
 export default function XContentTriggerNode({ data, selected }: NodeProps) {
   const conditions = (data.conditions as unknown[]) || [];
   const condCount = conditions.filter((c: any) => c?.field).length;
   const mode = data.mode as string;
-  const subtitle = mode === "list_posts"
+  const subtitle = mode === CONTENT_X_TRIGGER_MODE_LIST_POSTS
     ? `List: ${(data.listName as string) || "(not selected)"}`
     : "My own posts";
 

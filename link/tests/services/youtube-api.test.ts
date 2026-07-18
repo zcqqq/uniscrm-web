@@ -3,6 +3,7 @@ import {
   parseISO8601Duration,
   resolveYouTubeChannelId,
   fetchVideoDetails,
+  fetchChannelSnippet,
   subscribeWebSub,
   unsubscribeWebSub,
 } from "../../src/services/youtube-api";
@@ -68,6 +69,22 @@ describe("youtube-api fetch functions", () => {
   it("fetchVideoDetails returns null when the video no longer exists", async () => {
     fetchMock.mockImplementationOnce(() => jsonResponse({ items: [] }));
     const result = await fetchVideoDetails("key", "deleted-vid");
+    expect(result).toBeNull();
+  });
+
+  it("fetchChannelSnippet fetches and parses channel name/thumbnail by ID", async () => {
+    fetchMock.mockImplementationOnce(() => jsonResponse({
+      items: [{ id: "UCabc123", snippet: { title: "Example Channel", thumbnails: { default: { url: "https://img/thumb.jpg" } } } }],
+    }));
+    const result = await fetchChannelSnippet("key", "UCabc123");
+    expect(result).toEqual({ channelName: "Example Channel", thumbnailUrl: "https://img/thumb.jpg" });
+    expect(fetchMock.mock.calls[0][0]).toContain("id=UCabc123");
+    expect(fetchMock.mock.calls[0][0]).not.toContain("forHandle");
+  });
+
+  it("fetchChannelSnippet returns null when the API finds no channel", async () => {
+    fetchMock.mockImplementationOnce(() => jsonResponse({ items: [] }));
+    const result = await fetchChannelSnippet("key", "UCnonexistent");
     expect(result).toBeNull();
   });
 

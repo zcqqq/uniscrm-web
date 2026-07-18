@@ -41,6 +41,21 @@ async function fetchChannelByHandle(apiKey: string, handle: string): Promise<You
   return runChannelLookup(apiUrl);
 }
 
+// Backfill for the direct /channel/UC... resolution path in resolveYouTubeChannelId, which
+// returns channelName/thumbnailUrl as "" since no API call is needed to get the ID itself.
+// Callers that need display info for a channelId obtained that way should call this once,
+// after resolution, rather than resolveYouTubeChannelId doing a redundant lookup by ID for
+// every /channel/ URL (most callers only need the ID).
+export async function fetchChannelSnippet(apiKey: string, channelId: string): Promise<{ channelName: string; thumbnailUrl: string } | null> {
+  const apiUrl = new URL(`${DATA_API_BASE}/channels`);
+  apiUrl.searchParams.set("part", "snippet");
+  apiUrl.searchParams.set("id", channelId);
+  apiUrl.searchParams.set("key", apiKey);
+  const result = await runChannelLookup(apiUrl);
+  if (!result) return null;
+  return { channelName: result.channelName, thumbnailUrl: result.thumbnailUrl };
+}
+
 async function runChannelLookup(apiUrl: URL): Promise<YouTubeChannelResolution | null> {
   const res = await fetch(apiUrl.toString());
   if (!res.ok) throw new Error(`YouTube channels.list failed: ${res.status} ${await res.text()}`);

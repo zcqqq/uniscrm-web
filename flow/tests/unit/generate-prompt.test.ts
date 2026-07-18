@@ -1,20 +1,26 @@
 import { describe, it, expect } from "vitest";
 import { buildFlowGenerateSystemPrompt } from "../../src/generate-prompt";
+import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 import { CHANNEL_TYPES } from "../../frontend/config/trigger-fields";
 
 describe("buildFlowGenerateSystemPrompt", () => {
-  it("user domain: documents the static structure (wait/waitForEvent/action fragments, rules, closing instructions)", () => {
+  it("user domain: documents every generatable user/both node type's fragment, rules, closing instructions", () => {
     const prompt = buildFlowGenerateSystemPrompt("user");
     expect(prompt).toContain("You are a workflow graph generator for a social CRM.");
-    expect(prompt).toContain("xTrigger - triggers on X (Twitter) events");
-    expect(prompt).toContain("wait - delay execution");
-    expect(prompt).toContain('waitForEvent - wait for an event within a time window, has "yes"/"no" branches');
+    for (const key of ["xTrigger", "cronTrigger", "waitForEvent", "userPropsCondition", "changeUserProps", "wait", "timeCondition", "abSplit", "webhook"]) {
+      expect(prompt, `missing fragment for "${key}"`).toContain(NODE_TYPE_REGISTRY[key].promptFragment!);
+    }
     expect(prompt).toContain('For X actions: data: { actionType: "xAction", xEvent: string }');
     expect(prompt).toContain('For list actions: data: { actionType: "addToList", listId: "", listName: "" }');
     // "For X actions" must precede "For list actions" — xAction is declared before addToList
     // in the registry specifically to preserve this order.
     expect(prompt.indexOf('actionType: "xAction"')).toBeLessThan(prompt.indexOf('actionType: "addToList"'));
-    expect(prompt).toContain("Flow must start with exactly one xTrigger node");
+    expect(prompt).toContain("xAction nodes have sourceHandle \"success\" or \"failed\" for branching");
+    expect(prompt).toContain("waitForEvent nodes have sourceHandle \"yes\" or \"no\"");
+    expect(prompt).toContain("userPropsCondition nodes have sourceHandle \"yes\" or \"no\"");
+    expect(prompt).toContain("abSplit nodes have sourceHandle \"a\" or \"b\"");
+    expect(prompt).toContain("webhook nodes have sourceHandle \"success\" or \"failed\"");
+    expect(prompt).toContain("Flow must start with exactly one trigger node: xTrigger or cronTrigger");
     expect(prompt).toContain('End your response with ONLY the JSON object on a new line: {"nodes":[...],"edges":[...]}');
   });
 
@@ -30,23 +36,27 @@ describe("buildFlowGenerateSystemPrompt", () => {
     expect(prompt).not.toContain("like.create");
   });
 
-  it("content domain: documents all 5 functional content node types via the type:\"action\" convention", () => {
+  it("content domain: documents every generatable content/both node type's fragment, including youtubeContentTrigger (previously dead — never actually included in the built prompt despite having a promptFragment)", () => {
     const prompt = buildFlowGenerateSystemPrompt("content");
-    expect(prompt).toContain("xContentTrigger - triggers when new content arrives");
+    for (const key of ["xContentTrigger", "youtubeContentTrigger", "wait", "timeCondition", "abSplit", "webhook"]) {
+      expect(prompt, `missing fragment for "${key}"`).toContain(NODE_TYPE_REGISTRY[key].promptFragment!);
+    }
     expect(prompt).toContain('actionType: "xContentAction"');
     expect(prompt).toContain('actionType: "tiktokContentAction"');
     expect(prompt).toContain('actionType: "updateContentStatus"');
-    expect(prompt).toContain("wait - delay execution");
-    expect(prompt).toContain("Flow must start with exactly one xContentTrigger node");
+    expect(prompt).toContain("Flow must start with exactly one trigger node: xContentTrigger or youtubeContentTrigger");
   });
 
   it("content domain: forbids user-domain types and never documents their data shape", () => {
     const prompt = buildFlowGenerateSystemPrompt("content");
-    expect(prompt).toContain("Do NOT use xTrigger, waitForEvent");
+    expect(prompt).toContain("Do NOT use xTrigger, cronTrigger, waitForEvent, userPropsCondition, changeUserProps");
     // The rules text is allowed to name addToList/xAction in a "do NOT use" sentence
     // (that's helpful, explicit LLM guidance) — what must never appear is their actual
     // data-shape declaration, which would let the LLM construct one.
     expect(prompt).not.toContain('actionType: "addToList"');
     expect(prompt).not.toContain('actionType: "xAction"');
+    // cronTrigger's own fragment (a "trigger on a schedule" declaration) must not leak into
+    // the content-domain prompt either — only its name in the "Do NOT use" sentence is allowed.
+    expect(prompt).not.toContain("cronTrigger - triggers on a schedule");
   });
 });

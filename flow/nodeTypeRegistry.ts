@@ -1,4 +1,5 @@
 import { ContentMetadata_X } from "../metadata/x-byok";
+import { ContentMetadata_TikTok } from "../metadata/tiktok";
 import { CHANNEL_TYPES } from "./frontend/config/trigger-fields";
 
 export type FlowDomain = "user" | "content";
@@ -6,6 +7,20 @@ export type FlowDomain = "user" | "content";
 export interface NodeTypeConfig {
   /** The React Flow `node.type` this entry corresponds to ("action" for every actionType variant). */
   reactFlowType: string;
+  /**
+   * Flow-semantics role, independent of `reactFlowType` (a canvas-rendering detail). Drives how
+   * generate-prompt.ts composes this entry into the LLM prompt:
+   * - "trigger": starts a flow, no target handle. Exactly one trigger-role node must open a
+   *   generated graph; multiple trigger-role entries per domain are alternatives (e.g. xTrigger
+   *   vs cronTrigger), not a chain.
+   * - "action": grouped under one shared numbered "action" item (data.actionType-discriminated,
+   *   reactFlowType "action" — same membership reactFlowType already identified, now explicit).
+   * - "condition": everything else — gets its own individual numbered prompt item. Catch-all: not
+   *   every "condition" entry actually branches (wait/changeUserProps are linear; webhook has its
+   *   own reactFlowType and a real side effect, not just a gate, but is grouped here rather than
+   *   "action" to avoid implying its JSON shape is data.actionType-discriminated like real actions).
+   */
+  role: "trigger" | "action" | "condition";
   /**
    * Display name shown in Sidebar, the canvas node, and the Inspector heading — the single
    * source of truth for this type's name so the three surfaces can't drift apart. Omitted only
@@ -47,6 +62,20 @@ const CONTENT_X_ACTION_OPERATIONS = CONTENT_X_ACTION_ENTRIES.map((m) => `"${m.so
 // rather than a separately-named enum, so there's nothing to keep in sync by hand.
 const CONTENT_X_TRIGGER_MODES = CONTENT_X_TRIGGER_ENTRIES.map((m) => `"${m.sourceContentType}"`).join("|");
 
+// Per-operation bullet text for xContentAction, derived from ContentMetadata_X rather than
+// hand-typed per operation — a new operation added to the metadata automatically gets both its
+// enum value (CONTENT_X_ACTION_OPERATIONS above) and its explanatory bullet here, with no
+// separate line to remember to add. The "needs no additional fields"/"prompt = free-text..."
+// suffix is derived from whether the operation has an aiType prop (same check Inspector.tsx
+// uses to decide whether to show the prompt/provider fields at all), not hand-typed either.
+const CONTENT_X_ACTION_BULLETS = CONTENT_X_ACTION_ENTRIES.map((m) => {
+  const hasAiProp = m.contentProps.some((p) => p.aiType);
+  const guidance = hasAiProp
+    ? "prompt = free-text instructions for AI generation, left blank for the user to fill in."
+    : "needs no additional fields; leave prompt/provider at these defaults.";
+  return `   - operation "${m.sourceContentType}": ${m.description!.en} — ${guidance}`;
+}).join("\n");
+
 // Exported so every consumer of the mode field (Inspector, flow-editor default data, the
 // XContentTriggerNode canvas subtitle, templates, and the engine's runtime dispatch) reads the
 // same value instead of re-typing ContentMetadata_X's sourceContentType literal itself.
@@ -59,23 +88,57 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
   xTrigger: {
     reactFlowType: "xTrigger",
     domain: "user",
+    role: "trigger",
     generatable: true,
     promptFragment: `xTrigger - triggers on X (Twitter) events
    data: { channelType: "X", eventType: string }
    eventTypes: ${X_TRIGGER_EVENT_LIST}`,
   },
-  cronTrigger: { reactFlowType: "cronTrigger", label: "Cron Trigger", description: "Trigger on a schedule", domain: "user", generatable: false },
+  cronTrigger: {
+    reactFlowType: "cronTrigger",
+    label: "Cron Trigger",
+    description: "Trigger on a schedule",
+    domain: "user",
+    role: "trigger",
+    generatable: true,
+    promptFragment: `cronTrigger - triggers on a schedule (all times UTC)
+   data: { scheduleType: "daily"|"interval"|"cron", dailyTime: "09:00", cronExpr: "", intervalValue: 60, intervalUnit: "minutes"|"hours"|"days" }
+   - scheduleType "daily": fires once per day at dailyTime ("HH:mm", UTC).
+   - scheduleType "interval": fires every intervalValue intervalUnit (e.g. intervalValue:30, intervalUnit:"minutes" = every 30 minutes).
+   - scheduleType "cron": fires per a 5-field cron expression in cronExpr ("minute hour day month weekday").`,
+  },
   waitForEvent: {
     reactFlowType: "waitForEvent",
     label: "Wait for Event",
     description: "Check if event has occurred",
     domain: "user",
+    role: "condition",
     generatable: true,
     promptFragment: `waitForEvent - wait for an event within a time window, has "yes"/"no" branches
    data: { eventType: string, duration: number, unit: "minutes"|"hours"|"days", conditions: [] }`,
   },
-  userPropsCondition: { reactFlowType: "userPropsCondition", label: "User Props", description: "Branch by user properties", domain: "user", generatable: false },
-  changeUserProps: { reactFlowType: "changeUserProps", label: "Change User Props", description: "Update user properties", domain: "user", generatable: false },
+  userPropsCondition: {
+    reactFlowType: "userPropsCondition",
+    label: "User Props",
+    description: "Branch by user properties",
+    domain: "user",
+    role: "condition",
+    generatable: true,
+    promptFragment: `userPropsCondition - branches on the triggering user's profile fields, has "yes"/"no" branches
+   data: { conditions: [{ field: string, operator: "=="|"!="|">"|"<", value: string }] }
+   - All conditions must pass (AND) for the "yes" branch; otherwise "no".`,
+  },
+  changeUserProps: {
+    reactFlowType: "changeUserProps",
+    label: "Change User Props",
+    description: "Update user properties",
+    domain: "user",
+    role: "condition",
+    generatable: true,
+    promptFragment: `changeUserProps - updates fields on the triggering user's profile, single output (no branching)
+   data: { updates: [{ field: string, value: string }] }
+   - value supports $user.x / $event.x interpolation from the triggering payload.`,
+  },
   // Declared before addToList: the user-domain prompt's action item lists X actions first
   // (see buildUserDomainPrompt in generate-prompt.ts, which composes fragments in this order).
   xAction: {
@@ -83,6 +146,7 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
     label: "X Action",
     description: `${X_ACTION_COUNT} actions`,
     domain: "user",
+    role: "action",
     generatable: true,
     promptFragment: `   For X actions: data: { actionType: "xAction", xEvent: string }
    xEvents: ${X_ACTION_EVENT_LIST}`,
@@ -92,6 +156,7 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
     label: "Add to List",
     description: "Add user to a profile list",
     domain: "user",
+    role: "action",
     generatable: true,
     promptFragment: `   For list actions: data: { actionType: "addToList", listId: "", listName: "" }`,
   },
@@ -102,6 +167,7 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
     label: "X Trigger",
     description: `${CONTENT_X_TRIGGER_COUNT} triggers`,
     domain: "content",
+    role: "trigger",
     generatable: true,
     promptFragment: `xContentTrigger - triggers when new content arrives on an X channel
    data: { channelId: "", mode: ${CONTENT_X_TRIGGER_MODES}, listId: "", listName: "", conditions: [] }
@@ -113,6 +179,7 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
     label: "YouTube Trigger",
     description: "Watches a public YouTube channel",
     domain: "content",
+    role: "trigger",
     generatable: true,
     promptFragment: `youtubeContentTrigger - triggers when a watched YouTube channel publishes a new video
    data: { channelId: "", channelUrl: "", channelName: "", conditions: [] }
@@ -124,31 +191,31 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
     label: "X Action",
     description: `${CONTENT_X_ACTION_COUNT} actions`,
     domain: "content",
+    role: "action",
     generatable: true,
     // Leading 3-space indent on the first line matches the user-domain action fragments'
     // (xAction/addToList) "   For X actions: ..." sub-variant style — these fragments are
     // concatenated directly under a numbered "action" item by the prompt builder.
     promptFragment: `   For content actions: data: { actionType: "xContentAction", operation: ${CONTENT_X_ACTION_OPERATIONS}, prompt: "", provider: "default" }
    - Every operation acts via the triggering channel's own account — there is no target-account picker.
-   - operation "create-bookmark": bookmarks the triggering content — needs no additional fields; leave prompt/provider at these defaults.
-   - operation "like-post": likes the triggering content — needs no additional fields; leave prompt/provider at these defaults.
-   - operation "repost-post": reposts the triggering content — needs no additional fields; leave prompt/provider at these defaults.
-   - operation "create-post": generates and publishes a new post (prompt = free-text instructions for AI generation, left blank for the user to fill in).`,
+${CONTENT_X_ACTION_BULLETS}`,
   },
   tiktokContentAction: {
     reactFlowType: "action",
     label: "TikTok Action",
     description: "Generate images + caption and send to TikTok as a draft",
     domain: "content",
+    role: "action",
     generatable: true,
     promptFragment: `   For TikTok photo-post actions: data: { actionType: "tiktokContentAction", channelId: "", prompts: {}, textProvider: "default", textSkillId: "none", imageCount: 1, imageProvider: "default", imageSkillId: "none" }
-   - Generates images and a caption from the triggering content and posts as a TikTok draft. Leave all fields at these defaults for the user to configure via the Inspector.`,
+   - ${ContentMetadata_TikTok.find((m) => m.sourceContentType === "photo-post")!.description!.en} Leave all fields at these defaults for the user to configure via the Inspector.`,
   },
   updateContentStatus: {
     reactFlowType: "action",
     label: "Update Content Status",
     description: "Set this content's status",
     domain: "content",
+    role: "action",
     generatable: true,
     promptFragment: `   For status-update actions: data: { actionType: "updateContentStatus", status: "" }
    - status must be set by the user afterward via the Inspector to "published" or "ignored" — leave it blank ("") here. No branching.`,
@@ -160,13 +227,45 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
     label: "Wait",
     description: "Delay for a specified duration",
     domain: "both",
+    role: "condition",
     generatable: true,
     promptFragment: `wait - delay execution
    data: { duration: number, unit: "minutes"|"hours"|"days" }`,
   },
-  timeCondition: { reactFlowType: "timeCondition", label: "Time Condition", description: "Gate by time-of-day / day-of-week", domain: "both", generatable: false },
-  abSplit: { reactFlowType: "abSplit", label: "A/B Split", description: "Split traffic by % or condition", domain: "both", generatable: false },
-  webhook: { reactFlowType: "webhook", label: "Webhook", description: "Send HTTP request", domain: "both", generatable: false },
+  timeCondition: {
+    reactFlowType: "timeCondition",
+    label: "Time Condition",
+    description: "Gate by time-of-day / day-of-week",
+    domain: "both",
+    role: "condition",
+    generatable: true,
+    promptFragment: `timeCondition - gates downstream execution to a time-of-day / day-of-week window, single output (no branching)
+   data: { timeFrom: "09:00", timeTo: "17:00", daysOfWeek: [1,2,3,4,5] }
+   - timeFrom/timeTo are "HH:mm". daysOfWeek is an array of 0(Sun)-6(Sat). Execution continues once inside the window.`,
+  },
+  abSplit: {
+    reactFlowType: "abSplit",
+    label: "A/B Split",
+    description: "Split traffic by % or condition",
+    domain: "both",
+    role: "condition",
+    generatable: true,
+    promptFragment: `abSplit - splits traffic into two branches, has "a"/"b" branches
+   data: { mode: "random"|"condition", percentA: 50, conditions: [{ field: string, operator: "==", value: string }] }
+   - mode "random": percentA% of traffic takes branch "a", the rest takes "b".
+   - mode "condition": a single field=="value" check in conditions[0] decides "a" (match) vs "b" (no match).`,
+  },
+  webhook: {
+    reactFlowType: "webhook",
+    label: "Webhook",
+    description: "Send HTTP request",
+    domain: "both",
+    role: "condition",
+    generatable: true,
+    promptFragment: `webhook - sends an HTTP request, has "success"/"failed" branches
+   data: { url: string, method: "GET"|"POST"|"PUT", body: "" }
+   - body supports $user.x / $event.x interpolation; if left blank, defaults to a JSON object of the triggering payload.`,
+  },
 };
 
 export function generatableKeysForDomain(domain: FlowDomain): string[] {
@@ -180,8 +279,8 @@ export function generatableKeysForDomain(domain: FlowDomain): string[] {
 // promptFragment composition order) so user-flow and content-flow Sidebars can each be reordered
 // independently without touching the other, or the registry's identity data.
 export const USER_FLOW_SIDEBAR_ORDER: string[] = [
-  "xTrigger", "cronTrigger", "xAction", "changeUserProps", "webhook", "waitForEvent", "userPropsCondition", 
-   "wait", "timeCondition", "abSplit", 
+  "xTrigger", "cronTrigger", "xAction", "addToList", "changeUserProps", "webhook", "waitForEvent", "userPropsCondition",
+  "wait", "timeCondition", "abSplit",
 ];
 
 export const CONTENT_FLOW_SIDEBAR_ORDER: string[] = [

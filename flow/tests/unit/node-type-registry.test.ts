@@ -7,6 +7,7 @@ import {
   CONTENT_X_TRIGGER_MODE_LIST_POSTS,
 } from "../../nodeTypeRegistry";
 import { ContentMetadata_X } from "../../../metadata/x-byok";
+import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
 import { CHANNEL_TYPES } from "../../frontend/config/trigger-fields";
 
 describe("NODE_TYPE_REGISTRY", () => {
@@ -21,10 +22,27 @@ describe("NODE_TYPE_REGISTRY", () => {
     }
   });
 
-  it("marks the three non-functional node types as not generatable", () => {
-    expect(NODE_TYPE_REGISTRY.timeCondition.generatable).toBe(false);
-    expect(NODE_TYPE_REGISTRY.abSplit.generatable).toBe(false);
-    expect(NODE_TYPE_REGISTRY.webhook.generatable).toBe(false);
+  it("marks every registry entry generatable — timeCondition/abSplit/userPropsCondition/webhook's branches don't resolve at runtime yet, but generation was explicitly turned on anyway (see flow/CLAUDE.md or the commit message for context)", () => {
+    for (const [key, cfg] of Object.entries(NODE_TYPE_REGISTRY)) {
+      expect(cfg.generatable, `expected "${key}" to be generatable`).toBe(true);
+    }
+  });
+
+  it("tags every entry with a role, and role 'action' exactly matches reactFlowType 'action'", () => {
+    for (const [key, cfg] of Object.entries(NODE_TYPE_REGISTRY)) {
+      expect(cfg.role, `missing role for "${key}"`).toBeTruthy();
+    }
+    for (const [key, cfg] of Object.entries(NODE_TYPE_REGISTRY)) {
+      expect(cfg.role === "action", `role/reactFlowType mismatch for "${key}"`).toBe(cfg.reactFlowType === "action");
+    }
+  });
+
+  it("tags exactly the trigger-family entries with role 'trigger'", () => {
+    const triggerKeys = Object.entries(NODE_TYPE_REGISTRY)
+      .filter(([, cfg]) => cfg.role === "trigger")
+      .map(([key]) => key)
+      .sort();
+    expect(triggerKeys).toEqual(["cronTrigger", "xContentTrigger", "xTrigger", "youtubeContentTrigger"].sort());
   });
 
   it("tags the action-family entries with reactFlowType 'action'", () => {
@@ -92,6 +110,31 @@ describe("NODE_TYPE_REGISTRY", () => {
     );
   });
 
+  it("derives xContentAction's per-operation bullets from ContentMetadata_X's description field, not hand-typed prose", () => {
+    const entries = ContentMetadata_X.filter((m) => m.flowType === "action");
+    const fragment = NODE_TYPE_REGISTRY.xContentAction.promptFragment!;
+    for (const m of entries) {
+      expect(m.description, `"${m.sourceContentType}" is missing a description — xContentAction's bullet generator needs it`).toBeTruthy();
+      expect(fragment, `missing bullet for "${m.sourceContentType}"`).toContain(`operation "${m.sourceContentType}": ${m.description!.en}`);
+    }
+  });
+
+  it("gives operations with an aiType prop the AI-generation guidance suffix, others the no-additional-fields suffix", () => {
+    const fragment = NODE_TYPE_REGISTRY.xContentAction.promptFragment!;
+    const createPost = ContentMetadata_X.find((m) => m.sourceContentType === "create-post")!;
+    expect(createPost.contentProps.some((p) => p.aiType)).toBe(true);
+    expect(fragment).toContain('operation "create-post": Publish a new post via the triggering channel — prompt = free-text instructions for AI generation, left blank for the user to fill in.');
+    const bookmark = ContentMetadata_X.find((m) => m.sourceContentType === "create-bookmark")!;
+    expect(bookmark.contentProps.some((p) => p.aiType)).toBe(false);
+    expect(fragment).toContain('operation "create-bookmark": Bookmarks via the triggering channel — needs no additional fields; leave prompt/provider at these defaults.');
+  });
+
+  it("derives tiktokContentAction's description from ContentMetadata_TikTok's photo-post entry, not hand-typed prose", () => {
+    const photoPost = ContentMetadata_TikTok.find((m) => m.sourceContentType === "photo-post")!;
+    expect(photoPost.description).toBeTruthy();
+    expect(NODE_TYPE_REGISTRY.tiktokContentAction.promptFragment).toContain(photoPost.description!.en);
+  });
+
   it("derives xContentTrigger's mode enum from ContentMetadata_X's flowType:\"trigger\" sourceContentType values, not a hand-typed my_posts/list_posts enum", () => {
     const modes = ContentMetadata_X.filter((m) => m.flowType === "trigger").map((m) => m.sourceContentType);
     expect(modes).toEqual(["get-list-posts"]); // own:get-posts is poll-only (no flowType: "trigger")
@@ -132,15 +175,21 @@ describe("USER_FLOW_SIDEBAR_ORDER / CONTENT_FLOW_SIDEBAR_ORDER", () => {
 });
 
 describe("generatableKeysForDomain", () => {
-  it("user domain: exactly the 5 types/actionTypes the generate prompt documents today", () => {
+  it("user domain: every domain:'user'/'both' type/actionType, now that all of them are generatable", () => {
     expect(generatableKeysForDomain("user").sort()).toEqual(
-      ["addToList", "wait", "waitForEvent", "xAction", "xTrigger"].sort()
+      [
+        "xTrigger", "cronTrigger", "waitForEvent", "userPropsCondition", "changeUserProps",
+        "xAction", "addToList", "wait", "timeCondition", "abSplit", "webhook",
+      ].sort()
     );
   });
 
-  it("content domain: exactly the 6 real, functional content types", () => {
+  it("content domain: every domain:'content'/'both' type/actionType, now that all of them are generatable", () => {
     expect(generatableKeysForDomain("content").sort()).toEqual(
-      ["tiktokContentAction", "updateContentStatus", "wait", "xContentAction", "xContentTrigger", "youtubeContentTrigger"].sort()
+      [
+        "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "updateContentStatus",
+        "wait", "timeCondition", "abSplit", "webhook",
+      ].sort()
     );
   });
 });

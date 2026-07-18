@@ -237,8 +237,12 @@ export const PROPS = definePropDefinitions([
   {
     propId: "has_face",
     isInsight: true,
-    dataType: "INT",
+    dataType: "ENUM_INT",
     entity: ["content"],
     label: { en: "Has Face", zh: "含人脸" },
+    enums: [
+      { value: 0, label: { en: "No face", zh: "无人脸" } },
+      { value: 1, label: { en: "Has face", zh: "含人脸" } },
+    ],
   },
 ]);

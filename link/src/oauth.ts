@@ -1,11 +1,12 @@
 import { Hono, type Context } from "hono";
 import { getCookie } from "hono/cookie";
-import { Twitter, generateState, generateCodeVerifier } from "arctic";
+import { Twitter, Google, generateState, generateCodeVerifier, decodeIdToken } from "arctic";
 import type { Env, Session } from "./types";
 import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { pollChannelOnce } from "./services/pollers/poll-channel";
+import { syncYouTubeSubscriptions } from "./services/youtube-account";
 import { getActiveSubscriptionTier } from "../../shared/credit-service";
 import { canUseFeature } from "../../shared/plans";
 
@@ -376,6 +377,102 @@ export function oauthRoutes() {
     } catch (e) {
       console.error("TikTok instant poll failed:", e);
     }
+
+    return c.redirect(url.origin, 302);
+  });
+
+  // YouTube OAuth connect — reuses the same Google Cloud OAuth client already registered
+  // for "Sign in with Google" in the web module (GOOGLE_CLIENT_ID/SECRET), not a new one.
+  router.get("/youtube/connect", async (c) => {
+    const session = await resolveSession(c);
+    const tenantId = session ? String(session.tenant_id) : null;
+    const memberId = session?.member_id || null;
+
+    const url = new URL(c.req.url);
+    const google = new Google(c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, `${url.origin}/api/auth/youtube/callback`);
+    const state = generateState();
+    const codeVerifier = generateCodeVerifier();
+    const oauthUrl = google.createAuthorizationURL(state, codeVerifier, [
+      "openid",
+      "email",
+      "https://www.googleapis.com/auth/youtube.readonly",
+    ]);
+
+    await c.env.KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier, tenantId, memberId }), { expirationTtl: 300 });
+    return c.redirect(oauthUrl.toString(), 302);
+  });
+
+  // YouTube OAuth callback
+  router.get("/youtube/callback", async (c) => {
+    const url = new URL(c.req.url);
+    const code = c.req.query("code");
+    const state = c.req.query("state");
+    if (!code || !state) return c.json({ error: "Missing code or state" }, 400);
+
+    const stored = await c.env.KV.get(`oauth_state:${state}`);
+    if (!stored) return c.json({ error: "Invalid or expired state" }, 400);
+    await c.env.KV.delete(`oauth_state:${state}`);
+    const { codeVerifier, tenantId, memberId } = JSON.parse(stored) as {
+      codeVerifier: string; tenantId?: string; memberId?: string;
+    };
+    if (!tenantId || !memberId) return c.json({ error: "Must be logged in to connect YouTube" }, 401);
+
+    const google = new Google(c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, `${url.origin}/api/auth/youtube/callback`);
+    let tokens;
+    try {
+      tokens = await google.validateAuthorizationCode(code, codeVerifier);
+    } catch (e) {
+      console.error(JSON.stringify({ event: "youtube_oauth_token_exchange_failed", error: String(e) }));
+      return c.json({ error: `Token exchange failed: ${e instanceof Error ? e.message : String(e)}` }, 400);
+    }
+
+    const claims = decodeIdToken(tokens.idToken()) as { sub: string; email: string };
+    const googleUserId = claims.sub;
+    const email = claims.email;
+
+    let expiresAt: string;
+    try {
+      expiresAt = new Date(Date.now() + tokens.accessTokenExpiresInSeconds() * 1000).toISOString();
+    } catch {
+      expiresAt = new Date(Date.now() + 3600 * 1000).toISOString();
+    }
+
+    const sourceChannelId = `${tenantId}:${googleUserId}`;
+    const config = {
+      google_user_id: googleUserId,
+      email,
+      access_token: tokens.accessToken(),
+      expires_at: expiresAt,
+      subscriptions: [] as unknown[],
+      sync_status: "pending" as const,
+      last_synced_at: null as string | null,
+    };
+    const now = new Date().toISOString();
+
+    const existing = await c.env.LINK_DB
+      .prepare("SELECT id FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id = ? AND is_active = 1")
+      .bind(sourceChannelId)
+      .first<{ id: string }>();
+
+    let channelId: string;
+    if (existing) {
+      channelId = existing.id;
+      await c.env.LINK_DB
+        .prepare("UPDATE channels SET config = ?, is_active = 1, updated_at = ? WHERE id = ?")
+        .bind(JSON.stringify(config), now, channelId)
+        .run();
+    } else {
+      channelId = crypto.randomUUID();
+      await c.env.LINK_DB
+        .prepare(
+          `INSERT INTO channels (id, channel_type, config, source_channel_id, tenant_id, member_id, created_at, updated_at)
+           VALUES (?, 'YOUTUBE_ACCOUNT', ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(channelId, JSON.stringify(config), sourceChannelId, Number(tenantId), memberId, now, now)
+        .run();
+    }
+
+    c.executionCtx.waitUntil(syncYouTubeSubscriptions(c.env, channelId, tokens.accessToken()));
 
     return c.redirect(url.origin, 302);
   });

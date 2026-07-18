@@ -1,0 +1,41 @@
+import type { TenantDataDB } from "../../../../shared/tenant-data-db";
+import type { Pipeline } from "../../types";
+import { ContentService } from "../content";
+import { fetchVideoDetails, parseISO8601Duration } from "../youtube-api";
+import { detectFace } from "../youtube-vision";
+import { resolveProps } from "./resolve-props";
+import { ContentMetadata_YouTube } from "../../../../metadata/youtube";
+
+const YOUTUBE_METADATA = ContentMetadata_YouTube.find((m) => m.sourceContentType === "watch:get-videos")!;
+
+export interface YouTubeIngestContext {
+  channelId: string;
+  tenantDb: TenantDataDB;
+  tenantId: number;
+  ai: Ai;
+  vectorize: VectorizeIndex;
+  apiKey: string;
+  pipelineContent?: Pipeline;
+  flowQueue?: Queue;
+}
+
+export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: string): Promise<void> {
+  const item = await fetchVideoDetails(ctx.apiKey, videoId);
+  if (!item) {
+    console.log(JSON.stringify({ event: "youtube_video_fetch_empty", channel_id: ctx.channelId, video_id: videoId }));
+    return;
+  }
+
+  const props = resolveProps(item, YOUTUBE_METADATA.contentProps, YOUTUBE_METADATA.linkPrefix);
+
+  const contentDetails = item.contentDetails as Record<string, unknown> | undefined;
+  const durationIso = contentDetails?.duration as string | undefined;
+  props.duration = durationIso ? parseISO8601Duration(durationIso) : 0;
+
+  const thumbnailUrl = props.cover_image_url as string | undefined;
+  props.has_face = thumbnailUrl ? await detectFace(ctx.ai, thumbnailUrl) : 1;
+
+  const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue);
+  const isNew = await contentService.upsertContentFromMetadata(item, props, ctx.channelId, "YOUTUBE", true);
+  console.log(JSON.stringify({ event: "youtube_video_ingested", channel_id: ctx.channelId, video_id: videoId, isNew }));
+}

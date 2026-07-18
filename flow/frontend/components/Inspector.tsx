@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useFlowEditor, ACTION_CHANNEL_TYPE } from "../store/flow-editor";
-import { CHANNEL_TYPES, CONTENT_TRIGGER_FIELDS, type TriggerFieldDefinition } from "../config/trigger-fields";
+import { CHANNEL_TYPES, getContentTriggerFields, type TriggerFieldDefinition } from "../config/trigger-fields";
 import { SelectPropsValue } from "../../../shared/frontend/components/SelectPropsValue";
 import { api } from "../lib/api";
 import { Button } from "../../../shared/frontend/ui/button";
@@ -13,6 +13,8 @@ import { PROPS } from "../../../metadata/props";
 import { t as localizeLabel } from "../../../metadata/locale";
 import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
 import { NODE_TYPE_REGISTRY, CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../../nodeTypeRegistry";
+import { EventMetadata_X } from "../../../metadata/x";
+import { OperationSelect } from "./OperationSelect";
 
 type SelectChange = React.ChangeEvent<HTMLSelectElement>;
 type InputChange = React.ChangeEvent<HTMLInputElement>;
@@ -301,7 +303,7 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
 
         <ConditionsEditor
           conditions={conditions}
-          fields={CONTENT_TRIGGER_FIELDS}
+          fields={getContentTriggerFields(data.mode || CONTENT_X_TRIGGER_MODE_LIST_POSTS)}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
         />
       </div>
@@ -467,6 +469,8 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
   return <p className="text-sm text-muted-foreground">Unknown action type</p>;
 }
 
+const X_ACTION_OPERATIONS = EventMetadata_X.filter((m) => m.flowType === "action");
+
 function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
   const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
@@ -492,17 +496,12 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
       <div className="space-y-3">
         <div>
           <Label className="text-xs block mb-1">Action</Label>
-          <Select
+          <OperationSelect
             value={data.xEvent || ""}
-            onChange={(e: SelectChange) => updateNodeData(nodeId, { xEvent: e.target.value, messageText: "" })}
-            className="w-full text-sm"
-          >
-            <option value="">Select action...</option>
-            <option value="follow-user">Follow User</option>
-            <option value="unfollow-user">Unfollow User</option>
-            <option value="create-dm">Direct Message</option>
-            <option value="mute-user">Mute User</option>
-          </Select>
+            onChange={(v) => updateNodeData(nodeId, { xEvent: v, messageText: "" })}
+            options={X_ACTION_OPERATIONS.map((op) => ({ value: op.eventType, label: localizeLabel(op.label, "en"), price: op.price }))}
+            placeholder="Select action..."
+          />
         </div>
         {data.xEvent === "create-dm" && (
           <div>
@@ -573,17 +572,15 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
       <div className="space-y-3">
         <div>
           <Label className="text-xs block mb-1">Operation</Label>
-          <Select
+          <OperationSelect
             value={data.operation || "create-post"}
-            onChange={(e: SelectChange) => updateNodeData(nodeId, { operation: e.target.value })}
-            className="w-full text-sm"
-          >
-            {CONTENT_ACTION_OPERATIONS.map((op) => (
-              <option key={op.sourceContentType} value={op.sourceContentType}>
-                {op.label ? localizeLabel(op.label, "en") : op.sourceContentType}
-              </option>
-            ))}
-          </Select>
+            onChange={(v) => updateNodeData(nodeId, { operation: v })}
+            options={CONTENT_ACTION_OPERATIONS.map((op) => ({
+              value: op.sourceContentType,
+              label: op.label ? localizeLabel(op.label, "en") : op.sourceContentType,
+              price: op.price,
+            }))}
+          />
         </div>
         {aiProp && (
           <>

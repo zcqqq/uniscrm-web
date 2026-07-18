@@ -169,11 +169,11 @@ export function generatableKeysForDomain(domain: FlowDomain): string[] {
 // promptFragment composition order) so user-flow and content-flow Sidebars can each be reordered
 // independently without touching the other, or the registry's identity data.
 export const USER_FLOW_SIDEBAR_ORDER: string[] = [
-  "xTrigger", "cronTrigger", "waitForEvent", "userPropsCondition", "changeUserProps",
-  "xAction", "addToList", "wait", "timeCondition", "abSplit", "webhook",
+  "xTrigger", "cronTrigger", "xAction", "changeUserProps", "webhook", "waitForEvent", "userPropsCondition", 
+   "wait", "timeCondition", "abSplit", 
 ];
 
 export const CONTENT_FLOW_SIDEBAR_ORDER: string[] = [
-  "xContentTrigger", "xContentAction", "tiktokContentAction", "updateContentStatus",
-  "wait", "timeCondition", "abSplit", "webhook",
+  "xContentTrigger", "xContentAction", "tiktokContentAction", "webhook",
+  "wait", "timeCondition", "abSplit", 
 ];

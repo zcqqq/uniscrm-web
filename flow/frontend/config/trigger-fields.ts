@@ -1,5 +1,6 @@
 import { EventMetadata_X, PROPS, t } from "../../../metadata";
 import type { Locale } from "../../../metadata";
+import { ContentMetadata_X } from "../../../metadata/x-byok";
 
 export interface TriggerFieldDefinition {
   id: string;
@@ -7,7 +8,7 @@ export interface TriggerFieldDefinition {
   dataType: "number" | "string" | "enum";
   operators: string[];
   enums?: { value: string; label: string }[];
-  group: "event" | "user";
+  group: "event" | "user" | "content";
 }
 
 export interface EventDefinition {
@@ -30,7 +31,7 @@ const NUMBER_OPS = [">", "<", ">=", "<=", "=="];
 const STRING_OPS = ["==", "!=", "contains"];
 const ENUM_OPS = ["==", "!="];
 
-function propToField(propId: string, locale: Locale, group: "event" | "user"): TriggerFieldDefinition | null {
+function propToField(propId: string, locale: Locale, group: "event" | "user" | "content"): TriggerFieldDefinition | null {
   const prop = PROPS.find((p) => p.propId === propId);
   if (!prop) return null;
 
@@ -105,11 +106,16 @@ export function getEventDefinition(eventType: string, locale: Locale = "en"): Ev
   return undefined;
 }
 
-export function getContentTriggerFields(locale: Locale = "en"): TriggerFieldDefinition[] {
-  return PROPS
-    .filter((p) => p.entity?.includes("content"))
-    .map((p) => propToField(p.propId, locale, "event"))
+/**
+ * Fields offered by a content trigger's condition editor, scoped to the trigger's own
+ * `mode` (e.g. own:get-posts vs get-list-posts) via ContentMetadata_X's per-mode
+ * `contentProps` — rather than a generic entity:"content" filter across all platforms,
+ * which previously leaked TikTok-only fields (duration, width, height, ...) into X triggers.
+ */
+export function getContentTriggerFields(mode: string, locale: Locale = "en"): TriggerFieldDefinition[] {
+  const meta = ContentMetadata_X.find((m) => m.sourceContentType === mode);
+  if (!meta) return [];
+  return meta.contentProps
+    .map((p) => propToField(p.propId, locale, "content"))
     .filter(Boolean) as TriggerFieldDefinition[];
 }
-
-export const CONTENT_TRIGGER_FIELDS: TriggerFieldDefinition[] = getContentTriggerFields("en");

@@ -10,6 +10,10 @@ export function microsToDollars(micros: number): number {
   return micros / MICROS_PER_DOLLAR;
 }
 
+export function formatUsd(dollars: number): string {
+  return `$${dollars.toFixed(3)}`;
+}
+
 function daysInMonth(year: number, month: number): number {
   // month is 0-indexed (JS Date convention)
   return new Date(Date.UTC(year, month + 1, 0)).getUTCDate();

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getCreditPeriod, dollarsToMicros, microsToDollars } from "../../../shared/credit";
+import { getCreditPeriod, dollarsToMicros, microsToDollars, formatUsd } from "../../../shared/credit";
 
 describe("credit period anniversary logic", () => {
   it("keeps the anchor day when every month is long enough", () => {
@@ -48,5 +48,14 @@ describe("dollar/micros conversion", () => {
 
   it("round-trips without floating point drift", () => {
     expect(microsToDollars(dollarsToMicros(0.015))).toBeCloseTo(0.015, 6);
+  });
+});
+
+describe("formatUsd", () => {
+  it("formats a dollar amount to 3 decimal places with a $ prefix", () => {
+    expect(formatUsd(0.015)).toBe("$0.015");
+    expect(formatUsd(0.01)).toBe("$0.010");
+    expect(formatUsd(0.001)).toBe("$0.001");
+    expect(formatUsd(5)).toBe("$5.000");
   });
 });

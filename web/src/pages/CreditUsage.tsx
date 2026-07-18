@@ -6,13 +6,14 @@ import { PageHeader } from "../../../shared/frontend/components/PageHeader";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
 import { EventMetadata_X } from "../../../metadata/x";
+import { formatUsd as formatUsdShared, microsToDollars } from "../../../shared/credit";
 
 function actionLabel(eventType: string): string {
   return EventMetadata_X.find((m) => m.eventType === eventType)?.label.en ?? eventType;
 }
 
 function formatUsd(micros: number): string {
-  return `$${(micros / 1_000_000).toFixed(3)}`;
+  return formatUsdShared(microsToDollars(micros));
 }
 
 export function CreditUsage() {

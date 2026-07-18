@@ -449,30 +449,34 @@ export function oauthRoutes() {
     };
     const now = new Date().toISOString();
 
+    // Atomic upsert on (channel_type, source_channel_id) — the table's unique
+    // index is unconditional (does not exclude inactive rows), so a prior
+    // SELECT-then-branch shape here would violate that index on a plain
+    // reconnect after disconnect (disconnect only flips is_active to 0, it
+    // does not clear source_channel_id). Mirrors the X System App / TikTok
+    // connect paths in this same file.
+    const channelId = crypto.randomUUID();
+    await c.env.LINK_DB
+      .prepare(
+        `INSERT INTO channels (id, channel_type, config, source_channel_id, tenant_id, member_id, created_at, updated_at)
+         VALUES (?, 'YOUTUBE_ACCOUNT', ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(channel_type, source_channel_id) DO UPDATE SET config = excluded.config, is_active = 1, updated_at = excluded.updated_at`
+      )
+      .bind(channelId, JSON.stringify(config), sourceChannelId, Number(tenantId), memberId, now, now)
+      .run();
+
+    // On reconnect, the ON CONFLICT path updates the pre-existing row in place
+    // and keeps its original id — the freshly-generated channelId above is
+    // never actually written to that row. Re-query for the real active row's
+    // id, mirroring the X System App / TikTok connect paths' actualChannelId
+    // pattern above.
     const existing = await c.env.LINK_DB
       .prepare("SELECT id FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id = ? AND is_active = 1")
       .bind(sourceChannelId)
       .first<{ id: string }>();
+    const actualChannelId = existing?.id || channelId;
 
-    let channelId: string;
-    if (existing) {
-      channelId = existing.id;
-      await c.env.LINK_DB
-        .prepare("UPDATE channels SET config = ?, is_active = 1, updated_at = ? WHERE id = ?")
-        .bind(JSON.stringify(config), now, channelId)
-        .run();
-    } else {
-      channelId = crypto.randomUUID();
-      await c.env.LINK_DB
-        .prepare(
-          `INSERT INTO channels (id, channel_type, config, source_channel_id, tenant_id, member_id, created_at, updated_at)
-           VALUES (?, 'YOUTUBE_ACCOUNT', ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(channelId, JSON.stringify(config), sourceChannelId, Number(tenantId), memberId, now, now)
-        .run();
-    }
-
-    c.executionCtx.waitUntil(syncYouTubeSubscriptions(c.env, channelId, tokens.accessToken()));
+    c.executionCtx.waitUntil(syncYouTubeSubscriptions(c.env, actualChannelId, tokens.accessToken()));
 
     return c.redirect(url.origin, 302);
   });

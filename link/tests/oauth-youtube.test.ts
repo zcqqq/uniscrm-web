@@ -95,7 +95,9 @@ describe("GET /youtube/callback", () => {
     decodeIdTokenMock.mockReturnValueOnce({ sub: "google-user-1", email: "tenant@example.com" });
 
     const kv = createMockKv({ codeVerifier: "verifier", tenantId: "1", memberId: "member1" });
-    const linkDb = createMockLinkDb([["channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id", null]]);
+    const linkDb = createMockLinkDb([
+      ["channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id", { id: "row-1" }],
+    ]);
 
     const app = buildApp();
     const { ctx, flush } = createMockExecutionCtx();
@@ -113,9 +115,65 @@ describe("GET /youtube/callback", () => {
     const insertCall = linkDb.calls.find((c) => c.sql.includes("INSERT INTO channels"));
     expect(insertCall).toBeDefined();
     expect(insertCall!.sql).toContain("YOUTUBE_ACCOUNT");
+    expect(insertCall!.sql).toContain("ON CONFLICT(channel_type, source_channel_id) DO UPDATE");
     expect(insertCall!.args).toContain("1:google-user-1");
 
-    expect(syncYouTubeSubscriptionsMock).toHaveBeenCalledWith(expect.anything(), expect.any(String), "access-tok");
+    const selectCall = linkDb.calls.find(
+      (c) => c.sql.startsWith("SELECT id FROM channels") && c.sql.includes("channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id")
+    );
+    expect(selectCall).toBeDefined();
+    expect(selectCall!.args).toContain("1:google-user-1");
+
+    // The follow-up SELECT resolves the real row id (post-upsert), and that's
+    // what gets passed to the sync — not the pre-generated (possibly discarded)
+    // channelId from the INSERT.
+    expect(syncYouTubeSubscriptionsMock).toHaveBeenCalledWith(expect.anything(), "row-1", "access-tok");
+  });
+
+  it("reconnecting after a prior disconnect (inactive row, same source_channel_id) does not throw and still redirects", async () => {
+    // Regression test: disconnect only flips is_active to 0, it does not clear
+    // source_channel_id. The unique index on (channel_type, source_channel_id)
+    // is unconditional, so a plain re-INSERT on reconnect would violate it. The
+    // atomic ON CONFLICT upsert must handle this without an unhandled exception.
+    validateAuthorizationCodeMock.mockResolvedValueOnce({
+      accessToken: () => "access-tok-2",
+      idToken: () => "mock-id-token",
+      accessTokenExpiresInSeconds: () => 3600,
+    });
+    decodeIdTokenMock.mockReturnValueOnce({ sub: "google-user-1", email: "tenant@example.com" });
+
+    const kv = createMockKv({ codeVerifier: "verifier", tenantId: "1", memberId: "member1" });
+    // The follow-up SELECT (after the upsert) finds the pre-existing row,
+    // now reactivated by the ON CONFLICT DO UPDATE (is_active = 1).
+    const linkDb = createMockLinkDb([
+      ["channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id", { id: "existing-row-id" }],
+    ]);
+
+    const app = buildApp();
+    const { ctx, flush } = createMockExecutionCtx();
+
+    let thrown: unknown = null;
+    let res: Response;
+    try {
+      res = await app.request(
+        "/youtube/callback?code=abc&state=xyz",
+        {},
+        { KV: kv, LINK_DB: linkDb, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any,
+        ctx as any
+      );
+      await flush();
+    } catch (e) {
+      thrown = e;
+      res = undefined as unknown as Response;
+    }
+
+    expect(thrown).toBeNull();
+    expect(res!.status).toBe(302);
+
+    const insertCall = linkDb.calls.find((c) => c.sql.includes("INSERT INTO channels"));
+    expect(insertCall!.sql).toContain("ON CONFLICT(channel_type, source_channel_id) DO UPDATE");
+
+    expect(syncYouTubeSubscriptionsMock).toHaveBeenCalledWith(expect.anything(), "existing-row-id", "access-tok-2");
   });
 
   it("returns 400 when state is missing or expired", async () => {

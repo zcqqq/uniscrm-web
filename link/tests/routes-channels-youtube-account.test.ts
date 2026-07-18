@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { Hono } from "hono";
 import { channelsRoutes } from "../src/routes-channels";
+import * as youtubeAccount from "../src/services/youtube-account";
 
 function buildApp(env: Record<string, unknown>) {
   const app = new Hono();
@@ -76,5 +77,56 @@ describe("GET /api/channels/youtube/subscriptions", () => {
       { channelId: "UC1", channelName: "One", thumbnailUrl: "", already_watching: true },
       { channelId: "UC2", channelName: "Two", thumbnailUrl: "", already_watching: false },
     ]);
+  });
+});
+
+describe("POST /api/channels/youtube/subscriptions/:id/watch", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("looks up the subscription from the cached list and calls findOrCreateWatchedChannel", async () => {
+    const findOrCreateSpy = vi.spyOn(youtubeAccount, "findOrCreateWatchedChannel").mockResolvedValue({
+      channelId: "new-chan", channelName: "One", thumbnailUrl: "https://img/1.jpg",
+    });
+    const linkDb = {
+      prepare: vi.fn().mockReturnValue({
+        bind: vi.fn().mockReturnValue({
+          first: vi.fn().mockResolvedValue({
+            config: JSON.stringify({ subscriptions: [{ channelId: "UC1", channelName: "One", thumbnailUrl: "https://img/1.jpg" }] }),
+          }),
+        }),
+      }),
+    };
+    const { app, env } = buildApp({ LINK_DB: linkDb });
+
+    const res = await app.request("/api/channels/youtube/subscriptions/UC1/watch", { method: "POST" }, env);
+    const body = await res.json() as any;
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ channelId: "new-chan", channelName: "One", thumbnailUrl: "https://img/1.jpg" });
+    expect(findOrCreateSpy).toHaveBeenCalledWith(env, 1, "member1", "UC1", "One", "https://img/1.jpg");
+  });
+
+  it("returns 404 when the channelId is not in the tenant's cached subscription list", async () => {
+    const linkDb = {
+      prepare: vi.fn().mockReturnValue({
+        bind: vi.fn().mockReturnValue({
+          first: vi.fn().mockResolvedValue({ config: JSON.stringify({ subscriptions: [] }) }),
+        }),
+      }),
+    };
+    const { app, env } = buildApp({ LINK_DB: linkDb });
+
+    const res = await app.request("/api/channels/youtube/subscriptions/UCnotmine/watch", { method: "POST" }, env);
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 400 when no YouTube account is connected", async () => {
+    const linkDb = { prepare: vi.fn().mockReturnValue({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(null) }) }) };
+    const { app, env } = buildApp({ LINK_DB: linkDb });
+
+    const res = await app.request("/api/channels/youtube/subscriptions/UC1/watch", { method: "POST" }, env);
+
+    expect(res.status).toBe(400);
   });
 });

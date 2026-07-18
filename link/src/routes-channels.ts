@@ -253,6 +253,50 @@ export function channelsRoutes() {
     return c.json(result);
   });
 
+  router.get("/youtube/status", async (c) => {
+    const tenantId = c.get("tenantId" as never) as number;
+    const row = await c.env.LINK_DB
+      .prepare("SELECT config, created_at FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND tenant_id = ? AND is_active = 1")
+      .bind(tenantId)
+      .first<{ config: string; created_at: string }>();
+    if (!row) return c.json({ connected: false });
+
+    const config = JSON.parse(row.config) as { email?: string; sync_status?: string; subscriptions?: unknown[] };
+    return c.json({
+      connected: true,
+      email: config.email,
+      sync_status: config.sync_status,
+      subscription_count: (config.subscriptions || []).length,
+      created_at: row.created_at,
+    });
+  });
+
+  router.get("/youtube/subscriptions", async (c) => {
+    const tenantId = c.get("tenantId" as never) as number;
+    const accountRow = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND tenant_id = ? AND is_active = 1")
+      .bind(tenantId)
+      .first<{ config: string }>();
+    if (!accountRow) return c.json({ subscriptions: [] });
+
+    const accountConfig = JSON.parse(accountRow.config) as {
+      subscriptions?: { channelId: string; channelName: string; thumbnailUrl: string }[];
+    };
+    const subscriptions = accountConfig.subscriptions || [];
+
+    const watchedRows = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE channel_type = 'YOUTUBE' AND tenant_id = ? AND is_active = 1")
+      .bind(tenantId)
+      .all<{ config: string }>();
+    const watchedIds = new Set(
+      watchedRows.results.map((r) => (JSON.parse(r.config) as { youtube_channel_id?: string }).youtube_channel_id)
+    );
+
+    return c.json({
+      subscriptions: subscriptions.map((s) => ({ ...s, already_watching: watchedIds.has(s.channelId) })),
+    });
+  });
+
   // --- Notion ---
   router.get("/notion/auth", async (c) => {
     const params = new URLSearchParams({

@@ -12,12 +12,14 @@ import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { TikTokTokenService } from "./services/tiktok-token";
 import { pollChannelOnce, pollXListPosts } from "./services/pollers/poll-channel";
+import { subscribeWebSub, unsubscribeWebSub } from "./services/youtube-api";
 
 export async function handleCron(env: Env): Promise<void> {
   await Promise.allSettled([
     handleTrendAggregation(env),
     handleTokenRefresh(env),
     handlePolling(env),
+    handleYouTubeRenewal(env),
   ]);
 }
 
@@ -186,6 +188,55 @@ export async function handlePolling(env: Env): Promise<void> {
       }
     } catch (e) {
       console.error(JSON.stringify({ event: "list_watches_fetch_error", error: String(e) }));
+    }
+  }
+}
+
+const YOUTUBE_RENEWAL_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+async function handleYouTubeRenewal(env: Env): Promise<void> {
+  let referencedIds: Set<string>;
+  try {
+    const res = await fetch(`${env.FLOW_URL}/internal/youtube-watches`, {
+      headers: { "X-Internal-Secret": env.INTERNAL_SECRET },
+    });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const { watches } = (await res.json()) as { watches: { channelId: string }[] };
+    referencedIds = new Set(watches.map((w) => w.channelId));
+  } catch (e) {
+    // Don't touch any subscription if we can't confirm what's still referenced —
+    // an unsubscribe based on stale/missing data would silently kill a live trigger.
+    console.error(JSON.stringify({ event: "youtube_watches_fetch_error", error: String(e) }));
+    return;
+  }
+
+  const rows = await env.LINK_DB
+    .prepare("SELECT id, config FROM channels WHERE channel_type = 'YOUTUBE' AND is_active = 1")
+    .all<{ id: string; config: string }>();
+
+  for (const row of rows.results) {
+    const config = JSON.parse(row.config) as { youtube_channel_id: string; websub_lease_expires_at?: string };
+
+    if (!referencedIds.has(row.id)) {
+      try {
+        await unsubscribeWebSub(`${env.LINK_URL}/youtube/websub/${row.id}`, config.youtube_channel_id);
+      } catch (e) {
+        console.error(JSON.stringify({ event: "youtube_unsubscribe_error", channel_id: row.id, error: String(e) }));
+      }
+      await env.LINK_DB
+        .prepare("UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE id = ?")
+        .bind(row.id)
+        .run();
+      continue;
+    }
+
+    const expiresAt = config.websub_lease_expires_at ? new Date(config.websub_lease_expires_at).getTime() : 0;
+    if (expiresAt - Date.now() > YOUTUBE_RENEWAL_WINDOW_MS) continue;
+
+    try {
+      await subscribeWebSub(`${env.LINK_URL}/youtube/websub/${row.id}`, config.youtube_channel_id);
+    } catch (e) {
+      console.error(JSON.stringify({ event: "youtube_resubscribe_error", channel_id: row.id, error: String(e) }));
     }
   }
 }

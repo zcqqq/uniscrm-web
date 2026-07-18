@@ -78,12 +78,15 @@ describe("YouTube WebSub renewal cron", () => {
     expect(subscribeSpy).not.toHaveBeenCalled();
   });
 
-  it("unsubscribes and deactivates a channel no longer referenced by any published flow", async () => {
+  it("skips renewal for a channel no longer referenced by any published flow, without unsubscribing or deactivating it", async () => {
     const updateBind = vi.fn().mockReturnValue({ run: vi.fn().mockResolvedValue({ success: true }) });
+    // Lease is near expiry — if the "unreferenced" branch fell through to the renewal
+    // logic below it, this would trigger a (re)subscribe call. It must not.
+    const nearExpiry = new Date(Date.now() + 60_000).toISOString();
     const linkDb = {
       prepare: vi.fn((sql: string) => {
         if (sql.includes("FROM channels WHERE channel_type = 'YOUTUBE'")) {
-          return { all: vi.fn().mockResolvedValue({ results: [{ id: "chan1", config: JSON.stringify({ youtube_channel_id: "UCabc" }) }] }) };
+          return { all: vi.fn().mockResolvedValue({ results: [{ id: "chan1", config: JSON.stringify({ youtube_channel_id: "UCabc", websub_lease_expires_at: nearExpiry }) }] }) };
         }
         if (sql.startsWith("UPDATE channels SET is_active")) {
           return { bind: updateBind };
@@ -92,6 +95,7 @@ describe("YouTube WebSub renewal cron", () => {
       }),
     };
     const unsubscribeSpy = vi.spyOn(youtubeApi, "unsubscribeWebSub").mockResolvedValue(undefined);
+    const subscribeSpy = vi.spyOn(youtubeApi, "subscribeWebSub").mockResolvedValue(undefined);
 
     fetchMock.mockImplementation((url: string) => {
       if (url.includes("/internal/youtube-watches")) return jsonResponse({ watches: [] }); // no longer referenced
@@ -101,8 +105,9 @@ describe("YouTube WebSub renewal cron", () => {
 
     await handleCron(baseEnv({ LINK_DB: linkDb }));
 
-    expect(unsubscribeSpy).toHaveBeenCalledWith(expect.stringContaining("/youtube/websub/chan1"), "UCabc");
-    expect(updateBind).toHaveBeenCalledWith("chan1");
+    expect(unsubscribeSpy).not.toHaveBeenCalled();
+    expect(subscribeSpy).not.toHaveBeenCalled();
+    expect(updateBind).not.toHaveBeenCalled();
   });
 
   it("does not touch subscriptions when the watches fetch fails", async () => {

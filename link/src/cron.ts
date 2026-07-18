@@ -12,7 +12,7 @@ import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { TikTokTokenService } from "./services/tiktok-token";
 import { pollChannelOnce, pollXListPosts } from "./services/pollers/poll-channel";
-import { subscribeWebSub, unsubscribeWebSub } from "./services/youtube-api";
+import { subscribeWebSub } from "./services/youtube-api";
 
 export async function handleCron(env: Env): Promise<void> {
   await Promise.allSettled([
@@ -217,16 +217,14 @@ async function handleYouTubeRenewal(env: Env): Promise<void> {
   for (const row of rows.results) {
     const config = JSON.parse(row.config) as { youtube_channel_id: string; websub_lease_expires_at?: string };
 
+    // Not referenced by any published flow yet — skip renewal this cycle rather than
+    // tearing the subscription down. A tenant may still be mid-build on the flow that
+    // will reference this channel (binding happens before publish), and deactivating
+    // here would permanently exclude the row from future runs (the query above only
+    // selects is_active = 1), with no self-heal even after the flow is published.
+    // If it truly stays unreferenced forever, the WebSub lease simply lapses on its
+    // own near its ~10-day expiry.
     if (!referencedIds.has(row.id)) {
-      try {
-        await unsubscribeWebSub(`${env.LINK_URL}/youtube/websub/${row.id}`, config.youtube_channel_id);
-      } catch (e) {
-        console.error(JSON.stringify({ event: "youtube_unsubscribe_error", channel_id: row.id, error: String(e) }));
-      }
-      await env.LINK_DB
-        .prepare("UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE id = ?")
-        .bind(row.id)
-        .run();
       continue;
     }
 

@@ -1,5 +1,6 @@
 import XTriggerNode from "./XTriggerNode";
 import XContentTriggerNode from "./XContentTriggerNode";
+import YouTubeContentTriggerNode from "./YouTubeContentTriggerNode";
 import CronTriggerNode from "./CronTriggerNode";
 import ActionNode from "./ActionNode";
 import WaitNode from "./WaitNode";
@@ -13,6 +14,7 @@ import ChangeUserPropsNode from "./ChangeUserPropsNode";
 export const nodeTypes = {
   xTrigger: XTriggerNode,
   xContentTrigger: XContentTriggerNode,
+  youtubeContentTrigger: YouTubeContentTriggerNode,
   cronTrigger: CronTriggerNode,
   action: ActionNode,
   wait: WaitNode,

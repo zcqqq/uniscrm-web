@@ -59,9 +59,9 @@ export function isValidConnection(source: Node | undefined, target: Node | undef
   if (!source || !target) return false;
   const targetType = target.type;
   const sourceType = source.type;
-  if (targetType === "xTrigger" || targetType === "cronTrigger" || targetType === "xContentTrigger") return false;
+  if (targetType === "xTrigger" || targetType === "cronTrigger" || targetType === "xContentTrigger" || targetType === "youtubeContentTrigger") return false;
   const validTargets = ["action", "wait", "waitForEvent", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps"];
-  const validSources = ["xTrigger", "cronTrigger", "xContentTrigger", "wait", "waitForEvent", "action", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps"];
+  const validSources = ["xTrigger", "cronTrigger", "xContentTrigger", "youtubeContentTrigger", "wait", "waitForEvent", "action", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps"];
   if (validSources.includes(sourceType!) && validTargets.includes(targetType!)) return true;
   return false;
 }
@@ -150,6 +150,9 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
     } else if (type === "xContentTrigger") {
       nodeType = "xContentTrigger";
       data = { channelId: "", mode: CONTENT_X_TRIGGER_MODE_LIST_POSTS, listId: "", listName: "", conditions: [] };
+    } else if (type === "youtubeContentTrigger") {
+      nodeType = "youtubeContentTrigger";
+      data = { channelId: "", channelUrl: "", channelName: "", conditions: [] };
     } else {
       return;
     }

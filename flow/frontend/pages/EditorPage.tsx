@@ -88,10 +88,10 @@ function EditorToolbar() {
         endpoint="/api/flows/generate"
         context={(() => { const { nodes, edges } = useFlowEditor.getState(); return { nodes, edges }; })()}
         extraBody={{
-          domain: (useFlowEditor.getState().nodes.some((n) => n.type === "xContentTrigger") ? "content" : "user") satisfies FlowDomain,
+          domain: (useFlowEditor.getState().nodes.some((n) => n.type === "xContentTrigger" || n.type === "youtubeContentTrigger") ? "content" : "user") satisfies FlowDomain,
         }}
         allowedNodeTypes={generatableKeysForDomain(
-          useFlowEditor.getState().nodes.some((n) => n.type === "xContentTrigger") ? "content" : "user"
+          useFlowEditor.getState().nodes.some((n) => n.type === "xContentTrigger" || n.type === "youtubeContentTrigger") ? "content" : "user"
         )}
         placeholder="Describe your flow..."
         onResult={(graph) => {

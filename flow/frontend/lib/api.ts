@@ -87,6 +87,11 @@ export const api = {
     },
     xLists: (channelId: string) =>
       request<{ lists: { id: string; name: string }[] }>(`/api/channels/${channelId}/x-lists`),
+    youtubeWatch: (channelUrl: string) =>
+      request<{ channelId: string; channelName: string; thumbnailUrl: string }>(`/api/channels/youtube/watch`, {
+        method: "POST",
+        body: JSON.stringify({ channelUrl }),
+      }),
   },
   lists: {
     list: () =>

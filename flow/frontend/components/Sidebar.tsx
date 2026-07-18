@@ -50,7 +50,7 @@ function sortByOrder(items: SectionItem[], order: string[]): React.ReactNode[] {
 
 export default function Sidebar() {
   const nodes = useFlowEditor((s) => s.nodes);
-  const domain: FlowDomain = nodes.some((n) => n.type === "xContentTrigger") ? "content" : "user";
+  const domain: FlowDomain = nodes.some((n) => n.type === "xContentTrigger" || n.type === "youtubeContentTrigger") ? "content" : "user";
   const visible = (nodeTypeKey: string) => {
     const cfg = NODE_TYPE_REGISTRY[nodeTypeKey];
     return !cfg || cfg.domain === "both" || cfg.domain === domain;
@@ -85,6 +85,12 @@ export default function Sidebar() {
     triggerItems.push({
       key: "xContentTrigger",
       el: <DraggableItem key="xContentTrigger" type="xContentTrigger" label={NODE_TYPE_REGISTRY.xContentTrigger.label!} description={NODE_TYPE_REGISTRY.xContentTrigger.description!} color="border-primary/30 bg-primary/5" icon="𝕏" />,
+    });
+  }
+  if (visible("youtubeContentTrigger")) {
+    triggerItems.push({
+      key: "youtubeContentTrigger",
+      el: <DraggableItem key="youtubeContentTrigger" type="youtubeContentTrigger" label={NODE_TYPE_REGISTRY.youtubeContentTrigger.label!} description={NODE_TYPE_REGISTRY.youtubeContentTrigger.description!} color="border-primary/30 bg-primary/5" icon="▶️" />,
     });
   }
 

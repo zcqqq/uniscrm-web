@@ -9,6 +9,7 @@ import { Select } from "../../../shared/frontend/ui/select";
 import { Textarea } from "../../../shared/frontend/ui/textarea";
 import { Label } from "../../../shared/frontend/ui/label";
 import { ContentMetadata_X } from "../../../metadata/x-byok";
+import { ContentMetadata_YouTube } from "../../../metadata/youtube";
 import { PROPS } from "../../../metadata/props";
 import { t as localizeLabel } from "../../../metadata/locale";
 import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
@@ -303,7 +304,62 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
 
         <ConditionsEditor
           conditions={conditions}
-          fields={getContentTriggerFields(data.mode || CONTENT_X_TRIGGER_MODE_LIST_POSTS)}
+          fields={getContentTriggerFields(ContentMetadata_X, data.mode || CONTENT_X_TRIGGER_MODE_LIST_POSTS)}
+          onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+        />
+      </div>
+    </div>
+  );
+}
+
+function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+  const conditions: Condition[] = data.conditions || [];
+  const [urlInput, setUrlInput] = useState((data.channelUrl as string) || "");
+  const [resolving, setResolving] = useState(false);
+  const [error, setError] = useState("");
+
+  const resolveChannel = async () => {
+    if (!urlInput) return;
+    setResolving(true);
+    setError("");
+    try {
+      const res = await api.channels.youtubeWatch(urlInput);
+      updateNodeData(nodeId, { channelId: res.channelId, channelUrl: urlInput, channelName: res.channelName });
+    } catch {
+      setError("Could not resolve this channel URL");
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.youtubeContentTrigger.label}</h4>
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Channel URL</Label>
+          <div className="flex gap-1">
+            <Input
+              type="text"
+              value={urlInput}
+              onChange={(e: InputChange) => setUrlInput(e.target.value)}
+              placeholder="https://www.youtube.com/@handle"
+              className="flex-1 h-8 text-sm"
+            />
+            <Button type="button" size="sm" onClick={resolveChannel} disabled={resolving || !urlInput}>
+              {resolving ? "..." : "Watch"}
+            </Button>
+          </div>
+          {error && <p className="text-xs text-destructive mt-1">{error}</p>}
+          {data.channelName && <p className="text-xs text-muted-foreground mt-1">Watching: {data.channelName}</p>}
+        </div>
+
+        <p className="text-xs text-muted-foreground">Fires when this channel publishes a new video.</p>
+
+        <ConditionsEditor
+          conditions={conditions}
+          fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos")}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
         />
       </div>
@@ -1014,6 +1070,9 @@ export default function Inspector() {
       )}
       {node.type === "xContentTrigger" && (
         <XContentTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />
+      )}
+      {node.type === "youtubeContentTrigger" && (
+        <YouTubeContentTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />
       )}
       {node.type === "cronTrigger" && (
         <CronTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />

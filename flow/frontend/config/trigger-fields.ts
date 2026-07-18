@@ -1,6 +1,6 @@
 import { EventMetadata_X, PROPS, t } from "../../../metadata";
 import type { Locale } from "../../../metadata";
-import { ContentMetadata_X } from "../../../metadata/x-byok";
+import type { ContentMetadata } from "../../../metadata/dataTypes";
 
 export interface TriggerFieldDefinition {
   id: string;
@@ -108,12 +108,20 @@ export function getEventDefinition(eventType: string, locale: Locale = "en"): Ev
 
 /**
  * Fields offered by a content trigger's condition editor, scoped to the trigger's own
- * `mode` (e.g. own:get-posts vs get-list-posts) via ContentMetadata_X's per-mode
- * `contentProps` — rather than a generic entity:"content" filter across all platforms,
- * which previously leaked TikTok-only fields (duration, width, height, ...) into X triggers.
+ * `sourceContentType` (e.g. own:get-posts vs get-list-posts vs watch:get-videos) via the
+ * given platform's ContentMetadata array's per-mode `contentProps` — rather than a generic
+ * entity:"content" filter across all platforms, which previously leaked TikTok-only fields
+ * (duration, width, height, ...) into X triggers.
+ *
+ * Generalized (was `(mode, locale)` scoped to ContentMetadata_X only) so non-X content
+ * triggers (e.g. youtubeContentTrigger) can reuse it against their own ContentMetadata array.
  */
-export function getContentTriggerFields(mode: string, locale: Locale = "en"): TriggerFieldDefinition[] {
-  const meta = ContentMetadata_X.find((m) => m.sourceContentType === mode);
+export function getContentTriggerFields(
+  metadata: ContentMetadata[],
+  sourceContentType: string,
+  locale: Locale = "en"
+): TriggerFieldDefinition[] {
+  const meta = metadata.find((m) => m.sourceContentType === sourceContentType);
   if (!meta) return [];
   return meta.contentProps
     .map((p) => propToField(p.propId, locale, "content"))

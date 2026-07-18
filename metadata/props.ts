@@ -234,4 +234,11 @@ export const PROPS = definePropDefinitions([
     entity: ["content"],
     label: { en: "Shares", zh: "分享数" },
   },
+  {
+    propId: "has_face",
+    isInsight: true,
+    dataType: "INT",
+    entity: ["content"],
+    label: { en: "Has Face", zh: "含人脸" },
+  },
 ]);

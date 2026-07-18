@@ -44,6 +44,9 @@ export interface Env {
   TIKTOK_CLIENT_SECRET: string;
   TIKTOK_COOKIE: string;
 
+  // YouTube (system-shared, no OAuth — public Data API reads only)
+  YOUTUBE_API_KEY: string;
+
   // Notion
   NOTION_CLIENT_ID: string;
   NOTION_CLIENT_SECRET: string;
@@ -66,7 +69,7 @@ export interface Session {
 }
 
 // Content types
-export type ChannelType = "LOCAL" | "NOTION" | "TIKTOK" | "X";
+export type ChannelType = "LOCAL" | "NOTION" | "TIKTOK" | "X" | "YOUTUBE";
 export type ContentStatus = "new" | "pending" | "published" | "ignored";
 
 export interface ContentRow {

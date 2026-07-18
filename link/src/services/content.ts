@@ -27,6 +27,7 @@ const CONTENT_COLUMN_MAP: Record<string, string> = {
   duration: "duration",
   height: "height",
   width: "width",
+  has_face: "has_face",
 };
 const CONTENT_TABLE_COLUMNS = Object.values(CONTENT_COLUMN_MAP);
 

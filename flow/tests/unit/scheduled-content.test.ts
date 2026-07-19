@@ -112,6 +112,66 @@ describe("scheduled(): content_flow_pending sweep", () => {
     ).first<{ content_id: string }>();
     expect(exec).toMatchObject({ content_id: "content-abc" });
   });
+
+  // videoAction nodes are stored as generic `action` nodes with data.actionType ===
+  // "videoAction" (flow/nodeTypeRegistry.ts: videoAction's reactFlowType is "action") — they
+  // only ever have "success"/"failed" branches, never "no". Before this fix, a timed-out
+  // videoAction pending row (awaiting_event="video_action_complete", past its execute_at because
+  // content's queue consumer never called back into /internal/video-action/resume) hit the
+  // sweep's hardcoded `row.awaiting_event ? "no" : undefined`, which resolved a nonexistent "no"
+  // edge and silently did nothing — the flow would hang forever instead of failing over.
+  const graphWithVideoActionBranches = JSON.stringify({
+    nodes: [
+      { id: "t1", type: "xContentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+      { id: "a1", type: "action", data: { actionType: "videoAction", targetLanguage: "zh" }, position: { x: 200, y: 0 } },
+      { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 0 } },
+      { id: "a3", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 100 } },
+    ],
+    edges: [
+      { id: "e1", source: "t1", target: "a1" },
+      { id: "e2", source: "a1", target: "a2", sourceHandle: "success" },
+      { id: "e3", source: "a1", target: "a3", sourceHandle: "failed" },
+    ],
+  });
+
+  it("a timed-out videoAction pending row resumes the 'failed' branch, not 'no'", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-c2', 1, 'video action timeout flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithVideoActionBranches).run();
+
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event)
+       VALUES ('pend-vaction-timeout-1', 'flow-c2', 'a1', 'content-vaction-1', 1, '{}', ?, datetime('now'), 'video_action_complete')`
+    ).bind(past).run();
+
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+
+    await worker.scheduled({} as any, testEnv as any);
+
+    const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE id = 'pend-vaction-timeout-1'`).first();
+    expect(remaining).toBeNull();
+
+    // The "failed" branch (a3) must have been reached — not a silent no-op, which is what
+    // resolving the old hardcoded "no" branch (a nonexistent edge on this node) would produce.
+    // Note: this generic sweep path emits result.nodeLogs unsliced (unlike the dedicated
+    // resume route and the xContentAction retry-exhausted path, which both slice off index 0
+    // to avoid a duplicate exit log) — nodeLogs[0] here is a duplicate exit for a1 (whose
+    // enter+exit were already logged at initial dispatch, before the async videoAction queue
+    // hand-off). That's a pre-existing minor log-duplication quirk of the general timeout path,
+    // out of this task's scope (which is limited to the branch-resolution fix); only the
+    // "failed"-branch resolution below (a3, not a hang) is what this test asserts on.
+    expect(pipelineSend).toHaveBeenCalledTimes(1);
+    const [records] = pipelineSend.mock.calls[0];
+    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:exit", "a3:enter", "a3:exit"]);
+
+    const exec = await env.FLOW_DB.prepare(
+      `SELECT content_id FROM content_flow_executions WHERE flow_id = 'flow-c2' AND content_id = 'content-vaction-1'`
+    ).first<{ content_id: string }>();
+    expect(exec).toMatchObject({ content_id: "content-vaction-1" });
+  });
 });
 
 describe("scheduled(): content_flow_pending retry_action handling", () => {

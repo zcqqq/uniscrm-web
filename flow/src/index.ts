@@ -801,6 +801,57 @@ app.post("/internal/trigger", async (c) => {
   return c.json({ triggered: results.length, results });
 });
 
+// Internal: resolves the "success"/"failed" branch of a videoAction node once content's
+// video-action queue consumer finishes processing (transcribe/translate/burn-in), or reports
+// a failure at any stage. See content/src/queue-video-action.ts's resumeFlow(), and the
+// content_flow_pending row inserted at this file's videoAction dispatch (awaiting_event:
+// "video_action_complete"). The periodic sweep below is the backstop if this callback never
+// arrives (queue consumer crash, dropped fetch, etc.) within the row's execute_at timeout.
+app.post("/internal/video-action/resume", async (c) => {
+  const secret = c.req.header("X-Internal-Secret");
+  if (secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
+
+  const { pendingId, branch, props } = await c.req.json<{
+    pendingId: string; branch: "success" | "failed"; props?: Record<string, unknown>;
+  }>();
+
+  // SELECT before DELETE: the row's fields are needed after the claim, and the claim itself
+  // (the DELETE) is what guards against a race with the sweep also resolving this same row on
+  // timeout — see the content_flow_pending sweep's identical claim pattern in scheduled().
+  const row = await c.env.FLOW_DB.prepare(
+    `SELECT flow_id, node_id, content_id, tenant_id, payload FROM content_flow_pending WHERE id = ?`
+  ).bind(pendingId).first<{ flow_id: string; node_id: string; content_id: string; tenant_id: number; payload: string }>();
+  if (!row) return c.json({ ok: true, alreadyResolved: true });
+
+  const claim = await c.env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE id = ?`).bind(pendingId).run();
+  if (!claim.meta.changes) return c.json({ ok: true, alreadyResolved: true });
+
+  const flow = await c.env.FLOW_DB.prepare(`SELECT graph_json, status FROM flows WHERE id = ?`)
+    .bind(row.flow_id).first<{ graph_json: string; status: string }>();
+  if (!flow || flow.status !== "published") return c.json({ ok: true });
+
+  const graph: FlowGraph = JSON.parse(flow.graph_json);
+  const payload = { ...JSON.parse(row.payload), ...(props || {}) };
+  const resumed = resumeFromNode(graph, row.node_id, payload, branch);
+  if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), row.flow_id, row.content_id, String(row.tenant_id), c.env);
+  if (resumed.actions.length > 0) {
+    await executeContentActions(graph, resumed.actions, row.content_id, String(payload.channel_id ?? ""), String(row.tenant_id), c.env, payload, row.flow_id);
+    await c.env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+       VALUES (?, ?, ?, ?, 1, ?)`
+    ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, new Date().toISOString()).run();
+  }
+  for (const wait of resumed.pendingWaits) {
+    const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
+    await c.env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(crypto.randomUUID(), row.flow_id, wait.nodeId, row.content_id, row.tenant_id, JSON.stringify(payload), executeAt, new Date().toISOString(), wait.awaitingEvent || "").run();
+  }
+
+  return c.json({ ok: true });
+});
+
 // Internal: which (channel, list) pairs any published flow's xContentTrigger List Posts
 // node currently wants polled. link's cron pulls this before each polling cycle — flow's
 // graph_json is the sole source of truth, nothing is persisted on link's side for this.
@@ -1273,7 +1324,12 @@ export default {
     }
 
     if (!url.pathname.startsWith("/api") && env.ASSETS) {
-      const assetRes = await env.ASSETS.fetch(request);
+      // Clone before probing ASSETS: Fetcher.fetch() locks/consumes the Request body it's
+      // given (confirmed empirically — reproduces in vitest-pool-workers' workerd, so this is
+      // real production behavior too), which would otherwise leave nothing for app.fetch()
+      // below to read on a POST body once ASSETS 404s (e.g. /internal/* routes, none of which
+      // are static assets). The clone's body is what gets locked; `request` itself stays intact.
+      const assetRes = await env.ASSETS.fetch(request.clone());
       if (assetRes.status !== 404) return assetRes;
     }
 
@@ -1616,7 +1672,15 @@ export default {
 
         const graph: FlowGraph = JSON.parse(flow.graph_json);
         const payload = JSON.parse(row.payload);
-        const branch = row.awaiting_event ? "no" : undefined;
+        // A videoAction node has no "no" branch (only "success"/"failed") — if its
+        // content_flow_pending row times out (queue consumer never called back into
+        // /internal/video-action/resume), resolving the old hardcoded "no" branch silently
+        // no-ops (no edge matches sourceHandle "no"). Node.type is generically "action" for
+        // videoAction nodes (see flow/nodeTypeRegistry.ts: videoAction's reactFlowType is
+        // "action"); the specific action identity lives in data.actionType.
+        const timedOutNode = graph.nodes.find((n) => n.id === row.node_id);
+        const isTimedOutVideoAction = timedOutNode?.type === "action" && timedOutNode?.data?.actionType === "videoAction";
+        const branch = isTimedOutVideoAction ? "failed" : (row.awaiting_event ? "no" : undefined);
         const result = resumeFromNode(graph, row.node_id, payload, branch);
         if (result.nodeLogs.length > 0) await emitContentNodeLogs(result.nodeLogs, row.flow_id, row.content_id, row.tenant_id, env);
 

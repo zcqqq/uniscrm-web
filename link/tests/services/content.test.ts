@@ -516,6 +516,15 @@ describe("ContentService.recordTriggerContentSeen", () => {
     expect(tenantDb.run).toHaveBeenCalledTimes(1);
     expect(pipelineContent.send).not.toHaveBeenCalled();
   });
+
+  it("throws for an empty sourceContentId", async () => {
+    const tenantDb = createMockTenantDb();
+    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42);
+
+    await expect(service.recordTriggerContentSeen("chan1", "listA", "")).rejects.toThrow(
+      "recordTriggerContentSeen: missing source_content_id"
+    );
+  });
 });
 
 describe("ContentService.emitContentTriggerEvent", () => {

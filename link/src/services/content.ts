@@ -275,6 +275,7 @@ export class ContentService {
     secondaryId: string,
     sourceContentId: string
   ): Promise<boolean> {
+    if (!sourceContentId) throw new Error("recordTriggerContentSeen: missing source_content_id");
     const now = new Date().toISOString();
     const result = await this.tenantDb.run(
       `INSERT OR IGNORE INTO content_trigger_dedup (channel_id, secondary_id, source_content_id, tenant_id, seen_at) VALUES (?, ?, ?, ?, ?)`,

@@ -14,22 +14,31 @@ function extractVideoIds(atomXml: string): string[] {
 export function youtubeWebhookRoutes() {
   const router = new Hono<{ Bindings: Env }>();
 
-  // WebSub verification handshake: echo hub.challenge back, and persist the granted
-  // lease so the renewal cron (Task 8) knows when to re-subscribe.
-  router.get("/websub/:channelId", async (c) => {
+  // WebSub verification handshake: echo hub.challenge back, and upsert the granted lease
+  // into youtube_websub_leases (keyed on the account + subscribed-channel pair, not a
+  // channels-table row) so the renewal cron knows when to re-subscribe.
+  router.get("/websub/:accountChannelId/:youtubeChannelId", async (c) => {
     const challenge = c.req.query("hub.challenge");
     if (!challenge) return c.text("Missing hub.challenge", 400);
 
-    const channelId = c.req.param("channelId");
+    const accountChannelId = c.req.param("accountChannelId");
+    const youtubeChannelId = c.req.param("youtubeChannelId");
     const leaseSeconds = c.req.query("hub.lease_seconds");
     if (leaseSeconds) {
-      const row = await c.env.LINK_DB.prepare("SELECT config FROM channels WHERE id = ?").bind(channelId).first<{ config: string }>();
-      if (row) {
-        const config = JSON.parse(row.config) as Record<string, unknown>;
-        config.websub_lease_expires_at = new Date(Date.now() + parseInt(leaseSeconds, 10) * 1000).toISOString();
+      const accountRow = await c.env.LINK_DB
+        .prepare("SELECT tenant_id FROM channels WHERE id = ? AND channel_type = 'YOUTUBE_ACCOUNT' AND is_active = 1")
+        .bind(accountChannelId)
+        .first<{ tenant_id: number }>();
+      if (accountRow) {
+        const leaseExpiresAt = new Date(Date.now() + parseInt(leaseSeconds, 10) * 1000).toISOString();
         await c.env.LINK_DB
-          .prepare("UPDATE channels SET config = ?, updated_at = datetime('now') WHERE id = ?")
-          .bind(JSON.stringify(config), channelId)
+          .prepare(
+            `INSERT INTO youtube_websub_leases (id, tenant_id, account_channel_id, youtube_channel_id, lease_expires_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+             ON CONFLICT(account_channel_id, youtube_channel_id) DO UPDATE SET
+               lease_expires_at = excluded.lease_expires_at, updated_at = datetime('now')`
+          )
+          .bind(crypto.randomUUID(), accountRow.tenant_id, accountChannelId, youtubeChannelId, leaseExpiresAt)
           .run();
       }
     }
@@ -37,18 +46,24 @@ export function youtubeWebhookRoutes() {
     return c.text(challenge);
   });
 
-  router.post("/websub/:channelId", async (c) => {
-    const channelId = c.req.param("channelId");
+  router.post("/websub/:accountChannelId/:youtubeChannelId", async (c) => {
+    const accountChannelId = c.req.param("accountChannelId");
+    const youtubeChannelId = c.req.param("youtubeChannelId");
     const body = await c.req.text();
     const videoIds = extractVideoIds(body);
     if (videoIds.length === 0) return c.text("ok");
 
     const row = await c.env.LINK_DB
-      .prepare("SELECT tenant_id FROM channels WHERE id = ? AND channel_type = 'YOUTUBE' AND is_active = 1")
-      .bind(channelId)
+      .prepare(
+        `SELECT c.tenant_id as tenant_id
+         FROM youtube_websub_leases l
+         JOIN channels c ON c.id = l.account_channel_id
+         WHERE l.account_channel_id = ? AND l.youtube_channel_id = ? AND c.is_active = 1`
+      )
+      .bind(accountChannelId, youtubeChannelId)
       .first<{ tenant_id: number | null }>();
     if (!row?.tenant_id) {
-      console.log(JSON.stringify({ event: "youtube_websub_unknown_channel", channel_id: channelId }));
+      console.log(JSON.stringify({ event: "youtube_websub_unknown_lease", account_channel_id: accountChannelId, youtube_channel_id: youtubeChannelId }));
       return c.text("ok");
     }
 
@@ -64,7 +79,8 @@ export function youtubeWebhookRoutes() {
       try {
         await ingestYouTubeVideo(
           {
-            channelId,
+            accountChannelId,
+            subscriptionChannelId: youtubeChannelId,
             tenantDb,
             tenantId: row.tenant_id,
             ai: c.env.AI,
@@ -76,7 +92,7 @@ export function youtubeWebhookRoutes() {
           videoId
         );
       } catch (e) {
-        console.error(JSON.stringify({ event: "youtube_websub_ingest_error", channel_id: channelId, video_id: videoId, error: String(e) }));
+        console.error(JSON.stringify({ event: "youtube_websub_ingest_error", account_channel_id: accountChannelId, subscription_channel_id: youtubeChannelId, video_id: videoId, error: String(e) }));
       }
     }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { syncYouTubeSubscriptions, findOrCreateWatchedChannel } from "../../src/services/youtube-account";
+import { syncYouTubeSubscriptions } from "../../src/services/youtube-account";
 import * as youtubeApi from "../../src/services/youtube-api";
 
 function createMockLinkDb(overrides: { selectResult?: unknown; existingRow?: unknown } = {}) {
@@ -55,44 +55,5 @@ describe("syncYouTubeSubscriptions", () => {
     await syncYouTubeSubscriptions(env, "gone", "access-tok");
 
     expect(spy).not.toHaveBeenCalled();
-  });
-});
-
-describe("findOrCreateWatchedChannel", () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it("creates a new row and subscribes WebSub when none exists", async () => {
-    const subscribeSpy = vi.spyOn(youtubeApi, "subscribeWebSub").mockResolvedValue(undefined);
-    const linkDb = createMockLinkDb({ existingRow: null });
-    const env = { LINK_DB: linkDb, LINK_URL: "https://link.example" } as any;
-
-    const result = await findOrCreateWatchedChannel(env, 1, "member1", "UCabc", "Channel A", "https://img/a.jpg");
-
-    expect(result.channelName).toBe("Channel A");
-    expect(subscribeSpy).toHaveBeenCalledWith(expect.stringContaining("/youtube/websub/"), "UCabc");
-    const insertCall = linkDb.prepare.mock.calls.find((c: unknown[]) => (c[0] as string).includes("INSERT INTO channels"));
-    expect(insertCall![0]).toContain("YOUTUBE");
-  });
-
-  it("reuses the existing row and does not re-subscribe", async () => {
-    const subscribeSpy = vi.spyOn(youtubeApi, "subscribeWebSub").mockResolvedValue(undefined);
-    const linkDb = createMockLinkDb({ existingRow: { id: "existing-chan" } });
-    const env = { LINK_DB: linkDb, LINK_URL: "https://link.example" } as any;
-
-    const result = await findOrCreateWatchedChannel(env, 1, "member1", "UCabc", "Channel A", "https://img/a.jpg");
-
-    expect(result.channelId).toBe("existing-chan");
-    expect(subscribeSpy).not.toHaveBeenCalled();
-  });
-
-  it("encodes source_channel_id as tenantId:youtubeChannelId", async () => {
-    vi.spyOn(youtubeApi, "subscribeWebSub").mockResolvedValue(undefined);
-    const linkDb = createMockLinkDb({ existingRow: null });
-    const env = { LINK_DB: linkDb, LINK_URL: "https://link.example" } as any;
-
-    await findOrCreateWatchedChannel(env, 42, "member1", "UCabc", "Channel A", "");
-
-    const insertBindArgs = linkDb._bind.mock.calls.find((c: unknown[]) => c.includes("42:UCabc"));
-    expect(insertBindArgs).toBeTruthy();
   });
 });

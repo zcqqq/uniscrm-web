@@ -13,7 +13,6 @@ import { encrypt } from "./services/crypto";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { XTokenService } from "./services/x-token";
 import { fetchOwnedLists } from "./services/x-posts-api";
-import { findOrCreateWatchedChannel } from "./services/youtube-account";
 
 export function channelsRoutes() {
   const router = new Hono<{ Bindings: Env }>();
@@ -246,50 +245,19 @@ export function channelsRoutes() {
   router.get("/youtube/subscriptions", async (c) => {
     const tenantId = c.get("tenantId" as never) as number;
     const accountRow = await c.env.LINK_DB
-      .prepare("SELECT config FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND tenant_id = ? AND is_active = 1")
+      .prepare("SELECT id, config FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND tenant_id = ? AND is_active = 1")
       .bind(tenantId)
-      .first<{ config: string }>();
-    if (!accountRow) return c.json({ subscriptions: [] });
-
-    const accountConfig = JSON.parse(accountRow.config) as {
-      subscriptions?: { channelId: string; channelName: string; thumbnailUrl: string }[];
-    };
-    const subscriptions = accountConfig.subscriptions || [];
-
-    const watchedRows = await c.env.LINK_DB
-      .prepare("SELECT config FROM channels WHERE channel_type = 'YOUTUBE' AND tenant_id = ? AND is_active = 1")
-      .bind(tenantId)
-      .all<{ config: string }>();
-    const watchedIds = new Set(
-      watchedRows.results.map((r) => (JSON.parse(r.config) as { youtube_channel_id?: string }).youtube_channel_id)
-    );
-
-    return c.json({
-      subscriptions: subscriptions.map((s) => ({ ...s, already_watching: watchedIds.has(s.channelId) })),
-    });
-  });
-
-  router.post("/youtube/subscriptions/:youtubeChannelId/watch", async (c) => {
-    const tenantId = c.get("tenantId" as never) as number;
-    const memberId = c.get("memberId" as never) as string;
-    const youtubeChannelId = c.req.param("youtubeChannelId");
-
-    const accountRow = await c.env.LINK_DB
-      .prepare("SELECT config FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND tenant_id = ? AND is_active = 1")
-      .bind(tenantId)
-      .first<{ config: string }>();
-    if (!accountRow) return c.json({ error: "YouTube account not connected" }, 400);
+      .first<{ id: string; config: string }>();
+    if (!accountRow) return c.json({ connected: false, accountChannelId: null, subscriptions: [] });
 
     const config = JSON.parse(accountRow.config) as {
       subscriptions?: { channelId: string; channelName: string; thumbnailUrl: string }[];
     };
-    const subscription = (config.subscriptions || []).find((s) => s.channelId === youtubeChannelId);
-    if (!subscription) return c.json({ error: "Not found in your subscriptions" }, 404);
-
-    const result = await findOrCreateWatchedChannel(
-      c.env, tenantId, memberId, youtubeChannelId, subscription.channelName, subscription.thumbnailUrl
-    );
-    return c.json(result);
+    return c.json({
+      connected: true,
+      accountChannelId: accountRow.id,
+      subscriptions: config.subscriptions || [],
+    });
   });
 
   // --- Notion ---

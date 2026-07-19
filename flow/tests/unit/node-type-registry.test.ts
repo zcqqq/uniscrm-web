@@ -187,7 +187,7 @@ describe("generatableKeysForDomain", () => {
   it("content domain: every domain:'content'/'both' type/actionType, now that all of them are generatable", () => {
     expect(generatableKeysForDomain("content").sort()).toEqual(
       [
-        "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction",
+        "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "videoCondition",
         "wait", "timeCondition", "abSplit", "webhook",
       ].sort()
     );

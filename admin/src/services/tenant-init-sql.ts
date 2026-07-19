@@ -98,4 +98,12 @@ export const TENANT_DB_INIT_SQL = [
     updated_at TEXT NOT NULL,
     PRIMARY KEY (flow_id, node_id, direction)
   )`,
+  `CREATE TABLE IF NOT EXISTS content_trigger_dedup (
+    channel_id TEXT NOT NULL,
+    secondary_id TEXT NOT NULL DEFAULT '',
+    source_content_id TEXT NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (channel_id, secondary_id, source_content_id)
+  )`,
 ];

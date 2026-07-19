@@ -172,8 +172,14 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
   useEffect(() => {
     if (!eventType) return;
     setLoadingChannels(true);
-    api.channels.list(channelType)
-      .then(setChannels)
+    api.channels.listCached(channelType)
+      .then((chs) => {
+        setChannels(chs);
+        // Safety net: auto-select the only connected account, same pattern XActionInspector uses.
+        if (chs.length === 1 && !channelId) {
+          updateNodeData(nodeId, { channelId: chs[0].id });
+        }
+      })
       .catch(() => setChannels([]))
       .finally(() => setLoadingChannels(false));
   }, [eventType, channelType]);
@@ -212,7 +218,7 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
                 onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
                 className="w-full text-sm"
               >
-                <option value="">All accounts</option>
+                <option value="">Select account...</option>
                 {channels.map((ch) => (
                   <option key={ch.id} value={ch.id}>@{ch.username}</option>
                 ))}
@@ -226,6 +232,7 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
             conditions={conditions}
             fields={evDef.contextFields}
             onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+            label="Event Props"
           />
         )}
       </div>

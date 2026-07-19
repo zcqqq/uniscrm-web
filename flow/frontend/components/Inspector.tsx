@@ -250,7 +250,15 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
   const [loadingLists, setLoadingLists] = useState(false);
 
   useEffect(() => {
-    api.channels.list("X").then(setChannels).catch(() => setChannels([]));
+    api.channels.listCached("X")
+      .then((chs) => {
+        setChannels(chs);
+        // Safety net: auto-select the only connected account, same pattern XActionInspector uses.
+        if (chs.length === 1 && !channelId) {
+          updateNodeData(nodeId, { channelId: chs[0].id, mode: CONTENT_X_TRIGGER_MODE_LIST_POSTS, listId: "", listName: "" });
+        }
+      })
+      .catch(() => setChannels([]));
   }, []);
 
   useEffect(() => {
@@ -266,6 +274,13 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
     <div>
       <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.xContentTrigger.label}</h4>
       <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Event</Label>
+          <Select value={CONTENT_X_TRIGGER_MODE_LIST_POSTS} disabled className="w-full text-sm">
+            <option value={CONTENT_X_TRIGGER_MODE_LIST_POSTS}>List Posts</option>
+          </Select>
+        </div>
+
         <div>
           <Label className="text-xs block mb-1">Account</Label>
           {channels.length === 0 ? (
@@ -315,6 +330,7 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
           conditions={conditions}
           fields={getContentTriggerFields(ContentMetadata_X, data.mode || CONTENT_X_TRIGGER_MODE_LIST_POSTS)}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+          label="Content Props"
         />
       </div>
     </div>

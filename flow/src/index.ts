@@ -1088,9 +1088,10 @@ export default {
         // same as the D1_TYPE_ERROR an undefined userId would otherwise throw further down.
         if (!userId) throw new Error("flow queue message has neither contentId nor userId");
 
+        const matchPayload = { ...payload, channel_id: channelId };
         for (const flow of rows.results) {
           const graph: FlowGraph = JSON.parse(flow.graph_json);
-          const result = executeFlow(graph, eventType, payload);
+          const result = executeFlow(graph, eventType, matchPayload);
           if (result.nodeLogs.length > 0) await emitNodeLogs(result.nodeLogs, flow.id, userId, Number(tenantId), env);
 
           if (result.actions.length > 0) {

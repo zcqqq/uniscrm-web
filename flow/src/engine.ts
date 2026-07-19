@@ -163,7 +163,8 @@ export function executeFlow(
   payload: Record<string, unknown>
 ): ExecutionResult {
   const triggerNodes = graph.nodes.filter(
-    (n) => (n.type === "xTrigger" && (n.data.eventType === eventType || n.data.triggerType === eventType))
+    (n) => (n.type === "xTrigger" && (n.data.eventType === eventType || n.data.triggerType === eventType)
+            && n.data.channelId === payload.channel_id)
       || (n.type === "cronTrigger" && eventType === "cron.trigger")
       || (n.type === "xContentTrigger" && eventType === "content.created"
           && n.data.channelId === payload.channel_id

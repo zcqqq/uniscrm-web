@@ -59,13 +59,25 @@ describe("executeFlow: xContentTrigger", () => {
   it("still matches xTrigger nodes unaffected by the new xContentTrigger clause", () => {
     const graph: FlowGraph = {
       nodes: [
-        { id: "t1", type: "xTrigger", data: { eventType: "follow.followed", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "t1", type: "xTrigger", data: { eventType: "follow.followed", channelId: "chan1", conditions: [] }, position: { x: 0, y: 0 } },
         { id: "a1", type: "action", data: { actionType: "addToList", listId: "l1" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
     };
-    const result = executeFlow(graph, "follow.followed", {});
+    const result = executeFlow(graph, "follow.followed", { channel_id: "chan1" });
     expect(result.matched).toBe(true);
+  });
+
+  it("does not match an xTrigger node when channelId differs from the event's channel_id", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xTrigger", data: { eventType: "follow.followed", channelId: "chan1", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "addToList", listId: "l1" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "follow.followed", { channel_id: "chan-other" });
+    expect(result.matched).toBe(false);
   });
 });
 

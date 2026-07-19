@@ -189,3 +189,74 @@ describe("POST /internal/generate-image", () => {
     expect(res.status).toBe(502);
   });
 });
+
+describe("POST /internal/detect-face", () => {
+  const testEnv = {
+    ...env,
+    INTERNAL_SECRET: "test-internal-secret",
+  };
+
+  it("rejects requests missing the internal secret", async () => {
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/detect-face", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl: "https://img/thumb.jpg" }),
+      }),
+      testEnv
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("returns hasFace: true when the model detects a face", async () => {
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/detect-face", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
+        body: JSON.stringify({ imageUrl: "https://img/thumb.jpg" }),
+      }),
+      { ...testEnv, AI: { run: async () => ({ objects: [{ x: 1 }] }) } as unknown as Ai }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json<{ hasFace: boolean }>();
+    expect(body.hasFace).toBe(true);
+  });
+
+  it("returns hasFace: false when the model detects no face", async () => {
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/detect-face", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
+        body: JSON.stringify({ imageUrl: "https://img/thumb.jpg" }),
+      }),
+      { ...testEnv, AI: { run: async () => ({ objects: [] }) } as unknown as Ai }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json<{ hasFace: boolean }>();
+    expect(body.hasFace).toBe(false);
+  });
+
+  it("returns 400 when imageUrl is missing", async () => {
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/detect-face", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
+        body: JSON.stringify({}),
+      }),
+      testEnv
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 502 when the model call throws", async () => {
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/detect-face", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
+        body: JSON.stringify({ imageUrl: "https://img/thumb.jpg" }),
+      }),
+      { ...testEnv, AI: { run: async () => { throw new Error("model down"); } } as unknown as Ai }
+    );
+    expect(res.status).toBe(502);
+  });
+});

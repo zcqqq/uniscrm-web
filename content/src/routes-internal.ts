@@ -3,6 +3,7 @@ import type { Env } from "./types";
 import { generateContent } from "./services/generate";
 import { generateImage } from "./services/generate-image";
 import { refreshSkillContent } from "./services/skill-content";
+import { detectFace } from "./services/vision";
 
 export function internalRoutes() {
   const router = new Hono<{ Bindings: Env }>();
@@ -49,6 +50,21 @@ export function internalRoutes() {
     } catch (err) {
       console.error(JSON.stringify({ event: "generate_image_failed", tenantId, provider, error: String(err) }));
       return c.json({ error: "Image generation failed" }, 502);
+    }
+  });
+
+  // moondream's "detect" task serves as a face-detection proxy (Workers AI has no dedicated face-detection model)
+  router.post("/detect-face", async (c) => {
+    const { imageUrl } = await c.req.json<{ imageUrl?: string }>();
+    if (!imageUrl) {
+      return c.json({ error: "imageUrl required" }, 400);
+    }
+    try {
+      const hasFace = await detectFace(c.env.AI, imageUrl);
+      return c.json({ hasFace });
+    } catch (err) {
+      console.error(JSON.stringify({ event: "detect_face_failed", error: String(err) }));
+      return c.json({ error: "Detection failed" }, 502);
     }
   });
 

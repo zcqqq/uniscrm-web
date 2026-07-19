@@ -483,6 +483,17 @@ async function executeContentActions(
                VALUES (?, ?, ?, ?, 1, ?)`
             ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
           }
+          for (const wait of resumed.pendingWaits) {
+            const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
+            await env.FLOW_DB.prepare(
+              `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            ).bind(
+              crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
+              JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
+              wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
+            ).run();
+          }
           continue;
         }
         const rawPrompts = (action.prompts as Record<string, string>) || {};

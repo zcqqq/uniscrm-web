@@ -6,6 +6,7 @@ import { internalRoutes } from "./routes-internal";
 import { setTenantLlmCredentials, listConfiguredProviders, deleteTenantLlmCredentials, getDefaultModel, setDefaultModel } from "./services/llm-credentials";
 import { listOpenAiModels, listAnthropicModels, listWorkersAiModels } from "./services/model-catalog";
 import { SKILL_CATALOG } from "./skills/catalog";
+import { processVideoActionJob, type VideoActionQueueMessage } from "./queue-video-action";
 
 export class SubtitleContainer extends Container<Env> {
   defaultPort = 8080;
@@ -159,5 +160,11 @@ export default {
       return env.ASSETS.fetch(new Request(new URL("/index.html", request.url)));
     }
     return res;
+  },
+
+  async queue(batch: MessageBatch<VideoActionQueueMessage>, env: Env): Promise<void> {
+    for (const message of batch.messages) {
+      await processVideoActionJob(env, message.body);
+    }
   },
 };

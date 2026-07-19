@@ -23,6 +23,7 @@ routes = [{ pattern = "content-dev.uni-scrm.com", custom_domain = true }]
 [env.dev.vars]
 WEB_URL = "https://web-dev.uni-scrm.com"
 CONTENT_URL = "https://content-dev.uni-scrm.com"
+FLOW_URL = "https://flow-dev.uni-scrm.com"
 INTERNAL_SECRET = "dev-internal-secret"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 R2_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
@@ -70,6 +71,11 @@ binding = "R2_SECRET_ACCESS_KEY"
 store_id = "358a0014b2254c2eafb877e4182fd977"
 secret_name = "uniscrm-content-r2-secret-access-key-dev"
 
+[[env.dev.queues.consumers]]
+queue = "uniscrm-video-action-dev"
+max_batch_size = 1
+max_batch_timeout = 5
+
 [env.production]
 name = "content"
 routes = [{ pattern = "content.uni-scrm.com", custom_domain = true }]
@@ -77,6 +83,7 @@ routes = [{ pattern = "content.uni-scrm.com", custom_domain = true }]
 [env.production.vars]
 WEB_URL = "https://web.uni-scrm.com"
 CONTENT_URL = "https://content.uni-scrm.com"
+FLOW_URL = "https://flow.uni-scrm.com"
 INTERNAL_SECRET = "prod-internal-secret-change-me"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 R2_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
@@ -123,3 +130,8 @@ secret_name = "uniscrm-content-r2-access-key-id"
 binding = "R2_SECRET_ACCESS_KEY"
 store_id = "358a0014b2254c2eafb877e4182fd977"
 secret_name = "uniscrm-content-r2-secret-access-key"
+
+[[env.production.queues.consumers]]
+queue = "uniscrm-video-action"
+max_batch_size = 1
+max_batch_timeout = 5

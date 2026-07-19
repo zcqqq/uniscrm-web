@@ -4,6 +4,7 @@ import type { ContentMetadata } from "./dataTypes";
 export const ContentMetadata_YouTube: ContentMetadata[] = [
   {
     sourceContentType: "watch:get-videos", // https://developers.google.com/youtube/v3/docs/videos/list
+    flowType: "trigger",
     linkPrefix: "items[]",
     contentProps: [
       { propId: "content_type", value: "VIDEO" },

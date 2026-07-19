@@ -150,7 +150,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
       data = { channelId: "", mode: CONTENT_X_TRIGGER_MODE_LIST_POSTS, listId: "", listName: "", conditions: [] };
     } else if (type === "youtubeContentTrigger") {
       nodeType = "youtubeContentTrigger";
-      data = { channelId: "", channelName: "", conditions: [] };
+      data = { channelId: "", subscriptionChannelId: "", subscriptionChannelName: "", conditions: [] };
     } else {
       return;
     }

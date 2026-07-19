@@ -171,7 +171,8 @@ export function executeFlow(
               ? n.data.listId === payload.list_id
               : payload.list_id === undefined || payload.list_id === null))
       || (n.type === "youtubeContentTrigger" && eventType === "content.created"
-          && n.data.channelId === payload.channel_id)
+          && n.data.channelId === payload.channel_id
+          && n.data.subscriptionChannelId === payload.subscription_channel_id)
   );
 
   if (triggerNodes.length === 0) return { matched: false, actions: [], pendingWaits: [], nodeLogs: [] };

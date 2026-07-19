@@ -466,6 +466,74 @@ async function executeContentActions(
       }
     } else if (action.type === "tiktokContentAction") {
       const interpolate = (s: string) => String(s || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""));
+      const operation = (action.operation as string) || "photo-post";
+
+      if (operation === "video-post") {
+        const videoUrl = String(payload?.processed_video_url ?? "");
+        if (!videoUrl) {
+          console.log(JSON.stringify({ event: "content_action_tiktok_video_post_missing_video", contentId, channelId: action.channelId }));
+          const nodeId = action.nodeId as string;
+          const resumed = resumeFromNode(graph, nodeId, payload, "failed");
+          if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+          if (resumed.actions.length > 0) {
+            const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
+            rateLimited.push(...nested.rateLimited);
+            await env.FLOW_DB.prepare(
+              `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+               VALUES (?, ?, ?, ?, 1, ?)`
+            ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
+          }
+          continue;
+        }
+        const rawPrompts = (action.prompts as Record<string, string>) || {};
+        const body = {
+          contentId,
+          channelId: action.channelId as string,
+          prompts: { title: interpolate(rawPrompts.title), description: interpolate(rawPrompts.description) },
+          textProvider: action.textProvider as string,
+          textSkillId: action.textSkillId as string,
+          videoUrl,
+          flowId: flowId || null,
+        };
+        const res = await fetch(`${env.LINK_URL}/internal/tiktok/video-post`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+          body: JSON.stringify(body),
+        });
+        const respBody = await res.json().catch(() => ({ ok: false })) as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string };
+        console.log(JSON.stringify({ event: "content_action_tiktok_content_action", contentId, status: res.status, ok: respBody.ok, channelId: body.channelId, operation: "video-post" }));
+
+        if (respBody.rateLimited) {
+          rateLimited.push({ action, retryAt: respBody.rateLimitReset || new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+          continue;
+        }
+
+        const branch = respBody.ok ? "success" : "failed";
+        const nodeId = action.nodeId as string;
+        const resumed = resumeFromNode(graph, nodeId, payload, branch);
+        if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+        if (resumed.actions.length > 0) {
+          const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
+          rateLimited.push(...nested.rateLimited);
+          await env.FLOW_DB.prepare(
+            `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+             VALUES (?, ?, ?, ?, 1, ?)`
+          ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
+        }
+        for (const wait of resumed.pendingWaits) {
+          const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
+          await env.FLOW_DB.prepare(
+            `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
+            JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
+            wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
+          ).run();
+        }
+        continue;
+      }
+
       const rawPrompts = (action.prompts as Record<string, string>) || {};
       const interpolatedPrompts: Record<string, string> = {};
       for (const key of Object.keys(rawPrompts)) {

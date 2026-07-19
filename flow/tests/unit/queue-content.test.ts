@@ -656,6 +656,71 @@ describe("queue(): tiktokContentAction dispatch", () => {
 
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-tiktok1'`).run();
   });
+
+  it("resolves failed immediately (no fetch) when operation is video-post but payload has no processed_video_url", async () => {
+    const graphTiktokVideoNoUrl = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "tiktokContentAction", operation: "video-post", channelId: "tiktok-chan-1", prompts: { title: "t", description: "d" }, textProvider: "none" }, position: { x: 200, y: 0 } },
+        { id: "a3", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 100 } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "a1" },
+        { id: "e3", source: "a1", target: "a3", sourceHandle: "failed" },
+      ],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-tiktok-video-no-url', 1, 'tiktok video no url flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphTiktokVideoNoUrl).run();
+
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-tiktok-video-no-url", channelId: "src-chan", payload: {} }),
+      env
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-tiktok-video-no-url'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-tiktok-video-no-url'`).run();
+    vi.unstubAllGlobals();
+  });
+
+  it("routes operation:'video-post' to /internal/tiktok/video-post with the interpolated video URL, and 'photo-post' (default) still routes to /internal/tiktok/photo-post", async () => {
+    const graphTiktokVideo = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "tiktokContentAction", operation: "video-post", channelId: "tiktok-chan-1", prompts: { title: "Title: $content.title", description: "Desc" }, textProvider: "none" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-tiktok-video', 1, 'tiktok video flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphTiktokVideo).run();
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-tiktok-video", channelId: "src-chan", payload: { title: "My Title", processed_video_url: "https://content-dev.uni-scrm.com/public/media/vid-tt-1" } }),
+      env
+    );
+
+    const videoPostCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/internal/tiktok/video-post"));
+    expect(videoPostCall).toBeDefined();
+    const body = JSON.parse((videoPostCall![1] as RequestInit).body as string);
+    expect(body.videoUrl).toBe("https://content-dev.uni-scrm.com/public/media/vid-tt-1");
+    expect(body.prompts.title).toBe("Title: My Title");
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/internal/tiktok/photo-post"))).toBe(false);
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-tiktok-video'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-tiktok-video'`).run();
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("queue(): videoCondition dispatch", () => {

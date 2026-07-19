@@ -437,6 +437,181 @@ describe("stub content-flow action endpoints", () => {
     vi.unstubAllGlobals();
   });
 
+  it("POST /internal/content/create-post returns ok:false (not pending) when X FINALIZE reports processing state 'failed'", async () => {
+    const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+
+    const videoBytes = new Uint8Array(1024);
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/internal/generate")) return new Response(JSON.stringify({ text: "caption text" }), { status: 200 });
+      if (u === "https://content-dev.uni-scrm.com/public/media/vid-failed") {
+        return new Response(videoBytes, { status: 200, headers: { "Content-Length": String(videoBytes.length) } });
+      }
+      if (u === "https://api.x.com/2/media/upload" && init?.method === "POST") {
+        const body = typeof init.body === "string" ? JSON.parse(init.body) : null;
+        if (body?.command === "INIT") return new Response(JSON.stringify({ data: { id: "media-failed-1" } }), { status: 200 });
+        // X's real API reports the video processing itself failed, not just an HTTP error.
+        if (body?.command === "FINALIZE") return new Response(JSON.stringify({ data: { id: "media-failed-1", processing_info: { state: "failed" } } }), { status: 200 });
+        return new Response(null, { status: 204 }); // APPEND
+      }
+      throw new Error(`Unexpected fetch: ${u}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({
+          contentId: "content-vid-failed", interpolatedPrompt: "raw prompt", provider: "default",
+          channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
+          videoUrl: "https://content-dev.uni-scrm.com/public/media/vid-failed",
+        }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Terminal "failed" must NOT be reported as pending:true, or the flow worker would poll a
+    // media upload that will never succeed (endless/dead polling loop).
+    expect(body).toEqual({ ok: false });
+    expect(fetchMock.mock.calls.some(([u]: [string]) => String(u) === "https://api.x.com/2/tweets")).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it("POST /internal/content/create-post chunks a video body larger than 5MB into multiple sequential APPEND calls", async () => {
+    const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+    tenantDataDbRunMock.mockClear();
+
+    const videoBytes = new Uint8Array(12 * 1024 * 1024); // spans 2 full 5MB chunks + a 2MB remainder
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/internal/generate")) return new Response(JSON.stringify({ text: "caption text" }), { status: 200 });
+      if (u === "https://content-dev.uni-scrm.com/public/media/vid-chunk") {
+        return new Response(videoBytes, { status: 200, headers: { "Content-Length": String(videoBytes.length), "Content-Type": "video/mp4" } });
+      }
+      if (u === "https://api.x.com/2/media/upload" && init?.method === "POST") {
+        if (typeof init.body === "string") {
+          const body = JSON.parse(init.body);
+          if (body.command === "INIT") return new Response(JSON.stringify({ data: { id: "media-chunk-1" } }), { status: 200 });
+          if (body.command === "FINALIZE") return new Response(JSON.stringify({ data: { id: "media-chunk-1" } }), { status: 200 }); // no processing_info -> succeeded
+        }
+        return new Response(null, { status: 204 }); // APPEND (FormData body)
+      }
+      if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-chunk-1", text: "caption text" } }), { status: 201 });
+      throw new Error(`Unexpected fetch: ${u}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({
+          contentId: "content-vid-chunk", interpolatedPrompt: "raw prompt", provider: "default",
+          channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
+          videoUrl: "https://content-dev.uni-scrm.com/public/media/vid-chunk",
+        }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ ok: true, id: "tweet-chunk-1" });
+
+    const appendCalls = fetchMock.mock.calls.filter(
+      ([u, i]: [string, RequestInit]) => String(u) === "https://api.x.com/2/media/upload" && i?.body instanceof FormData
+    ) as [string, RequestInit][];
+    // 12MB / 5MB-per-chunk => 3 APPEND calls (5MB, 5MB, 2MB remainder) proves real chunking,
+    // not one giant blob.
+    expect(appendCalls.length).toBeGreaterThan(1);
+    let totalAppended = 0;
+    appendCalls.forEach(([, init], idx) => {
+      const form = init.body as FormData;
+      expect(form.get("command")).toBe("APPEND");
+      expect(Number(form.get("segment_index"))).toBe(idx); // sequential, 0-based
+      const media = form.get("media") as Blob;
+      expect(media.size).toBeLessThanOrEqual(5 * 1024 * 1024);
+      totalAppended += media.size;
+    });
+    expect(totalAppended).toBe(12 * 1024 * 1024);
+    vi.unstubAllGlobals();
+  });
+
+  it("POST /internal/content/create-post rejects a video whose streamed body exceeds 50MB even with no Content-Length header (running byte-count guard)", async () => {
+    const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+    tenantDataDbRunMock.mockClear();
+
+    const chunkBytes = 6 * 1024 * 1024;
+    const totalChunks = 9; // 54MB total, well over the 50MB cap
+    const makeOversizeStream = (): ReadableStream<Uint8Array> => {
+      let sent = 0;
+      return new ReadableStream({
+        pull(controller) {
+          if (sent >= totalChunks) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(new Uint8Array(chunkBytes));
+          sent++;
+        },
+      });
+    };
+
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/internal/generate")) return new Response(JSON.stringify({ text: "caption text" }), { status: 200 });
+      if (u === "https://content-dev.uni-scrm.com/public/media/vid-oversize") {
+        // A ReadableStream body carries no Content-Length header, so this exercises the
+        // running totalRead byte-count guard in the streaming loop, not the header short-circuit.
+        return new Response(makeOversizeStream(), { status: 200 });
+      }
+      if (u === "https://api.x.com/2/media/upload" && init?.method === "POST") {
+        if (typeof init.body === "string") {
+          const body = JSON.parse(init.body);
+          if (body.command === "INIT") return new Response(JSON.stringify({ data: { id: "media-oversize-1" } }), { status: 200 });
+          if (body.command === "FINALIZE") return new Response(JSON.stringify({ data: { id: "media-oversize-1" } }), { status: 200 });
+        }
+        return new Response(null, { status: 204 }); // APPEND
+      }
+      throw new Error(`Unexpected fetch: ${u}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({
+          contentId: "content-vid-oversize", interpolatedPrompt: "raw prompt", provider: "default",
+          channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
+          videoUrl: "https://content-dev.uni-scrm.com/public/media/vid-oversize",
+        }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false });
+
+    // Proves this hit the running-byte-count guard, not the Content-Length header guard: INIT
+    // (and therefore at least one APPEND) must have fired, since the header guard would have
+    // returned before ever calling initMediaUpload.
+    const initCalled = fetchMock.mock.calls.some(
+      ([u, i]: [string, RequestInit]) => String(u) === "https://api.x.com/2/media/upload" && typeof i?.body === "string" && JSON.parse(i.body as string).command === "INIT"
+    );
+    expect(initCalled).toBe(true);
+    // The abort happens mid-stream, before finalize.
+    const finalizeCalled = fetchMock.mock.calls.some(
+      ([u, i]: [string, RequestInit]) => String(u) === "https://api.x.com/2/media/upload" && typeof i?.body === "string" && JSON.parse(i.body as string).command === "FINALIZE"
+    );
+    expect(finalizeCalled).toBe(false);
+    expect(tenantDataDbRunMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it("POST /internal/content/create-post rejects a videoUrl reporting over 50MB via Content-Length without uploading anything to X", async () => {
     const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
 

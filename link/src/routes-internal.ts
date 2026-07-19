@@ -384,9 +384,14 @@ export function internalRoutes() {
       }
       if (upload.state === "succeeded") {
         mediaId = upload.mediaId;
-      } else {
+      } else if (upload.state === "pending" || upload.state === "in_progress") {
         console.log(JSON.stringify({ event: "create_post_video_pending", contentId, channelId, mediaId: upload.mediaId, state: upload.state }));
         return c.json({ pending: true, mediaId: upload.mediaId, channelId, text, checkAfterSecs: upload.checkAfterSecs ?? 60 });
+      } else {
+        // "failed" (or any other unexpected state) is terminal — never report pending:true here,
+        // or the flow worker would poll a media upload that will never succeed.
+        console.error(JSON.stringify({ event: "create_post_video_upload_failed", contentId, channelId, mediaId: upload.mediaId, state: upload.state }));
+        return c.json({ ok: false }, 200);
       }
     }
 

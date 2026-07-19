@@ -433,12 +433,19 @@ export function internalRoutes() {
     const accessToken = await tokenService.getValidToken(channelId);
     const status = await getMediaUploadStatus(accessToken, mediaId);
 
-    if (!status.ok || status.state === "failed") {
-      console.log(JSON.stringify({ event: "x_video_status_failed", contentId, channelId, mediaId }));
+    if (!status.ok) {
+      console.error(JSON.stringify({ event: "x_video_status_failed", contentId, channelId, mediaId }));
       return c.json({ ok: false }, 200);
     }
-    if (status.state !== "succeeded") {
+    if (status.state === "succeeded") {
+      // proceed to post
+    } else if (status.state === "pending" || status.state === "in_progress") {
       return c.json({ pending: true, checkAfterSecs: status.checkAfterSecs ?? 60 });
+    } else {
+      // "failed" or any other unrecognized state is terminal — never report pending:true here,
+      // or the flow worker would poll a media upload that will never succeed.
+      console.error(JSON.stringify({ event: "x_video_status_failed", contentId, channelId, mediaId, state: status.state }));
+      return c.json({ ok: false }, 200);
     }
 
     const postResult = await createPost(accessToken, text, mediaId);
@@ -456,6 +463,11 @@ export function internalRoutes() {
         generatedFromContentId: contentId,
         flowId: flowId || "",
       });
+    } else {
+      // Unlike /content/create-post, we don't fail here because the video was already uploaded to X
+      // in an earlier request (Task 4), so refusing to post now would waste a consumed resource.
+      // Instead, we proceed with posting but log the skipped recording for data-integrity auditing.
+      console.error(JSON.stringify({ event: "x_video_status_post_not_recorded", contentId, channelId, postId: postResult.id }));
     }
 
     return c.json({ ok: true, id: postResult.id });

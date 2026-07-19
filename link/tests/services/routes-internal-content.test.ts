@@ -809,5 +809,28 @@ describe("stub content-flow action endpoints", () => {
       expect(await res.json()).toEqual({ ok: false });
       vi.unstubAllGlobals();
     });
+
+    it("returns ok:false (not pending) when status is an unrecognized future state", async () => {
+      const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ data: { id: "media-1", processing_info: { state: "unknown_future_state" } } }), { status: 200 })
+      ));
+
+      const res = await worker.fetch(
+        new Request("https://link-dev.uni-scrm.com/internal/content/x-video-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+          body: JSON.stringify({ channelId: "tgt-chan", mediaId: "media-1", text: "caption text", contentId: "content-1", flowId: "flow-1" }),
+        }),
+        { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // Unrecognized state must NOT be reported as pending:true, or the flow worker would poll
+      // a media upload in an unknown state, causing an endless polling loop.
+      expect(body).toEqual({ ok: false });
+      vi.unstubAllGlobals();
+    });
   });
 });

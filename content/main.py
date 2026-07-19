@@ -84,7 +84,7 @@ def burn_subtitles():
         return jsonify({"error": f"burn-in failed: {burn.stderr[-2000:]}"}), 200
 
     final_key = f"{uuid.uuid4()}.mp4"
-    client.upload_file(output_path, bucket, final_key)
+    client.upload_file(output_path, bucket, final_key, ExtraArgs={"ContentType": "video/mp4"})
 
     # video-action-jobs/{job_id}/* scratch files (source.mp4, audio.mp3) are cleaned up
     # by the Worker after this call returns, once it has both this final_key and knows

@@ -10,6 +10,7 @@ export interface Env {
   AI: Ai;
   WEB_URL: string;
   FLOW_QUEUE: Queue;
+  VIDEO_ACTION_QUEUE: Queue;
   PIPELINE_FLOW_LOG?: Pipeline;
   PIPELINE_CONTENT_FLOW_LOG?: Pipeline;
   R2_SQL_TOKEN: string;

@@ -630,6 +630,80 @@ async function executeContentActions(
           wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
         ).run();
       }
+    } else if (action.type === "videoAction") {
+      const duration = Number(payload?.duration ?? 0);
+      const MAX_DURATION_SECONDS = 600;
+      const nodeId = action.nodeId as string;
+
+      if (duration > MAX_DURATION_SECONDS) {
+        console.log(JSON.stringify({ event: "content_action_video_action_duration_exceeded", contentId, duration }));
+        const resumed = resumeFromNode(graph, nodeId, payload, "failed");
+        if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+        if (resumed.actions.length > 0) {
+          const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
+          rateLimited.push(...nested.rateLimited);
+          await env.FLOW_DB.prepare(
+            `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+             VALUES (?, ?, ?, ?, 1, ?)`
+          ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
+        }
+        continue;
+      }
+
+      const sourceContentId = String(payload?.source_content_id ?? "");
+      let videoUrl: string | null = null;
+      try {
+        const res = await fetch(`${env.LINK_URL}/internal/content/video-url`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+          body: JSON.stringify({ contentId, channelId, sourceContentId }),
+        });
+        if (res.ok) {
+          const body = await res.json() as { url: string | null };
+          videoUrl = body.url;
+        }
+      } catch {
+        // network error: treated the same as "no video" below
+      }
+
+      if (!videoUrl) {
+        console.log(JSON.stringify({ event: "content_action_video_action_no_video", contentId }));
+        const resumed = resumeFromNode(graph, nodeId, payload, "failed");
+        if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+        if (resumed.actions.length > 0) {
+          const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
+          rateLimited.push(...nested.rateLimited);
+          await env.FLOW_DB.prepare(
+            `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+             VALUES (?, ?, ?, ?, 1, ?)`
+          ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
+        }
+        continue;
+      }
+
+      // NOTE: unlike every other branch above, this does NOT call resumeFromNode on this
+      // success path — the "success"/"failed" branch resolves later, asynchronously, when
+      // content's video-action queue consumer calls back into POST
+      // /internal/video-action/resume (Task 11) with this pendingId. Only the two early-exit
+      // paths above (duration cap, no video) resolve synchronously here.
+      const pendingId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const executeAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      await env.FLOW_DB.prepare(
+        `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        pendingId, flowId || "", nodeId, contentId, Number(tenantId),
+        JSON.stringify({ ...payload, channel_id: channelId }), executeAt, now, "video_action_complete"
+      ).run();
+
+      await env.VIDEO_ACTION_QUEUE.send({
+        pendingId, contentId, tenantId: Number(tenantId),
+        videoUrl, targetLanguage: (action.targetLanguage as string) || "zh",
+        flowId: flowId || "", nodeId, payload,
+      });
+
+      console.log(JSON.stringify({ event: "content_action_video_action_dispatched", contentId, pendingId }));
     }
   }
 

@@ -857,3 +857,146 @@ describe("queue(): videoCondition dispatch", () => {
     expect(detectFaceCall).toBeUndefined();
   });
 });
+
+describe("queue(): videoAction dispatch", () => {
+  // Unlike xContentAction/tiktokContentAction/videoCondition above, videoAction's success
+  // path does NOT resolve a branch synchronously — it dispatches to VIDEO_ACTION_QUEUE and
+  // waits for content's queue consumer to call back into /internal/video-action/resume
+  // (Task 11, not yet implemented). Only the two early-exit paths (duration cap, no video)
+  // resolve "failed" synchronously here, so only those two get a2/a3 branch graphs.
+  function graphWithVideoAction() {
+    return JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "videoAction", targetLanguage: "zh" }, position: { x: 200, y: 0 } },
+        { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: -50 } },
+        { id: "a3", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 50 } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "a1" },
+        { id: "e2", source: "a1", target: "a2", sourceHandle: "success" },
+        { id: "e3", source: "a1", target: "a3", sourceHandle: "failed" },
+      ],
+    });
+  }
+
+  afterEach(async () => {
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-videoaction1'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-videoaction1'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-videoaction1'`).run();
+    vi.unstubAllGlobals();
+  });
+
+  it("resolves the failed branch immediately (no link call, no queue dispatch) when payload.duration exceeds the 600s cap", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const queueSend = vi.fn();
+    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend } };
+
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-videoaction1', 1, 'video action flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithVideoAction()).run();
+
+    await worker.queue(
+      makeBatch({
+        tenantId: "1", eventType: "content.created", contentId: "content-va-1", channelId: "src-chan",
+        payload: { duration: 700 },
+      }),
+      testEnv as any
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(queueSend).not.toHaveBeenCalled();
+
+    // Same discriminator used by the videoCondition/xContentAction tests above: the outer
+    // queue() call site unconditionally writes one row for the initial match, so >=2 proves
+    // resumeFromNode resolved into a3 (the wired "failed" target).
+    const rows = await env.FLOW_DB.prepare(
+      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-videoaction1' AND content_id = 'content-va-1'`
+    ).first<{ c: number }>();
+    expect(rows?.c).toBeGreaterThanOrEqual(2);
+
+    const pending = await env.FLOW_DB.prepare(
+      `SELECT id FROM content_flow_pending WHERE flow_id = 'flow-videoaction1' AND content_id = 'content-va-1'`
+    ).first();
+    expect(pending).toBeNull();
+  });
+
+  it("resolves the failed branch immediately (no queue dispatch) when link returns no video URL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: null }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const queueSend = vi.fn();
+    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend } };
+
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-videoaction1', 1, 'video action flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithVideoAction()).run();
+
+    await worker.queue(
+      makeBatch({
+        tenantId: "1", eventType: "content.created", contentId: "content-va-2", channelId: "src-chan",
+        payload: {},
+      }),
+      testEnv as any
+    );
+
+    const call = fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/internal/content/video-url"));
+    expect(call).toBeDefined();
+    expect(queueSend).not.toHaveBeenCalled();
+
+    const rows = await env.FLOW_DB.prepare(
+      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-videoaction1' AND content_id = 'content-va-2'`
+    ).first<{ c: number }>();
+    expect(rows?.c).toBeGreaterThanOrEqual(2);
+  });
+
+  it("enqueues a VIDEO_ACTION_QUEUE job and inserts a content_flow_pending row, without resolving success/failed yet, when link returns a video URL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: "https://youtube.com/watch?v=x" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const queueSend = vi.fn();
+    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend } };
+
+    // Deliberately use the both-branches graph (a2 wired to "success") rather than a graph with
+    // no success edge at all — otherwise execCount === 1 below would hold trivially regardless
+    // of whether the code resolves the success branch, since there'd be nothing to resolve into.
+    // With a2 wired, execCount === 1 genuinely proves resumeFromNode was NOT called on the
+    // success path (a2 never ran), which is the architectural property this test exists to check.
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-videoaction1', 1, 'video action flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithVideoAction()).run();
+
+    await worker.queue(
+      makeBatch({
+        tenantId: "1", eventType: "content.created", contentId: "content-va-3", channelId: "src-chan",
+        payload: { source_content_id: "x" },
+      }),
+      testEnv as any
+    );
+
+    expect(queueSend).toHaveBeenCalledTimes(1);
+    const message = queueSend.mock.calls[0][0];
+    expect(message.videoUrl).toBe("https://youtube.com/watch?v=x");
+    expect(message.targetLanguage).toBe("zh");
+    expect(message.contentId).toBe("content-va-3");
+    expect(message.nodeId).toBe("a1");
+
+    const pending = await env.FLOW_DB.prepare(
+      `SELECT node_id, awaiting_event, tenant_id FROM content_flow_pending WHERE flow_id = 'flow-videoaction1' AND content_id = 'content-va-3'`
+    ).first<{ node_id: string; awaiting_event: string; tenant_id: number }>();
+    expect(pending).toBeTruthy();
+    expect(pending!.node_id).toBe("a1");
+    expect(pending!.awaiting_event).toBe("video_action_complete");
+    expect(pending!.tenant_id).toBe(1);
+    expect(message.pendingId).toBeTruthy();
+
+    // Only the initial dispatch row — no resumed-branch row, since videoAction's success path
+    // does not call resumeFromNode synchronously.
+    const execCount = await env.FLOW_DB.prepare(
+      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-videoaction1' AND content_id = 'content-va-3'`
+    ).first<{ c: number }>();
+    expect(execCount?.c).toBe(1);
+  });
+});

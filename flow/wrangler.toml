@@ -50,6 +50,10 @@ queue = "uniscrm-event-dev"
 max_batch_size = 10
 max_batch_timeout = 5
 
+[[env.dev.queues.producers]]
+binding = "VIDEO_ACTION_QUEUE"
+queue = "uniscrm-video-action-dev"
+
 [[env.dev.pipelines]]
 binding = "PIPELINE_FLOW_LOG"
 stream = "cf0fca6467a043ec952b1a901ea62661"
@@ -96,6 +100,10 @@ database_id = "ecf7a3be-2457-4e40-a537-bab4cc0ec281"
 queue = "uniscrm-event"
 max_batch_size = 10
 max_batch_timeout = 5
+
+[[env.production.queues.producers]]
+binding = "VIDEO_ACTION_QUEUE"
+queue = "uniscrm-video-action"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_FLOW_LOG"

@@ -122,3 +122,42 @@ design spec's "Cross-list dedup" decision), not a duplicate-trigger bug. `list_i
 join the R2 analytics pipeline in this phase (see the design spec's Global Constraints) —
 analytics collapses both rows to one via the existing `(tenant_id, channel_id,
 source_content_id)` compactor key.
+
+## Content-domain: videoAction (dispatch to the dedicated video-action queue)
+
+Architecturally different from every other branch in `executeContentActions`: the
+success path does **not** call `resumeFromNode` synchronously — branch resolution
+happens later, when `content`'s queue consumer finishes the job and calls back into
+`POST /internal/video-action/resume` (a route `flow` itself must expose — not yet
+implemented as of this diagram). Only the two early-exit guards below (duration cap,
+no video found) resolve the "failed" branch synchronously here. The full
+download/transcribe/translate/burn-in pipeline inside `content`'s consumer is
+diagrammed separately in `content/src/services/video-action/sequence.md`.
+
+```mermaid
+sequenceDiagram
+    participant FW as flow Worker
+    participant LW as link Worker
+    participant Q as Queue: uniscrm-video-action
+    participant CW as content Worker (queue consumer)
+    participant CFP as content_flow_pending
+
+    FW->>FW: duration = payload.duration
+    alt duration > 600s
+        FW->>FW: resumeFromNode(graph, nodeId, payload, "failed")
+        Note over FW: no link call, no queue dispatch
+    else duration OK
+        FW->>LW: POST /internal/content/video-url { contentId, channelId, sourceContentId }
+        LW-->>FW: { url } | { url: null }
+        alt url is null (or network error)
+            FW->>FW: resumeFromNode(graph, nodeId, payload, "failed")
+        else url present
+            FW->>CFP: INSERT content_flow_pending (awaiting_event: "video_action_complete")
+            FW->>Q: enqueue { pendingId, contentId, tenantId, videoUrl, targetLanguage, flowId, nodeId, payload }
+            Note over FW,Q: branch NOT resolved yet — awaits async callback
+            Q->>CW: processVideoActionJob(message)
+            CW-->>FW: POST /internal/video-action/resume { pendingId, branch, props } (Task 11)
+            Note over FW: resumeFromNode(graph, nodeId, payload, branch) happens here, asynchronously
+        end
+    end
+```

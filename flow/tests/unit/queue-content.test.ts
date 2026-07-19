@@ -531,6 +531,49 @@ describe("queue(): xContentAction branch resolution", () => {
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-video-pending'`).run();
     vi.unstubAllGlobals();
   });
+
+  it("schedules a content_flow_pending wait row when a wait node follows the video xContentAction success branch", async () => {
+    const graphVideoWithWait = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-post", attachVideo: true }, position: { x: 200, y: 0 } },
+        { id: "w1", type: "wait", data: { duration: 5, unit: "minutes" }, position: { x: 400, y: 0 } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "a1" },
+        { id: "e2", source: "a1", target: "w1", sourceHandle: "success" },
+      ],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-video-with-wait', 1, 'video with wait flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphVideoWithWait).run();
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(
+      async () => new Response(JSON.stringify({ ok: true }), { status: 200 })
+    ));
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-video-wait", channelId: "src-chan", payload: { processed_video_url: "https://content-dev.uni-scrm.com/public/media/vid-11" } }),
+      env
+    );
+
+    // Query for the wait node pending row (awaiting_event is empty for timed wait)
+    const waitRow = await env.FLOW_DB.prepare(
+      `SELECT node_id, awaiting_event, execute_at FROM content_flow_pending WHERE flow_id = 'flow-video-with-wait' AND content_id = 'content-video-wait' AND node_id = 'w1'`
+    ).first<{ node_id: string; awaiting_event: string; execute_at: string }>();
+    expect(waitRow).toBeTruthy();
+    expect(waitRow!.node_id).toBe("w1");
+    expect(new Date(waitRow!.execute_at).getTime()).toBeGreaterThan(Date.now());
+    // Verify the wait is scheduled roughly 5 minutes (300000 ms) in the future
+    expect(new Date(waitRow!.execute_at).getTime() - Date.now()).toBeGreaterThan(299000);
+    expect(new Date(waitRow!.execute_at).getTime() - Date.now()).toBeLessThan(301000);
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-video-with-wait'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-video-with-wait'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-video-with-wait'`).run();
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("queue(): tiktokContentAction dispatch", () => {

@@ -222,6 +222,24 @@ export function resumeFromNode(
         if (!actionData.hasBranches) {
           collectActions(graph, target.id, payload, actions, pendingWaits, nodeLogs);
         }
+      } else if (target.type === "wait") {
+        nodeLogs.push({ nodeId: target.id, direction: "enter" });
+        const duration = Number(target.data.duration || 0);
+        const unit = String(target.data.unit || "minutes");
+        if (duration > 0) {
+          pendingWaits.push({ nodeId: target.id, durationMs: durationToMs(duration, unit) });
+        }
+        nodeLogs.push({ nodeId: target.id, direction: "exit" });
+      } else if (target.type === "waitForEvent") {
+        nodeLogs.push({ nodeId: target.id, direction: "enter" });
+        const awaitingEvent = target.data.eventType as string;
+        const duration = Number(target.data.duration || 1);
+        const unit = String(target.data.unit || "days");
+        const conditions = (target.data.conditions as { field: string; operator: string; value: string }[]) || [];
+        if (awaitingEvent) {
+          pendingWaits.push({ nodeId: target.id, durationMs: durationToMs(duration, unit), awaitingEvent, conditions: conditions.length > 0 ? conditions : undefined });
+        }
+        nodeLogs.push({ nodeId: target.id, direction: "exit" });
       } else {
         collectActions(graph, target.id, payload, actions, pendingWaits, nodeLogs);
       }
@@ -244,7 +262,7 @@ function durationToMs(duration: number, unit: string): number {
 
 function buildActionData(targetNode: FlowNode): ActionResult {
   const actionType = targetNode.data.actionType as string;
-  const isExternalApi = actionType === "xAction" || actionType === "xContentAction" || actionType === "tiktokContentAction";
+  const isExternalApi = actionType === "xAction" || actionType === "xContentAction" || actionType === "tiktokContentAction" || actionType === "videoAction";
   const actionData: ActionResult = { type: actionType, nodeId: targetNode.id, hasBranches: isExternalApi };
   if (actionType === "addToList") actionData.listId = targetNode.data.listId as string;
   if (actionType === "xAction") {
@@ -268,6 +286,9 @@ function buildActionData(targetNode: FlowNode): ActionResult {
     actionData.imageCount = (targetNode.data.imageCount as number) || 1;
     actionData.imageProvider = targetNode.data.imageProvider as string;
     actionData.imageSkillId = (targetNode.data.imageSkillId as string) || "none";
+  }
+  if (actionType === "videoAction") {
+    actionData.targetLanguage = (targetNode.data.targetLanguage as string) || "zh";
   }
   return actionData;
 }

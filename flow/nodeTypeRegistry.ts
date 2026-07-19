@@ -184,7 +184,7 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
     promptFragment: `youtubeContentTrigger - triggers when a subscribed YouTube channel publishes a new video
    data: { channelId: "", subscriptionChannelId: "", subscriptionChannelName: "", conditions: [] }
    - channelId and subscriptionChannelId are left blank ("") — the user picks a subscription from a dropdown in the Inspector after generation, sourced from their connected YouTube account (OAuth) on the Social page.
-   - conditions may filter on "duration" (seconds) and "has_face" (0 or 1, computed from the video's thumbnail).`,
+   - conditions may filter on "duration" (seconds).`,
   },
   xContentAction: {
     reactFlowType: "action",

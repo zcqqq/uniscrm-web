@@ -9,9 +9,9 @@ describe("getContentTriggerFields", () => {
     expect(fields.some((f) => f.id === "content_text")).toBe(true);
   });
 
-  it("returns duration and has_face for the YouTube watch mode", () => {
+  it("returns duration for the YouTube watch mode", () => {
     const fields = getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos");
-    expect(fields.map((f) => f.id)).toEqual(expect.arrayContaining(["duration", "has_face"]));
+    expect(fields.map((f) => f.id)).toEqual(expect.arrayContaining(["duration"]));
   });
 
   it("returns an empty array for an unknown sourceContentType", () => {

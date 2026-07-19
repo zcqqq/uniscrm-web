@@ -15,12 +15,11 @@ export const ContentMetadata_YouTube: ContentMetadata[] = [
       { propId: "cover_image_url", dataId: "{linkPrefix}.snippet.thumbnails.default.url" },
       { propId: "view_count", dataId: "{linkPrefix}.statistics.viewCount" },
       { propId: "like_count", dataId: "{linkPrefix}.statistics.likeCount" },
-      // duration and has_face are computed (not resolveProps-mapped) — declared here with
-      // no dataId/value purely so the flow Inspector's ConditionsEditor field list includes
-      // them (see getContentTriggerFields in Task 10). resolveProps skips entries with
-      // neither `value` nor `dataId`, so these are safe no-ops during ingestion mapping.
+      // duration is computed (not resolveProps-mapped) — declared here with no dataId/value
+      // purely so the flow Inspector's ConditionsEditor field list includes it (see
+      // getContentTriggerFields). resolveProps skips entries with neither `value` nor
+      // `dataId`, so this is a safe no-op during ingestion mapping.
       { propId: "duration" },
-      { propId: "has_face" },
     ],
   },
 ];

@@ -2,7 +2,6 @@ import type { TenantDataDB } from "../../../../shared/tenant-data-db";
 import type { Pipeline } from "../../types";
 import { ContentService } from "../content";
 import { fetchVideoDetails, parseISO8601Duration } from "../youtube-api";
-import { detectFace } from "../youtube-vision";
 import { resolveProps } from "./resolve-props";
 import { ContentMetadata_YouTube } from "../../../../metadata/youtube";
 
@@ -31,9 +30,6 @@ export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: str
   const contentDetails = item.contentDetails as Record<string, unknown> | undefined;
   const durationIso = contentDetails?.duration as string | undefined;
   props.duration = durationIso ? parseISO8601Duration(durationIso) : 0;
-
-  const thumbnailUrl = props.cover_image_url as string | undefined;
-  props.has_face = thumbnailUrl ? await detectFace(ctx.ai, thumbnailUrl) : 1;
 
   const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue);
   const isNew = await contentService.upsertContentFromMetadata(item, props, ctx.channelId, "YOUTUBE", true);

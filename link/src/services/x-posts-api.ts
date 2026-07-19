@@ -125,14 +125,79 @@ export interface CreatePostResult {
   rateLimited?: boolean;
 }
 
-export async function createPost(accessToken: string, text: string): Promise<CreatePostResult> {
+export interface MediaUploadResult {
+  ok: boolean;
+  mediaId?: string;
+}
+
+// https://docs.x.com/x-api/media/quickstart/media-upload-chunked
+export async function initMediaUpload(accessToken: string, totalBytes: number, mediaType: string): Promise<MediaUploadResult> {
+  const res = await fetch("https://api.x.com/2/media/upload", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ command: "INIT", media_type: mediaType, total_bytes: totalBytes, media_category: "tweet_video" }),
+  });
+  if (!res.ok) return { ok: false };
+  const body = (await res.json()) as { data: { id: string } };
+  return { ok: true, mediaId: body.data.id };
+}
+
+export async function appendMediaChunk(accessToken: string, mediaId: string, segmentIndex: number, chunk: Uint8Array): Promise<{ ok: boolean }> {
+  const form = new FormData();
+  form.set("command", "APPEND");
+  form.set("media_id", mediaId);
+  form.set("segment_index", String(segmentIndex));
+  form.set("media", new Blob([chunk]));
+
+  const res = await fetch("https://api.x.com/2/media/upload", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
+  });
+  return { ok: res.ok };
+}
+
+export interface MediaProcessingResult {
+  ok: boolean;
+  state?: string;
+  checkAfterSecs?: number;
+}
+
+export async function finalizeMediaUpload(accessToken: string, mediaId: string): Promise<MediaProcessingResult> {
+  const res = await fetch("https://api.x.com/2/media/upload", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ command: "FINALIZE", media_id: mediaId }),
+  });
+  if (!res.ok) return { ok: false };
+  const body = (await res.json()) as { data: { processing_info?: { state: string; check_after_secs?: number } } };
+  const info = body.data.processing_info;
+  if (!info) return { ok: true, state: "succeeded" };
+  return { ok: true, state: info.state, checkAfterSecs: info.check_after_secs };
+}
+
+export async function getMediaUploadStatus(accessToken: string, mediaId: string): Promise<MediaProcessingResult> {
+  const res = await fetch(`https://api.x.com/2/media/upload?command=STATUS&media_id=${mediaId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) return { ok: false };
+  const body = (await res.json()) as { data: { processing_info?: { state: string; check_after_secs?: number } } };
+  const info = body.data.processing_info;
+  if (!info) return { ok: true, state: "succeeded" };
+  return { ok: true, state: info.state, checkAfterSecs: info.check_after_secs };
+}
+
+export async function createPost(accessToken: string, text: string, mediaId?: string): Promise<CreatePostResult> {
+  const body: { text: string; media?: { media_ids: string[] } } = { text };
+  if (mediaId) body.media = { media_ids: [mediaId] };
+
   const res = await fetch("https://api.x.com/2/tweets", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(body),
   });
 
   if (res.status === 429) {
@@ -142,8 +207,8 @@ export async function createPost(accessToken: string, text: string): Promise<Cre
     return { ok: false };
   }
 
-  const body = (await res.json()) as { data: { id: string; text: string } };
-  return { ok: true, id: body.data.id };
+  const respBody = (await res.json()) as { data: { id: string; text: string } };
+  return { ok: true, id: respBody.data.id };
 }
 
 export interface RepostResult {

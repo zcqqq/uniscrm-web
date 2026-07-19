@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fetchPostsPage, createPost, repostPost, fetchOwnedLists, fetchListPostsPage } from "../../src/services/x-posts-api";
+import { fetchPostsPage, createPost, repostPost, fetchOwnedLists, fetchListPostsPage, initMediaUpload, appendMediaChunk, finalizeMediaUpload, getMediaUploadStatus } from "../../src/services/x-posts-api";
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -169,5 +169,142 @@ describe("fetchListPostsPage", () => {
     const { rateLimited } = await fetchListPostsPage("tok", "listA");
 
     expect(rateLimited).toBe(true);
+  });
+});
+
+describe("initMediaUpload", () => {
+  it("posts command=INIT with total_bytes/media_type/media_category and returns the media_id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { id: "media-1", media_key: "mk-1", expires_after_secs: 86400 } }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await initMediaUpload("access-token-1", 1048576, "video/mp4");
+
+    expect(result).toEqual({ ok: true, mediaId: "media-1" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.x.com/2/media/upload");
+    expect(init.headers.Authorization).toBe("Bearer access-token-1");
+    const body = JSON.parse(init.body);
+    expect(body).toEqual({ command: "INIT", media_type: "video/mp4", total_bytes: 1048576, media_category: "tweet_video" });
+    vi.unstubAllGlobals();
+  });
+
+  it("returns ok: false on a non-2xx response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("error", { status: 400 })));
+    const result = await initMediaUpload("access-token-1", 1048576, "video/mp4");
+    expect(result).toEqual({ ok: false });
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("appendMediaChunk", () => {
+  it("posts command=APPEND with the media_id/segment_index/chunk and returns ok: true on 2xx", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chunk = new Uint8Array([1, 2, 3]);
+    const result = await appendMediaChunk("access-token-1", "media-1", 0, chunk);
+
+    expect(result).toEqual({ ok: true });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.x.com/2/media/upload");
+    expect(init.method).toBe("POST");
+    const formData = init.body as FormData;
+    expect(formData.get("command")).toBe("APPEND");
+    expect(formData.get("media_id")).toBe("media-1");
+    expect(formData.get("segment_index")).toBe("0");
+    expect(formData.get("media")).toBeInstanceOf(Blob);
+    vi.unstubAllGlobals();
+  });
+
+  it("returns ok: false on a non-2xx response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("error", { status: 400 })));
+    const result = await appendMediaChunk("access-token-1", "media-1", 0, new Uint8Array([1]));
+    expect(result).toEqual({ ok: false });
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("finalizeMediaUpload", () => {
+  it("posts command=FINALIZE and returns the processing state", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { id: "media-1", processing_info: { state: "pending", check_after_secs: 5 } } }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await finalizeMediaUpload("access-token-1", "media-1");
+
+    expect(result).toEqual({ ok: true, state: "pending", checkAfterSecs: 5 });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toEqual({ command: "FINALIZE", media_id: "media-1" });
+    vi.unstubAllGlobals();
+  });
+
+  it("returns state: succeeded with no checkAfterSecs when processing_info is absent (small/simple media)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { id: "media-1" } }), { status: 200 })));
+    const result = await finalizeMediaUpload("access-token-1", "media-1");
+    expect(result).toEqual({ ok: true, state: "succeeded" });
+    vi.unstubAllGlobals();
+  });
+
+  it("returns ok: false on a non-2xx response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("error", { status: 400 })));
+    const result = await finalizeMediaUpload("access-token-1", "media-1");
+    expect(result).toEqual({ ok: false });
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("getMediaUploadStatus", () => {
+  it("gets command=STATUS with the media_id and returns the processing state", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { id: "media-1", processing_info: { state: "succeeded" } } }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getMediaUploadStatus("access-token-1", "media-1");
+
+    expect(result).toEqual({ ok: true, state: "succeeded" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.x.com/2/media/upload?command=STATUS&media_id=media-1");
+    expect(init.headers.Authorization).toBe("Bearer access-token-1");
+    vi.unstubAllGlobals();
+  });
+
+  it("returns ok: false on a non-2xx response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("error", { status: 400 })));
+    const result = await getMediaUploadStatus("access-token-1", "media-1");
+    expect(result).toEqual({ ok: false });
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("createPost with media", () => {
+  it("includes media.media_ids in the body when mediaId is passed", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { id: "tweet-1", text: "hello" } }), { status: 201 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createPost("access-token-1", "hello", "media-1");
+
+    expect(result).toEqual({ ok: true, id: "tweet-1" });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toEqual({ text: "hello", media: { media_ids: ["media-1"] } });
+    vi.unstubAllGlobals();
+  });
+
+  it("omits media when mediaId is not passed (existing text-only behavior, unchanged)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { id: "tweet-2", text: "hi" } }), { status: 201 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createPost("access-token-1", "hi");
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toEqual({ text: "hi" });
+    vi.unstubAllGlobals();
   });
 });

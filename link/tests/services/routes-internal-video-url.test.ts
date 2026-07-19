@@ -17,7 +17,7 @@ function makeEnv(channelRow: { channel_type: string; config: string } | null) {
 describe("POST /internal/content/video-url", () => {
   it("returns a youtube watch URL for a YouTube channel", async () => {
     const router = internalRoutes();
-    const env = makeEnv({ channel_type: "YOUTUBE", config: "{}" });
+    const env = makeEnv({ channel_type: "YOUTUBE_ACCOUNT", config: "{}" });
     const res = await router.request(
       "/content/video-url",
       {

@@ -347,23 +347,34 @@ export function internalRoutes() {
   // any content item that has no video, so the caller can route to its "failed" branch
   // uniformly rather than special-casing "not found" vs "no video".
   router.post("/content/video-url", async (c) => {
-    const { channelId, sourceContentId } = await c.req.json<{
+    const { contentId, channelId, sourceContentId } = await c.req.json<{
       contentId: string; channelId: string; sourceContentId: string;
     }>();
 
     const channel = await c.env.LINK_DB.prepare("SELECT channel_type, config FROM channels WHERE id = ?")
       .bind(channelId).first<{ channel_type: string; config: string }>();
-    if (!channel) return c.json({ url: null });
+    if (!channel) {
+      console.log(JSON.stringify({ event: "video_url_channel_not_found", contentId, channelId, sourceContentId }));
+      return c.json({ url: null });
+    }
 
-    if (channel.channel_type === "YOUTUBE" && sourceContentId) {
+    // NOTE: the channels table's channel_type for a real YouTube channel row is
+    // "YOUTUBE_ACCOUNT" (see oauth.ts, webhook-youtube.ts, routes-channels.ts) — "YOUTUBE"
+    // is only used as a content-table/event-payload platform tag, never as this column's value.
+    if (channel.channel_type === "YOUTUBE_ACCOUNT" && sourceContentId) {
+      console.log(JSON.stringify({ event: "video_url_youtube_match", contentId, channelId, sourceContentId }));
       return c.json({ url: `https://www.youtube.com/watch?v=${sourceContentId}` });
     }
     if (channel.channel_type === "X" && sourceContentId) {
       const config = JSON.parse(channel.config);
       const handle = config.x_username;
-      if (handle) return c.json({ url: `https://x.com/${handle}/status/${sourceContentId}` });
+      if (handle) {
+        console.log(JSON.stringify({ event: "video_url_x_match", contentId, channelId, sourceContentId }));
+        return c.json({ url: `https://x.com/${handle}/status/${sourceContentId}` });
+      }
     }
 
+    console.log(JSON.stringify({ event: "video_url_no_video", contentId, channelId, channelType: channel.channel_type, sourceContentId }));
     return c.json({ url: null });
   });
 

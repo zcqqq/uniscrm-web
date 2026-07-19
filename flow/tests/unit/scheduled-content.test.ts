@@ -214,3 +214,124 @@ describe("scheduled(): content_flow_pending retry_action handling", () => {
     expect(execCount?.c).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
+  afterEach(async () => {
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-vpoll1'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-vpoll1'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-vpoll1'`).run();
+    vi.unstubAllGlobals();
+  });
+
+  const graphWithBranches = JSON.stringify({
+    nodes: [
+      { id: "t1", type: "xContentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+      { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-post", attachVideo: true }, position: { x: 200, y: 0 } },
+      { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 0 } },
+      { id: "a3", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 100 } },
+    ],
+    edges: [
+      { id: "e1", source: "t1", target: "a1" },
+      { id: "e2", source: "a1", target: "a2", sourceHandle: "success" },
+      { id: "e3", source: "a1", target: "a3", sourceHandle: "failed" },
+    ],
+  });
+
+  it("resolves the success branch and calls x-video-status once, when it reports ok:true", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-vpoll1', 1, 'vpoll flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBranches).run();
+
+    const pollAction = { type: "xVideoStatusPoll", channelId: "src-chan", mediaId: "media-1", text: "caption", nodeId: "a1" };
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+       VALUES ('pend-vpoll-1', 'flow-vpoll1', 'a1', 'content-vpoll-1', 1, ?, ?, datetime('now'), ?, 0)`
+    ).bind(JSON.stringify({ channel_id: "src-chan" }), past, JSON.stringify(pollAction)).run();
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, id: "tweet-poll-1" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await worker.scheduled({} as any, env);
+
+    const statusCall = fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/internal/content/x-video-status"));
+    expect(statusCall).toBeDefined();
+    const body = JSON.parse((statusCall![1] as RequestInit).body as string);
+    expect(body).toMatchObject({ channelId: "src-chan", mediaId: "media-1", text: "caption" });
+
+    const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE id = 'pend-vpoll-1'`).first();
+    expect(remaining).toBeNull();
+
+    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-vpoll1' AND content_id = 'content-vpoll-1'`).first<{ c: number }>();
+    expect(execCount?.c).toBeGreaterThanOrEqual(1);
+  });
+
+  it("resolves the failed branch when x-video-status reports ok:false", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-vpoll1', 1, 'vpoll flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBranches).run();
+
+    const pollAction = { type: "xVideoStatusPoll", channelId: "src-chan", mediaId: "media-2", text: "caption", nodeId: "a1" };
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+       VALUES ('pend-vpoll-2', 'flow-vpoll1', 'a1', 'content-vpoll-2', 1, ?, ?, datetime('now'), ?, 0)`
+    ).bind(JSON.stringify({ channel_id: "src-chan" }), past, JSON.stringify(pollAction)).run();
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false }), { status: 200 })));
+
+    await worker.scheduled({} as any, env);
+
+    const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE id = 'pend-vpoll-2'`).first();
+    expect(remaining).toBeNull();
+    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-vpoll1' AND content_id = 'content-vpoll-2'`).first<{ c: number }>();
+    expect(execCount?.c).toBeGreaterThanOrEqual(1);
+  });
+
+  it("reschedules (retry_count+1) when still pending and under the 5-attempt ceiling", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-vpoll1', 1, 'vpoll flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBranches).run();
+
+    const pollAction = { type: "xVideoStatusPoll", channelId: "src-chan", mediaId: "media-3", text: "caption", nodeId: "a1" };
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+       VALUES ('pend-vpoll-3', 'flow-vpoll1', 'a1', 'content-vpoll-3', 1, ?, ?, datetime('now'), ?, 1)`
+    ).bind(JSON.stringify({ channel_id: "src-chan" }), past, JSON.stringify(pollAction)).run();
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ pending: true, checkAfterSecs: 10 }), { status: 200 })));
+
+    await worker.scheduled({} as any, env);
+
+    const row = await env.FLOW_DB.prepare(`SELECT retry_count, execute_at FROM content_flow_pending WHERE id = 'pend-vpoll-3'`).first<{ retry_count: number; execute_at: string }>();
+    expect(row?.retry_count).toBe(2);
+    expect(new Date(row!.execute_at).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("resolves the failed branch once pending retries are exhausted (retry_count >= 5)", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-vpoll1', 1, 'vpoll flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBranches).run();
+
+    const pollAction = { type: "xVideoStatusPoll", channelId: "src-chan", mediaId: "media-4", text: "caption", nodeId: "a1" };
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+       VALUES ('pend-vpoll-4', 'flow-vpoll1', 'a1', 'content-vpoll-4', 1, ?, ?, datetime('now'), ?, 5)`
+    ).bind(JSON.stringify({ channel_id: "src-chan" }), past, JSON.stringify(pollAction)).run();
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ pending: true, checkAfterSecs: 10 }), { status: 200 })));
+
+    await worker.scheduled({} as any, env);
+
+    const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE id = 'pend-vpoll-4'`).first();
+    expect(remaining).toBeNull();
+    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-vpoll1' AND content_id = 'content-vpoll-4'`).first<{ c: number }>();
+    expect(execCount?.c).toBeGreaterThanOrEqual(1);
+  });
+});

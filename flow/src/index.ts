@@ -1515,6 +1515,52 @@ export default {
           const graph: FlowGraph = JSON.parse(flow.graph_json);
           const payload = JSON.parse(row.payload);
           const channelId = String(payload.channel_id ?? "");
+
+          if (action.type === "xVideoStatusPoll") {
+            const statusRes = await fetch(`${env.LINK_URL}/internal/content/x-video-status`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+              body: JSON.stringify({ channelId: action.channelId, mediaId: action.mediaId, text: action.text, contentId: row.content_id, flowId: row.flow_id }),
+            });
+            const statusBody = await statusRes.json().catch(() => ({ ok: false })) as { ok?: boolean; pending?: boolean; checkAfterSecs?: number };
+
+            if (statusBody.pending && row.retry_count < 5) {
+              const nextAt = new Date(Date.now() + Math.max(statusBody.checkAfterSecs || 60, 60) * 1000).toISOString();
+              await env.FLOW_DB.prepare(
+                `UPDATE content_flow_pending SET execute_at = ?, retry_count = ? WHERE id = ?`
+              ).bind(nextAt, row.retry_count + 1, row.id).run();
+              console.log(JSON.stringify({ event: "x_video_poll_rescheduled", id: row.id, retryCount: row.retry_count + 1 }));
+              continue;
+            }
+
+            const branch = !statusBody.pending && statusBody.ok ? "success" : "failed";
+            const resolved = resumeFromNode(graph, action.nodeId as string, payload, branch);
+            if (resolved.nodeLogs.length > 1) await emitContentNodeLogs(resolved.nodeLogs.slice(1), row.flow_id, row.content_id, row.tenant_id, env);
+            if (resolved.actions.length > 0) {
+              const { rateLimited: nestedRateLimited } = await executeContentActions(graph, resolved.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
+              await env.FLOW_DB.prepare(
+                `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+                 VALUES (?, ?, ?, ?, 1, ?)`
+              ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, now).run();
+              for (const rl of nestedRateLimited) {
+                await env.FLOW_DB.prepare(
+                  `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+                   VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 0)`
+                ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, row.payload, rl.retryAt, now, JSON.stringify(rl.action)).run();
+              }
+            }
+            for (const wait of resolved.pendingWaits) {
+              const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
+              await env.FLOW_DB.prepare(
+                `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              ).bind(crypto.randomUUID(), row.flow_id, wait.nodeId, row.content_id, row.tenant_id, row.payload, executeAt, now, wait.awaitingEvent || "").run();
+            }
+            await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE id = ?`).bind(row.id).run();
+            console.log(JSON.stringify({ event: statusBody.pending ? "x_video_poll_exhausted" : "x_video_poll_resolved", id: row.id, branch }));
+            continue;
+          }
+
           const { rateLimited } = await executeContentActions(graph, [action], row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
 
           if (rateLimited.length > 0 && row.retry_count < 5) {

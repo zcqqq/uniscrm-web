@@ -431,6 +431,50 @@ async function executeContentActions(
           wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
         ).run();
       }
+    } else if (action.type === "videoCondition") {
+      const imageUrl = payload?.cover_image_url as string | undefined;
+      let branch: "has-face" | "no-face" | "failed" = "failed";
+
+      if (imageUrl) {
+        try {
+          const res = await fetch(`${env.CONTENT_URL}/internal/detect-face`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+            body: JSON.stringify({ imageUrl }),
+          });
+          if (res.ok) {
+            const body = await res.json() as { hasFace: boolean };
+            branch = body.hasFace ? "has-face" : "no-face";
+          }
+        } catch {
+          // network error: branch stays "failed"
+        }
+      }
+
+      console.log(JSON.stringify({ event: "content_action_video_condition", contentId, branch }));
+
+      const nodeId = action.nodeId as string;
+      const resumed = resumeFromNode(graph, nodeId, payload, branch);
+      if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+      if (resumed.actions.length > 0) {
+        const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
+        rateLimited.push(...nested.rateLimited);
+        await env.FLOW_DB.prepare(
+          `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+           VALUES (?, ?, ?, ?, 1, ?)`
+        ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
+      }
+      for (const wait of resumed.pendingWaits) {
+        const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
+        await env.FLOW_DB.prepare(
+          `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
+          JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
+          wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
+        ).run();
+      }
     }
   }
 

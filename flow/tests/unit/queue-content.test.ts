@@ -476,3 +476,132 @@ describe("queue(): tiktokContentAction dispatch", () => {
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-tiktok1'`).run();
   });
 });
+
+describe("queue(): videoCondition dispatch", () => {
+  afterEach(async () => {
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-video1'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-video1'`).run();
+    vi.unstubAllGlobals();
+  });
+
+  function graphWithVideoCondition() {
+    return JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "videoCondition", data: { operation: "check-face" }, position: { x: 200, y: 0 } },
+        { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: -50 } },
+        { id: "a3", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 50 } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "a1" },
+        { id: "e2", source: "a1", target: "a2", sourceHandle: "has-face" },
+        { id: "e3", source: "a1", target: "a3", sourceHandle: "no-face" },
+      ],
+    });
+  }
+
+  it("calls content's /internal/detect-face with the payload's cover_image_url and resumes on the has-face branch", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ hasFace: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-video1', 1, 'video flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithVideoCondition()).run();
+
+    await worker.queue(
+      makeBatch({
+        tenantId: "1", eventType: "content.created", contentId: "content-vid-1", channelId: "src-chan",
+        payload: { cover_image_url: "https://img/thumb.jpg" },
+      }),
+      env
+    );
+
+    const call = fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/internal/detect-face"));
+    expect(call).toBeDefined();
+    const body = JSON.parse(call![1].body as string);
+    expect(body.imageUrl).toBe("https://img/thumb.jpg");
+
+    const execution = await env.FLOW_DB.prepare(
+      `SELECT * FROM content_flow_executions WHERE flow_id = 'flow-video1' AND content_id = 'content-vid-1'`
+    ).first();
+    expect(execution).toBeTruthy(); // the has-face branch resolved into a2 (noopLeaf), proving the correct branch fired
+  });
+
+  it("resumes on the no-face branch when content's /internal/detect-face reports hasFace: false", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ hasFace: false }), { status: 200 })));
+
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-video1', 1, 'video flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithVideoCondition()).run();
+
+    await worker.queue(
+      makeBatch({
+        tenantId: "1", eventType: "content.created", contentId: "content-vid-2", channelId: "src-chan",
+        payload: { cover_image_url: "https://img/thumb.jpg" },
+      }),
+      env
+    );
+
+    const execution = await env.FLOW_DB.prepare(
+      `SELECT * FROM content_flow_executions WHERE flow_id = 'flow-video1' AND content_id = 'content-vid-2'`
+    ).first();
+    expect(execution).toBeTruthy(); // the no-face branch resolved into a3 (noopLeaf)
+  });
+
+  it("resumes on the failed branch when content's /internal/detect-face returns a non-2xx", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "Detection failed" }), { status: 502 })));
+
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-video1', 1, 'video flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithVideoCondition()).run();
+
+    await worker.queue(
+      makeBatch({
+        tenantId: "1", eventType: "content.created", contentId: "content-vid-3", channelId: "src-chan",
+        payload: { cover_image_url: "https://img/thumb.jpg" },
+      }),
+      env
+    );
+
+    // DEVIATION FROM BRIEF: the brief's literal test body asserted
+    // `expect(execution).toBeFalsy()` against a single-row SELECT. That can never pass: the
+    // outer queue() call site (src/index.ts ~line 1005) unconditionally inserts ONE
+    // content_flow_executions row whenever executeFlow()'s initial pass yields any action at
+    // all — which it does here (the videoCondition node itself is the one action), regardless
+    // of how the branch inside executeContentActions resolves. This exact masking behavior is
+    // called out by this same file's xContentAction branch tests (see the comment above the
+    // `>=2` assertion around line 176-188), which deliberately use a COUNT-based check instead
+    // of truthy/falsy for this reason. Neither a2 (has-face) nor a3 (no-face) is wired to the
+    // "failed" branch in this graph, so resumeFromNode's downstream resolution is empty and no
+    // *second* (inner) row is written — the discriminator for "it went to failed" is exactly
+    // ONE row (the outer one only), not zero.
+    const rows = await env.FLOW_DB.prepare(
+      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-video1' AND content_id = 'content-vid-3'`
+    ).first<{ c: number }>();
+    expect(rows?.c).toBe(1);
+  });
+
+  it("resumes on the failed branch without calling content when cover_image_url is missing", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-video1', 1, 'video flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithVideoCondition()).run();
+
+    await worker.queue(
+      makeBatch({
+        tenantId: "1", eventType: "content.created", contentId: "content-vid-4", channelId: "src-chan",
+        payload: {},
+      }),
+      env
+    );
+
+    const detectFaceCall = fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/internal/detect-face"));
+    expect(detectFaceCall).toBeUndefined();
+  });
+});

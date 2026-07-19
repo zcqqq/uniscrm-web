@@ -741,4 +741,73 @@ describe("stub content-flow action endpoints", () => {
     );
     expect(res.status).toBe(403);
   });
+
+  describe("POST /internal/content/x-video-status", () => {
+    it("posts the tweet and records content when status is succeeded", async () => {
+      const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+      tenantDataDbRunMock.mockClear();
+
+      const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+        const u = String(url);
+        if (u.includes("command=STATUS")) return new Response(JSON.stringify({ data: { id: "media-1", processing_info: { state: "succeeded" } } }), { status: 200 });
+        if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-status-1", text: "caption text" } }), { status: 201 });
+        throw new Error(`Unexpected fetch: ${u}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await worker.fetch(
+        new Request("https://link-dev.uni-scrm.com/internal/content/x-video-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+          body: JSON.stringify({ channelId: "tgt-chan", mediaId: "media-1", text: "caption text", contentId: "content-1", flowId: "flow-1" }),
+        }),
+        { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, id: "tweet-status-1" });
+      expect(tenantDataDbRunMock).toHaveBeenCalledTimes(1);
+      vi.unstubAllGlobals();
+    });
+
+    it("returns pending:true with checkAfterSecs when status is still processing", async () => {
+      const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ data: { id: "media-1", processing_info: { state: "in_progress", check_after_secs: 10 } } }), { status: 200 })
+      ));
+
+      const res = await worker.fetch(
+        new Request("https://link-dev.uni-scrm.com/internal/content/x-video-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+          body: JSON.stringify({ channelId: "tgt-chan", mediaId: "media-1", text: "caption text", contentId: "content-1", flowId: "flow-1" }),
+        }),
+        { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ pending: true, checkAfterSecs: 10 });
+      vi.unstubAllGlobals();
+    });
+
+    it("returns ok:false when status is failed", async () => {
+      const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ data: { id: "media-1", processing_info: { state: "failed" } } }), { status: 200 })
+      ));
+
+      const res = await worker.fetch(
+        new Request("https://link-dev.uni-scrm.com/internal/content/x-video-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+          body: JSON.stringify({ channelId: "tgt-chan", mediaId: "media-1", text: "caption text", contentId: "content-1", flowId: "flow-1" }),
+        }),
+        { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: false });
+      vi.unstubAllGlobals();
+    });
+  });
 });

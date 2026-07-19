@@ -7,7 +7,7 @@ import { CreditService, getActiveSubscriptionTier } from "../../shared/credit-se
 import { EventMetadata_X } from "../../metadata/x";
 import { dollarsToMicros } from "../../shared/credit";
 import { ContentService } from "./services/content";
-import { createPost, repostPost, createBookmark, likePost, initMediaUpload, appendMediaChunk, finalizeMediaUpload } from "./services/x-posts-api";
+import { createPost, repostPost, createBookmark, likePost, initMediaUpload, appendMediaChunk, finalizeMediaUpload, getMediaUploadStatus } from "./services/x-posts-api";
 import { TikTokTokenService } from "./services/tiktok-token";
 import { initPhotoPost } from "./services/tiktok-publish";
 
@@ -412,6 +412,51 @@ export function internalRoutes() {
       generatedFromContentId: contentId,
       flowId: flowId || "",
     });
+
+    return c.json({ ok: true, id: postResult.id });
+  });
+
+  // Check X video processing status and immediately post + record if succeeded.
+  // Called by flow worker's polling loop when /content/create-post returned pending:true.
+  // Stateless — looks up channel, checks X's status, and if succeeded, posts and records
+  // in one call (so caller never needs a second round-trip once status is succeeded).
+  router.post("/content/x-video-status", async (c) => {
+    const { channelId, mediaId, text, contentId, flowId } = await c.req.json<{
+      channelId: string; mediaId: string; text: string; contentId: string; flowId?: string | null;
+    }>();
+
+    const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
+      .bind(channelId).first<{ config: string; channel_type: string; tenant_id: number }>();
+    if (!channel || channel.channel_type !== "X") return c.json({ ok: false }, 200);
+
+    const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
+    const accessToken = await tokenService.getValidToken(channelId);
+    const status = await getMediaUploadStatus(accessToken, mediaId);
+
+    if (!status.ok || status.state === "failed") {
+      console.log(JSON.stringify({ event: "x_video_status_failed", contentId, channelId, mediaId }));
+      return c.json({ ok: false }, 200);
+    }
+    if (status.state !== "succeeded") {
+      return c.json({ pending: true, checkAfterSecs: status.checkAfterSecs ?? 60 });
+    }
+
+    const postResult = await createPost(accessToken, text, mediaId);
+    console.log(JSON.stringify({ event: "x_video_status_post", contentId, channelId, ok: postResult.ok }));
+    if (!postResult.ok || !postResult.id) {
+      return c.json({ ok: false }, 200);
+    }
+
+    const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+      .bind(channel.tenant_id).first<{ d1_database_id: string | null }>();
+    if (tenantRow?.d1_database_id) {
+      const tenantDataDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
+      const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, channel.tenant_id);
+      await contentService.recordPublishedContent(channelId, "X", postResult.id, text, {
+        generatedFromContentId: contentId,
+        flowId: flowId || "",
+      });
+    }
 
     return c.json({ ok: true, id: postResult.id });
   });

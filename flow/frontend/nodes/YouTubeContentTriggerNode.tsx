@@ -5,7 +5,7 @@ import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 export default function YouTubeContentTriggerNode({ data, selected }: NodeProps) {
   const conditions = (data.conditions as unknown[]) || [];
   const condCount = conditions.filter((c: any) => c?.field).length;
-  const channelName = (data.channelName as string) || "(no channel selected)";
+  const channelName = (data.subscriptionChannelName as string) || "(no subscription selected)";
 
   return (
     <div

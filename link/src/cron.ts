@@ -195,14 +195,13 @@ export async function handlePolling(env: Env): Promise<void> {
 const YOUTUBE_RENEWAL_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 async function handleYouTubeRenewal(env: Env): Promise<void> {
-  let referencedIds: Set<string>;
+  let watches: { channelId: string; subscriptionChannelId: string }[];
   try {
     const res = await fetch(`${env.FLOW_URL}/internal/youtube-watches`, {
       headers: { "X-Internal-Secret": env.INTERNAL_SECRET },
     });
     if (!res.ok) throw new Error(`status ${res.status}`);
-    const { watches } = (await res.json()) as { watches: { channelId: string }[] };
-    referencedIds = new Set(watches.map((w) => w.channelId));
+    ({ watches } = (await res.json()) as { watches: { channelId: string; subscriptionChannelId: string }[] });
   } catch (e) {
     // Don't touch any subscription if we can't confirm what's still referenced —
     // an unsubscribe based on stale/missing data would silently kill a live trigger.
@@ -210,31 +209,20 @@ async function handleYouTubeRenewal(env: Env): Promise<void> {
     return;
   }
 
-  const rows = await env.LINK_DB
-    .prepare("SELECT id, config FROM channels WHERE channel_type = 'YOUTUBE' AND is_active = 1")
-    .all<{ id: string; config: string }>();
+  for (const { channelId: accountChannelId, subscriptionChannelId: youtubeChannelId } of watches) {
+    const leaseRow = await env.LINK_DB
+      .prepare("SELECT lease_expires_at FROM youtube_websub_leases WHERE account_channel_id = ? AND youtube_channel_id = ?")
+      .bind(accountChannelId, youtubeChannelId)
+      .first<{ lease_expires_at: string | null }>();
 
-  for (const row of rows.results) {
-    const config = JSON.parse(row.config) as { youtube_channel_id: string; websub_lease_expires_at?: string };
-
-    // Not referenced by any published flow yet — skip renewal this cycle rather than
-    // tearing the subscription down. A tenant may still be mid-build on the flow that
-    // will reference this channel (binding happens before publish), and deactivating
-    // here would permanently exclude the row from future runs (the query above only
-    // selects is_active = 1), with no self-heal even after the flow is published.
-    // If it truly stays unreferenced forever, the WebSub lease simply lapses on its
-    // own near its ~10-day expiry.
-    if (!referencedIds.has(row.id)) {
-      continue;
-    }
-
-    const expiresAt = config.websub_lease_expires_at ? new Date(config.websub_lease_expires_at).getTime() : 0;
-    if (expiresAt - Date.now() > YOUTUBE_RENEWAL_WINDOW_MS) continue;
+    const expiresAt = leaseRow?.lease_expires_at ? new Date(leaseRow.lease_expires_at).getTime() : 0;
+    // No lease row at all (never subscribed) or nearing expiry — (re)subscribe either way.
+    if (leaseRow && expiresAt - Date.now() > YOUTUBE_RENEWAL_WINDOW_MS) continue;
 
     try {
-      await subscribeWebSub(`${env.LINK_URL}/youtube/websub/${row.id}`, config.youtube_channel_id);
+      await subscribeWebSub(`${env.LINK_URL}/youtube/websub/${accountChannelId}/${youtubeChannelId}`, youtubeChannelId);
     } catch (e) {
-      console.error(JSON.stringify({ event: "youtube_resubscribe_error", channel_id: row.id, error: String(e) }));
+      console.error(JSON.stringify({ event: "youtube_resubscribe_error", account_channel_id: accountChannelId, subscription_channel_id: youtubeChannelId, error: String(e) }));
     }
   }
 }

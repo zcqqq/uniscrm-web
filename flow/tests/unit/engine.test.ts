@@ -317,6 +317,32 @@ describe("collectActions: new content-domain action types", () => {
       { type: "videoCondition", nodeId: "a1", operation: "check-face", hasBranches: true },
     ]);
   });
+
+  it("collects a videoAction action carrying its targetLanguage, with hasBranches=true", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "videoAction", targetLanguage: "zh" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
+    expect(result.actions).toEqual([
+      { type: "videoAction", nodeId: "a1", hasBranches: true, targetLanguage: "zh" },
+    ]);
+  });
+
+  it("defaults targetLanguage to 'zh' when not set on a videoAction node", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "videoAction" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
+    expect(result.actions[0]).toMatchObject({ targetLanguage: "zh" });
+  });
 });
 
 describe("resumeFromNode: action branch targets get full actionData", () => {

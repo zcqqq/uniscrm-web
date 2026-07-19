@@ -87,6 +87,10 @@ export const api = {
     },
     xLists: (channelId: string) =>
       request<{ lists: { id: string; name: string }[] }>(`/api/channels/${channelId}/x-lists`),
+    youtubeSubscriptions: () =>
+      request<{ connected: boolean; accountChannelId: string | null; subscriptions: { channelId: string; channelName: string; thumbnailUrl: string }[] }>(
+        `/api/channels/youtube/subscriptions`
+      ),
   },
   lists: {
     list: () =>

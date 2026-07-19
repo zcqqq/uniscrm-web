@@ -315,11 +315,15 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
 function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
   const conditions: Condition[] = data.conditions || [];
-  const channelId = data.channelId as string;
-  const [channels, setChannels] = useState<ChannelOption[]>([]);
+  const subscriptionChannelId = data.subscriptionChannelId as string;
+  const [state, setState] = useState<{ connected: boolean; accountChannelId: string | null; subscriptions: { channelId: string; channelName: string; thumbnailUrl: string }[] }>({
+    connected: false, accountChannelId: null, subscriptions: [],
+  });
 
   useEffect(() => {
-    api.channels.list("YOUTUBE").then(setChannels).catch(() => setChannels([]));
+    api.channels.youtubeSubscriptions()
+      .then(setState)
+      .catch(() => setState({ connected: false, accountChannelId: null, subscriptions: [] }));
   }, []);
 
   return (
@@ -327,29 +331,37 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
       <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.youtubeContentTrigger.label}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Channel</Label>
-          {channels.length === 0 ? (
+          <Label className="text-xs block mb-1">Subscription</Label>
+          {!state.connected ? (
             <p className="text-xs text-muted-foreground italic">
-              No watched YouTube channels yet — connect your YouTube account and pick channels to watch from the Social page.
+              Connect your YouTube account from the Social page to pick a subscription.
+            </p>
+          ) : state.subscriptions.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">
+              No subscriptions found — check your YouTube account has subscriptions.
             </p>
           ) : (
             <Select
-              value={channelId || ""}
+              value={subscriptionChannelId || ""}
               onChange={(e: SelectChange) => {
-                const ch = channels.find((c) => c.id === e.target.value);
-                updateNodeData(nodeId, { channelId: e.target.value, channelName: ch?.username || "" });
+                const sub = state.subscriptions.find((s) => s.channelId === e.target.value);
+                updateNodeData(nodeId, {
+                  channelId: state.accountChannelId || "",
+                  subscriptionChannelId: e.target.value,
+                  subscriptionChannelName: sub?.channelName || "",
+                });
               }}
               className="w-full text-sm"
             >
-              <option value="">Select channel...</option>
-              {channels.map((ch) => (
-                <option key={ch.id} value={ch.id}>{ch.username}</option>
+              <option value="">Select subscription...</option>
+              {state.subscriptions.map((sub) => (
+                <option key={sub.channelId} value={sub.channelId}>{sub.channelName}</option>
               ))}
             </Select>
           )}
         </div>
 
-        <p className="text-xs text-muted-foreground">Fires when this channel publishes a new video.</p>
+        <p className="text-xs text-muted-foreground">Fires when this subscription publishes a new video.</p>
 
         <ConditionsEditor
           conditions={conditions}

@@ -393,6 +393,144 @@ describe("queue(): xContentAction branch resolution", () => {
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-repost-rl'`).run();
     vi.unstubAllGlobals();
   });
+
+  it("resolves failed immediately (no fetch to link) when attachVideo is true but payload has no processed_video_url", async () => {
+    const graphVideoNoUrl = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-post", attachVideo: true }, position: { x: 200, y: 0 } },
+        { id: "a3", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 100 } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "a1" },
+        { id: "e3", source: "a1", target: "a3", sourceHandle: "failed" },
+      ],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-video-no-url', 1, 'video no url flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphVideoNoUrl).run();
+
+    // The describe-level beforeEach also has 'flow-branch1' (same trigger channelId "src-chan")
+    // live in FLOW_DB for every test in this block, so this content.created event ALSO matches
+    // flow-branch1 and its own (non-video) xContentAction fires a real fetch call — fetchMock must
+    // resolve to something usable (an unconfigured vi.fn() returns undefined, and flow-branch1's
+    // code unconditionally awaits res.json(), throwing and aborting the whole queue message before
+    // this test's own flow ever gets to record its content_flow_executions row).
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ ok: false }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-video-no-url", channelId: "src-chan", payload: {} }),
+      env
+    );
+
+    // Assert no call carried a videoUrl (rather than "zero calls total", since flow-branch1's own
+    // call above is expected) — only an attachVideo:true action would ever include one, and this
+    // test's own action must short-circuit before ever fetching.
+    const anyCallWithVideoUrl = fetchMock.mock.calls.some(([, init]) => {
+      const body = init && (init as RequestInit).body ? JSON.parse((init as RequestInit).body as string) : {};
+      return !!body.videoUrl;
+    });
+    expect(anyCallWithVideoUrl).toBe(false);
+    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-video-no-url'`).first<{ c: number }>();
+    expect(execCount?.c).toBeGreaterThanOrEqual(1);
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-video-no-url'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-video-no-url'`).run();
+    vi.unstubAllGlobals();
+  });
+
+  it("passes payload.processed_video_url as videoUrl to /internal/content/create-post when attachVideo is true", async () => {
+    const graphVideo = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-post", attachVideo: true }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-video-url', 1, 'video url flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphVideo).run();
+
+    // mockImplementation (not mockResolvedValue) so flow-branch1's own concurrent call to the same
+    // URL gets its own fresh Response instance, not a body already consumed by this flow's call.
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ ok: true, id: "tweet-1" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-video-url", channelId: "src-chan", payload: { processed_video_url: "https://content-dev.uni-scrm.com/public/media/vid-9" } }),
+      env
+    );
+
+    // flow-branch1 (same trigger channelId "src-chan") also calls /internal/content/create-post
+    // for this event — find the call that actually carries a videoUrl, not just the first call to
+    // this URL, since flow-branch1's own (non-video) call has no videoUrl and could come first.
+    const createPostCall = fetchMock.mock.calls.find(([u, init]) => {
+      if (!String(u).includes("/internal/content/create-post")) return false;
+      const body = init && (init as RequestInit).body ? JSON.parse((init as RequestInit).body as string) : {};
+      return !!body.videoUrl;
+    });
+    expect(createPostCall).toBeDefined();
+    const body = JSON.parse((createPostCall![1] as RequestInit).body as string);
+    expect(body.videoUrl).toBe("https://content-dev.uni-scrm.com/public/media/vid-9");
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-video-url'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-video-url'`).run();
+    vi.unstubAllGlobals();
+  });
+
+  it("inserts a content_flow_pending row with an xVideoStatusPoll retry_action when link returns pending:true, without resolving success/failed yet", async () => {
+    const graphVideo = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-post", attachVideo: true }, position: { x: 200, y: 0 } },
+        { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 0 } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "a1" },
+        { id: "e2", source: "a1", target: "a2", sourceHandle: "success" },
+      ],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-video-pending', 1, 'video pending flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphVideo).run();
+
+    // NOTE: the describe-level beforeEach also has 'flow-branch1' live in FLOW_DB (same trigger
+    // channelId "src-chan"), so this content.created event matches BOTH flows and each dispatches
+    // its own fetch call. mockResolvedValue would hand back the SAME Response instance to both
+    // calls, and Response.json() can only consume a body once — the second caller would silently
+    // get a used-body failure. Use mockImplementation so every call gets a fresh Response, matching
+    // the same fix already applied to the pre-existing rate-limited-repost test above in this file.
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(
+      async () => new Response(JSON.stringify({ pending: true, mediaId: "media-9", channelId: "src-chan", text: "caption", checkAfterSecs: 5 }), { status: 200 })
+    ));
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-video-pending", channelId: "src-chan", payload: { processed_video_url: "https://content-dev.uni-scrm.com/public/media/vid-10" } }),
+      env
+    );
+
+    const pending = await env.FLOW_DB.prepare(
+      `SELECT retry_action, retry_count, execute_at FROM content_flow_pending WHERE flow_id = 'flow-video-pending' AND content_id = 'content-video-pending'`
+    ).first<{ retry_action: string; retry_count: number; execute_at: string }>();
+    expect(pending).toBeTruthy();
+    expect(pending!.retry_count).toBe(0);
+    expect(JSON.parse(pending!.retry_action)).toMatchObject({ type: "xVideoStatusPoll", channelId: "src-chan", mediaId: "media-9", text: "caption", nodeId: "a1" });
+    expect(new Date(pending!.execute_at).getTime()).toBeGreaterThan(Date.now());
+
+    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-video-pending'`).first<{ c: number }>();
+    // Only the initial dispatch row (matching the trigger) — no resumed-branch row yet, since
+    // the branch hasn't resolved.
+    expect(execCount?.c).toBe(1);
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-video-pending'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-video-pending'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-video-pending'`).run();
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("queue(): tiktokContentAction dispatch", () => {

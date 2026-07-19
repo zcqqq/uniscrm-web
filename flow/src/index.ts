@@ -334,6 +334,71 @@ async function executeContentActions(
         const provider = action.provider as string;
         const skillId = (action.skillId as string) || "none";
         const interpolatedPrompt = String(action.prompt || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""));
+
+        if (action.attachVideo) {
+          const videoUrl = String(payload?.processed_video_url ?? "");
+          if (!videoUrl) {
+            console.log(JSON.stringify({ event: "content_action_x_content_action_missing_video", contentId, channelId }));
+            const nodeId = action.nodeId as string;
+            const resumed = resumeFromNode(graph, nodeId, payload, "failed");
+            if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+            if (resumed.actions.length > 0) {
+              const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
+              rateLimited.push(...nested.rateLimited);
+              await env.FLOW_DB.prepare(
+                `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+                 VALUES (?, ?, ?, ?, 1, ?)`
+              ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
+            }
+            continue;
+          }
+          res = await fetch(`${env.LINK_URL}/internal/content/create-post`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+            body: JSON.stringify({ contentId, interpolatedPrompt, provider, channelId, flowId: flowId || null, skillId, videoUrl }),
+          });
+          const videoBody = await res.json().catch(() => ({})) as {
+            ok?: boolean; pending?: boolean; rateLimited?: boolean; rateLimitReset?: string;
+            mediaId?: string; channelId?: string; text?: string; checkAfterSecs?: number;
+          };
+          if (videoBody.pending) {
+            const nodeId = action.nodeId as string;
+            const executeAt = new Date(Date.now() + Math.max(videoBody.checkAfterSecs || 60, 60) * 1000).toISOString();
+            await env.FLOW_DB.prepare(
+              `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`
+            ).bind(
+              crypto.randomUUID(), flowId || "", nodeId, contentId, Number(tenantId),
+              JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
+              JSON.stringify({ type: "xVideoStatusPoll", channelId: videoBody.channelId, mediaId: videoBody.mediaId, text: videoBody.text, nodeId })
+            ).run();
+            console.log(JSON.stringify({ event: "content_action_x_video_pending", contentId, channelId, mediaId: videoBody.mediaId }));
+            continue;
+          }
+          if (videoBody.rateLimited) {
+            // Video already uploaded to X successfully — only the final createPost() call hit
+            // a rate limit. Reschedule like the non-video rate-limit path below does, rather than
+            // treating this as a permanent failure (the uploaded media_id would otherwise be
+            // wasted and the tenant's video silently dropped).
+            rateLimited.push({ action, retryAt: videoBody.rateLimitReset || new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+            continue;
+          }
+          console.log(JSON.stringify({ event: "content_action_x_content_action", contentId, status: res.status, ok: !!videoBody.ok, channelId, provider, skillId, attachVideo: true }));
+          const branch = videoBody.ok ? "success" : "failed";
+          const nodeId = action.nodeId as string;
+          const resumed = resumeFromNode(graph, nodeId, payload, branch);
+          if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+          if (resumed.actions.length > 0) {
+            const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
+            rateLimited.push(...nested.rateLimited);
+            await env.FLOW_DB.prepare(
+              `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+               VALUES (?, ?, ?, ?, 1, ?)`
+            ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
+          }
+          continue;
+        }
+
         res = await fetch(`${env.LINK_URL}/internal/content/create-post`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },

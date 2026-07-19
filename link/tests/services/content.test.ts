@@ -463,3 +463,96 @@ describe("recordPublishedContent", () => {
     );
   });
 });
+
+describe("ContentService.recordTriggerContentSeen", () => {
+  function createMockTenantDb() {
+    return {
+      query: vi.fn(),
+      run: vi.fn().mockResolvedValue({ changes: 1 }),
+      batch: vi.fn(),
+      getDbId: vi.fn().mockReturnValue("db-1"),
+    };
+  }
+
+  it("inserts into content_trigger_dedup and returns true when the row is new", async () => {
+    const tenantDb = createMockTenantDb();
+    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42);
+
+    const isNew = await service.recordTriggerContentSeen("chan1", "listA", "t1");
+
+    expect(isNew).toBe(true);
+    expect(tenantDb.run).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT OR IGNORE INTO content_trigger_dedup"),
+      ["chan1", "listA", "t1", 42, expect.any(String)]
+    );
+  });
+
+  it("returns false when the row already existed (changes: 0)", async () => {
+    const tenantDb = createMockTenantDb();
+    tenantDb.run.mockResolvedValue({ changes: 0 });
+    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42);
+
+    const isNew = await service.recordTriggerContentSeen("chan1", "listA", "t1");
+
+    expect(isNew).toBe(false);
+  });
+
+  it("accepts an empty secondaryId for trigger types with no secondary dimension", async () => {
+    const tenantDb = createMockTenantDb();
+    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42);
+
+    await service.recordTriggerContentSeen("chan1", "", "t1");
+
+    expect(tenantDb.run).toHaveBeenCalledWith(expect.any(String), ["chan1", "", "t1", 42, expect.any(String)]);
+  });
+
+  it("does not touch the content table or pipelineContent", async () => {
+    const tenantDb = createMockTenantDb();
+    const pipelineContent = { send: vi.fn() };
+    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42, pipelineContent as any);
+
+    await service.recordTriggerContentSeen("chan1", "listA", "t1");
+
+    expect(tenantDb.run).toHaveBeenCalledTimes(1);
+    expect(pipelineContent.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("ContentService.emitContentTriggerEvent", () => {
+  it("sends content.created with a freshly generated contentId and the named secondary field", async () => {
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService({} as any, {} as any, {} as any, 42, undefined, flowQueue as any);
+
+    await service.emitContentTriggerEvent("chan1", "X", "listId", "listA", { content_type: "TWEET" });
+
+    expect(flowQueue.send).toHaveBeenCalledTimes(1);
+    const [msg] = flowQueue.send.mock.calls[0];
+    expect(msg).toMatchObject({
+      tenantId: "42",
+      eventType: "content.created",
+      channelId: "chan1",
+      listId: "listA",
+      payload: { channel_type: "X", content_type: "TWEET" },
+    });
+    expect(typeof msg.contentId).toBe("string");
+    expect(msg.contentId.length).toBeGreaterThan(0);
+  });
+
+  it("omits the secondary field entirely when secondaryValue is empty (not just undefined)", async () => {
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService({} as any, {} as any, {} as any, 42, undefined, flowQueue as any);
+
+    await service.emitContentTriggerEvent("chan1", "YOUTUBE", "subscriptionChannelId", "", { content_type: "VIDEO" });
+
+    const [msg] = flowQueue.send.mock.calls[0];
+    expect("subscriptionChannelId" in msg).toBe(false);
+  });
+
+  it("does not throw when no flowQueue was provided", async () => {
+    const service = new ContentService({} as any, {} as any, {} as any, 42);
+
+    await expect(
+      service.emitContentTriggerEvent("chan1", "X", "listId", "listA", {})
+    ).resolves.not.toThrow();
+  });
+});

@@ -270,6 +270,39 @@ export class ContentService {
     );
   }
 
+  async recordTriggerContentSeen(
+    channelId: string,
+    secondaryId: string,
+    sourceContentId: string
+  ): Promise<boolean> {
+    const now = new Date().toISOString();
+    const result = await this.tenantDb.run(
+      `INSERT OR IGNORE INTO content_trigger_dedup (channel_id, secondary_id, source_content_id, tenant_id, seen_at) VALUES (?, ?, ?, ?, ?)`,
+      [channelId, secondaryId, sourceContentId, this.tenantId, now]
+    );
+    return result.changes > 0;
+  }
+
+  async emitContentTriggerEvent(
+    channelId: string,
+    channelType: ChannelType,
+    secondaryFieldName: "listId" | "subscriptionChannelId",
+    secondaryValue: string,
+    resolvedProps: Record<string, unknown>
+  ): Promise<void> {
+    if (!this.flowQueue) return;
+    await this.flowQueue.send({
+      tenantId: String(this.tenantId),
+      eventType: "content.created",
+      contentId: crypto.randomUUID(),
+      channelId,
+      ...(secondaryValue ? { [secondaryFieldName]: secondaryValue } : {}),
+      payload: { channel_type: channelType, ...resolvedProps },
+    }).catch((err) => {
+      console.error(JSON.stringify({ event: "content_trigger_queue_send_error", channelId, error: String(err) }));
+    });
+  }
+
   async list(channelType?: ChannelType): Promise<ContentRow[]> {
     if (channelType) {
       return this.tenantDb.query<ContentRow>(

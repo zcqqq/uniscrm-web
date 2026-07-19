@@ -81,10 +81,12 @@ function ConditionsEditor({
   conditions,
   fields,
   onChange,
+  label = "Conditions",
 }: {
   conditions: Condition[];
   fields: TriggerFieldDefinition[];
   onChange: (conditions: Condition[]) => void;
+  label?: string;
 }) {
   const addCondition = () => onChange([...conditions, { field: "", operator: "==", value: "" }]);
   const updateCondition = (idx: number, patch: Partial<Condition>) => {
@@ -97,7 +99,7 @@ function ConditionsEditor({
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <Label className="text-xs">Conditions</Label>
+        <Label className="text-xs">{label}</Label>
         <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={addCondition}>+ Add</Button>
       </div>
       {conditions.length === 0 && (

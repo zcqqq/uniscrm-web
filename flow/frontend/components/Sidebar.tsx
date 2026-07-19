@@ -131,6 +131,12 @@ export default function Sidebar() {
       el: <DraggableItem key="tiktokContentAction" type="tiktokContentAction" label={NODE_TYPE_REGISTRY.tiktokContentAction.label!} description={NODE_TYPE_REGISTRY.tiktokContentAction.description!} color="border-accent bg-accent/50" icon="📸" />,
     });
   }
+  if (visible("videoAction")) {
+    actionItems.push({
+      key: "videoAction",
+      el: <DraggableItem key="videoAction" type="videoAction" label={NODE_TYPE_REGISTRY.videoAction.label!} description={NODE_TYPE_REGISTRY.videoAction.description!} color="border-accent bg-accent/50" icon="🎬" />,
+    });
+  }
   const flowControlItems: SectionItem[] = [];
   if (visible("waitForEvent")) {
     flowControlItems.push({

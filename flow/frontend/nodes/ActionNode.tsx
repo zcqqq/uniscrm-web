@@ -5,7 +5,7 @@ import { CHANNEL_TYPES } from "../config/trigger-fields";
 import { ContentMetadata_X } from "../../../metadata/x-byok";
 import { t as localizeLabel } from "../../../metadata/locale";
 
-const EXTERNAL_API_ACTIONS = ["xAction", "xContentAction", "tiktokContentAction"];
+const EXTERNAL_API_ACTIONS = ["xAction", "xContentAction", "tiktokContentAction", "videoAction"];
 const X_ACTION_COUNT = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!.actions.length;
 const CONTENT_X_ACTION_OPERATIONS = ContentMetadata_X.filter((m) => m.flowType === "action");
 
@@ -47,6 +47,11 @@ export default function ActionNode({ data, selected }: NodeProps) {
     description = channelId ? "Target channel selected" : "Select a target channel...";
     icon = "📸";
     isConfigured = !!channelId;
+  } else if (actionType === "videoAction") {
+    label = NODE_TYPE_REGISTRY.videoAction.label!;
+    description = NODE_TYPE_REGISTRY.videoAction.description;
+    icon = "🎬";
+    isConfigured = true;
   } else {
     label = "Action";
     description = "Unknown action";

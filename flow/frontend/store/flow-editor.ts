@@ -42,7 +42,7 @@ export interface FlowEditorState {
   setErrorNodeIds: (ids: string[]) => void;
 }
 
-const ACTION_TYPES = ["addToList", "xAction", "xContentAction", "tiktokContentAction"];
+const ACTION_TYPES = ["addToList", "xAction", "xContentAction", "tiktokContentAction", "videoAction"];
 
 // Action types that operate on a specific channel account (need `data.channelId`), mapped to
 // the channelType used to fetch that account list. Add an entry here whenever a new
@@ -145,6 +145,8 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
           textProvider: "default", textSkillId: "none",
           imageCount: 1, imageProvider: "default", imageSkillId: "none",
         };
+      } else if (type === "videoAction") {
+        data = { actionType: type, targetLanguage: "zh" };
       } else {
         throw new Error(`Unexpected action type: ${type}`);
       }

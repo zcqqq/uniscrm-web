@@ -568,6 +568,10 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
     return <TikTokContentActionInspector nodeId={nodeId} data={data} />;
   }
 
+  if (actionType === "videoAction") {
+    return <VideoActionInspector nodeId={nodeId} data={data} />;
+  }
+
   return <p className="text-sm text-muted-foreground">Unknown action type</p>;
 }
 
@@ -765,6 +769,40 @@ function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Recor
             onChange={(v) => updateNodeData(nodeId, { operation: v })}
             options={VIDEO_CONDITION_OPERATIONS}
           />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const VIDEO_ACTION_LANGUAGES = [
+  { value: "zh", label: "Chinese" },
+  { value: "en", label: "English" },
+  { value: "ja", label: "Japanese" },
+  { value: "ko", label: "Korean" },
+  { value: "es", label: "Spanish" },
+  { value: "fr", label: "French" },
+  { value: "de", label: "German" },
+];
+
+function VideoActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.videoAction.label}</h4>
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Target Language</Label>
+          <Select
+            value={data.targetLanguage || "zh"}
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { targetLanguage: e.target.value })}
+            className="w-full text-sm"
+          >
+            {VIDEO_ACTION_LANGUAGES.map((l) => (
+              <option key={l.value} value={l.value}>{l.label}</option>
+            ))}
+          </Select>
         </div>
       </div>
     </div>

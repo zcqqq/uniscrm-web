@@ -16,12 +16,14 @@ export default function ActionNode({ data, selected }: NodeProps) {
   let label: string;
   let description: string | undefined;
   let icon: string;
+  let isConfigured: boolean;
 
   if (actionType === "addToList") {
     const listName = data.listName as string;
     label = NODE_TYPE_REGISTRY.addToList.label!;
     description = listName || "Select a list...";
     icon = "📋";
+    isConfigured = !!listName;
   } else if (actionType === "xAction") {
     const xEvent = data.xEvent as string;
     label = NODE_TYPE_REGISTRY.xAction.label!;
@@ -31,21 +33,25 @@ export default function ActionNode({ data, selected }: NodeProps) {
       : xEvent === "mute-user" ? "Mute User"
       : `${X_ACTION_COUNT} actions`;
     icon = "𝕏";
+    isConfigured = !!xEvent;
   } else if (actionType === "xContentAction") {
     const operation = (data.operation as string) || "create-post";
     const selectedOperation = CONTENT_X_ACTION_OPERATIONS.find((op) => op.sourceContentType === operation);
     label = NODE_TYPE_REGISTRY.xContentAction.label!;
-    description = selectedOperation?.description ? localizeLabel(selectedOperation.description, "en") : undefined;
+    description = selectedOperation?.label ? localizeLabel(selectedOperation.label, "en") : undefined;
     icon = "✨";
+    isConfigured = !!selectedOperation;
   } else if (actionType === "tiktokContentAction") {
     const channelId = data.channelId as string;
     label = NODE_TYPE_REGISTRY.tiktokContentAction.label!;
     description = channelId ? "Target channel selected" : "Select a target channel...";
     icon = "📸";
+    isConfigured = !!channelId;
   } else {
     label = "Action";
     description = "Unknown action";
     icon = "⚡";
+    isConfigured = false;
   }
 
   return (
@@ -60,7 +66,7 @@ export default function ActionNode({ data, selected }: NodeProps) {
         <span className="font-semibold text-sm text-green-700">{label}</span>
       </div>
       {description && (
-        <p className={`text-xs ${data.listName || data.xEvent ? "text-gray-500" : "text-gray-400 italic"}`}>
+        <p className={`text-xs ${isConfigured ? "text-gray-500" : "text-gray-400 italic"}`}>
           {description}
         </p>
       )}

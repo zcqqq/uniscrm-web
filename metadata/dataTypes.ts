@@ -1,5 +1,5 @@
 export type PropDataType = "INT" | "TEXT" | "ENUM_INT" | "ENUM_TEXT" | "DATETIME" | "IMAGE" | "VIDEO";
-export type PropFieldType = "IMAGE";
+export type PropFieldType = "IMAGE" | "VIDEO";
 
 export type LocalizedString = { en: string; zh: string };
 

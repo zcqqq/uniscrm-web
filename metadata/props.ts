@@ -179,6 +179,25 @@ export const PROPS = definePropDefinitions([
     label: { en: "Duration", zh: "时长" },
   },
   {
+    propId: "processed_video_url",
+    dataType: "TEXT",
+    fieldType: "VIDEO",
+    entity: ["content"],
+    label: { en: "Subtitled Video", zh: "字幕视频" },
+  },
+  {
+    propId: "video_transcript",
+    dataType: "TEXT",
+    entity: ["content"],
+    label: { en: "Video Transcript", zh: "视频转录文本" },
+  },
+  {
+    propId: "translated_subtitle_text",
+    dataType: "TEXT",
+    entity: ["content"],
+    label: { en: "Translated Subtitle Text", zh: "翻译字幕文本" },
+  },
+  {
     propId: "height",
     isInsight: true,
     dataType: "INT",

@@ -135,7 +135,7 @@ describe("collectActions: new content-domain action types", () => {
     };
     const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
     expect(result.actions).toEqual([
-      { type: "xContentAction", nodeId: "a1", hasBranches: true, operation: "repost-post", prompt: "Rewrite this: $content.content_text", provider: "default", skillId: "none" },
+      { type: "xContentAction", nodeId: "a1", hasBranches: true, operation: "repost-post", prompt: "Rewrite this: $content.content_text", provider: "default", skillId: "none", attachVideo: false },
     ]);
   });
 
@@ -213,7 +213,7 @@ describe("collectActions: new content-domain action types", () => {
     const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
     expect(result.actions).toEqual([
       {
-        type: "tiktokContentAction", nodeId: "a1", hasBranches: true, channelId: "tiktok-chan-1",
+        type: "tiktokContentAction", nodeId: "a1", hasBranches: true, operation: "photo-post", channelId: "tiktok-chan-1",
         prompts: { title: "Write a title: $content.title", description: "Write a caption: $content.content_text", message_image: "A photo of: $content.title" },
         textProvider: "default", textSkillId: "none",
         imageCount: 1, imageProvider: "default", imageSkillId: "none",
@@ -240,6 +240,54 @@ describe("collectActions: new content-domain action types", () => {
     };
     const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
     expect(result.actions[0]).toMatchObject({ imageCount: 5, textSkillId: "marketingskills-social", imageSkillId: "marketingskills-social" });
+  });
+
+  it("collects attachVideo:true on an xContentAction node when data.attachVideo is set", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-post", attachVideo: true }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
+    expect(result.actions[0]).toMatchObject({ attachVideo: true });
+  });
+
+  it("defaults attachVideo to false when not set on an xContentAction node", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-post" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
+    expect(result.actions[0]).toMatchObject({ attachVideo: false });
+  });
+
+  it("defaults tiktokContentAction operation to 'photo-post' when not set", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "tiktokContentAction", channelId: "tiktok-chan-1", prompts: {}, textProvider: "default", imageProvider: "default" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
+    expect(result.actions[0]).toMatchObject({ operation: "photo-post" });
+  });
+
+  it("carries a set 'video-post' operation through on a tiktokContentAction node", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "tiktokContentAction", operation: "video-post", channelId: "tiktok-chan-1", prompts: {}, textProvider: "default" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
+    expect(result.actions[0]).toMatchObject({ operation: "video-post" });
   });
 
   it("collects a videoCondition action, defaulting operation to 'check-face' when unset", () => {

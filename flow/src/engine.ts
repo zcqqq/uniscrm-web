@@ -257,8 +257,10 @@ function buildActionData(targetNode: FlowNode): ActionResult {
     actionData.prompt = targetNode.data.prompt as string;
     actionData.provider = targetNode.data.provider as string;
     actionData.skillId = (targetNode.data.skillId as string) || "none";
+    actionData.attachVideo = !!targetNode.data.attachVideo;
   }
   if (actionType === "tiktokContentAction") {
+    actionData.operation = (targetNode.data.operation as string) || "photo-post";
     actionData.channelId = targetNode.data.channelId as string;
     actionData.prompts = (targetNode.data.prompts as Record<string, string>) || {};
     actionData.textProvider = targetNode.data.textProvider as string;

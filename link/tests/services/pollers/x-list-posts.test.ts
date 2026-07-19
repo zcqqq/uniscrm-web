@@ -85,7 +85,10 @@ describe("runListPostsPoller", () => {
     await runListPostsPoller(baseCtx(linkDb, tenantDb, { flowQueue }));
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Seed phase still records into content_trigger_dedup (so the next incremental poll
+    // doesn't see this backlog as new and flood the flow) — it just never emits.
     expect(tenantDb.run).toHaveBeenCalledTimes(1);
+    expect(tenantDb.run.mock.calls[0][0]).toContain("INSERT OR IGNORE INTO content_trigger_dedup");
     expect(flowQueue.send).not.toHaveBeenCalled();
 
     const updateCall = linkDb.prepare.mock.calls.find((c: unknown[]) => (c[0] as string).includes("UPDATE channel_poll_state"));
@@ -118,15 +121,14 @@ describe("runListPostsPoller", () => {
     expect(flowQueue.send.mock.calls[0][0]).toMatchObject({ eventType: "content.created", channelId: "chan1", listId: "listA" });
   });
 
-  it("passes listId through to upsertContentFromMetadata (via ContentService.upsertContentFromMetadata's list-scoped INSERT)", async () => {
+  it("passes listId as the dedup table's secondary_id", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
     const tenantDb = createMockTenantDb();
     fetchMock.mockImplementationOnce(() => jsonResponse({ data: [{ id: "t1", text: "hello" }], meta: {} }));
 
     await runListPostsPoller(baseCtx(linkDb, tenantDb));
 
-    const insertCall = tenantDb.run.mock.calls.find((c: unknown[]) => (c[0] as string).includes("INSERT INTO content"));
-    expect(insertCall![0]).toContain("ON CONFLICT(channel_id, list_id, source_content_id) WHERE list_id IS NOT NULL");
-    expect(insertCall![1]).toContain("listA");
+    const dedupCall = tenantDb.run.mock.calls.find((c: unknown[]) => (c[0] as string).includes("content_trigger_dedup"));
+    expect(dedupCall![1]).toEqual(["chan1", "listA", "t1", 1, expect.any(String)]);
   });
 });

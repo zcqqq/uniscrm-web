@@ -66,8 +66,16 @@ async function upsertPage(
     if (item.article) {
       props.content_type = "ARTICLE";
     }
-    const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "X", emitFlowEvent, listId);
+    const sourceContentId = String(props.source_content_id ?? "");
+    // ALWAYS record, including during the seed phase (emitFlowEvent=false) — the dedup table
+    // is the only place "already seen" state lives now, so skipping the record during seed
+    // would make the first incremental poll see the whole seeded backlog as new and flood the
+    // flow with duplicate triggers.
+    const isNew = await contentService.recordTriggerContentSeen(channelId, listId, sourceContentId);
     if (isNew) newCount++;
+    if (isNew && emitFlowEvent) {
+      await contentService.emitContentTriggerEvent(channelId, "X", "listId", listId, props);
+    }
   }
   return newCount;
 }

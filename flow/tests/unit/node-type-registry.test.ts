@@ -15,7 +15,7 @@ describe("NODE_TYPE_REGISTRY", () => {
     const expectedKeys = [
       "xTrigger", "cronTrigger", "xContentTrigger", "waitForEvent", "wait",
       "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps",
-      "addToList", "xAction", "xContentAction", "tiktokContentAction", "updateContentStatus",
+      "addToList", "xAction", "xContentAction", "tiktokContentAction",
     ];
     for (const key of expectedKeys) {
       expect(NODE_TYPE_REGISTRY[key], `missing registry entry for "${key}"`).toBeDefined();
@@ -46,7 +46,7 @@ describe("NODE_TYPE_REGISTRY", () => {
   });
 
   it("tags the action-family entries with reactFlowType 'action'", () => {
-    for (const key of ["addToList", "xAction", "xContentAction", "tiktokContentAction", "updateContentStatus"]) {
+    for (const key of ["addToList", "xAction", "xContentAction", "tiktokContentAction"]) {
       expect(NODE_TYPE_REGISTRY[key].reactFlowType).toBe("action");
     }
   });
@@ -187,7 +187,7 @@ describe("generatableKeysForDomain", () => {
   it("content domain: every domain:'content'/'both' type/actionType, now that all of them are generatable", () => {
     expect(generatableKeysForDomain("content").sort()).toEqual(
       [
-        "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "updateContentStatus",
+        "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction",
         "wait", "timeCondition", "abSplit", "webhook",
       ].sort()
     );

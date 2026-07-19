@@ -43,7 +43,6 @@ describe("buildFlowGenerateSystemPrompt", () => {
     }
     expect(prompt).toContain('actionType: "xContentAction"');
     expect(prompt).toContain('actionType: "tiktokContentAction"');
-    expect(prompt).toContain('actionType: "updateContentStatus"');
     expect(prompt).toContain("Flow must start with exactly one trigger node: xContentTrigger or youtubeContentTrigger");
   });
 

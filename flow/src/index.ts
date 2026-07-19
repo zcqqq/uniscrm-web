@@ -431,13 +431,6 @@ async function executeContentActions(
           wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
         ).run();
       }
-    } else if (action.type === "updateContentStatus" && action.status) {
-      const tenantRow = await env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-        .bind(Number(tenantId)).first<{ d1_database_id: string }>();
-      if (tenantRow?.d1_database_id) {
-        const tdb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
-        await tdb.run(`UPDATE content SET status = ? WHERE id = ?`, [action.status as string, contentId]);
-      }
     }
   }
 

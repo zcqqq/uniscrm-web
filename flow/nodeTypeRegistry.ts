@@ -210,17 +210,6 @@ ${CONTENT_X_ACTION_BULLETS}`,
     promptFragment: `   For TikTok photo-post actions: data: { actionType: "tiktokContentAction", channelId: "", prompts: {}, textProvider: "default", textSkillId: "none", imageCount: 1, imageProvider: "default", imageSkillId: "none" }
    - ${ContentMetadata_TikTok.find((m) => m.sourceContentType === "photo-post")!.description!.en} Leave all fields at these defaults for the user to configure via the Inspector.`,
   },
-  updateContentStatus: {
-    reactFlowType: "action",
-    label: "Update Content Status",
-    description: "Set this content's status",
-    domain: "content",
-    role: "action",
-    generatable: true,
-    promptFragment: `   For status-update actions: data: { actionType: "updateContentStatus", status: "" }
-   - status must be set by the user afterward via the Inspector to "published" or "ignored" — leave it blank ("") here. No branching.`,
-  },
-
   // --- shared across both domains ---
   wait: {
     reactFlowType: "wait",
@@ -284,6 +273,6 @@ export const USER_FLOW_SIDEBAR_ORDER: string[] = [
 ];
 
 export const CONTENT_FLOW_SIDEBAR_ORDER: string[] = [
-  "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "updateContentStatus",
+  "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction",
   "wait", "timeCondition", "abSplit", "webhook",
 ];

@@ -265,9 +265,6 @@ function buildActionData(targetNode: FlowNode): ActionResult {
     actionData.imageProvider = targetNode.data.imageProvider as string;
     actionData.imageSkillId = (targetNode.data.imageSkillId as string) || "none";
   }
-  if (actionType === "updateContentStatus") {
-    actionData.status = targetNode.data.status as string;
-  }
   return actionData;
 }
 

@@ -387,11 +387,8 @@ export function internalRoutes() {
         body: JSON.stringify({ tenantId, prompt: prompts.message_image, provider: imageProvider, skillId: imageSkillId }),
       });
       if (!res.ok) continue;
-      const bytes = await res.arrayBuffer();
-      const contentType = res.headers.get("Content-Type") || "image/jpeg";
-      const key = crypto.randomUUID();
-      await c.env.MEDIA_BUCKET.put(key, bytes, { httpMetadata: { contentType } });
-      photoUrls.push(`${c.env.LINK_URL}/public/media/${key}`);
+      const body = await res.json() as { url: string };
+      photoUrls.push(body.url);
     }
 
     console.log(JSON.stringify({

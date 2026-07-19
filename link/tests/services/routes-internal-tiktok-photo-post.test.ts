@@ -38,9 +38,6 @@ function mockWebDb(d1DatabaseId: string | null) {
   };
 }
 
-function mockMediaBucket() {
-  return { put: vi.fn().mockResolvedValue(undefined) };
-}
 
 const baseBody = {
   contentId: "content-1",
@@ -69,14 +66,14 @@ describe("POST /internal/tiktok/photo-post", () => {
     expect(res.status).toBe(403);
   });
 
-  it("generates images, stores them in R2, and publishes on success (best-effort: 1 of 2 images failing still succeeds)", async () => {
+  it("generates images, forwards content's URLs, and publishes on success (best-effort: 1 of 2 images failing still succeeds)", async () => {
     tenantDataDbRunMock.mockClear();
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("/internal/generate-image")) {
         // First call succeeds, second call fails -- best-effort should still publish with 1 image.
         const priorCalls = fetchMock.mock.calls.filter((c: any[]) => String(c[0]).includes("generate-image")).length;
         if (priorCalls === 1) {
-          return new Response("fake-jpeg-bytes", { status: 200, headers: { "Content-Type": "image/jpeg" } });
+          return new Response(JSON.stringify({ url: "https://content-dev.uni-scrm.com/public/media/fake-key-1" }), { status: 200 });
         }
         return new Response("upstream error", { status: 502 });
       }
@@ -93,7 +90,7 @@ describe("POST /internal/tiktok/photo-post", () => {
         headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
         body: JSON.stringify(baseBody),
       }),
-      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1"), MEDIA_BUCKET: mockMediaBucket() } as any
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") } as any
     );
 
     expect(res.status).toBe(200);
@@ -102,7 +99,7 @@ describe("POST /internal/tiktok/photo-post", () => {
 
     const publishCall = fetchMock.mock.calls.find((c: any[]) => String(c[0]).includes("/v2/post/publish/content/init/"));
     const publishBody = JSON.parse(publishCall![1].body);
-    expect(publishBody.source_info.photo_images).toHaveLength(1); // only the 1 successful image
+    expect(publishBody.source_info.photo_images).toEqual(["https://content-dev.uni-scrm.com/public/media/fake-key-1"]);
     expect(publishBody.post_info.title).toBe("Write a catchy title"); // textProvider: "none" -> literal prompt text
     expect(tenantDataDbRunMock).toHaveBeenCalledTimes(1); // recordPublishedContent wrote the new content row
     vi.unstubAllGlobals();
@@ -117,7 +114,7 @@ describe("POST /internal/tiktok/photo-post", () => {
         headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
         body: JSON.stringify(baseBody),
       }),
-      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1"), MEDIA_BUCKET: mockMediaBucket() } as any
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") } as any
     );
 
     const body = await res.json<{ ok: boolean }>();

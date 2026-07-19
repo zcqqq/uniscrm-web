@@ -337,11 +337,13 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
   );
 }
 
+const YOUTUBE_TRIGGER_META = ContentMetadata_YouTube.find((m) => m.sourceContentType === "watch:get-videos")!;
+
 function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
   const conditions: Condition[] = data.conditions || [];
   const subscriptionChannelId = data.subscriptionChannelId as string;
-  const [state, setState] = useState<{ connected: boolean; accountChannelId: string | null; subscriptions: { channelId: string; channelName: string; thumbnailUrl: string }[] }>({
+  const [state, setState] = useState<{ connected: boolean; accountChannelId: string | null; email?: string; subscriptions: { channelId: string; channelName: string; thumbnailUrl: string }[] }>({
     connected: false, accountChannelId: null, subscriptions: [],
   });
 
@@ -355,6 +357,22 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
     <div>
       <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.youtubeContentTrigger.label}</h4>
       <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Event</Label>
+          <Select value={YOUTUBE_TRIGGER_META.sourceContentType} disabled className="w-full text-sm">
+            <option value={YOUTUBE_TRIGGER_META.sourceContentType}>{localizeLabel(YOUTUBE_TRIGGER_META.label!, "en")}</option>
+          </Select>
+        </div>
+
+        {state.connected && (
+          <div>
+            <Label className="text-xs block mb-1">Account</Label>
+            <Select value={state.accountChannelId || ""} disabled className="w-full text-sm">
+              <option value={state.accountChannelId || ""}>{state.email || "Connected account"}</option>
+            </Select>
+          </div>
+        )}
+
         <div>
           <Label className="text-xs block mb-1">Subscription</Label>
           {!state.connected ? (
@@ -392,6 +410,7 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
           conditions={conditions}
           fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos")}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+          label="Content Props"
         />
       </div>
     </div>

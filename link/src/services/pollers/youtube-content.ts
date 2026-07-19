@@ -8,7 +8,8 @@ import { ContentMetadata_YouTube } from "../../../../metadata/youtube";
 const YOUTUBE_METADATA = ContentMetadata_YouTube.find((m) => m.sourceContentType === "watch:get-videos")!;
 
 export interface YouTubeIngestContext {
-  channelId: string;
+  accountChannelId: string;
+  subscriptionChannelId: string;
   tenantDb: TenantDataDB;
   tenantId: number;
   ai: Ai;
@@ -21,7 +22,7 @@ export interface YouTubeIngestContext {
 export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: string): Promise<void> {
   const item = await fetchVideoDetails(ctx.apiKey, videoId);
   if (!item) {
-    console.log(JSON.stringify({ event: "youtube_video_fetch_empty", channel_id: ctx.channelId, video_id: videoId }));
+    console.log(JSON.stringify({ event: "youtube_video_fetch_empty", account_channel_id: ctx.accountChannelId, subscription_channel_id: ctx.subscriptionChannelId, video_id: videoId }));
     return;
   }
 
@@ -32,6 +33,10 @@ export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: str
   props.duration = durationIso ? parseISO8601Duration(durationIso) : 0;
 
   const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue);
-  const isNew = await contentService.upsertContentFromMetadata(item, props, ctx.channelId, "YOUTUBE", true);
-  console.log(JSON.stringify({ event: "youtube_video_ingested", channel_id: ctx.channelId, video_id: videoId, isNew }));
+  const sourceContentId = String(props.source_content_id ?? "");
+  const isNew = await contentService.recordTriggerContentSeen(ctx.accountChannelId, ctx.subscriptionChannelId, sourceContentId);
+  if (isNew) {
+    await contentService.emitContentTriggerEvent(ctx.accountChannelId, "YOUTUBE", "subscriptionChannelId", ctx.subscriptionChannelId, props);
+  }
+  console.log(JSON.stringify({ event: "youtube_video_ingested", account_channel_id: ctx.accountChannelId, subscription_channel_id: ctx.subscriptionChannelId, video_id: videoId, isNew }));
 }

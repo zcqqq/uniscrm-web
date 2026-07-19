@@ -993,6 +993,66 @@ describe("queue(): videoAction dispatch", () => {
       `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-videoaction1' AND content_id = 'content-va-2'`
     ).first<{ c: number }>();
     expect(rows?.c).toBeGreaterThanOrEqual(2);
+
+    // Minor symmetry fix: this graph has no wait node wired to the "failed" handle (a3 is a
+    // plain noopLeaf), so resumed.pendingWaits is empty and no content_flow_pending row should
+    // be written — mirrors the same assertion in the duration-cap test above.
+    const pending = await env.FLOW_DB.prepare(
+      `SELECT id FROM content_flow_pending WHERE flow_id = 'flow-videoaction1' AND content_id = 'content-va-2'`
+    ).first();
+    expect(pending).toBeNull();
+  });
+
+  it("schedules a content_flow_pending wait row when a wait node follows videoAction's failed branch (duration cap exceeded)", async () => {
+    // Same wait-drain bug class as the video xContentAction/tiktok tests above: a wait node
+    // wired to videoAction's "failed" handle must get its content_flow_pending row scheduled
+    // when resumeFromNode resolves into it, even though this is an early-exit synchronous path.
+    const graphVideoActionWithFailedWait = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "videoAction", targetLanguage: "zh" }, position: { x: 200, y: 0 } },
+        { id: "w1", type: "wait", data: { duration: 5, unit: "minutes" }, position: { x: 400, y: 0 } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "a1" },
+        { id: "e2", source: "a1", target: "w1", sourceHandle: "failed" },
+      ],
+    });
+
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const queueSend = vi.fn();
+    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend } };
+
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-videoaction-failed-wait', 1, 'video action failed wait flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphVideoActionWithFailedWait).run();
+
+    await worker.queue(
+      makeBatch({
+        tenantId: "1", eventType: "content.created", contentId: "content-va-failed-wait", channelId: "src-chan",
+        payload: { duration: 700 },
+      }),
+      testEnv as any
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(queueSend).not.toHaveBeenCalled();
+
+    const waitRow = await env.FLOW_DB.prepare(
+      `SELECT node_id, awaiting_event, execute_at FROM content_flow_pending WHERE flow_id = 'flow-videoaction-failed-wait' AND content_id = 'content-va-failed-wait' AND node_id = 'w1'`
+    ).first<{ node_id: string; awaiting_event: string; execute_at: string }>();
+    expect(waitRow).toBeTruthy();
+    expect(waitRow!.node_id).toBe("w1");
+    expect(new Date(waitRow!.execute_at).getTime()).toBeGreaterThan(Date.now());
+    // Verify the wait is scheduled roughly 5 minutes (300000 ms) in the future
+    expect(new Date(waitRow!.execute_at).getTime() - Date.now()).toBeGreaterThan(299000);
+    expect(new Date(waitRow!.execute_at).getTime() - Date.now()).toBeLessThan(301000);
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-videoaction-failed-wait'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-videoaction-failed-wait'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-videoaction-failed-wait'`).run();
   });
 
   it("enqueues a VIDEO_ACTION_QUEUE job and inserts a content_flow_pending row, without resolving success/failed yet, when link returns a video URL", async () => {

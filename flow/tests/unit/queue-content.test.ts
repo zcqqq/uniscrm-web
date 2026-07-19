@@ -522,10 +522,14 @@ describe("queue(): videoCondition dispatch", () => {
     const body = JSON.parse(call![1].body as string);
     expect(body.imageUrl).toBe("https://img/thumb.jpg");
 
-    const execution = await env.FLOW_DB.prepare(
-      `SELECT * FROM content_flow_executions WHERE flow_id = 'flow-video1' AND content_id = 'content-vid-1'`
-    ).first();
-    expect(execution).toBeTruthy(); // the has-face branch resolved into a2 (noopLeaf), proving the correct branch fired
+    // The outer queue() call site unconditionally writes one row whenever the initial
+    // executeFlow() call produces any actions (i.e. just for matching videoCondition itself), so
+    // >=1 would pass even without branch resolution — >=2 discriminates "resumeFromNode ran and
+    // resolved into a wired downstream node (a2, the has-face target)".
+    const rows = await env.FLOW_DB.prepare(
+      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-video1' AND content_id = 'content-vid-1'`
+    ).first<{ c: number }>();
+    expect(rows?.c).toBeGreaterThanOrEqual(2);
   });
 
   it("resumes on the no-face branch when content's /internal/detect-face reports hasFace: false", async () => {
@@ -544,10 +548,12 @@ describe("queue(): videoCondition dispatch", () => {
       env
     );
 
-    const execution = await env.FLOW_DB.prepare(
-      `SELECT * FROM content_flow_executions WHERE flow_id = 'flow-video1' AND content_id = 'content-vid-2'`
-    ).first();
-    expect(execution).toBeTruthy(); // the no-face branch resolved into a3 (noopLeaf)
+    // Same reasoning as the has-face test above: >=2 proves resumeFromNode resolved into a3 (the
+    // no-face target), not just that the outer unconditional row for the initial match exists.
+    const rows = await env.FLOW_DB.prepare(
+      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-video1' AND content_id = 'content-vid-2'`
+    ).first<{ c: number }>();
+    expect(rows?.c).toBeGreaterThanOrEqual(2);
   });
 
   it("resumes on the failed branch when content's /internal/detect-face returns a non-2xx", async () => {

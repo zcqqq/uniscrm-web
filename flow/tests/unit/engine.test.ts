@@ -70,33 +70,32 @@ describe("executeFlow: xContentTrigger", () => {
 });
 
 describe("executeFlow: youtubeContentTrigger", () => {
-  it("matches a youtubeContentTrigger node on channelId + subscriptionChannelId for content.created events", () => {
-    const graph = {
+  function graphWithYoutubeContentTrigger(
+    conditions: { field: string; operator: string; value: string }[] = [],
+    data: Record<string, unknown> = {}
+  ): FlowGraph {
+    return {
       nodes: [
-        { id: "t1", type: "youtubeContentTrigger", data: { channelId: "acct1", subscriptionChannelId: "UCabc", subscriptionChannelName: "Channel A", conditions: [] } },
-        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-post" } },
+        { id: "t1", type: "youtubeContentTrigger", data: { channelId: "acct1", subscriptionChannelId: "UCabc", subscriptionChannelName: "Channel A", conditions, ...data }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-post" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
     };
-    const result = executeFlow(graph as any, "content.created", { channel_id: "acct1", subscription_channel_id: "UCabc" });
+  }
+
+  it("matches a youtubeContentTrigger node on channelId + subscriptionChannelId for content.created events", () => {
+    const result = executeFlow(graphWithYoutubeContentTrigger(), "content.created", { channel_id: "acct1", subscription_channel_id: "UCabc" });
     expect(result.matched).toBe(true);
+    expect(result.actions).toHaveLength(1);
   });
 
   it("does not match when subscriptionChannelId differs, even if channelId (the account) matches", () => {
-    const graph = {
-      nodes: [{ id: "t1", type: "youtubeContentTrigger", data: { channelId: "acct1", subscriptionChannelId: "UCabc", subscriptionChannelName: "Channel A", conditions: [] } }],
-      edges: [],
-    };
-    const result = executeFlow(graph as any, "content.created", { channel_id: "acct1", subscription_channel_id: "UCother" });
+    const result = executeFlow(graphWithYoutubeContentTrigger(), "content.created", { channel_id: "acct1", subscription_channel_id: "UCother" });
     expect(result.matched).toBe(false);
   });
 
   it("does not match a youtubeContentTrigger node for a different account channelId", () => {
-    const graph = {
-      nodes: [{ id: "t1", type: "youtubeContentTrigger", data: { channelId: "acct1", subscriptionChannelId: "UCabc", subscriptionChannelName: "Channel A", conditions: [] } }],
-      edges: [],
-    };
-    const result = executeFlow(graph as any, "content.created", { channel_id: "acct-other", subscription_channel_id: "UCabc" });
+    const result = executeFlow(graphWithYoutubeContentTrigger(), "content.created", { channel_id: "acct-other", subscription_channel_id: "UCabc" });
     expect(result.matched).toBe(false);
   });
 });

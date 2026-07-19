@@ -154,6 +154,37 @@ describe("NODE_TYPE_REGISTRY", () => {
   it("lists youtubeContentTrigger in the content sidebar order", () => {
     expect(CONTENT_FLOW_SIDEBAR_ORDER).toContain("youtubeContentTrigger");
   });
+
+  it("create-post's contentProps include an optional VIDEO-aiType prop (message_video), alongside the existing TEXT prop", () => {
+    const createPost = ContentMetadata_X.find((m) => m.sourceContentType === "create-post")!;
+    expect(createPost.contentProps).toEqual([
+      { propId: "message_text", aiType: "TEXT" },
+      { propId: "message_video", aiType: "VIDEO" },
+    ]);
+  });
+
+  it("xContentAction's AI-generation-guidance bullet check only fires for TEXT/IMAGE aiType props, not VIDEO — create-post (TEXT+VIDEO) still gets the AI-generation suffix from its TEXT prop", () => {
+    const fragment = NODE_TYPE_REGISTRY.xContentAction.promptFragment!;
+    expect(fragment).toContain('operation "create-post": Publish a new post via the triggering channel — prompt = free-text instructions for AI generation, left blank for the user to fill in.');
+  });
+
+  it("ContentMetadata_TikTok has a video-post action entry distinct from photo-post, with only TEXT contentProps (video is implicit, not a toggle)", () => {
+    const videoPost = ContentMetadata_TikTok.find((m) => m.sourceContentType === "video-post")!;
+    expect(videoPost.flowType).toBe("action");
+    expect(videoPost.contentProps).toEqual([
+      { propId: "title", dataId: "post_info.title", aiType: "TEXT" },
+      { propId: "description", dataId: "post_info.description", aiType: "TEXT" },
+    ]);
+  });
+
+  it("tiktokContentAction's promptFragment is derived from ContentMetadata_TikTok's action entries (not hand-typed), and documents both photo-post and video-post", () => {
+    const fragment = NODE_TYPE_REGISTRY.tiktokContentAction.promptFragment!;
+    const photoPost = ContentMetadata_TikTok.find((m) => m.sourceContentType === "photo-post")!;
+    const videoPost = ContentMetadata_TikTok.find((m) => m.sourceContentType === "video-post")!;
+    expect(fragment).toContain(photoPost.description!.en);
+    expect(fragment).toContain(videoPost.description!.en);
+    expect(fragment).toContain('operation: "photo-post"|"video-post"');
+  });
 });
 
 describe("USER_FLOW_SIDEBAR_ORDER / CONTENT_FLOW_SIDEBAR_ORDER", () => {

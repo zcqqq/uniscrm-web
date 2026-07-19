@@ -69,11 +69,19 @@ const CONTENT_X_TRIGGER_MODES = CONTENT_X_TRIGGER_ENTRIES.map((m) => `"${m.sourc
 // suffix is derived from whether the operation has an aiType prop (same check Inspector.tsx
 // uses to decide whether to show the prompt/provider fields at all), not hand-typed either.
 const CONTENT_X_ACTION_BULLETS = CONTENT_X_ACTION_ENTRIES.map((m) => {
-  const hasAiProp = m.contentProps.some((p) => p.aiType);
+  // Only TEXT/IMAGE aiType props mean "AI generates this from a prompt" — VIDEO means
+  // "optionally attach $content.processed_video_url", never AI-generated, never prompted.
+  const hasAiProp = m.contentProps.some((p) => p.aiType === "TEXT" || p.aiType === "IMAGE");
   const guidance = hasAiProp
     ? "prompt = free-text instructions for AI generation, left blank for the user to fill in."
     : "needs no additional fields; leave prompt/provider at these defaults.";
   return `   - operation "${m.sourceContentType}": ${m.description!.en} — ${guidance}`;
+}).join("\n");
+
+const CONTENT_TIKTOK_ACTION_ENTRIES = ContentMetadata_TikTok.filter((m) => m.flowType === "action");
+const CONTENT_TIKTOK_ACTION_OPERATIONS = CONTENT_TIKTOK_ACTION_ENTRIES.map((m) => `"${m.sourceContentType}"`).join("|");
+const CONTENT_TIKTOK_ACTION_BULLETS = CONTENT_TIKTOK_ACTION_ENTRIES.map((m) => {
+  return `   - operation "${m.sourceContentType}": ${m.description!.en}`;
 }).join("\n");
 
 // Exported so every consumer of the mode field (Inspector, flow-editor default data, the
@@ -203,12 +211,13 @@ ${CONTENT_X_ACTION_BULLETS}`,
   tiktokContentAction: {
     reactFlowType: "action",
     label: "TikTok Action",
-    description: "Generate images + caption and send to TikTok as a draft",
+    description: `${CONTENT_TIKTOK_ACTION_ENTRIES.length} actions`,
     domain: "content",
     role: "action",
     generatable: true,
-    promptFragment: `   For TikTok photo-post actions: data: { actionType: "tiktokContentAction", channelId: "", prompts: {}, textProvider: "default", textSkillId: "none", imageCount: 1, imageProvider: "default", imageSkillId: "none" }
-   - ${ContentMetadata_TikTok.find((m) => m.sourceContentType === "photo-post")!.description!.en} Leave all fields at these defaults for the user to configure via the Inspector.`,
+    promptFragment: `   For TikTok content actions: data: { actionType: "tiktokContentAction", operation: ${CONTENT_TIKTOK_ACTION_OPERATIONS}, channelId: "", prompts: {}, textProvider: "default", textSkillId: "none", imageCount: 1, imageProvider: "default", imageSkillId: "none" }
+   - Leave all fields at these defaults for the user to configure via the Inspector. imageCount/imageProvider/imageSkillId only apply to "photo-post".
+${CONTENT_TIKTOK_ACTION_BULLETS}`,
   },
   videoCondition: {
     reactFlowType: "videoCondition",

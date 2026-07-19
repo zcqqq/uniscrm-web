@@ -32,4 +32,14 @@ export const ContentMetadata_TikTok: ContentMetadata[] = [
         {propId: "message_image", dataId:"source_info.photo_images[]", aiType:"IMAGE"},
     ],
   },
+  {
+    sourceContentType: "video-post", // https://developers.tiktok.com/doc/content-posting-api-reference-direct-post
+    flowType: "action",
+    label: {"en":"Video Posting", "zh":"发布视频"},
+    description: {"en":"Posts the content flow's processed video to TikTok as a draft.", "zh":"将内容流处理后的视频发布为TikTok草稿。"},
+    contentProps: [
+        {propId: "title", dataId:"post_info.title", aiType:"TEXT"},
+        {propId: "description", dataId:"post_info.description", aiType:"TEXT"},
+    ],
+  },
 ];

@@ -58,6 +58,13 @@ vi.mock("../src/services/pollers/poll-channel", () => ({
 
 import { oauthRoutes } from "../src/oauth";
 
+describe("X_CHANNEL_SCOPES", () => {
+  it("includes media.write (required for attaching video to a tweet)", async () => {
+    const { X_CHANNEL_SCOPES } = await import("../src/oauth");
+    expect(X_CHANNEL_SCOPES).toContain("media.write");
+  });
+});
+
 type MockRow = Record<string, unknown> | null;
 
 function createMockLinkDb(responses: Array<[string, MockRow]>) {

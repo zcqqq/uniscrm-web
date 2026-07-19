@@ -61,10 +61,11 @@ ${list}
 Rules:
 - Each node needs: id (UUID format like "a1b2c3d4-..."), type, position: {x:0,y:0}, data
 - Edges: { id: string, source: nodeId, target: nodeId, sourceHandle?: string }
-- Only use xContentTrigger, youtubeContentTrigger, wait, timeCondition, abSplit, webhook, and action (with actionType "xContentAction" or "tiktokContentAction") node types. Do NOT use xTrigger, cronTrigger, waitForEvent, userPropsCondition, changeUserProps, or an action with actionType "xAction"/"addToList" — those belong to a different flow domain.
+- Only use xContentTrigger, youtubeContentTrigger, wait, timeCondition, abSplit, webhook, videoCondition, and action (with actionType "xContentAction" or "tiktokContentAction") node types. Do NOT use xTrigger, cronTrigger, waitForEvent, userPropsCondition, changeUserProps, or an action with actionType "xAction"/"addToList" — those belong to a different flow domain.
 - action nodes with actionType "xContentAction" or "tiktokContentAction" have sourceHandle "success" or "failed" for branching
 - abSplit nodes have sourceHandle "a" or "b"
 - webhook nodes have sourceHandle "success" or "failed"
+- videoCondition nodes have sourceHandle "has-face", "no-face", or "failed"
 - Flow must start with exactly one trigger node: ${triggerTypes.join(" or ")}
 - Generate UUIDs for all ids (8-4-4-4-12 format)
 

@@ -38,12 +38,13 @@ describe("buildFlowGenerateSystemPrompt", () => {
 
   it("content domain: documents every generatable content/both node type's fragment, including youtubeContentTrigger (previously dead — never actually included in the built prompt despite having a promptFragment)", () => {
     const prompt = buildFlowGenerateSystemPrompt("content");
-    for (const key of ["xContentTrigger", "youtubeContentTrigger", "wait", "timeCondition", "abSplit", "webhook"]) {
+    for (const key of ["xContentTrigger", "youtubeContentTrigger", "videoCondition", "wait", "timeCondition", "abSplit", "webhook"]) {
       expect(prompt, `missing fragment for "${key}"`).toContain(NODE_TYPE_REGISTRY[key].promptFragment!);
     }
     expect(prompt).toContain('actionType: "xContentAction"');
     expect(prompt).toContain('actionType: "tiktokContentAction"');
     expect(prompt).toContain("Flow must start with exactly one trigger node: xContentTrigger or youtubeContentTrigger");
+    expect(prompt).toContain('videoCondition nodes have sourceHandle "has-face", "no-face", or "failed"');
   });
 
   it("content domain: forbids user-domain types and never documents their data shape", () => {

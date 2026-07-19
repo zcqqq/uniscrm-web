@@ -210,6 +210,17 @@ ${CONTENT_X_ACTION_BULLETS}`,
     promptFragment: `   For TikTok photo-post actions: data: { actionType: "tiktokContentAction", channelId: "", prompts: {}, textProvider: "default", textSkillId: "none", imageCount: 1, imageProvider: "default", imageSkillId: "none" }
    - ${ContentMetadata_TikTok.find((m) => m.sourceContentType === "photo-post")!.description!.en} Leave all fields at these defaults for the user to configure via the Inspector.`,
   },
+  videoCondition: {
+    reactFlowType: "videoCondition",
+    label: "Video Condition",
+    description: "Run a model-based check on the content's thumbnail",
+    domain: "content",
+    role: "condition",
+    generatable: true,
+    promptFragment: `videoCondition - runs a model-based check on the content's thumbnail, has "has-face"/"no-face"/"failed" branches
+   data: { operation: "check-face" }
+   - "check-face": detects whether the content's cover image contains a human face. "failed" covers a missing thumbnail or a model error — never guess a result on failure.`,
+  },
   // --- shared across both domains ---
   wait: {
     reactFlowType: "wait",
@@ -273,6 +284,6 @@ export const USER_FLOW_SIDEBAR_ORDER: string[] = [
 ];
 
 export const CONTENT_FLOW_SIDEBAR_ORDER: string[] = [
-  "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction",
+  "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "videoCondition",
   "wait", "timeCondition", "abSplit", "webhook",
 ];

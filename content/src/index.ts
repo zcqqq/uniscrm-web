@@ -1,10 +1,29 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { Container } from "@cloudflare/containers";
 import type { Env } from "./types";
 import { internalRoutes } from "./routes-internal";
 import { setTenantLlmCredentials, listConfiguredProviders, deleteTenantLlmCredentials, getDefaultModel, setDefaultModel } from "./services/llm-credentials";
 import { listOpenAiModels, listAnthropicModels, listWorkersAiModels } from "./services/model-catalog";
 import { SKILL_CATALOG } from "./skills/catalog";
+
+export class SubtitleContainer extends Container<Env> {
+  defaultPort = 8080;
+  sleepAfter = "5m";
+  enableInternet = true;
+
+  override async startAndWaitForPorts(
+    ...args: Parameters<Container<Env>["startAndWaitForPorts"]>
+  ): Promise<void> {
+    this.envVars = {
+      R2_ACCOUNT_ID: this.env.R2_ACCOUNT_ID,
+      R2_ACCESS_KEY_ID: await this.env.R2_ACCESS_KEY_ID.get(),
+      R2_SECRET_ACCESS_KEY: await this.env.R2_SECRET_ACCESS_KEY.get(),
+      R2_BUCKET_NAME: this.env.R2_BUCKET_NAME,
+    };
+    return super.startAndWaitForPorts(...args);
+  }
+}
 
 type HonoEnv = { Bindings: Env; Variables: { tenantId: string } };
 

@@ -21,6 +21,7 @@
     "uniscrm-byok": "github:zcqqq/uniscrm-byok#v1.0.0"
   },
   "devDependencies": {
+    "@cloudflare/containers": "^0.1.0",
     "@cloudflare/vitest-pool-workers": "^0.18.0",
     "@cloudflare/workers-types": "^4.20250410.0",
     "@tailwindcss/vite": "^4.0.0",

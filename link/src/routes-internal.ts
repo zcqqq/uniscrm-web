@@ -7,7 +7,7 @@ import { CreditService, getActiveSubscriptionTier } from "../../shared/credit-se
 import { EventMetadata_X } from "../../metadata/x";
 import { dollarsToMicros } from "../../shared/credit";
 import { ContentService } from "./services/content";
-import { createPost, repostPost, createBookmark, likePost } from "./services/x-posts-api";
+import { createPost, repostPost, createBookmark, likePost, initMediaUpload, appendMediaChunk, finalizeMediaUpload } from "./services/x-posts-api";
 import { TikTokTokenService } from "./services/tiktok-token";
 import { initPhotoPost } from "./services/tiktok-publish";
 
@@ -17,6 +17,60 @@ const ACTION_TO_EVENT_TYPE: Record<string, string> = {
   "create-dm": "create-dm",
   "mute-user": "mute-user",
 };
+
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+const VIDEO_CHUNK_BYTES = 5 * 1024 * 1024;
+
+async function uploadVideoToX(
+  accessToken: string,
+  videoUrl: string
+): Promise<{ ok: true; mediaId: string; state: string; checkAfterSecs?: number } | { ok: false }> {
+  const videoRes = await fetch(videoUrl);
+  if (!videoRes.ok || !videoRes.body) return { ok: false };
+
+  const contentLength = Number(videoRes.headers.get("Content-Length") || "0");
+  if (contentLength > MAX_VIDEO_BYTES) return { ok: false };
+
+  const contentType = videoRes.headers.get("Content-Type") || "video/mp4";
+  const init = await initMediaUpload(accessToken, contentLength, contentType);
+  if (!init.ok || !init.mediaId) return { ok: false };
+
+  const reader = videoRes.body.getReader();
+  let segmentIndex = 0;
+  let buffered: Uint8Array = new Uint8Array(0);
+  let totalRead = 0;
+
+  const flush = async (chunk: Uint8Array): Promise<boolean> => {
+    const appendResult = await appendMediaChunk(accessToken, init.mediaId!, segmentIndex, chunk);
+    segmentIndex++;
+    return appendResult.ok;
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (value) {
+      totalRead += value.length;
+      if (totalRead > MAX_VIDEO_BYTES) return { ok: false };
+      const combined = new Uint8Array(buffered.length + value.length);
+      combined.set(buffered, 0);
+      combined.set(value, buffered.length);
+      buffered = combined;
+      while (buffered.length >= VIDEO_CHUNK_BYTES) {
+        const toSend = buffered.slice(0, VIDEO_CHUNK_BYTES);
+        if (!(await flush(toSend))) return { ok: false };
+        buffered = buffered.slice(VIDEO_CHUNK_BYTES);
+      }
+    }
+    if (done) break;
+  }
+  if (buffered.length > 0) {
+    if (!(await flush(buffered))) return { ok: false };
+  }
+
+  const final = await finalizeMediaUpload(accessToken, init.mediaId!);
+  if (!final.ok || !final.state) return { ok: false };
+  return { ok: true, mediaId: init.mediaId!, state: final.state, checkAfterSecs: final.checkAfterSecs };
+}
 
 export function internalRoutes() {
   const router = new Hono<{ Bindings: Env }>();
@@ -286,8 +340,8 @@ export function internalRoutes() {
   // spec's non-goals) — channelId resolving to a TIKTOK channel_type falls through to the
   // generic ok:false path below.
   router.post("/content/create-post", async (c) => {
-    const { contentId, interpolatedPrompt, provider, channelId, flowId, skillId } = await c.req.json<{
-      contentId: string; interpolatedPrompt: string; provider: "default" | "openai" | "anthropic" | "none"; channelId: string; flowId?: string | null; skillId?: string;
+    const { contentId, interpolatedPrompt, provider, channelId, flowId, skillId, videoUrl } = await c.req.json<{
+      contentId: string; interpolatedPrompt: string; provider: "default" | "openai" | "anthropic" | "none"; channelId: string; flowId?: string | null; skillId?: string; videoUrl?: string;
     }>();
 
     const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
@@ -320,7 +374,23 @@ export function internalRoutes() {
 
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
     const accessToken = await tokenService.getValidToken(channelId);
-    const postResult = await createPost(accessToken, text);
+
+    let mediaId: string | undefined;
+    if (videoUrl) {
+      const upload = await uploadVideoToX(accessToken, videoUrl);
+      if (!upload.ok) {
+        console.error(JSON.stringify({ event: "create_post_video_upload_failed", contentId, channelId }));
+        return c.json({ ok: false }, 200);
+      }
+      if (upload.state === "succeeded") {
+        mediaId = upload.mediaId;
+      } else {
+        console.log(JSON.stringify({ event: "create_post_video_pending", contentId, channelId, mediaId: upload.mediaId, state: upload.state }));
+        return c.json({ pending: true, mediaId: upload.mediaId, channelId, text, checkAfterSecs: upload.checkAfterSecs ?? 60 });
+      }
+    }
+
+    const postResult = await createPost(accessToken, text, mediaId);
 
     console.log(JSON.stringify({ event: "create_post_x_post", contentId, channelId, provider, ok: postResult.ok, rateLimited: !!postResult.rateLimited }));
 
@@ -338,7 +408,7 @@ export function internalRoutes() {
       flowId: flowId || "",
     });
 
-    return c.json({ ok: true });
+    return c.json({ ok: true, id: postResult.id });
   });
 
   // Resolves a content item's public watch/permalink video URL for the Video Action

@@ -294,7 +294,7 @@ describe("stub content-flow action endpoints", () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ ok: true });
+    expect(body).toEqual({ ok: true, id: "tweet-999" });
     const generateCallBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(generateCallBody.skillId).toBe("marketingskills-social"); // forwarded through to content's /internal/generate
     expect(tenantDataDbRunMock).toHaveBeenCalledTimes(1); // recordPublishedContent wrote the new content row
@@ -345,10 +345,128 @@ describe("stub content-flow action endpoints", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    expect(await res.json()).toEqual({ ok: true, id: "tweet-none-1" });
     expect(fetchMock).toHaveBeenCalledTimes(1); // only the X call, no /internal/generate call
     const [url] = fetchMock.mock.calls[0];
     expect(String(url)).toContain("api.x.com");
+    vi.unstubAllGlobals();
+  });
+
+  it("POST /internal/content/create-post with videoUrl under 50MB uploads to X and posts with media_ids when processing succeeds immediately", async () => {
+    const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+    tenantDataDbRunMock.mockClear();
+
+    const videoBytes = new Uint8Array(1024); // tiny, well under 50MB
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/internal/generate")) return new Response(JSON.stringify({ text: "caption text" }), { status: 200 });
+      if (u === "https://content-dev.uni-scrm.com/public/media/vid-1") {
+        return new Response(videoBytes, { status: 200, headers: { "Content-Length": String(videoBytes.length), "Content-Type": "video/mp4" } });
+      }
+      if (u === "https://api.x.com/2/media/upload" && init?.method === "POST") {
+        const body = typeof init.body === "string" ? JSON.parse(init.body) : null;
+        if (body?.command === "INIT") return new Response(JSON.stringify({ data: { id: "media-1" } }), { status: 200 });
+        if (body?.command === "FINALIZE") return new Response(JSON.stringify({ data: { id: "media-1" } }), { status: 200 }); // no processing_info -> succeeded
+        // APPEND (FormData body)
+        return new Response(null, { status: 204 });
+      }
+      if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-vid-1", text: "caption text" } }), { status: 201 });
+      throw new Error(`Unexpected fetch: ${u}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({
+          contentId: "content-vid-1", interpolatedPrompt: "raw prompt", provider: "default",
+          channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
+          videoUrl: "https://content-dev.uni-scrm.com/public/media/vid-1",
+        }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ ok: true, id: "tweet-vid-1" });
+
+    const tweetCall = fetchMock.mock.calls.find(([u]: [string]) => u === "https://api.x.com/2/tweets");
+    const tweetBody = JSON.parse(tweetCall![1].body as string);
+    expect(tweetBody).toEqual({ text: "caption text", media: { media_ids: ["media-1"] } });
+    vi.unstubAllGlobals();
+  });
+
+  it("POST /internal/content/create-post with videoUrl returns pending:true when X reports processing still in progress", async () => {
+    const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+
+    const videoBytes = new Uint8Array(1024);
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/internal/generate")) return new Response(JSON.stringify({ text: "caption text" }), { status: 200 });
+      if (u === "https://content-dev.uni-scrm.com/public/media/vid-2") {
+        return new Response(videoBytes, { status: 200, headers: { "Content-Length": String(videoBytes.length) } });
+      }
+      if (u === "https://api.x.com/2/media/upload" && init?.method === "POST") {
+        const body = typeof init.body === "string" ? JSON.parse(init.body) : null;
+        if (body?.command === "INIT") return new Response(JSON.stringify({ data: { id: "media-2" } }), { status: 200 });
+        if (body?.command === "FINALIZE") return new Response(JSON.stringify({ data: { id: "media-2", processing_info: { state: "pending", check_after_secs: 5 } } }), { status: 200 });
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected fetch: ${u}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({
+          contentId: "content-vid-2", interpolatedPrompt: "raw prompt", provider: "default",
+          channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
+          videoUrl: "https://content-dev.uni-scrm.com/public/media/vid-2",
+        }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ pending: true, mediaId: "media-2", channelId: "tgt-chan", text: "caption text", checkAfterSecs: 5 });
+    vi.unstubAllGlobals();
+  });
+
+  it("POST /internal/content/create-post rejects a videoUrl reporting over 50MB via Content-Length without uploading anything to X", async () => {
+    const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/internal/generate")) return new Response(JSON.stringify({ text: "caption text" }), { status: 200 });
+      if (u === "https://content-dev.uni-scrm.com/public/media/vid-big") {
+        return new Response(new Uint8Array(0), { status: 200, headers: { "Content-Length": String(60 * 1024 * 1024) } });
+      }
+      throw new Error(`Unexpected fetch to X: ${u}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({
+          contentId: "content-vid-big", interpolatedPrompt: "raw prompt", provider: "default",
+          channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
+          videoUrl: "https://content-dev.uni-scrm.com/public/media/vid-big",
+        }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ ok: false });
+    expect(fetchMock.mock.calls.some(([u]: [string]) => String(u).includes("api.x.com"))).toBe(false);
     vi.unstubAllGlobals();
   });
 

@@ -547,7 +547,7 @@ app.get("/internal/youtube-watches", async (c) => {
   ).all<{ graph_json: string }>();
 
   const seen = new Set<string>();
-  const watches: { channelId: string }[] = [];
+  const watches: { channelId: string; subscriptionChannelId: string }[] = [];
   for (const row of rows.results) {
     let graph: FlowGraph;
     try {
@@ -560,9 +560,12 @@ app.get("/internal/youtube-watches", async (c) => {
       if (!node.data) continue;
       if (node.type !== "youtubeContentTrigger") continue;
       const channelId = node.data.channelId as string;
-      if (!channelId || seen.has(channelId)) continue;
-      seen.add(channelId);
-      watches.push({ channelId });
+      const subscriptionChannelId = node.data.subscriptionChannelId as string;
+      if (!channelId || !subscriptionChannelId) continue;
+      const key = `${channelId}:${subscriptionChannelId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      watches.push({ channelId, subscriptionChannelId });
     }
   }
 
@@ -620,6 +623,16 @@ app.get("/api/channels/:channelId/x-lists", async (c) => {
     status: res.status,
     headers: { "Content-Type": "application/json" },
   });
+});
+
+// Proxy YouTube subscriptions lookup from link worker (for the youtubeContentTrigger Inspector)
+app.get("/api/channels/youtube/subscriptions", async (c) => {
+  const linkUrl = c.env.LINK_URL;
+  const res = await fetch(`${linkUrl}/api/channels/youtube/subscriptions`, {
+    headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
+  });
+  const body = await res.text();
+  return new Response(body, { status: res.status, headers: { "Content-Type": "application/json" } });
 });
 
 // Proxy configured LLM providers from content worker (tenant-scoped, forwards the session cookie)
@@ -968,7 +981,7 @@ export default {
   async queue(batch: MessageBatch<any>, env: Env): Promise<void> {
     for (const message of batch.messages) {
       try {
-        const { tenantId, eventType, userId, contentId, channelId, listId, payload } = message.body as FlowQueueMessage;
+        const { tenantId, eventType, userId, contentId, channelId, listId, subscriptionChannelId, payload } = message.body as FlowQueueMessage;
 
         const rows = await env.FLOW_DB.prepare(
           `SELECT id, graph_json FROM flows WHERE tenant_id = ? AND status = 'published'`
@@ -977,7 +990,12 @@ export default {
           .all<{ id: string; graph_json: string }>();
 
         if (contentId) {
-          const matchPayload = { ...payload, channel_id: channelId, ...(listId ? { list_id: listId } : {}) };
+          const matchPayload = {
+            ...payload,
+            channel_id: channelId,
+            ...(listId ? { list_id: listId } : {}),
+            ...(subscriptionChannelId ? { subscription_channel_id: subscriptionChannelId } : {}),
+          };
           for (const flow of rows.results) {
             const graph: FlowGraph = JSON.parse(flow.graph_json);
             const result = executeFlow(graph, eventType, matchPayload);

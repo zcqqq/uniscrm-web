@@ -71,6 +71,25 @@ describe("processVideoActionJob", () => {
     await expect(processVideoActionJob(makeEnv(), message)).resolves.not.toThrow();
   });
 
+  it("never throws even if updateJobStatus itself rejects inside the outer catch block", async () => {
+    vi.spyOn(containerClient, "downloadAndExtract").mockRejectedValue(new Error("boom"));
+    (jobStore.updateJobStatus as any).mockImplementation((_env: any, _jobId: string, status: string) => {
+      if (status === "failed") {
+        return Promise.reject(new Error("D1 write failed"));
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await expect(processVideoActionJob(makeEnv(), message)).resolves.not.toThrow();
+
+    // Even though updateJobStatus("failed") rejected, cleanup and the flow callback must still happen
+    // so the queue message still gets acknowledged with no lingering side effects skipped.
+    const resumeCall = (fetch as any).mock.calls.find((c: any[]) => c[0].includes("/internal/video-action/resume"));
+    expect(resumeCall).toBeDefined();
+    const body = JSON.parse(resumeCall[1].body);
+    expect(body.branch).toBe("failed");
+  });
+
   it("resolves failed and notifies flow when createJob itself throws, without ever calling downloadAndExtract", async () => {
     (jobStore.createJob as any).mockRejectedValue(new Error("D1 write failed"));
     const downloadSpy = vi.spyOn(containerClient, "downloadAndExtract");

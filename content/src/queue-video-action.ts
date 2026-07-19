@@ -98,7 +98,11 @@ export async function processVideoActionJob(env: Env, message: VideoActionQueueM
     });
   } catch (err) {
     console.error(JSON.stringify({ event: "video_action_job_error", jobId, error: String(err) }));
-    await updateJobStatus(env, jobId, "failed", "unknown", String(err));
+    try {
+      await updateJobStatus(env, jobId, "failed", "unknown", String(err));
+    } catch (statusErr) {
+      console.error(JSON.stringify({ event: "video_action_job_status_update_failed", jobId, error: String(statusErr) }));
+    }
     await cleanupScratch(env, jobId);
     await resumeFlow(env, message.pendingId, "failed");
   }

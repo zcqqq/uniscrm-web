@@ -229,7 +229,7 @@ export function resumeFromNode(
         if (duration > 0) {
           pendingWaits.push({ nodeId: target.id, durationMs: durationToMs(duration, unit) });
         }
-        nodeLogs.push({ nodeId: target.id, direction: "exit" });
+        // wait node: enter logged, exit will be logged when cron resumes
       } else if (target.type === "waitForEvent") {
         nodeLogs.push({ nodeId: target.id, direction: "enter" });
         const awaitingEvent = target.data.eventType as string;
@@ -239,7 +239,7 @@ export function resumeFromNode(
         if (awaitingEvent) {
           pendingWaits.push({ nodeId: target.id, durationMs: durationToMs(duration, unit), awaitingEvent, conditions: conditions.length > 0 ? conditions : undefined });
         }
-        nodeLogs.push({ nodeId: target.id, direction: "exit" });
+        // waitForEvent node: enter logged, exit will be logged when event triggers or timeout occurs
       } else {
         collectActions(graph, target.id, payload, actions, pendingWaits, nodeLogs);
       }

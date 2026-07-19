@@ -364,4 +364,38 @@ describe("resumeFromNode: action branch targets get full actionData", () => {
       { type: "addToList", nodeId: "a3", hasBranches: false, listId: "l1" },
     ]);
   });
+
+  it("logs wait node as direct branch target with only 'enter' (no premature 'exit')", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "a1", type: "action", data: { actionType: "xContentAction" }, position: { x: 0, y: 0 } },
+        { id: "w1", type: "wait", data: { duration: 5, unit: "minutes" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [
+        { id: "e1", source: "a1", target: "w1", sourceHandle: "success" },
+      ],
+    };
+    const result = resumeFromNode(graph, "a1", {}, "success");
+    const waitLogs = result.nodeLogs.filter((log) => log.nodeId === "w1");
+    expect(waitLogs).toEqual([{ nodeId: "w1", direction: "enter" }]);
+    expect(result.pendingWaits).toHaveLength(1);
+    expect(result.pendingWaits[0]).toMatchObject({ nodeId: "w1", durationMs: 300000 });
+  });
+
+  it("logs waitForEvent node as direct branch target with only 'enter' (no premature 'exit')", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "a1", type: "action", data: { actionType: "xContentAction" }, position: { x: 0, y: 0 } },
+        { id: "e1", type: "waitForEvent", data: { eventType: "user.joined", duration: 7, unit: "days" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [
+        { id: "edge1", source: "a1", target: "e1", sourceHandle: "failed" },
+      ],
+    };
+    const result = resumeFromNode(graph, "a1", {}, "failed");
+    const eventLogs = result.nodeLogs.filter((log) => log.nodeId === "e1");
+    expect(eventLogs).toEqual([{ nodeId: "e1", direction: "enter" }]);
+    expect(result.pendingWaits).toHaveLength(1);
+    expect(result.pendingWaits[0]).toMatchObject({ nodeId: "e1", awaitingEvent: "user.joined" });
+  });
 });

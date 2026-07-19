@@ -46,7 +46,7 @@ describe("NODE_TYPE_REGISTRY", () => {
   });
 
   it("tags the action-family entries with reactFlowType 'action'", () => {
-    for (const key of ["addToList", "xAction", "xContentAction", "tiktokContentAction"]) {
+    for (const key of ["addToList", "xAction", "xContentAction", "tiktokContentAction", "videoAction"]) {
       expect(NODE_TYPE_REGISTRY[key].reactFlowType).toBe("action");
     }
   });
@@ -218,7 +218,7 @@ describe("generatableKeysForDomain", () => {
   it("content domain: every domain:'content'/'both' type/actionType, now that all of them are generatable", () => {
     expect(generatableKeysForDomain("content").sort()).toEqual(
       [
-        "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "videoCondition",
+        "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "videoAction", "videoCondition",
         "wait", "timeCondition", "abSplit", "webhook",
       ].sort()
     );

@@ -219,6 +219,16 @@ ${CONTENT_X_ACTION_BULLETS}`,
    - Leave all fields at these defaults for the user to configure via the Inspector. imageCount/imageProvider/imageSkillId only apply to "photo-post".
 ${CONTENT_TIKTOK_ACTION_BULLETS}`,
   },
+  videoAction: {
+    reactFlowType: "action",
+    label: "Video Action",
+    description: "Add translated subtitles to the content's video",
+    domain: "content",
+    role: "action",
+    generatable: true,
+    promptFragment: `   For video actions: data: { actionType: "videoAction", operation: ["add-subtitle"], targetLanguage: "zh" }
+   - "add-subtitle": downloads the content's video, transcribes speech, translates it into targetLanguage, burns in subtitles, caches the result in R2. Has "success"/"failed" branches. Never publishes anywhere — produces $content.processed_video_url, $content.video_transcript, $content.translated_subtitle_text for later nodes to use.`,
+  },
   videoCondition: {
     reactFlowType: "videoCondition",
     label: "Video Condition",
@@ -293,6 +303,6 @@ export const USER_FLOW_SIDEBAR_ORDER: string[] = [
 ];
 
 export const CONTENT_FLOW_SIDEBAR_ORDER: string[] = [
-  "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "videoCondition",
+  "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "videoAction", "videoCondition",
   "wait", "timeCondition", "abSplit", "webhook",
 ];

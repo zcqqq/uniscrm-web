@@ -61,8 +61,8 @@ ${list}
 Rules:
 - Each node needs: id (UUID format like "a1b2c3d4-..."), type, position: {x:0,y:0}, data
 - Edges: { id: string, source: nodeId, target: nodeId, sourceHandle?: string }
-- Only use xContentTrigger, youtubeContentTrigger, wait, timeCondition, abSplit, webhook, videoCondition, and action (with actionType "xContentAction" or "tiktokContentAction") node types. Do NOT use xTrigger, cronTrigger, waitForEvent, userPropsCondition, changeUserProps, or an action with actionType "xAction"/"addToList" — those belong to a different flow domain.
-- action nodes with actionType "xContentAction" or "tiktokContentAction" have sourceHandle "success" or "failed" for branching
+- Only use xContentTrigger, youtubeContentTrigger, wait, timeCondition, abSplit, webhook, videoCondition, and action (with actionType "xContentAction", "tiktokContentAction", or "videoAction") node types. Do NOT use xTrigger, cronTrigger, waitForEvent, userPropsCondition, changeUserProps, or an action with actionType "xAction"/"addToList" — those belong to a different flow domain.
+- action nodes with actionType "xContentAction", "tiktokContentAction", or "videoAction" have sourceHandle "success" or "failed" for branching
 - abSplit nodes have sourceHandle "a" or "b"
 - webhook nodes have sourceHandle "success" or "failed"
 - videoCondition nodes have sourceHandle "has-face", "no-face", or "failed"

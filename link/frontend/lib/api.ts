@@ -160,13 +160,8 @@ export const api = {
         "/channels/youtube/status"
       ),
     youtubeSubscriptions: () =>
-      request<{ subscriptions: { channelId: string; channelName: string; thumbnailUrl: string; already_watching: boolean }[] }>(
+      request<{ connected: boolean; accountChannelId: string | null; subscriptions: { channelId: string; channelName: string; thumbnailUrl: string }[] }>(
         "/channels/youtube/subscriptions"
-      ),
-    youtubeWatchSubscription: (youtubeChannelId: string) =>
-      request<{ channelId: string; channelName: string; thumbnailUrl: string }>(
-        `/channels/youtube/subscriptions/${youtubeChannelId}/watch`,
-        { method: "POST" }
       ),
   },
   users: {

@@ -388,13 +388,10 @@ function SimpleChannelCard({ config, locale }: { config: SimpleChannelConfig; lo
   );
 }
 
-// ─── YouTube — bespoke: OAuth connect + pick-which-subscriptions-to-watch ──
+// ─── YouTube — bespoke: OAuth connect + subscription count ──
 
 function YouTubeAccountCard({ locale }: { locale: Locale }) {
-  const {
-    connected, email, syncStatus, subscriptions, loadingSubscriptions, createdAt,
-    connect, disconnect, watchChannel,
-  } = useYouTubeAccount();
+  const { connected, email, syncStatus, subscriptionCount, createdAt, connect, disconnect } = useYouTubeAccount();
 
   const status = !connected ? "disconnected" : syncStatus === "pending" ? "pending" : "connected";
 
@@ -403,8 +400,8 @@ function YouTubeAccountCard({ locale }: { locale: Locale }) {
       logo={<span className="text-2xl leading-none">▶️</span>}
       name="YouTube"
       tagline={{
-        en: "Connect your YouTube account, then pick which subscribed channels to watch for new videos.",
-        zh: "连接你的YouTube账号，选择要监控新视频的订阅频道。",
+        en: "Connect your YouTube account — pick which subscriptions to watch from a flow's trigger.",
+        zh: "连接你的YouTube账号——在flow的trigger里选择要监控的订阅频道。",
       }}
       locale={locale}
       status={status}
@@ -416,27 +413,7 @@ function YouTubeAccountCard({ locale }: { locale: Locale }) {
         ) : syncStatus === "error" ? (
           <p className="text-xs text-destructive">Failed to sync subscriptions — try reconnecting.</p>
         ) : (
-          <div className="space-y-1 max-h-64 overflow-y-auto">
-            {loadingSubscriptions ? (
-              <p className="text-xs text-muted-foreground">Loading subscriptions…</p>
-            ) : subscriptions.length === 0 ? (
-              <p className="text-xs text-muted-foreground italic">No subscriptions found</p>
-            ) : (
-              subscriptions.map((s) => (
-                <div key={s.channelId} className="flex items-center justify-between gap-2 py-1">
-                  <span className="text-sm truncate">{s.channelName}</span>
-                  <Button
-                    size="sm"
-                    variant={s.already_watching ? "outline" : "default"}
-                    disabled={s.already_watching}
-                    onClick={() => watchChannel(s.channelId)}
-                  >
-                    {s.already_watching ? "Watching" : "Watch"}
-                  </Button>
-                </div>
-              ))
-            )}
-          </div>
+          <p className="text-xs text-muted-foreground">{subscriptionCount} subscription{subscriptionCount === 1 ? "" : "s"} available</p>
         )
       }
       actions={

@@ -3,8 +3,10 @@ export interface Env {
   AI: Ai;
   ASSETS: Fetcher;
   WEB_URL: string;
+  CONTENT_URL: string;
   INTERNAL_SECRET: string;
   ENCRYPTION_KEY: { get(): Promise<string> };
   CF_ACCOUNT_ID: string;
   CF_API_TOKEN: string;
+  MEDIA_BUCKET: R2Bucket;
 }

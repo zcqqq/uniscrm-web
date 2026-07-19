@@ -40,6 +40,15 @@ app.route("/internal", internalRoutes());
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
+app.get("/public/media/:key", async (c) => {
+  const object = await c.env.MEDIA_BUCKET.get(c.req.param("key"));
+  if (!object) return c.notFound();
+  return new Response(object.body, {
+    status: 200,
+    headers: { "Content-Type": object.httpMetadata?.contentType || "application/octet-stream" },
+  });
+});
+
 // Hono's `/*` wildcard also matches the exact parent path, so a single middleware
 // registration here covers both "/api/llm-credentials" and "/api/llm-credentials/:provider"
 // (registering both "/api/llm-credentials" and "/api/llm-credentials/*" would run sessionAuth
@@ -107,7 +116,7 @@ export default {
 
     // Auth redirect for HTML pages
     const accept = request.headers.get("Accept") || "";
-    if (accept.includes("text/html") && !url.pathname.startsWith("/api") && !url.pathname.startsWith("/internal")) {
+    if (accept.includes("text/html") && !url.pathname.startsWith("/api") && !url.pathname.startsWith("/internal") && !url.pathname.startsWith("/public")) {
       const sessionCookie = getCookieValue(request, "session");
       if (!sessionCookie) {
         return Response.redirect(`${env.WEB_URL}/login`, 302);
@@ -121,7 +130,7 @@ export default {
     }
 
     // Serve static assets first for non-API paths
-    if (!url.pathname.startsWith("/api") && !url.pathname.startsWith("/internal") && !url.pathname.startsWith("/health") && env.ASSETS) {
+    if (!url.pathname.startsWith("/api") && !url.pathname.startsWith("/internal") && !url.pathname.startsWith("/health") && !url.pathname.startsWith("/public") && env.ASSETS) {
       const assetRes = await env.ASSETS.fetch(request);
       if (assetRes.status !== 404) return assetRes;
     }

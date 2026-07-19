@@ -22,6 +22,7 @@ routes = [{ pattern = "content-dev.uni-scrm.com", custom_domain = true }]
 
 [env.dev.vars]
 WEB_URL = "https://web-dev.uni-scrm.com"
+CONTENT_URL = "https://content-dev.uni-scrm.com"
 INTERNAL_SECRET = "dev-internal-secret"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 
@@ -34,6 +35,10 @@ migrations_dir = "migrations"
 [env.dev.ai]
 binding = "AI"
 
+[[env.dev.r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "uniscrm-content-media-dev"
+
 [[env.dev.secrets_store_secrets]]
 binding = "ENCRYPTION_KEY"
 store_id = "358a0014b2254c2eafb877e4182fd977"
@@ -45,6 +50,7 @@ routes = [{ pattern = "content.uni-scrm.com", custom_domain = true }]
 
 [env.production.vars]
 WEB_URL = "https://web.uni-scrm.com"
+CONTENT_URL = "https://content.uni-scrm.com"
 INTERNAL_SECRET = "prod-internal-secret-change-me"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 
@@ -56,6 +62,10 @@ migrations_dir = "migrations"
 
 [env.production.ai]
 binding = "AI"
+
+[[env.production.r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "uniscrm-content-media"
 
 [[env.production.secrets_store_secrets]]
 binding = "ENCRYPTION_KEY"

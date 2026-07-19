@@ -251,11 +251,13 @@ export function channelsRoutes() {
     if (!accountRow) return c.json({ connected: false, accountChannelId: null, subscriptions: [] });
 
     const config = JSON.parse(accountRow.config) as {
+      email?: string;
       subscriptions?: { channelId: string; channelName: string; thumbnailUrl: string }[];
     };
     return c.json({
       connected: true,
       accountChannelId: accountRow.id,
+      email: config.email,
       subscriptions: config.subscriptions || [],
     });
   });

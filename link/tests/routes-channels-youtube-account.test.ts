@@ -79,6 +79,25 @@ describe("GET /api/channels/youtube/subscriptions", () => {
       ],
     });
   });
+
+  it("includes the connected account's email alongside its subscriptions", async () => {
+    const linkDb = {
+      prepare: vi.fn().mockReturnValue({
+        bind: vi.fn().mockReturnValue({
+          first: vi.fn().mockResolvedValue({
+            id: "acct1",
+            config: JSON.stringify({ email: "creator@example.com", subscriptions: [{ channelId: "UC1", channelName: "One", thumbnailUrl: "" }] }),
+          }),
+        }),
+      }),
+    };
+    const { app, env } = buildApp({ LINK_DB: linkDb });
+
+    const res = await app.request("/api/channels/youtube/subscriptions", {}, env);
+    const body = await res.json() as any;
+
+    expect(body.email).toBe("creator@example.com");
+  });
 });
 
 describe("DELETE /api/channels/youtube_account (disconnect isolation)", () => {

@@ -162,6 +162,12 @@ export default function Sidebar() {
       el: <DraggableItem key="abSplit" type="abSplit" label={NODE_TYPE_REGISTRY.abSplit.label!} description={NODE_TYPE_REGISTRY.abSplit.description!} color="border-secondary bg-secondary/30" icon="⚡" />,
     });
   }
+  if (visible("videoCondition")) {
+    flowControlItems.push({
+      key: "videoCondition",
+      el: <DraggableItem key="videoCondition" type="videoCondition" label={NODE_TYPE_REGISTRY.videoCondition.label!} description={NODE_TYPE_REGISTRY.videoCondition.description!} color="border-secondary bg-secondary/30" icon="👁️" />,
+    });
+  }
 
   return (
     <TooltipProvider>

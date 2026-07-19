@@ -674,6 +674,28 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
   );
 }
 
+const VIDEO_CONDITION_OPERATIONS = [{ value: "check-face", label: "Check Face" }];
+
+function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.videoCondition.label}</h4>
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Operation</Label>
+          <OperationSelect
+            value={data.operation || "check-face"}
+            onChange={(v) => updateNodeData(nodeId, { operation: v })}
+            options={VIDEO_CONDITION_OPERATIONS}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
   const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
@@ -1066,6 +1088,9 @@ export default function Inspector() {
       )}
       {node.type === "webhook" && (
         <WebhookInspector nodeId={node.id} data={node.data as Record<string, any>} />
+      )}
+      {node.type === "videoCondition" && (
+        <VideoConditionInspector nodeId={node.id} data={node.data as Record<string, any>} />
       )}
       {node.type === "changeUserProps" && (
         <ChangeUserPropsInspector nodeId={node.id} data={node.data as Record<string, any>} />

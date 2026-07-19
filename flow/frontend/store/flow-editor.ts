@@ -125,6 +125,9 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
     } else if (type === "webhook") {
       nodeType = "webhook";
       data = { url: "", method: "POST", headers: {}, body: "" };
+    } else if (type === "videoCondition") {
+      nodeType = "videoCondition";
+      data = { operation: "check-face" };
     } else if (type === "changeUserProps") {
       nodeType = "changeUserProps";
       data = { updates: [] };

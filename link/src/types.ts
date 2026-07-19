@@ -10,7 +10,6 @@ export interface Env {
   VECTORIZE: VectorizeIndex;
   AI: Ai;
   ASSETS: Fetcher;
-  MEDIA_BUCKET: R2Bucket;
   MAIGRET_QUEUE: Queue;
   FLOW_QUEUE: Queue;
   PIPELINE_EVENT: Pipeline;

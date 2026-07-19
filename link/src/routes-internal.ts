@@ -341,6 +341,32 @@ export function internalRoutes() {
     return c.json({ ok: true });
   });
 
+  // Resolves a content item's public watch/permalink video URL for the Video Action
+  // node's pipeline (entirely owned by content — link only resolves the URL, never
+  // downloads or processes anything). Returns { url: null } (never an error status) for
+  // any content item that has no video, so the caller can route to its "failed" branch
+  // uniformly rather than special-casing "not found" vs "no video".
+  router.post("/content/video-url", async (c) => {
+    const { channelId, sourceContentId } = await c.req.json<{
+      contentId: string; channelId: string; sourceContentId: string;
+    }>();
+
+    const channel = await c.env.LINK_DB.prepare("SELECT channel_type, config FROM channels WHERE id = ?")
+      .bind(channelId).first<{ channel_type: string; config: string }>();
+    if (!channel) return c.json({ url: null });
+
+    if (channel.channel_type === "YOUTUBE" && sourceContentId) {
+      return c.json({ url: `https://www.youtube.com/watch?v=${sourceContentId}` });
+    }
+    if (channel.channel_type === "X" && sourceContentId) {
+      const config = JSON.parse(channel.config);
+      const handle = config.x_username;
+      if (handle) return c.json({ url: `https://x.com/${handle}/status/${sourceContentId}` });
+    }
+
+    return c.json({ url: null });
+  });
+
   router.post("/tiktok/photo-post", async (c) => {
     const {
       contentId, channelId, prompts, textProvider, textSkillId,

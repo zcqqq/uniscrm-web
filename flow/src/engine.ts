@@ -355,6 +355,12 @@ function collectActions(
       continue;
     }
 
+    if (targetNode.type === "videoCondition") {
+      actions.push({ type: "videoCondition", nodeId: targetNode.id, operation: (targetNode.data.operation as string) || "check-face", hasBranches: true });
+      nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+      continue;
+    }
+
     if (targetNode.type === "changeUserProps") {
       actions.push({ type: "changeUserProps", nodeId: targetNode.id, updates: targetNode.data.updates });
       nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });

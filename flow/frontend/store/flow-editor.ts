@@ -60,8 +60,8 @@ export function isValidConnection(source: Node | undefined, target: Node | undef
   const targetType = target.type;
   const sourceType = source.type;
   if (targetType === "xTrigger" || targetType === "cronTrigger" || targetType === "xContentTrigger" || targetType === "youtubeContentTrigger") return false;
-  const validTargets = ["action", "wait", "waitForEvent", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps"];
-  const validSources = ["xTrigger", "cronTrigger", "xContentTrigger", "youtubeContentTrigger", "wait", "waitForEvent", "action", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps"];
+  const validTargets = ["action", "wait", "waitForEvent", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps", "videoCondition"];
+  const validSources = ["xTrigger", "cronTrigger", "xContentTrigger", "youtubeContentTrigger", "wait", "waitForEvent", "action", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps", "videoCondition"];
   if (validSources.includes(sourceType!) && validTargets.includes(targetType!)) return true;
   return false;
 }

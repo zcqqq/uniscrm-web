@@ -162,19 +162,24 @@ describe("POST /internal/generate-image", () => {
     expect(res.status).toBe(403);
   });
 
-  it("returns image bytes with the right content-type on success (default provider, Workers AI)", async () => {
+  it("stores the generated image in R2 and returns its public URL on success (default provider, Workers AI)", async () => {
     const res = await worker.fetch(
       new Request("https://content-dev.uni-scrm.com/internal/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
         body: JSON.stringify({ tenantId: 999, prompt: "a lizard", provider: "default" }),
       }),
-      testEnv
+      { ...testEnv, CONTENT_URL: "https://content-dev.uni-scrm.com" }
     );
     expect(res.status).toBe(200);
-    expect(res.headers.get("Content-Type")).toBe("image/jpeg");
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(new TextDecoder().decode(bytes)).toBe("fake-jpeg-bytes");
+    const body = await res.json<{ url: string }>();
+    expect(body.url).toMatch(/^https:\/\/content-dev\.uni-scrm\.com\/public\/media\/[0-9a-f-]+$/);
+
+    const key = body.url.split("/").pop()!;
+    const stored = await env.MEDIA_BUCKET.get(key);
+    expect(stored).toBeTruthy();
+    expect(stored!.httpMetadata?.contentType).toBe("image/jpeg");
+    expect(new TextDecoder().decode(await stored!.arrayBuffer())).toBe("fake-jpeg-bytes");
   });
 
   it("returns 502 when provider: 'openai' has no configured credentials", async () => {

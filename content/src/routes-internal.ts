@@ -46,7 +46,9 @@ export function internalRoutes() {
 
     try {
       const { bytes, contentType } = await generateImage(c.env, { tenantId, prompt, provider, skillId });
-      return new Response(bytes, { status: 200, headers: { "Content-Type": contentType } });
+      const key = crypto.randomUUID();
+      await c.env.MEDIA_BUCKET.put(key, bytes, { httpMetadata: { contentType } });
+      return c.json({ url: `${c.env.CONTENT_URL}/public/media/${key}` });
     } catch (err) {
       console.error(JSON.stringify({ event: "generate_image_failed", tenantId, provider, error: String(err) }));
       return c.json({ error: "Image generation failed" }, 502);

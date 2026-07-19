@@ -131,13 +131,6 @@ export default function Sidebar() {
       el: <DraggableItem key="tiktokContentAction" type="tiktokContentAction" label={NODE_TYPE_REGISTRY.tiktokContentAction.label!} description={NODE_TYPE_REGISTRY.tiktokContentAction.description!} color="border-accent bg-accent/50" icon="📸" />,
     });
   }
-  if (visible("updateContentStatus")) {
-    actionItems.push({
-      key: "updateContentStatus",
-      el: <DraggableItem key="updateContentStatus" type="updateContentStatus" label={NODE_TYPE_REGISTRY.updateContentStatus.label!} description={NODE_TYPE_REGISTRY.updateContentStatus.description!} color="border-accent bg-accent/50" icon="🏷️" />,
-    });
-  }
-
   const flowControlItems: SectionItem[] = [];
   if (visible("waitForEvent")) {
     flowControlItems.push({

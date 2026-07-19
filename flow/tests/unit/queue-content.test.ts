@@ -6,7 +6,7 @@ import { executeFlow } from "../../src/engine";
 const graphContentToStatus = JSON.stringify({
   nodes: [
     { id: "t1", type: "xContentTrigger", data: { channelId: "chan-1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
-    { id: "a1", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
+    { id: "a1", type: "action", data: { actionType: "noopLeaf" }, position: { x: 200, y: 0 } },
   ],
   edges: [{ id: "e1", source: "t1", target: "a1" }],
 });
@@ -96,10 +96,7 @@ describe("queue(): content.created dispatch", () => {
     ).bind(graphContentToStatus).run();
     await env.WEB_DB.prepare(
       `INSERT INTO tenants (tenant_id, d1_database_id) VALUES (1, 'tenant-db-1')`
-    ).run().catch(() => {}); // no-op: violates tenants.email NOT NULL — intentionally left
-    // unresolvable so the updateContentStatus action's SELECT ... WHERE tenant_id = ? finds no
-    // row and skips constructing a real TenantDataDB (which would otherwise fire an actual
-    // Cloudflare D1 REST API call with an undefined CF_D1_API_TOKEN in this test environment).
+    ).run().catch(() => {}); // no-op: violates tenants.email NOT NULL — intentionally left unresolvable
   });
 
   afterEach(async () => {
@@ -138,8 +135,8 @@ describe("queue(): xContentAction branch resolution", () => {
     nodes: [
       { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
       { id: "a1", type: "action", data: { actionType: "xContentAction", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
-      { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 400, y: 0 } },
-      { id: "a3", type: "action", data: { actionType: "updateContentStatus", status: "ignored" }, position: { x: 400, y: 100 } },
+      { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 0 } },
+      { id: "a3", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 100 } },
     ],
     edges: [
       { id: "e1", source: "t1", target: "a1" },
@@ -149,7 +146,7 @@ describe("queue(): xContentAction branch resolution", () => {
   };
   const graphWithBranches = JSON.stringify(graphWithBranchesObj);
 
-  it("does not collect both branches on the initial dispatch (hasBranches gating) — executeFlow's initial pass over an xContentAction node yields only the action itself, not either branch's downstream updateContentStatus node", () => {
+  it("does not collect both branches on the initial dispatch (hasBranches gating) — executeFlow's initial pass over an xContentAction node yields only the action itself, not either branch's downstream noopLeaf node", () => {
     const result = executeFlow(graphWithBranchesObj, "content.created", { channel_id: "src-chan" });
     expect(result.actions.map((a) => a.type)).toEqual(["xContentAction"]);
   });
@@ -168,7 +165,7 @@ describe("queue(): xContentAction branch resolution", () => {
     vi.unstubAllGlobals();
   });
 
-  it("resolves the success branch and runs updateContentStatus(published) when link returns ok:true", async () => {
+  it("resolves the success branch and runs a2 when link returns ok:true", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })));
 
     await worker.queue(
@@ -176,9 +173,7 @@ describe("queue(): xContentAction branch resolution", () => {
       env
     );
 
-    // updateContentStatus tries to look up the tenant's d1_database_id and no-ops if missing
-    // (same pattern the existing queue-content.test.ts beforeEach relies on) — what we're
-    // actually asserting here is that resumeFromNode fired at all (a second
+    // What we're actually asserting here is that resumeFromNode fired at all (a second
     // content_flow_executions row was recorded for the resumed action) after the fetch resolved.
     // The outer queue() call site unconditionally writes one row whenever the initial
     // executeFlow() call produces any actions (i.e. just for matching xContentAction itself), so

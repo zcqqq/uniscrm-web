@@ -29,7 +29,6 @@ function getNodeIcon(type: string, data: Record<string, unknown>) {
     if (at === "addToList") return ListIcon;
     if (at === "xContentAction") return FileTextIcon;
     if (at === "tiktokContentAction") return FileTextIcon;
-    if (at === "updateContentStatus") return ListIcon;
     return XIcon;
   }
   return ClockIcon;

@@ -5,7 +5,7 @@ import worker from "../../src/index";
 const graphWithXContentTrigger = JSON.stringify({
   nodes: [
     { id: "t1", type: "xContentTrigger", data: { channelId: "chan-1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
-    { id: "a1", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
+    { id: "a1", type: "action", data: { actionType: "noopLeaf" }, position: { x: 200, y: 0 } },
   ],
   edges: [{ id: "e1", source: "t1", target: "a1" }],
 });
@@ -40,18 +40,6 @@ describe("emitContentNodeLogs: content-domain execution now writes node logs", (
          awaiting_event TEXT NOT NULL DEFAULT '', conditions TEXT NOT NULL DEFAULT '',
          retry_action TEXT NOT NULL DEFAULT '', retry_count INTEGER NOT NULL DEFAULT 0,
          created_at TEXT NOT NULL
-       )`
-    ).run();
-    // updateContentStatus (in the test graph below) queries env.WEB_DB.tenants — mirrors the
-    // same CREATE TABLE IF NOT EXISTS pattern queue-content.test.ts's beforeEach already uses,
-    // per this task's brief prose ("copy its flows/content_flow_executions/content_flow_pending/
-    // tenants table setup"). No row is inserted: an absent tenants row makes tenantRow?.d1_database_id
-    // falsy, so the action skips constructing a real TenantDataDB (which would otherwise fire an
-    // actual Cloudflare D1 REST API call with an undefined CF_D1_API_TOKEN in this test environment).
-    await env.WEB_DB.prepare(
-      `CREATE TABLE IF NOT EXISTS tenants (
-         tenant_id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL,
-         d1_database_id TEXT, created_at TEXT NOT NULL
        )`
     ).run();
     await env.FLOW_DB.prepare(

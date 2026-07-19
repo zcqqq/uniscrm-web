@@ -9,7 +9,7 @@ describe("executeFlow: xContentTrigger", () => {
     return {
       nodes: [
         { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions, ...data }, position: { x: 0, y: 0 } },
-        { id: "a1", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "noopLeaf" }, position: { x: 200, y: 0 } },
       ],
       edges: [{ id: "e1", source: "t1", target: "a1" }],
     };
@@ -19,7 +19,7 @@ describe("executeFlow: xContentTrigger", () => {
     const result = executeFlow(graphWithXContentTrigger([]), "content.created", { channel_id: "chan1", channel_type: "X" });
     expect(result.matched).toBe(true);
     expect(result.actions).toHaveLength(1);
-    expect(result.actions[0]).toMatchObject({ type: "updateContentStatus" });
+    expect(result.actions[0]).toMatchObject({ type: "noopLeaf" });
   });
 
   it("does not match a My Posts node for a different channel_id", () => {
@@ -155,12 +155,12 @@ describe("collectActions: new content-domain action types", () => {
     expect(result.actions[0]).toMatchObject({ operation: "create-post" });
   });
 
-  it("collects an updateContentStatus action and continues traversal past it", () => {
+  it("collects a noopLeaf action and continues traversal past it", () => {
     const graph: FlowGraph = {
       nodes: [
         { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
-        { id: "a1", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
-        { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "ignored" }, position: { x: 400, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "noopLeaf" }, position: { x: 200, y: 0 } },
+        { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 0 } },
       ],
       edges: [
         { id: "e1", source: "t1", target: "a1" },
@@ -169,8 +169,8 @@ describe("collectActions: new content-domain action types", () => {
     };
     const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
     expect(result.actions).toEqual([
-      { type: "updateContentStatus", nodeId: "a1", hasBranches: false, status: "published" },
-      { type: "updateContentStatus", nodeId: "a2", hasBranches: false, status: "ignored" },
+      { type: "noopLeaf", nodeId: "a1", hasBranches: false },
+      { type: "noopLeaf", nodeId: "a2", hasBranches: false },
     ]);
   });
 
@@ -224,25 +224,11 @@ describe("collectActions: new content-domain action types", () => {
 });
 
 describe("resumeFromNode: action branch targets get full actionData", () => {
-  it("populates status on an updateContentStatus branch target (not just {type})", () => {
-    const graph: FlowGraph = {
-      nodes: [
-        { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-1", prompt: "Rewrite this: $content.content_text", provider: "default" }, position: { x: 0, y: 0 } },
-        { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
-      ],
-      edges: [{ id: "e1", source: "a1", target: "a2", sourceHandle: "success" }],
-    };
-    const result = resumeFromNode(graph, "a1", {}, "success");
-    expect(result.actions).toEqual([
-      { type: "updateContentStatus", nodeId: "a2", hasBranches: false, status: "published" },
-    ]);
-  });
-
   it("continues traversal past a non-branching action branch target", () => {
     const graph: FlowGraph = {
       nodes: [
         { id: "a1", type: "action", data: { actionType: "xContentAction", channelId: "chan-1" }, position: { x: 0, y: 0 } },
-        { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 200, y: 0 } },
+        { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 200, y: 0 } },
         { id: "a3", type: "action", data: { actionType: "addToList", listId: "l1" }, position: { x: 400, y: 0 } },
       ],
       edges: [
@@ -252,7 +238,7 @@ describe("resumeFromNode: action branch targets get full actionData", () => {
     };
     const result = resumeFromNode(graph, "a1", {}, "success");
     expect(result.actions).toEqual([
-      { type: "updateContentStatus", nodeId: "a2", hasBranches: false, status: "published" },
+      { type: "noopLeaf", nodeId: "a2", hasBranches: false },
       { type: "addToList", nodeId: "a3", hasBranches: false, listId: "l1" },
     ]);
   });

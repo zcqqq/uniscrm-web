@@ -42,11 +42,6 @@ export default function ActionNode({ data, selected }: NodeProps) {
     label = NODE_TYPE_REGISTRY.tiktokContentAction.label!;
     description = channelId ? "Target channel selected" : "Select a target channel...";
     icon = "📸";
-  } else if (actionType === "updateContentStatus") {
-    const status = data.status as string;
-    label = NODE_TYPE_REGISTRY.updateContentStatus.label!;
-    description = status ? `Set status to "${status}"` : "Select a status...";
-    icon = "🏷️";
   } else {
     label = "Action";
     description = "Unknown action";

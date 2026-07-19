@@ -6,7 +6,7 @@ const graphWithWait = JSON.stringify({
   nodes: [
     { id: "t1", type: "xContentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
     { id: "w1", type: "wait", data: { duration: 1, unit: "minutes" }, position: { x: 200, y: 0 } },
-    { id: "a1", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 400, y: 0 } },
+    { id: "a1", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 0 } },
   ],
   edges: [
     { id: "e1", source: "t1", target: "w1" },
@@ -20,9 +20,9 @@ describe("scheduled(): content_flow_pending sweep", () => {
     // <BINDING>_MIGRATIONS binding is wired up — confirmed empirically by Task 5's
     // flow/tests/unit/queue-content.test.ts). Create the post-migration schema by hand,
     // matching migrations/0001_init.sql (as amended by 0011_drop_enabled.sql, which removed
-    // flows.enabled), migrations/0013_content_flow_tables.sql, and web/migrations/0001_init.sql's
-    // `tenants` table. Copied from queue-content.test.ts's beforeEach to avoid a second,
-    // independently-drifting copy of the same schema.
+    // flows.enabled) and migrations/0013_content_flow_tables.sql. Copied from
+    // queue-content.test.ts's beforeEach to avoid a second, independently-drifting copy of the
+    // same schema.
     await env.FLOW_DB.prepare(
       `CREATE TABLE IF NOT EXISTS flows (
          id TEXT PRIMARY KEY,
@@ -82,18 +82,6 @@ describe("scheduled(): content_flow_pending sweep", () => {
          created_at TEXT NOT NULL
        )`
     ).run();
-    // updateContentStatus (the action in graphWithWait) looks up tenants.d1_database_id before
-    // doing anything — the table must exist or that SELECT throws "no such table: tenants". No
-    // row is needed: with no matching tenant_id, the SELECT returns null and the action becomes
-    // a no-op (skips constructing a real TenantDataDB / firing a Cloudflare D1 REST API call).
-    await env.WEB_DB.prepare(
-      `CREATE TABLE IF NOT EXISTS tenants (
-         tenant_id INTEGER PRIMARY KEY AUTOINCREMENT,
-         email TEXT NOT NULL,
-         d1_database_id TEXT,
-         created_at TEXT NOT NULL
-       )`
-    ).run();
   });
 
   afterEach(async () => {
@@ -138,8 +126,8 @@ describe("scheduled(): content_flow_pending retry_action handling", () => {
     nodes: [
       { id: "t1", type: "xContentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
       { id: "a1", type: "action", data: { actionType: "xContentAction", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
-      { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 400, y: 0 } },
-      { id: "a3", type: "action", data: { actionType: "updateContentStatus", status: "ignored" }, position: { x: 400, y: 100 } },
+      { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 0 } },
+      { id: "a3", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 100 } },
     ],
     edges: [
       { id: "e1", source: "t1", target: "a1" },
@@ -211,8 +199,7 @@ describe("scheduled(): content_flow_pending retry_action handling", () => {
     ).bind(past, JSON.stringify(action)).run();
 
     // Still rate-limited on this final attempt too — retry_count (5) is no longer < 5, so this
-    // must exhaust and resolve the "failed" branch (a3: updateContentStatus status:"ignored"),
-    // not just silently delete the row.
+    // must exhaust and resolve the "failed" branch (a3: noopLeaf), not just silently delete the row.
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, rateLimited: true, rateLimitReset: "2099-01-01T00:00:00.000Z" }), { status: 429 }))

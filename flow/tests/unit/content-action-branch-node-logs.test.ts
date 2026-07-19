@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
 
-// Both scenarios below use an xContentTrigger -> xContentAction -> updateContentStatus graph,
+// Both scenarios below use an xContentTrigger -> xContentAction -> noopLeaf graph,
 // where the xContentAction node ("a1") has a success branch (-> a2) and a failed branch (-> a3).
 // resumeFromNode(graph, "a1", payload, branch) is called at two call sites in src/index.ts to
 // resolve which of a2/a3 fires once the async xContentAction's outcome (ok/rateLimited) is known:
@@ -19,8 +19,8 @@ const graphWithBranches = JSON.stringify({
   nodes: [
     { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
     { id: "a1", type: "action", data: { actionType: "xContentAction", prompt: "Rewrite: $content.content_text", provider: "default" }, position: { x: 200, y: 0 } },
-    { id: "a2", type: "action", data: { actionType: "updateContentStatus", status: "published" }, position: { x: 400, y: 0 } },
-    { id: "a3", type: "action", data: { actionType: "updateContentStatus", status: "ignored" }, position: { x: 400, y: 100 } },
+    { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 0 } },
+    { id: "a3", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 100 } },
   ],
   edges: [
     { id: "e1", source: "t1", target: "a1" },
@@ -67,14 +67,6 @@ async function setupSchema() {
        awaiting_event TEXT NOT NULL DEFAULT '', conditions TEXT NOT NULL DEFAULT '',
        retry_action TEXT NOT NULL DEFAULT '', retry_count INTEGER NOT NULL DEFAULT 0,
        created_at TEXT NOT NULL
-     )`
-  ).run();
-  // updateContentStatus (a2/a3) queries env.WEB_DB.tenants and no-ops when no matching row exists
-  // (mirrors queue-content.test.ts / scheduled-content.test.ts), avoiding a real D1 REST API call.
-  await env.WEB_DB.prepare(
-    `CREATE TABLE IF NOT EXISTS tenants (
-       tenant_id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL,
-       d1_database_id TEXT, created_at TEXT NOT NULL
      )`
   ).run();
 }

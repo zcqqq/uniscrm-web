@@ -512,10 +512,6 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
     return <TikTokContentActionInspector nodeId={nodeId} data={data} />;
   }
 
-  if (actionType === "updateContentStatus") {
-    return <UpdateContentStatusInspector nodeId={nodeId} data={data} />;
-  }
-
   return <p className="text-sm text-muted-foreground">Unknown action type</p>;
 }
 
@@ -811,27 +807,6 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
             ))}
           </Select>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function UpdateContentStatusInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
-  const { updateNodeData } = useFlowEditor();
-  return (
-    <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.updateContentStatus.label}</h4>
-      <div>
-        <Label className="text-xs block mb-1">New Status</Label>
-        <Select
-          value={data.status || ""}
-          onChange={(e: SelectChange) => updateNodeData(nodeId, { status: e.target.value })}
-          className="w-full text-sm"
-        >
-          <option value="">Select status...</option>
-          <option value="published">Published</option>
-          <option value="ignored">Ignored</option>
-        </Select>
       </div>
     </div>
   );

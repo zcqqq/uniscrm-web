@@ -1329,7 +1329,7 @@ export default {
       // real production behavior too), which would otherwise leave nothing for app.fetch()
       // below to read on a POST body once ASSETS 404s (e.g. /internal/* routes, none of which
       // are static assets). The clone's body is what gets locked; `request` itself stays intact.
-      const assetRes = await env.ASSETS.fetch(request.clone());
+      const assetRes = await env.ASSETS.fetch(request.clone() as Request);
       if (assetRes.status !== 404) return assetRes;
     }
 

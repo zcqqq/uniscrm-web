@@ -16,19 +16,21 @@ import { TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../..
 import { DataTable } from "../../../shared/frontend/components/DataTable";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
-import { Pencil as EditIcon, Search as SearchIcon, Clock as ClockIcon, List as ListIcon, FileText as FileTextIcon } from "lucide-react";
-import { XIcon } from "../../../shared/frontend/ui/icons";
+import { Pencil as EditIcon, Search as SearchIcon, Clock as ClockIcon, List as ListIcon, Clapperboard as ClapperboardIcon } from "lucide-react";
+import { XIcon, TikTokIcon, YouTubeIcon } from "../../../shared/frontend/ui/icons";
 
-function getNodeIcon(type: string, data: Record<string, unknown>) {
+export function getNodeIcon(type: string, data: Record<string, unknown>) {
   if (type === "xTrigger") return XIcon;
-  if (type === "xContentTrigger") return FileTextIcon;
+  if (type === "xContentTrigger") return XIcon;
+  if (type === "youtubeContentTrigger") return YouTubeIcon;
   if (type === "waitForEvent") return SearchIcon;
   if (type === "wait") return ClockIcon;
   if (type === "action") {
     const at = data.actionType as string;
     if (at === "addToList") return ListIcon;
-    if (at === "xContentAction") return FileTextIcon;
-    if (at === "tiktokContentAction") return FileTextIcon;
+    if (at === "xContentAction") return XIcon;
+    if (at === "tiktokContentAction") return TikTokIcon;
+    if (at === "videoAction") return ClapperboardIcon;
     return XIcon;
   }
   return ClockIcon;

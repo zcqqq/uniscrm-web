@@ -2,13 +2,14 @@ import { useFlowEditor } from "../store/flow-editor";
 import { CHANNEL_TYPES } from "../config/trigger-fields";
 import { NODE_TYPE_REGISTRY, USER_FLOW_SIDEBAR_ORDER, CONTENT_FLOW_SIDEBAR_ORDER, type FlowDomain } from "../../nodeTypeRegistry";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
+import { XIcon, TikTokIcon, YouTubeIcon } from "../../../shared/frontend/ui/icons";
 
 interface DraggableItemProps {
   type: string;
   label: string;
   description: string;
   color: string;
-  icon: string;
+  icon: React.ReactNode;
 }
 
 function DraggableItem({ type, label, description, color, icon }: DraggableItemProps) {
@@ -69,7 +70,7 @@ export default function Sidebar() {
             label={`${ct.label} Trigger`}
             description={`${ct.events.length} triggers`}
             color="border-primary/30 bg-primary/5"
-            icon={ct.icon}
+            icon={<ct.icon className="w-4 h-4" />}
           />
         ),
       });
@@ -84,13 +85,13 @@ export default function Sidebar() {
   if (visible("xContentTrigger")) {
     triggerItems.push({
       key: "xContentTrigger",
-      el: <DraggableItem key="xContentTrigger" type="xContentTrigger" label={NODE_TYPE_REGISTRY.xContentTrigger.label!} description={NODE_TYPE_REGISTRY.xContentTrigger.description!} color="border-primary/30 bg-primary/5" icon="𝕏" />,
+      el: <DraggableItem key="xContentTrigger" type="xContentTrigger" label={NODE_TYPE_REGISTRY.xContentTrigger.label!} description={NODE_TYPE_REGISTRY.xContentTrigger.description!} color="border-primary/30 bg-primary/5" icon={<XIcon className="w-4 h-4" />} />,
     });
   }
   if (visible("youtubeContentTrigger")) {
     triggerItems.push({
       key: "youtubeContentTrigger",
-      el: <DraggableItem key="youtubeContentTrigger" type="youtubeContentTrigger" label={NODE_TYPE_REGISTRY.youtubeContentTrigger.label!} description={NODE_TYPE_REGISTRY.youtubeContentTrigger.description!} color="border-primary/30 bg-primary/5" icon="▶️" />,
+      el: <DraggableItem key="youtubeContentTrigger" type="youtubeContentTrigger" label={NODE_TYPE_REGISTRY.youtubeContentTrigger.label!} description={NODE_TYPE_REGISTRY.youtubeContentTrigger.description!} color="border-primary/30 bg-primary/5" icon={<YouTubeIcon className="w-4 h-4" />} />,
     });
   }
 
@@ -104,7 +105,7 @@ export default function Sidebar() {
   if (visible("xAction")) {
     actionItems.push({
       key: "xAction",
-      el: <DraggableItem key="xAction" type="xAction" label={NODE_TYPE_REGISTRY.xAction.label!} description={NODE_TYPE_REGISTRY.xAction.description!} color="border-accent bg-accent/50" icon="𝕏" />,
+      el: <DraggableItem key="xAction" type="xAction" label={NODE_TYPE_REGISTRY.xAction.label!} description={NODE_TYPE_REGISTRY.xAction.description!} color="border-accent bg-accent/50" icon={<XIcon className="w-4 h-4" />} />,
     });
   }
   if (visible("webhook")) {
@@ -122,13 +123,13 @@ export default function Sidebar() {
   if (visible("xContentAction")) {
     actionItems.push({
       key: "xContentAction",
-      el: <DraggableItem key="xContentAction" type="xContentAction" label={NODE_TYPE_REGISTRY.xContentAction.label!} description={NODE_TYPE_REGISTRY.xContentAction.description!} color="border-accent bg-accent/50" icon="✨" />,
+      el: <DraggableItem key="xContentAction" type="xContentAction" label={NODE_TYPE_REGISTRY.xContentAction.label!} description={NODE_TYPE_REGISTRY.xContentAction.description!} color="border-accent bg-accent/50" icon={<XIcon className="w-4 h-4" />} />,
     });
   }
   if (visible("tiktokContentAction")) {
     actionItems.push({
       key: "tiktokContentAction",
-      el: <DraggableItem key="tiktokContentAction" type="tiktokContentAction" label={NODE_TYPE_REGISTRY.tiktokContentAction.label!} description={NODE_TYPE_REGISTRY.tiktokContentAction.description!} color="border-accent bg-accent/50" icon="📸" />,
+      el: <DraggableItem key="tiktokContentAction" type="tiktokContentAction" label={NODE_TYPE_REGISTRY.tiktokContentAction.label!} description={NODE_TYPE_REGISTRY.tiktokContentAction.description!} color="border-accent bg-accent/50" icon={<TikTokIcon className="w-4 h-4" />} />,
     });
   }
   if (visible("videoAction")) {

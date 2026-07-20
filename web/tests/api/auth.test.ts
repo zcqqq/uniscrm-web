@@ -4,7 +4,7 @@ import { createAuthRouter } from "../../worker/api/auth";
 
 describe("auth routes", () => {
   let db: any;
-  let kv: any;
+  let emailSend: any;
   let app: Hono;
 
   beforeEach(() => {
@@ -16,19 +16,13 @@ describe("auth routes", () => {
         }),
       }),
     };
-    kv = {
-      put: vi.fn().mockResolvedValue(undefined),
-      get: vi.fn().mockResolvedValue(null),
-      delete: vi.fn().mockResolvedValue(undefined),
-    };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response('{"id":"msg"}', { status: 200 })));
+    emailSend = vi.fn().mockResolvedValue({ messageId: "msg-1" });
     app = new Hono();
     app.use("/*", (c, next) => {
       (c.env as any) = {
-        DB: db,
-        KV: kv,
-        RESEND_API_KEY: "re_test",
-        APP_URL: "https://app.example.com",
+        WEB_DB: db,
+        EMAIL_WEB: { send: emailSend },
+        WEB_URL: "https://app.example.com",
       };
       return next();
     });
@@ -45,7 +39,7 @@ describe("auth routes", () => {
       expect(res.status).toBe(400);
     });
 
-    it("creates magic link and sends email", async () => {
+    it("creates magic link and sends email via EMAIL_WEB binding", async () => {
       const res = await app.request("/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -53,6 +47,23 @@ describe("auth routes", () => {
       });
       expect(res.status).toBe(200);
       expect(db.prepare).toHaveBeenCalled();
+      expect(emailSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: "UniSCRM <noreply@uni-scrm.com>",
+          to: "user@example.com",
+          subject: "Sign in to UniSCRM",
+        })
+      );
+    });
+
+    it("returns 500 when email send fails", async () => {
+      emailSend.mockRejectedValue(new Error("send failed"));
+      const res = await app.request("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "user@example.com" }),
+      });
+      expect(res.status).toBe(500);
     });
   });
 
@@ -72,8 +83,8 @@ describe("auth routes", () => {
       db.prepare.mockReturnValue({
         bind: vi.fn().mockReturnValue({
           first: vi.fn()
-            .mockResolvedValueOnce({ token: "tok", email: "u@e.com", expires_at: future, used: 0 })
-            .mockResolvedValueOnce({ id: "user-1", email: "u@e.com" }),
+            .mockResolvedValueOnce({ token: "tok", email: "u@e.com", expires_at: future, used: 0, trial: null, timezone: null })
+            .mockResolvedValueOnce({ id: "member-1", tenant_id: 1, email: "u@e.com", preferred_location: "global", language: "en", timezone: "UTC" }),
           run: vi.fn().mockResolvedValue({}),
         }),
       });
@@ -102,13 +113,13 @@ describe("auth routes", () => {
       expect(res.status).toBe(401);
     });
 
-    it("returns user data for valid session", async () => {
-      kv.get.mockResolvedValue(
-        JSON.stringify({ user_id: "user-1", email: "u@e.com", expires_at: new Date(Date.now() + 86400000).toISOString() })
-      );
+    it("returns member data for valid session", async () => {
+      const future = new Date(Date.now() + 86400000).toISOString();
       db.prepare.mockReturnValue({
         bind: vi.fn().mockReturnValue({
-          first: vi.fn().mockResolvedValue({ id: "user-1", email: "u@e.com", preferred_location: "global" }),
+          first: vi.fn()
+            .mockResolvedValueOnce({ member_id: "member-1", tenant_id: 1, email: "u@e.com", language: "en", expires_at: future })
+            .mockResolvedValueOnce({ id: "member-1", tenant_id: 1, email: "u@e.com", preferred_location: "global", language: "en", timezone: "UTC" }),
           run: vi.fn().mockResolvedValue({}),
         }),
       });
@@ -117,7 +128,7 @@ describe("auth routes", () => {
       });
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.user).toEqual({ id: "user-1", email: "u@e.com", preferred_location: "global" });
+      expect(body.member).toEqual({ id: "member-1", email: "u@e.com", preferred_location: "global", language: "en", timezone: "UTC" });
     });
   });
 });

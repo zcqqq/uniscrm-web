@@ -18,6 +18,10 @@ Required callback/redirect URLs to register in third-party developer consoles.
 - Console: https://developers.tiktok.com → App → Redirect URI
 
 
+## Cloudflare Email Service (auth emails)
+- Sender: `noreply@uni-scrm.com` via `send_email` binding (`EMAIL_WEB` in web worker), no API key needed
+- One-time setup: Cloudflare Dashboard → Compute → Email Service → Email Sending → Onboard Domain `uni-scrm.com` (requires Workers Paid; auto-adds SPF/DKIM/DMARC on `cf-bounce` subdomain)
+
 ## GitHub Secrets
 - Page: https://github.com/zcqqq/uniscrm-web/settings/secrets/actions
-- Required: X_CLIENT_SECRET, X_CONSUMER_SECRET, X_BEARER_TOKEN, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, TIKTOK_CLIENT_SECRET, STRIPE_SECRET_KEY
+- Required: X_CLIENT_SECRET, X_CONSUMER_SECRET, X_BEARER_TOKEN, GOOGLE_CLIENT_SECRET, TIKTOK_CLIENT_SECRET, STRIPE_SECRET_KEY

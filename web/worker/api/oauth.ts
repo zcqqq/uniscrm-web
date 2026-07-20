@@ -211,7 +211,7 @@ export function createOAuthRouter() {
       expirationTtl: 600,
     });
 
-    const emailService = new EmailService(c.env.RESEND_API_KEY, c.env.WEB_URL);
+    const emailService = new EmailService(c.env.EMAIL_WEB, c.env.WEB_URL);
     await emailService.sendVerificationCode(email, code);
 
     return c.json({ ok: true });

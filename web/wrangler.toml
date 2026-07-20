@@ -44,6 +44,10 @@ index_name = "uniscrm-embeddings-dev"
 [env.dev.ai]
 binding = "AI"
 
+[[env.dev.send_email]]
+name = "EMAIL_WEB"
+allowed_sender_addresses = ["noreply@uni-scrm.com"]
+
 [env.production]
 name = "web"
 routes = [{ pattern = "web.uni-scrm.com", custom_domain = true }]
@@ -74,3 +78,7 @@ index_name = "uniscrm-embeddings"
 
 [env.production.ai]
 binding = "AI"
+
+[[env.production.send_email]]
+name = "EMAIL_WEB"
+allowed_sender_addresses = ["noreply@uni-scrm.com"]

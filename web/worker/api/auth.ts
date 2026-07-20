@@ -22,7 +22,7 @@ export function createAuthRouter() {
       .bind(token, body.email, expiresAt, body.trial ?? null, body.timezone ?? null)
       .run();
 
-    const emailService = new EmailService(c.env.RESEND_API_KEY, c.env.WEB_URL);
+    const emailService = new EmailService(c.env.EMAIL_WEB, c.env.WEB_URL);
     try {
       await emailService.sendMagicLink(body.email, token);
     } catch (e) {

@@ -1,10 +1,12 @@
+import type { EmailSender } from "./services/email";
+
 export interface Env {
   WEB_DB: D1Database;
   KV: KVNamespace;
   VECTORIZE: VectorizeIndex;
   AI: Ai;
   ASSETS: Fetcher;
-  RESEND_API_KEY: string;
+  EMAIL_WEB: EmailSender;
   WEBHOOK_SECRET: string;
   WEB_URL: string;
   GOOGLE_CLIENT_ID: string;

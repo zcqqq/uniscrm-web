@@ -1063,6 +1063,10 @@ Drag an X Trigger, X Content Trigger, YouTube Content Trigger, X Action, X Conte
 
 Navigate to the flows list. Confirm a flow containing `xContentTrigger`/`xContentAction`/`tiktokContentAction`/`youtubeContentTrigger`/`videoAction` nodes shows the correct distinct icon for each in its row badges (no more generic document icon, no more `videoAction` mislabeled as X).
 
+- [ ] **Step 5.5: Verify the analytics page**
+
+Open a published flow's analytics view (`/flows/:id/analytics`) for a flow containing at least one action node or channel trigger. Confirm the page renders normally (no blank/white screen, no console error) and icons/tooltips work the same as on the canvas. This surface was the site of a final-review Critical finding (`AnalyticsPage.tsx` was missing the `TooltipProvider` added to `EditorPage.tsx` in Task 3, causing a render-time crash — fixed in commit `326c6c6`) — this step exists specifically to confirm that fix live.
+
 - [ ] **Step 6: Report results**
 
 If all checks pass, this plan is complete. If anything looks wrong, note exactly which surface/node type and revisit the relevant task above rather than patching ad hoc.

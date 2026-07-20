@@ -1,6 +1,8 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
 import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
+import { YouTubeIcon } from "../../../shared/frontend/ui/icons";
+import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
 
 export default function YouTubeContentTriggerNode({ data, selected }: NodeProps) {
   const conditions = (data.conditions as unknown[]) || [];
@@ -14,7 +16,12 @@ export default function YouTubeContentTriggerNode({ data, selected }: NodeProps)
       }`}
     >
       <div className="flex items-center gap-2">
-        <span className="text-lg">▶️</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span><YouTubeIcon className="w-4 h-4" /></span>
+          </TooltipTrigger>
+          <TooltipContent>YouTube</TooltipContent>
+        </Tooltip>
         <div>
           <span className="font-semibold text-sm text-red-700">{NODE_TYPE_REGISTRY.youtubeContentTrigger.label}</span>
           <p className="text-xs text-gray-500">{channelName}</p>

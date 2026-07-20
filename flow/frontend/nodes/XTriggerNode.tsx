@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { CHANNEL_TYPES } from "../config/trigger-fields";
 import AnalyticsBadges from "./AnalyticsBadges";
+import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
 
 export default function TriggerNode({ data, selected }: NodeProps) {
   const channelType = data.channelType as string | undefined;
@@ -13,6 +14,7 @@ export default function TriggerNode({ data, selected }: NodeProps) {
 
   const title = ctDef ? `${ctDef.label} Trigger` : "Trigger";
   const subtitle = evDef?.label || "Select event...";
+  const Icon = ctDef?.icon;
 
   return (
     <div
@@ -21,7 +23,16 @@ export default function TriggerNode({ data, selected }: NodeProps) {
       }`}
     >
       <div className="flex items-center gap-2">
-        <span className="text-lg">{ctDef?.icon || "⚡"}</span>
+        {Icon ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span><Icon className="w-4 h-4" /></span>
+            </TooltipTrigger>
+            <TooltipContent>{ctDef.label}</TooltipContent>
+          </Tooltip>
+        ) : (
+          <span className="text-lg">⚡</span>
+        )}
         <div>
           <span className="font-semibold text-sm text-purple-700">{title}</span>
           {eventType && (

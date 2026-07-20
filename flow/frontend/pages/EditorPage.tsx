@@ -11,6 +11,7 @@ import AiGenerateBar from "../../../shared/frontend/components/BarAiGenerate";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
+import { TooltipProvider } from "../../../shared/frontend/ui/tooltip";
 import { MoreVertical as MoreVerticalIcon } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import Canvas from "../components/Canvas";
@@ -197,15 +198,17 @@ export default function EditorPage() {
   }
 
   return (
-    <ReactFlowProvider>
-      <div className="h-screen flex flex-col">
-        <EditorToolbar />
-        <div className="flex flex-1 overflow-hidden">
-          <Sidebar />
-          <Canvas />
-          <Inspector />
+    <TooltipProvider>
+      <ReactFlowProvider>
+        <div className="h-screen flex flex-col">
+          <EditorToolbar />
+          <div className="flex flex-1 overflow-hidden">
+            <Sidebar />
+            <Canvas />
+            <Inspector />
+          </div>
         </div>
-      </div>
-    </ReactFlowProvider>
+      </ReactFlowProvider>
+    </TooltipProvider>
   );
 }

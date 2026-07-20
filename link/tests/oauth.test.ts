@@ -5,23 +5,28 @@ const validateAuthorizationCodeMock = vi.fn();
 const getAppCredentialsMock = vi.fn().mockResolvedValue({ clientId: "byok-client-id", clientSecret: "byok-client-secret" });
 const updateConfigMock = vi.fn().mockResolvedValue(undefined);
 const setupAllSubscriptionsMock = vi.fn().mockResolvedValue(["sub-1"]);
+const createAuthorizationURLMock = vi.fn().mockReturnValue(new URL("https://x.com/i/oauth2/authorize"));
 
 vi.mock("arctic", () => ({
   Twitter: class {
     validateAuthorizationCode(...args: unknown[]) {
       return validateAuthorizationCodeMock(...args);
     }
-    createAuthorizationURL() {
-      return new URL("https://x.com/i/oauth2/authorize");
+    createAuthorizationURL(...args: unknown[]) {
+      return createAuthorizationURLMock(...args);
     }
   },
   generateState: () => "state",
   generateCodeVerifier: () => "verifier",
 }));
 
-vi.mock("../src/services/app-credentials", () => ({
-  getAppCredentials: (...args: unknown[]) => getAppCredentialsMock(...args),
-}));
+vi.mock("../src/services/app-credentials", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/app-credentials")>();
+  return {
+    ...actual,
+    getAppCredentials: (...args: unknown[]) => getAppCredentialsMock(...args),
+  };
+});
 
 vi.mock("../src/services/x-token", () => ({
   XTokenService: class {
@@ -59,9 +64,46 @@ vi.mock("../src/services/pollers/poll-channel", () => ({
 import { oauthRoutes } from "../src/oauth";
 
 describe("X_CHANNEL_SCOPES", () => {
-  it("includes media.write (required for attaching video to a tweet)", async () => {
+  it("does not include media.write (video-attach is a content action, BYOK-only)", async () => {
     const { X_CHANNEL_SCOPES } = await import("../src/oauth");
-    expect(X_CHANNEL_SCOPES).toContain("media.write");
+    expect(X_CHANNEL_SCOPES).not.toContain("media.write");
+  });
+});
+
+describe("X_BYOK_SCOPES", () => {
+  it("includes media.write (required for attaching video to a tweet)", async () => {
+    const { X_BYOK_SCOPES } = await import("../src/services/app-credentials");
+    expect(X_BYOK_SCOPES).toContain("media.write");
+  });
+});
+
+describe("GET /x/connect — scope selection", () => {
+  beforeEach(() => {
+    createAuthorizationURLMock.mockClear();
+  });
+
+  it("requests X_CHANNEL_SCOPES (minimal) when no channelId is given (system default App)", async () => {
+    const { X_CHANNEL_SCOPES } = await import("../src/oauth");
+    const app = new Hono();
+    app.route("/", oauthRoutes());
+    const env = { KV: { put: vi.fn().mockResolvedValue(undefined) } };
+    await app.request("/x/connect", {}, env as never);
+    expect(createAuthorizationURLMock).toHaveBeenCalledWith("state", "verifier", X_CHANNEL_SCOPES);
+  });
+
+  it("requests X_BYOK_SCOPES (broad) when channelId is given (BYOK connect)", async () => {
+    const { X_BYOK_SCOPES } = await import("../src/services/app-credentials");
+    const app = new Hono();
+    app.route("/", oauthRoutes());
+    const { prepare } = createMockLinkDb([
+      ["FROM channels", { config: JSON.stringify({ is_byok: true }) }],
+    ]);
+    const env = {
+      KV: { put: vi.fn().mockResolvedValue(undefined) },
+      LINK_DB: { prepare },
+    };
+    await app.request("/x/connect?channelId=byok-chan-1", {}, env as never);
+    expect(createAuthorizationURLMock).toHaveBeenCalledWith("state", "verifier", X_BYOK_SCOPES);
   });
 });
 

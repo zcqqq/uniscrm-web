@@ -4,7 +4,7 @@ import { Twitter, Google, generateState, generateCodeVerifier, decodeIdToken } f
 import type { Env, Session } from "./types";
 import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
-import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
+import { getAppCredentials, X_BYOK_SCOPES, type ByokConfig } from "./services/app-credentials";
 import { pollChannelOnce } from "./services/pollers/poll-channel";
 import { syncYouTubeSubscriptions } from "./services/youtube-account";
 import { getActiveSubscriptionTier } from "../../shared/credit-service";
@@ -57,7 +57,8 @@ export function oauthRoutes() {
     const twitter = new Twitter(clientId, clientSecret, `${url.origin}/api/auth/x/callback`);
     const state = generateState();
     const codeVerifier = generateCodeVerifier();
-    const arcticUrl = twitter.createAuthorizationURL(state, codeVerifier, X_CHANNEL_SCOPES);
+    const scopes = byokChannelId ? X_BYOK_SCOPES : X_CHANNEL_SCOPES;
+    const arcticUrl = twitter.createAuthorizationURL(state, codeVerifier, scopes);
     const oauthUrl = new URL(arcticUrl.toString().replace("https://twitter.com/", "https://x.com/"));
 
     await c.env.KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier, tenantId, memberId, byokChannelId }), { expirationTtl: 300 });

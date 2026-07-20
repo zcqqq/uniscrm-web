@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { TikTokLogo } from "./channelLogos";
+import { TikTokIcon } from "../../../shared/frontend/ui/icons";
 import type { LocalizedString } from "../../../metadata/dataTypes";
 
 export interface SimpleChannelConfig {
@@ -31,7 +31,7 @@ export const SIMPLE_CHANNELS: SimpleChannelConfig[] = [
       en: "Connect your TikTok account to sync content and track follower growth.",
       zh: "连接 TikTok 账号以同步内容并追踪粉丝增长数据。",
     },
-    logo: <TikTokLogo />,
+    logo: <TikTokIcon className="w-8 h-8" />,
     displayField: "display_name",
     connectPath: "/api/auth/tiktok/connect",
     helpUrl: "https://cobalt-fountain-6cf.notion.site/TikTok-39a7ddccdac980fd9885cc262ab18dd6",

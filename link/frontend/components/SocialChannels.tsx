@@ -24,7 +24,7 @@ import { useSimpleChannel } from "../hooks/useSimpleChannel";
 import { useYouTubeAccount } from "../hooks/useYouTubeAccount";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { SIMPLE_CHANNELS, type SimpleChannelConfig } from "../lib/channelRegistry";
-import { XLogo } from "../lib/channelLogos";
+import { XIcon, YouTubeIcon } from "../../../shared/frontend/ui/icons";
 import { api } from "../lib/api";
 import type { Locale } from "../../../metadata/locale";
 import { useTier } from "../../../shared/frontend/useTier";
@@ -54,7 +54,7 @@ function XChannelCard({ locale }: { locale: Locale }) {
   return (
     <>
       <ChannelCard
-        logo={<XLogo />}
+        logo={<XIcon className="w-8 h-8" />}
         name="X"
         tagline={{
           en: "Sync follower data and receive real-time events and DMs via UniSCRM's managed X app.",
@@ -204,7 +204,7 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
   return (
     <>
       <ChannelCard
-        logo={<XLogo />}
+        logo={<XIcon className="w-8 h-8" />}
         name="X (BYOK)"
         tagline={{
           en: "More features, cost of your own. Use your own X developer app (Bring Your Own Key).",
@@ -270,7 +270,7 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <XLogo />
+              <XIcon className="w-8 h-8" />
               {editingChannelId ? "X (BYOK) — 编辑凭证" : "X (BYOK) — New App"}
             </DialogTitle>
             <DialogDescription>
@@ -397,7 +397,7 @@ function YouTubeAccountCard({ locale }: { locale: Locale }) {
 
   return (
     <ChannelCard
-      logo={<span className="text-2xl leading-none">▶️</span>}
+      logo={<YouTubeIcon className="w-8 h-8" />}
       name="YouTube"
       tagline={{
         en: "Connect your YouTube account — pick which subscriptions to watch from a flow's trigger.",

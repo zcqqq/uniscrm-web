@@ -5,6 +5,7 @@ import { nodeTypes } from "../nodes";
 import { api, type FlowDetail } from "../lib/api";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
+import { TooltipProvider } from "../../../shared/frontend/ui/tooltip";
 
 export default function AnalyticsPage() {
   const { id } = useParams<{ id: string }>();
@@ -55,84 +56,86 @@ export default function AnalyticsPage() {
   };
 
   return (
-    <ReactFlowProvider>
-      <div className="h-screen flex flex-col">
-        <div className="flex items-center h-12 px-4 border-b border-border bg-background gap-3">
-          <Button variant="ghost" size="sm" onClick={() => navigate("/")}>← Back</Button>
-          <span className="text-sm font-medium flex-1">{flow.name}</span>
-          <Button variant="outline" size="sm" onClick={handleUnpublish}>Unpublish</Button>
-        </div>
-        <div className="flex-1 relative">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            nodesDraggable={false}
-            nodesConnectable={false}
-            elementsSelectable={true}
-            onNodeClick={(_, node) => setSelectedNode(node.id)}
-            onPaneClick={() => setSelectedNode(null)}
-            fitView
-          >
-            <Background />
-            <Controls showInteractive={false} />
-          </ReactFlow>
+    <TooltipProvider>
+      <ReactFlowProvider>
+        <div className="h-screen flex flex-col">
+          <div className="flex items-center h-12 px-4 border-b border-border bg-background gap-3">
+            <Button variant="ghost" size="sm" onClick={() => navigate("/")}>← Back</Button>
+            <span className="text-sm font-medium flex-1">{flow.name}</span>
+            <Button variant="outline" size="sm" onClick={handleUnpublish}>Unpublish</Button>
+          </div>
+          <div className="flex-1 relative">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              nodesDraggable={false}
+              nodesConnectable={false}
+              elementsSelectable={true}
+              onNodeClick={(_, node) => setSelectedNode(node.id)}
+              onPaneClick={() => setSelectedNode(null)}
+              fitView
+            >
+              <Background />
+              <Controls showInteractive={false} />
+            </ReactFlow>
 
-          {/* Node count overlays */}
-          {nodes.map((node: any) => {
-            const c = counts[node.id];
-            if (!c) return null;
-            return (
-              <div key={node.id} className="pointer-events-none absolute" style={{ display: "none" }}>
-                {/* Counts are rendered as part of node components via data prop in future */}
-              </div>
-            );
-          })}
-
-          {/* Right drawer */}
-          {selectedNode && (() => {
-            const node = nodes.find((n: any) => n.id === selectedNode);
-            const nodeType = node?.type || "";
-            const nodeData = node?.data || {};
-            let nodeName = "";
-            if (nodeType === "xTrigger") nodeName = (nodeData.eventType as string) || "Trigger";
-            else if (nodeType === "action") nodeName = (nodeData.actionType as string) === "xAction" ? "X Action" : (nodeData.actionType as string) === "addToList" ? "Add to List" : "Action";
-            else if (nodeType === "wait") nodeName = `Wait ${nodeData.duration} ${nodeData.unit}`;
-            else if (nodeType === "waitForEvent") nodeName = `Wait for Event`;
-            else nodeName = nodeType;
-            return (
-            <div className="absolute right-0 top-0 h-full w-80 bg-background border-l border-border shadow-lg p-4 overflow-y-auto z-10">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground">{nodeName}</h3>
-                  <p className="text-xs text-muted-foreground">Node Analytics</p>
+            {/* Node count overlays */}
+            {nodes.map((node: any) => {
+              const c = counts[node.id];
+              if (!c) return null;
+              return (
+                <div key={node.id} className="pointer-events-none absolute" style={{ display: "none" }}>
+                  {/* Counts are rendered as part of node components via data prop in future */}
                 </div>
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setSelectedNode(null)}>×</Button>
+              );
+            })}
+
+            {/* Right drawer */}
+            {selectedNode && (() => {
+              const node = nodes.find((n: any) => n.id === selectedNode);
+              const nodeType = node?.type || "";
+              const nodeData = node?.data || {};
+              let nodeName = "";
+              if (nodeType === "xTrigger") nodeName = (nodeData.eventType as string) || "Trigger";
+              else if (nodeType === "action") nodeName = (nodeData.actionType as string) === "xAction" ? "X Action" : (nodeData.actionType as string) === "addToList" ? "Add to List" : "Action";
+              else if (nodeType === "wait") nodeName = `Wait ${nodeData.duration} ${nodeData.unit}`;
+              else if (nodeType === "waitForEvent") nodeName = `Wait for Event`;
+              else nodeName = nodeType;
+              return (
+              <div className="absolute right-0 top-0 h-full w-80 bg-background border-l border-border shadow-lg p-4 overflow-y-auto z-10">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground">{nodeName}</h3>
+                    <p className="text-xs text-muted-foreground">Node Analytics</p>
+                  </div>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setSelectedNode(null)}>×</Button>
+                </div>
+                <div className="mb-4">
+                  <p className="text-2xl font-bold text-primary">{counts[selectedNode]?.enter || 0}</p>
+                  <p className="text-xs text-muted-foreground">Entered</p>
+                </div>
+                <h4 className="text-xs font-medium text-muted-foreground mb-2">Users Entered</h4>
+                {logsLoading ? (
+                  <p className="text-xs text-muted-foreground">Loading...</p>
+                ) : nodeLogs.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">No users have entered this node yet.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {nodeLogs.map((log, i) => (
+                      <li key={i} className="flex items-center justify-between text-xs">
+                        <span className="text-foreground">{log.name || log.user_id}</span>
+                        <span className="text-muted-foreground">{new Date(log.created_at).toLocaleString()}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
-              <div className="mb-4">
-                <p className="text-2xl font-bold text-primary">{counts[selectedNode]?.enter || 0}</p>
-                <p className="text-xs text-muted-foreground">Entered</p>
-              </div>
-              <h4 className="text-xs font-medium text-muted-foreground mb-2">Users Entered</h4>
-              {logsLoading ? (
-                <p className="text-xs text-muted-foreground">Loading...</p>
-              ) : nodeLogs.length === 0 ? (
-                <p className="text-xs text-muted-foreground italic">No users have entered this node yet.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {nodeLogs.map((log, i) => (
-                    <li key={i} className="flex items-center justify-between text-xs">
-                      <span className="text-foreground">{log.name || log.user_id}</span>
-                      <span className="text-muted-foreground">{new Date(log.created_at).toLocaleString()}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            );
-          })()}
+              );
+            })()}
+          </div>
         </div>
-      </div>
-    </ReactFlowProvider>
+      </ReactFlowProvider>
+    </TooltipProvider>
   );
 }

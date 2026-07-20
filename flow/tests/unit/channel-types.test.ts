@@ -1,8 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { CHANNEL_TYPES } from "../../frontend/config/trigger-fields";
 import { EventMetadata_X } from "../../../metadata/x";
+import { XIcon } from "../../../shared/frontend/ui/icons";
 
 describe("CHANNEL_TYPES", () => {
+  it("gives the X channel type the shared XIcon brand component, not a string glyph", () => {
+    const x = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!;
+    expect(x.icon).toBe(XIcon);
+  });
+
   it("gives the X channel type an actions list mirroring EventMetadata_X's flowType:'action' entries", () => {
     const x = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!;
     const expectedActionTypes = EventMetadata_X.filter((m) => m.flowType === "action").map((m) => m.eventType);

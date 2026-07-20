@@ -1,6 +1,7 @@
 import { EventMetadata_X, PROPS, t } from "../../../metadata";
 import type { Locale } from "../../../metadata";
 import type { ContentMetadata } from "../../../metadata/dataTypes";
+import { XIcon } from "../../../shared/frontend/ui/icons";
 
 export interface TriggerFieldDefinition {
   id: string;
@@ -21,7 +22,7 @@ export interface EventDefinition {
 export interface ChannelTypeDefinition {
   channelType: string;
   label: string;
-  icon: string;
+  icon: React.ComponentType<{ className?: string }>;
   events: EventDefinition[];
   /** flowType:"action" entries for this channel — mirrors `events`, which is flowType:"trigger". */
   actions: EventDefinition[];
@@ -89,7 +90,7 @@ export function getChannelTypes(locale: Locale = "en"): ChannelTypeDefinition[] 
     {
       channelType: "X",
       label: "X",
-      icon: "𝕏",
+      icon: XIcon,
       events: xEvents,
       actions: xActions,
     },

@@ -4,6 +4,8 @@ import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 import { CHANNEL_TYPES } from "../config/trigger-fields";
 import { ContentMetadata_X } from "../../../metadata/x-byok";
 import { t as localizeLabel } from "../../../metadata/locale";
+import { XIcon, TikTokIcon } from "../../../shared/frontend/ui/icons";
+import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
 
 const EXTERNAL_API_ACTIONS = ["xAction", "xContentAction", "tiktokContentAction", "videoAction"];
 const X_ACTION_COUNT = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!.actions.length;
@@ -15,7 +17,7 @@ export default function ActionNode({ data, selected }: NodeProps) {
 
   let label: string;
   let description: string | undefined;
-  let icon: string;
+  let icon: React.ComponentType<{ className?: string }> | string;
   let isConfigured: boolean;
 
   if (actionType === "addToList") {
@@ -32,20 +34,20 @@ export default function ActionNode({ data, selected }: NodeProps) {
       : xEvent === "create-dm" ? "Direct Message"
       : xEvent === "mute-user" ? "Mute User"
       : `${X_ACTION_COUNT} actions`;
-    icon = "𝕏";
+    icon = XIcon;
     isConfigured = !!xEvent;
   } else if (actionType === "xContentAction") {
     const operation = (data.operation as string) || "create-post";
     const selectedOperation = CONTENT_X_ACTION_OPERATIONS.find((op) => op.sourceContentType === operation);
     label = NODE_TYPE_REGISTRY.xContentAction.label!;
     description = selectedOperation?.label ? localizeLabel(selectedOperation.label, "en") : undefined;
-    icon = "✨";
+    icon = XIcon;
     isConfigured = !!selectedOperation;
   } else if (actionType === "tiktokContentAction") {
     const channelId = data.channelId as string;
     label = NODE_TYPE_REGISTRY.tiktokContentAction.label!;
     description = channelId ? "Target channel selected" : "Select a target channel...";
-    icon = "📸";
+    icon = TikTokIcon;
     isConfigured = !!channelId;
   } else if (actionType === "videoAction") {
     label = NODE_TYPE_REGISTRY.videoAction.label!;
@@ -59,6 +61,8 @@ export default function ActionNode({ data, selected }: NodeProps) {
     isConfigured = false;
   }
 
+  const IconComponent = typeof icon === "string" ? null : icon;
+
   return (
     <div
       className={`px-4 py-3 rounded-lg border-2 bg-white min-w-[160px] ${
@@ -67,7 +71,14 @@ export default function ActionNode({ data, selected }: NodeProps) {
     >
       <Handle type="target" position={Position.Left} className="!bg-green-500 !w-3 !h-3" />
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-lg">{icon}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              {IconComponent ? <IconComponent className="w-4 h-4" /> : <span className="text-lg">{icon as string}</span>}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{label}</TooltipContent>
+        </Tooltip>
         <span className="font-semibold text-sm text-green-700">{label}</span>
       </div>
       {description && (

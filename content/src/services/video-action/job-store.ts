@@ -1,11 +1,20 @@
 import type { Env } from "../../types";
 
-export type JobStatus = "downloading" | "transcribing" | "translating" | "burning_in" | "success" | "failed";
+export type JobStatus =
+  | "downloading"
+  | "transcribing"
+  | "translating"
+  | "burning_in"
+  | "rotating"
+  | "detecting_faces"
+  | "success"
+  | "failed";
 
 export interface CreateJobParams {
   pendingId: string;
   contentId: string;
   tenantId: number;
+  operation: string;
   targetLanguage: string;
 }
 
@@ -13,9 +22,9 @@ export async function createJob(env: Env, params: CreateJobParams): Promise<stri
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   await env.CONTENT_DB.prepare(
-    `INSERT INTO video_action_jobs (id, pending_id, content_id, tenant_id, target_language, job_status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(id, params.pendingId, params.contentId, params.tenantId, params.targetLanguage, "downloading", now, now).run();
+    `INSERT INTO video_action_jobs (id, pending_id, content_id, tenant_id, operation, target_language, job_status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(id, params.pendingId, params.contentId, params.tenantId, params.operation, params.targetLanguage, "downloading", now, now).run();
   return id;
 }
 

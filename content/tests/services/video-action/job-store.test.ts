@@ -21,11 +21,19 @@ describe("video-action job-store", () => {
   it("createJob inserts a row with job_status='downloading' and returns its id", async () => {
     const { env, runs } = makeEnv();
     const jobId = await createJob(env, {
-      pendingId: "p1", contentId: "c1", tenantId: 1, targetLanguage: "zh",
+      pendingId: "p1", contentId: "c1", tenantId: 1, operation: "add-subtitle", targetLanguage: "zh",
     });
     expect(typeof jobId).toBe("string");
     expect(runs[0].sql).toContain("INSERT INTO video_action_jobs");
     expect(runs[0].args).toContain("downloading");
+  });
+
+  it("createJob persists the given operation", async () => {
+    const { env, runs } = makeEnv();
+    await createJob(env, {
+      pendingId: "p2", contentId: "c2", tenantId: 1, operation: "rotate-to-vertical", targetLanguage: "",
+    });
+    expect(runs[0].args).toContain("rotate-to-vertical");
   });
 
   it("updateJobStatus updates status, failed_step, and error", async () => {

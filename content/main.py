@@ -150,14 +150,11 @@ def burn_subtitles():
 
     with open(srt_path, "w", encoding="utf-8") as f:
         f.write(subtitle_srt)
-        f.flush()
-        os.fsync(f.fileno())
 
-    # Confirmed via live diagnostics that the file exists with correct content at this point
-    # (fsync alone didn't fix the failure) — the absolute path passed through ffmpeg's -vf
-    # filtergraph STRING is what's unreliable in this container runtime, not the file itself.
-    # Running ffmpeg with cwd=work_dir and a bare relative filename sidesteps that string
-    # parsing entirely, regardless of the exact underlying cause.
+    # cwd + a bare relative filename: the subtitles filter's argument goes through ffmpeg's
+    # filtergraph parser, where ":" and "\" in an absolute path are separator/escape
+    # characters. job_id is a UUID today so an absolute path happens to be safe, but keeping
+    # the filtergraph argument free of path syntax removes that coupling entirely.
     burn = subprocess.run(
         ["ffmpeg", "-y", "-i", video_path, "-vf", "subtitles=subs.srt", "-c:a", "copy", output_path],
         capture_output=True, text=True, timeout=600, cwd=work_dir,

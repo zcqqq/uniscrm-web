@@ -2,9 +2,23 @@ import type { Env } from "../../types";
 import { generateContent } from "../generate";
 import type { Cue } from "./transcribe";
 
+// WebVTT (what Whisper returns) makes the hours component OPTIONAL and omits it for every
+// sub-hour video, so cues routinely arrive as "00:04.240". SRT requires the full
+// "HH:MM:SS,mmm" form — ffmpeg's subtitles filter probes the file via avformat_open_input(),
+// which rejects an hours-less timestamp and reports it as the misleading "Unable to open
+// subs.srt" (the file is present and readable; it's a format-probe failure, not an I/O one).
+function vttTimestampToSrt(timestamp: string): string {
+  const [clock, fraction = ""] = timestamp.trim().split(".");
+  const parts = clock.split(":");
+  while (parts.length < 3) parts.unshift("0");
+  const [hours, minutes, seconds] = parts.map((p) => p.padStart(2, "0"));
+  const millis = fraction.padEnd(3, "0").slice(0, 3);
+  return `${hours}:${minutes}:${seconds},${millis}`;
+}
+
 export function cuesToSrt(cues: Cue[]): string {
   return cues
-    .map((cue, i) => `${i + 1}\n${cue.start.replace(".", ",")} --> ${cue.end.replace(".", ",")}\n${cue.text}`)
+    .map((cue, i) => `${i + 1}\n${vttTimestampToSrt(cue.start)} --> ${vttTimestampToSrt(cue.end)}\n${cue.text}`)
     .join("\n\n");
 }
 

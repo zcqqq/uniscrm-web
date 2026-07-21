@@ -14,6 +14,31 @@ describe("cuesToSrt", () => {
     expect(srt).toContain("1\n00:00:00,000 --> 00:00:02,000\nHello there.");
     expect(srt).toContain("2\n00:00:02,000 --> 00:00:04,000\nThis is a test.");
   });
+
+  // Whisper emits WebVTT, where the hours component is OPTIONAL ("MM:SS.mmm") — and it omits
+  // it for every sub-hour video. SRT requires the full "HH:MM:SS,mmm" form: ffmpeg's subtitles
+  // filter probes the file with avformat_open_input(), which fails on an hours-less timestamp
+  // and reports it as the misleading "Unable to open subs.srt". Reproduced in-container: the
+  // same burn-in call succeeds with hours present and fails without, all else identical.
+  it("pads hours onto WebVTT short-form timestamps, which SRT requires", () => {
+    const srt = cuesToSrt([{ start: "00:04.240", end: "00:04.800", text: "我们的" }]);
+    expect(srt).toBe("1\n00:00:04,240 --> 00:00:04,800\n我们的");
+  });
+
+  it("leaves already-full-form timestamps unchanged apart from the decimal separator", () => {
+    const srt = cuesToSrt([{ start: "01:02:03.456", end: "01:02:04.789", text: "hi" }]);
+    expect(srt).toBe("1\n01:02:03,456 --> 01:02:04,789\nhi");
+  });
+
+  it("zero-pads single-digit components and a short fraction", () => {
+    const srt = cuesToSrt([{ start: "1:2.3", end: "9:8.75", text: "x" }]);
+    expect(srt).toBe("1\n00:01:02,300 --> 00:09:08,750\nx");
+  });
+
+  it("supplies a zero fraction when the timestamp has none", () => {
+    const srt = cuesToSrt([{ start: "00:04", end: "00:05", text: "x" }]);
+    expect(srt).toBe("1\n00:00:04,000 --> 00:00:05,000\nx");
+  });
 });
 
 describe("translateCues", () => {

@@ -107,11 +107,11 @@ queue = "uniscrm-video-action"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_FLOW_LOG"
-stream = "7a87df632dd84ccb93084ce938714ab8"
+stream = "237ac8578a614291a7a108e2d25950b5"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_CONTENT_FLOW_LOG"
-stream = "3268a0ab5a8c4263aa9e92cd119f4c79"
+stream = "2e610c670e7045f9b2d90880c5187564"
 
 [env.production.ai]
 binding = "AI"

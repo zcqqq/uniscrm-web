@@ -38,17 +38,19 @@ poller (x-posts.ts / x-list-posts.ts / youtube-content.ts / tiktok-content.ts)
     │  resolveProps() 结果 + 一次性拼接/API 自带的 content_url
     ▼
 payload = { channel_type, title, content_text, content_url, source_content_id, ... }
-    │  flowQueue.send({ contentId, payload, ... })
+    │  flowQueue.send({ contentId, payload, ... })  （videoAction 成功后 payload 多一个 processed_video_url）
     ▼
 flow/src/index.ts  queue() / executeContentActions()
-    │  nodeLogs.push({ nodeId, direction: "enter"|"exit" })          ← 不变，badge 计数
-    │  resumeFromNode(...) 内部 nodeLogs[0] = { nodeId, direction: "outcome", outcome: branch }
-    │  （videoAction 分支：content_url 替换为刚算出的 processed_video_url）
+    │  collectActions()：nodeLogs.push({ nodeId, direction: "enter"|"exit" })     ← 不变，badge 计数
+    │  resumeFromNode()：wait/waitForEvent/timeCondition → 唯一的 exit，原样保留
+    │                     其余可 resume 类型 → index-0 重标记为 { direction: "outcome", outcome: branch }
     ▼
-emitContentNodeLogs(nodeLogs, ...)  → 写入 R2 uniscrm.content_flow_log
+emitContentNodeLogs(nodeLogs, ..., payload)：整批统一从 payload 取 title/content_text/
+    (payload.processed_video_url || payload.content_url)，写到这一批每条记录上
+    → 写入 R2 uniscrm.content_flow_log
     (tenant_id, flow_id, node_id, content_id, direction, outcome?, title?, content_text?, content_url?, created_at)
     ▼
-GET /api/flows/:id/nodes/:nodeId/logs   ← 直接读 R2，不再 join D1 content 表
+GET /api/flows/:id/nodes/:nodeId/logs   ← 直接读 R2，按 content_id 去重取最新一条，不再 join D1 content 表
     ▼
 AnalyticsPage.tsx 右侧抽屉：每行 [左: title||content_text前5字+…  content_url]  [右: 时间 / 红字Failed]
 ```
@@ -92,20 +94,17 @@ wrangler pipelines create uniscrm_content_flow_log_pipeline_dev --sql "INSERT IN
 
 验证（读，安全）：跑一次真实的 content flow 触发，然后 `wrangler r2 sql query <warehouse> "DESCRIBE uniscrm.content_flow_log"` 确认新列存在，`SELECT * FROM uniscrm.content_flow_log ORDER BY created_at DESC LIMIT 5` 确认新写入的行带着 `outcome`/`title`/`content_text`/`content_url`。dev 验证通过后，对 `uniscrm_flow_log`/`uniscrm_content_flow_log`（生产，无 `_dev` 后缀，bucket 为 `uniscrm`）重复同样的 delete/create 步骤——生产的 `content_flow_log_sink` 凭证未失效，不需要顺带修复那一步。
 
-### 2. `flow/src/engine.ts` — `NodeLog` 接口 + outcome 附着
+### 2. `flow/src/engine.ts` — `NodeLog` 接口 + outcome 附着（按节点类型区分，不能无条件重标记）
 
 ```typescript
 export interface NodeLog {
   nodeId: string;
   direction: "enter" | "exit" | "outcome";
-  outcome?: string;         // "success" | "failed"，仅 direction === "outcome" 时有值
-  detail?: {                // 仅 direction === "outcome" 时有值，来自 payload
-    title?: string;
-    content_text?: string;
-    content_url?: string;
-  };
+  outcome?: string;   // "success" | "failed" 等，仅 direction === "outcome" 时有值
 }
 ```
+
+**关键纠正：** 不能无条件把 `resumeFromNode` 的 index-0 重标记为 `"outcome"`。`wait`/`waitForEvent`/`timeCondition` 三种节点被 resume 时，index-0 是它们**唯一**的合法 exit（`collectActions` 从不为这三种类型提前记 exit，是等 resume 时才记——见 engine.ts 里各自的 "exit will be logged when..." 注释）；其余可 resume 的类型（所有 `action` 节点，含 `xAction`/`xContentAction`/`tiktokContentAction`/`youtubeContentAction`/`videoAction`/`addToList`；以及 `webhook`/`abSplit`/`userPropsCondition`/`videoCondition`）在 `collectActions` 里已经提前记过一次 exit，index-0 才是那条要丢弃/重标记的重复项。用户流（user flow）里已有的 `wait`/`waitForEvent` resume 调用（index.ts 现有的 1542/1824 两处）如果被无条件重标记，会把它们唯一合法的 exit 从 badge 计数里踢出去——这是必须避免的回归。
 
 `resumeFromNode()`（engine.ts:210）把原来的
 
@@ -117,48 +116,83 @@ nodeLogs.push({ nodeId, direction: "exit" });
 
 ```typescript
 const originatingNode = graph.nodes.find((n) => n.id === nodeId);
-const isVideoAction = originatingNode?.type === "action" && originatingNode.data.actionType === "videoAction";
-nodeLogs.push({
-  nodeId,
-  direction: "outcome",
-  outcome: branch,
-  detail: branch ? {
-    title: payload?.title as string | undefined,
-    content_text: payload?.content_text as string | undefined,
-    // videoAction 展示的是节点产出的视频，不是原始内容——见下方 "videoAction 的 content_url 来源"
-    content_url: (isVideoAction ? payload?.processed_video_url : payload?.content_url) as string | undefined,
-  } : undefined,
-});
+const DEFERRED_EXIT_TYPES = ["wait", "waitForEvent", "timeCondition"];
+if (originatingNode && DEFERRED_EXIT_TYPES.includes(originatingNode.type)) {
+  nodeLogs.push({ nodeId, direction: "exit" });
+} else {
+  nodeLogs.push({ nodeId, direction: "outcome", outcome: branch });
+}
 ```
 
-**videoAction 的 content_url 来源：** 成功路径下，`content` worker 的 `queue-video-action.ts`（`resumeFlow(env, pendingId, "success", { processed_video_url: ... })`）已经把产出的 R2 链接放进 `props`，并在 `/internal/video-action/resume` 路由里 `payload = { ...JSON.parse(row.payload), ...(props || {}) }` 合并进 payload——不需要在 `flow/src/index.ts` 里手动补丁 payload，`resumeFromNode` 按节点类型选字段即可读到。两条同步失败路径（时长超限、无视频）本来就没有产出视频，`processed_video_url` 为空，detail 里 `content_url` 也就是空，属于预期。
+### 3. Content 预览字段——写在每一条记录上，不只是 outcome 行
 
-### 3. `flow/src/index.ts` — 调用点改动
+**关键纠正：** 若 title/content_text/content_url 只挂在 outcome 行上，trigger 节点（`xContentTrigger`/`youtubeContentTrigger`，从不产生 outcome）永远没有预览可显示，这正好违反了原始需求的第一个例子。这三个字段在整个 content 执行过程中来自同一个 `payload`（只在 `videoAction` 产出新视频后变化），所以改为**由 `emitContentNodeLogs` 按整批统一从 `payload` 取值，写到这一批的每一条记录上**（不区分 enter/exit/outcome），彻底不需要动 `engine.ts`/`NodeLog` 来传这三个字段。
 
-所有 `if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), ...)` 改为 `if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, ...)`（不再丢弃 index 0；它现在是安全的 `direction: "outcome"`，不会被 badge 聚合误算进 exit）。`emitNodeLogs`/`emitContentNodeLogs` 写入 R2 时，`direction === "outcome"` 的记录额外带上 `outcome`/`title`/`content_text`/`content_url` 列，其余记录这些列留空。
+`content_url` 取值：`payload?.processed_video_url || payload?.content_url`——`processed_video_url` 优先且无需按节点类型判断：一旦某个 `videoAction` 产出了新视频，下游任何节点（包括链式的第二个 `videoAction`，见 `cdbf8c5`"chain videoAction nodes via processed_video_url"）拿到的 `payload.processed_video_url` 天然是"当前最新产出"，直接展示这个就是正确语义，不需要在 `resumeFromNode`/`engine.ts` 里查 `graph.nodes` 判断节点类型。
 
-**user-flow 侧不需要改任何调用点**：搜索确认 `flow/src/index.ts` 里所有 `resumed.nodeLogs.slice(1)`/`.length > 1` 的重复-exit 处理，无一例外都是 `emitContentNodeLogs`（内容域）——`emitNodeLogs`（user flow）目前完全没有走 `resumeFromNode` 的分支型 action 解析（`xAction` 在 `executeActions` 里只做限流记账，没有走 `resumeFromNode`），所以 user flow 侧没有"重复 exit"要处理，`outcome` 列对 user flow 只是 schema 层面的对称打底，不需要任何 `index.ts` 改动。
+`flow/src/index.ts`：
 
-### 4. `queryR2Counts`/`recomputeFlowCounts` — 无需改动
+```typescript
+async function emitContentNodeLogs(
+  nodeLogs: NodeLog[],
+  flowId: string,
+  contentId: string,
+  tenantId: string,
+  env: Env,
+  payload: Record<string, unknown>
+): Promise<void> {
+  if (nodeLogs.length === 0) return;
+  const timestamp = new Date().toISOString();
+  const contentUrl = (payload?.processed_video_url as string) || (payload?.content_url as string) || undefined;
+  const records = nodeLogs.map((log) => ({
+    tenant_id: Number(tenantId),
+    id: crypto.randomUUID(),
+    flow_id: flowId,
+    node_id: log.nodeId,
+    content_id: contentId,
+    direction: log.direction,
+    outcome: log.direction === "outcome" ? log.outcome : undefined,
+    title: payload?.title as string | undefined,
+    content_text: payload?.content_text as string | undefined,
+    content_url: contentUrl,
+    created_at: timestamp,
+  }));
+  await env.PIPELINE_CONTENT_FLOW_LOG?.send(records).catch(() => {});
+}
+```
+
+`payload` 改为必填参数（不给默认值）——所有 15 个 `emitContentNodeLogs` 调用点都已经有 `payload`（或该作用域里等价的变量，如 queue() 里的 `matchPayload`）在作用域内，加这个参数是纯机械改动，逐一在 Task 里列出。
+
+`emitNodeLogs`（user flow）**不需要加参数**——`outcome` 已经在 `NodeLog` 对象自身的 `.outcome` 字段上（resumeFromNode 已经设置好），只需要在记录里加一行 `outcome: log.direction === "outcome" ? log.outcome : undefined`，3 个调用点原样不动。
+
+### 4. `flow/src/index.ts` — 调用点改动
+
+13 处 `if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), ...)`（或 `resolved`/`failedResult` 变量名）改为 `if (X.nodeLogs.length > 0) await emitContentNodeLogs(X.nodeLogs, ..., payload)`（不再丢弃 index 0——按第 2 点的规则，非 wait 类节点的 index-0 现在是安全的 `direction: "outcome"`，不会被 badge 聚合误算进 exit；wait 类节点的 index-0 仍然是 `direction: "exit"`，行为不变）。另外 2 处已经在传完整数组的调用点（trigger 分发、通用 sweep）只需要加 `payload` 参数。
+
+**user-flow 侧不需要改任何调用点**：搜索确认 `flow/src/index.ts` 里所有走 `emitContentNodeLogs` 的重复-exit 处理都是内容域；`emitNodeLogs`（user flow）目前完全没有走 `resumeFromNode` 解析分支型 action（`xAction` 在 `executeActions` 里只做限流记账，没有走 `resumeFromNode`）——user flow 现有的两处 `resumeFromNode` 调用（`waitForEvent`/`timeCondition` 类型的 resume，index.ts 现有 1542/1824 两行）在第 2 点的类型判断下保持 `direction: "exit"` 不变，行为不受影响。
+
+### 5. `queryR2Counts`/`recomputeFlowCounts` — 无需改动
 
 `GROUP BY tenant_id, flow_id, node_id, direction` 会自然产出一组 `direction = 'outcome'` 的计数行，写进 `flow_counts`/`content_flow_counts`；前端 `AnalyticsBadges.tsx` 只读 `.enter`/`.exit`，这组多余的行不影响现有 badge 展示。
 
-### 5. `queryNodeLogRows` / `/api/flows/:id/nodes/:nodeId/logs`（`flow/src/index.ts`）
+### 6. `queryNodeLogRows` / `/api/flows/:id/nodes/:nodeId/logs`（`flow/src/index.ts`）
 
 内容域分支改为：
 
 ```sql
-SELECT content_id, created_at, outcome, title, content_text, content_url
+SELECT content_id, created_at, direction, outcome, title, content_text, content_url
 FROM uniscrm.content_flow_log
 WHERE tenant_id = ? AND flow_id = ? AND node_id = ? AND direction IN ('enter', 'outcome')
 ORDER BY created_at DESC LIMIT 50
 ```
 
+同一个 content_id 可能同时有一条 `enter` 记录（刚进入，outcome 还未知）和一条 `outcome` 记录（分支已解析）——两条的 title/content_text/content_url 相同（同一批 payload 写入），只有 `outcome`/`created_at` 不同。按 `content_id` 去重，`ORDER BY created_at DESC` 后保留每个 content_id 第一次出现的行（即最新一条——如果 outcome 已解析，它必然比 enter 晚写入，自然排在前面）。
+
 去掉现有的 D1 `content` 表 title 查询（`tdb.query<{ id, title }>(...)`）。返回结构从 `{ content_id, name, created_at }` 改为 `{ content_id, created_at, outcome, title, content_text, content_url }`，`name` 字段整体去掉（前端不再需要）。
 
 user-flow 分支（`user_id` 版本）保持字段不变，只加一个可选 `outcome` 透传（不强制要求，因为 user flow 前端本次不消费它）。
 
-### 6. Poller — `content_url` 写入
+### 7. Poller — `content_url` 写入
 
 - **`link/src/services/pollers/x-posts.ts` / `x-list-posts.ts`**：`upsertPage()` 里 `resolveProps()` 之后加一行 `props.content_url = `https://x.com/i/status/${props.source_content_id}`;`（与既有 `item.article` fixup 同样的写法/同样的位置）。
 - **`link/src/services/pollers/youtube-content.ts`**：同理加 `props.content_url = `https://www.youtube.com/watch?v=${props.source_content_id}`;`。
@@ -168,13 +202,13 @@ user-flow 分支（`user_id` 版本）保持字段不变，只加一个可选 `o
 
 不改 `content` 表 / `CONTENT_COLUMN_MAP`——`content_url` 只经过 `payload`，不落 D1。
 
-### 7. 前端 — `flow/frontend/pages/AnalyticsPage.tsx`
+### 8. 前端 — `flow/frontend/pages/AnalyticsPage.tsx`
 
 - `nodeLogs` state 类型改为 `{ content_id: string; created_at: string; outcome?: string; title?: string; content_text?: string; content_url?: string }[]`（内容域）。
 - 每行渲染拆成左右两栏：
   - 左：`title || (content_text ? content_text.slice(0, 5) + "…" : "")`，下方若有 `content_url` 则渲染为可点击链接。
   - 右：`new Date(created_at).toLocaleString()`；若 `outcome === "failed"`，下方红字 "Failed"。
-- 抽屉标题的 `nodeName` 计算逻辑补上内容域分支：`xContentTrigger`/`youtubeContentTrigger` 用 `NODE_TYPE_REGISTRY[nodeType].label`；`action` 节点的 `actionType` 为 `xContentAction`/`tiktokContentAction`/`videoAction` 时同样查 registry 或对应 label，而不是落到裸的 `nodeType` 字符串。
+- 抽屉标题的 `nodeName` 计算逻辑补上内容域分支：`xContentTrigger`/`youtubeContentTrigger` 用 `NODE_TYPE_REGISTRY[nodeType].label`；`action` 节点的 `actionType` 为 `xContentAction`/`tiktokContentAction`/`youtubeContentAction`/`videoAction` 时同样查 registry 或对应 label，而不是落到裸的 `nodeType` 字符串。
 
 ## Out of Scope
 

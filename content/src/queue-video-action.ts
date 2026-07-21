@@ -1,6 +1,6 @@
 import type { Env } from "./types";
 import { createJob, updateJobStatus } from "./services/video-action/job-store";
-import { downloadAndExtract, burnSubtitles } from "./services/video-action/container-client";
+import { downloadAndExtract, downloadVideo, burnSubtitles, rotateToVertical, removeFace } from "./services/video-action/container-client";
 import { transcribeAudio } from "./services/video-action/transcribe";
 import { translateCues, cuesToSrt } from "./services/video-action/translate";
 
@@ -9,6 +9,7 @@ export interface VideoActionQueueMessage {
   contentId: string;
   tenantId: number;
   videoUrl: string;
+  operation: "add-subtitle" | "rotate-to-vertical" | "remove-face";
   targetLanguage: string;
   flowId: string;
   nodeId: string;
@@ -37,12 +38,110 @@ async function cleanupScratch(env: Env, jobId: string): Promise<void> {
   }
 }
 
+async function processAddSubtitle(env: Env, jobId: string, message: VideoActionQueueMessage): Promise<void> {
+  const downloaded = await downloadAndExtract(env, jobId, message.videoUrl);
+  if (downloaded.error || !downloaded.videoKey || !downloaded.audioKey) {
+    await updateJobStatus(env, jobId, "failed", "downloading", downloaded.error || "unknown download error");
+    await cleanupScratch(env, jobId);
+    await resumeFlow(env, message.pendingId, "failed");
+    return;
+  }
+
+  await updateJobStatus(env, jobId, "transcribing");
+  const cues = await transcribeAudio(env, downloaded.audioKey);
+  if (!cues) {
+    await updateJobStatus(env, jobId, "failed", "transcribing", "no speech detected or transcription error");
+    await cleanupScratch(env, jobId);
+    await resumeFlow(env, message.pendingId, "failed");
+    return;
+  }
+
+  await updateJobStatus(env, jobId, "translating");
+  const translated = await translateCues(env, message.tenantId, cues, message.targetLanguage);
+  if (!translated) {
+    await updateJobStatus(env, jobId, "failed", "translating", "translation failed or cue count mismatch");
+    await cleanupScratch(env, jobId);
+    await resumeFlow(env, message.pendingId, "failed");
+    return;
+  }
+
+  await updateJobStatus(env, jobId, "burning_in");
+  const srt = cuesToSrt(translated.translatedCues);
+  const burned = await burnSubtitles(env, jobId, downloaded.videoKey, srt);
+  if (burned.error || !burned.finalKey) {
+    await updateJobStatus(env, jobId, "failed", "burning_in", burned.error || "unknown burn-in error");
+    await cleanupScratch(env, jobId);
+    await resumeFlow(env, message.pendingId, "failed");
+    return;
+  }
+
+  await updateJobStatus(env, jobId, "success");
+  await cleanupScratch(env, jobId);
+
+  const originalText = cues.map((c) => c.text).join(" ");
+  await resumeFlow(env, message.pendingId, "success", {
+    processed_video_url: `${env.CONTENT_URL}/public/media/${burned.finalKey}`,
+    video_transcript: originalText,
+    translated_subtitle_text: translated.plainText,
+  });
+}
+
+async function processRotateToVertical(env: Env, jobId: string, message: VideoActionQueueMessage): Promise<void> {
+  const downloaded = await downloadVideo(env, jobId, message.videoUrl);
+  if (downloaded.error || !downloaded.videoKey) {
+    await updateJobStatus(env, jobId, "failed", "downloading", downloaded.error || "unknown download error");
+    await cleanupScratch(env, jobId);
+    await resumeFlow(env, message.pendingId, "failed");
+    return;
+  }
+
+  await updateJobStatus(env, jobId, "rotating");
+  const rotated = await rotateToVertical(env, jobId, downloaded.videoKey);
+  if (rotated.error || !rotated.finalKey) {
+    await updateJobStatus(env, jobId, "failed", "rotating", rotated.error || "unknown rotate error");
+    await cleanupScratch(env, jobId);
+    await resumeFlow(env, message.pendingId, "failed");
+    return;
+  }
+
+  await updateJobStatus(env, jobId, "success");
+  await cleanupScratch(env, jobId);
+  await resumeFlow(env, message.pendingId, "success", {
+    processed_video_url: `${env.CONTENT_URL}/public/media/${rotated.finalKey}`,
+  });
+}
+
+async function processRemoveFace(env: Env, jobId: string, message: VideoActionQueueMessage): Promise<void> {
+  const downloaded = await downloadVideo(env, jobId, message.videoUrl);
+  if (downloaded.error || !downloaded.videoKey) {
+    await updateJobStatus(env, jobId, "failed", "downloading", downloaded.error || "unknown download error");
+    await cleanupScratch(env, jobId);
+    await resumeFlow(env, message.pendingId, "failed");
+    return;
+  }
+
+  await updateJobStatus(env, jobId, "detecting_faces");
+  const cut = await removeFace(env, jobId, downloaded.videoKey);
+  if (cut.error || !cut.finalKey) {
+    await updateJobStatus(env, jobId, "failed", "detecting_faces", cut.error || "unknown remove-face error");
+    await cleanupScratch(env, jobId);
+    await resumeFlow(env, message.pendingId, "failed");
+    return;
+  }
+
+  await updateJobStatus(env, jobId, "success");
+  await cleanupScratch(env, jobId);
+  await resumeFlow(env, message.pendingId, "success", {
+    processed_video_url: `${env.CONTENT_URL}/public/media/${cut.finalKey}`,
+  });
+}
+
 export async function processVideoActionJob(env: Env, message: VideoActionQueueMessage): Promise<void> {
   let jobId: string;
   try {
     jobId = await createJob(env, {
       pendingId: message.pendingId, contentId: message.contentId,
-      tenantId: message.tenantId, targetLanguage: message.targetLanguage,
+      tenantId: message.tenantId, operation: message.operation, targetLanguage: message.targetLanguage,
     });
   } catch (err) {
     console.error(JSON.stringify({ event: "video_action_job_create_failed", pendingId: message.pendingId, error: String(err) }));
@@ -51,51 +150,13 @@ export async function processVideoActionJob(env: Env, message: VideoActionQueueM
   }
 
   try {
-    const downloaded = await downloadAndExtract(env, jobId, message.videoUrl);
-    if (downloaded.error || !downloaded.videoKey || !downloaded.audioKey) {
-      await updateJobStatus(env, jobId, "failed", "downloading", downloaded.error || "unknown download error");
-      await cleanupScratch(env, jobId);
-      await resumeFlow(env, message.pendingId, "failed");
-      return;
+    if (message.operation === "rotate-to-vertical") {
+      await processRotateToVertical(env, jobId, message);
+    } else if (message.operation === "remove-face") {
+      await processRemoveFace(env, jobId, message);
+    } else {
+      await processAddSubtitle(env, jobId, message);
     }
-
-    await updateJobStatus(env, jobId, "transcribing");
-    const cues = await transcribeAudio(env, downloaded.audioKey);
-    if (!cues) {
-      await updateJobStatus(env, jobId, "failed", "transcribing", "no speech detected or transcription error");
-      await cleanupScratch(env, jobId);
-      await resumeFlow(env, message.pendingId, "failed");
-      return;
-    }
-
-    await updateJobStatus(env, jobId, "translating");
-    const translated = await translateCues(env, message.tenantId, cues, message.targetLanguage);
-    if (!translated) {
-      await updateJobStatus(env, jobId, "failed", "translating", "translation failed or cue count mismatch");
-      await cleanupScratch(env, jobId);
-      await resumeFlow(env, message.pendingId, "failed");
-      return;
-    }
-
-    await updateJobStatus(env, jobId, "burning_in");
-    const srt = cuesToSrt(translated.translatedCues);
-    const burned = await burnSubtitles(env, jobId, downloaded.videoKey, srt);
-    if (burned.error || !burned.finalKey) {
-      await updateJobStatus(env, jobId, "failed", "burning_in", burned.error || "unknown burn-in error");
-      await cleanupScratch(env, jobId);
-      await resumeFlow(env, message.pendingId, "failed");
-      return;
-    }
-
-    await updateJobStatus(env, jobId, "success");
-    await cleanupScratch(env, jobId);
-
-    const originalText = cues.map((c) => c.text).join(" ");
-    await resumeFlow(env, message.pendingId, "success", {
-      processed_video_url: `${env.CONTENT_URL}/public/media/${burned.finalKey}`,
-      video_transcript: originalText,
-      translated_subtitle_text: translated.plainText,
-    });
   } catch (err) {
     console.error(JSON.stringify({ event: "video_action_job_error", jobId, error: String(err) }));
     try {

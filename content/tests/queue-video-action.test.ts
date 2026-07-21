@@ -7,7 +7,7 @@ import * as translateModule from "../src/services/video-action/translate";
 
 const message = {
   pendingId: "pend1", contentId: "c1", tenantId: 1,
-  videoUrl: "https://youtube.com/watch?v=x", targetLanguage: "zh",
+  videoUrl: "https://youtube.com/watch?v=x", operation: "add-subtitle" as const, targetLanguage: "zh",
   flowId: "f1", nodeId: "n1", payload: {},
 };
 
@@ -101,5 +101,67 @@ describe("processVideoActionJob", () => {
     expect(resumeCall).toBeDefined();
     const body = JSON.parse(resumeCall[1].body);
     expect(body.branch).toBe("failed");
+  });
+
+  it("rotate-to-vertical: resolves success and posts only processed_video_url", async () => {
+    vi.spyOn(containerClient, "downloadVideo").mockResolvedValue({ videoKey: "v1" });
+    vi.spyOn(containerClient, "rotateToVertical").mockResolvedValue({ finalKey: "rotated-xyz.mp4" });
+
+    await processVideoActionJob(makeEnv(), { ...message, operation: "rotate-to-vertical" });
+
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(expect.anything(), "job1", "rotating");
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(expect.anything(), "job1", "success");
+    const resumeCall = (fetch as any).mock.calls.find((c: any[]) => c[0].includes("/internal/video-action/resume"));
+    const body = JSON.parse(resumeCall[1].body);
+    expect(body.branch).toBe("success");
+    expect(body.props).toEqual({ processed_video_url: expect.stringContaining("rotated-xyz.mp4") });
+  });
+
+  it("rotate-to-vertical: resolves failed when the container reports an error", async () => {
+    vi.spyOn(containerClient, "downloadVideo").mockResolvedValue({ videoKey: "v1" });
+    vi.spyOn(containerClient, "rotateToVertical").mockResolvedValue({ error: "rotate failed" });
+
+    await processVideoActionJob(makeEnv(), { ...message, operation: "rotate-to-vertical" });
+
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(expect.anything(), "job1", "failed", "rotating", "rotate failed");
+    const resumeCall = (fetch as any).mock.calls.find((c: any[]) => c[0].includes("/internal/video-action/resume"));
+    const body = JSON.parse(resumeCall[1].body);
+    expect(body.branch).toBe("failed");
+  });
+
+  it("remove-face: resolves success and posts only processed_video_url", async () => {
+    vi.spyOn(containerClient, "downloadVideo").mockResolvedValue({ videoKey: "v1" });
+    vi.spyOn(containerClient, "removeFace").mockResolvedValue({ finalKey: "cut-xyz.mp4" });
+
+    await processVideoActionJob(makeEnv(), { ...message, operation: "remove-face" });
+
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(expect.anything(), "job1", "detecting_faces");
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(expect.anything(), "job1", "success");
+    const resumeCall = (fetch as any).mock.calls.find((c: any[]) => c[0].includes("/internal/video-action/resume"));
+    const body = JSON.parse(resumeCall[1].body);
+    expect(body.branch).toBe("success");
+    expect(body.props).toEqual({ processed_video_url: expect.stringContaining("cut-xyz.mp4") });
+  });
+
+  it("remove-face: resolves failed when the video is too short after removal", async () => {
+    vi.spyOn(containerClient, "downloadVideo").mockResolvedValue({ videoKey: "v1" });
+    vi.spyOn(containerClient, "removeFace").mockResolvedValue({ error: "video too short after face removal" });
+
+    await processVideoActionJob(makeEnv(), { ...message, operation: "remove-face" });
+
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(expect.anything(), "job1", "failed", "detecting_faces", "video too short after face removal");
+    const resumeCall = (fetch as any).mock.calls.find((c: any[]) => c[0].includes("/internal/video-action/resume"));
+    const body = JSON.parse(resumeCall[1].body);
+    expect(body.branch).toBe("failed");
+  });
+
+  it("rotate-to-vertical and remove-face: resolve failed when download fails, without calling the operation step", async () => {
+    vi.spyOn(containerClient, "downloadVideo").mockResolvedValue({ error: "yt-dlp failed" });
+    const rotateSpy = vi.spyOn(containerClient, "rotateToVertical");
+
+    await processVideoActionJob(makeEnv(), { ...message, operation: "rotate-to-vertical" });
+
+    expect(rotateSpy).not.toHaveBeenCalled();
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(expect.anything(), "job1", "failed", "downloading", "yt-dlp failed");
   });
 });

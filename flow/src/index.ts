@@ -1159,12 +1159,11 @@ app.get("/api/flows", async (c) => {
   const total = countRow?.total || 0;
 
   const rows = await c.env.FLOW_DB.prepare(
-    `SELECT f.id, f.name, f.description, f.status, f.member_id, f.created_at, f.updated_at,
-       (SELECT COUNT(*) FROM flow_executions WHERE flow_id = f.id) + (SELECT COUNT(*) FROM content_flow_executions WHERE flow_id = f.id) as trigger_count
+    `SELECT f.id, f.name, f.description, f.status, f.member_id, f.created_at, f.updated_at, f.trigger_count
      FROM flows f WHERE f.tenant_id = ? AND f.domain = ? ORDER BY f.updated_at DESC LIMIT ? OFFSET ?`
   )
     .bind(tenantId, domain, limit, offset)
-    .all<{ id: string; name: string; description: string; status: string; member_id: string; created_at: string; updated_at: string; trigger_count: number }>();
+    .all<{ id: string; name: string; description: string; status: string; member_id: string; created_at: string; updated_at: string; trigger_count: number | null }>();
 
   const memberIds = [...new Set(rows.results.map(r => r.member_id).filter(Boolean))];
   let memberMap: Record<string, string> = {};

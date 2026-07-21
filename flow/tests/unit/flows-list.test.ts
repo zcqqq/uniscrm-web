@@ -45,39 +45,18 @@ describe("GET /api/flows domain filter", () => {
          graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}',
          domain TEXT NOT NULL DEFAULT 'user',
          status TEXT NOT NULL DEFAULT 'draft',
+         trigger_count INTEGER,
          created_at TEXT NOT NULL,
          updated_at TEXT NOT NULL
-       )`
-    ).run();
-    await env.FLOW_DB.prepare(
-      `CREATE TABLE IF NOT EXISTS flow_executions (
-         id TEXT PRIMARY KEY,
-         flow_id TEXT NOT NULL,
-         event_id TEXT,
-         user_id TEXT NOT NULL,
-         tenant_id INTEGER NOT NULL,
-         matched INTEGER NOT NULL DEFAULT 1,
-         created_at TEXT NOT NULL
-       )`
-    ).run();
-    await env.FLOW_DB.prepare(
-      `CREATE TABLE IF NOT EXISTS content_flow_executions (
-         id TEXT PRIMARY KEY,
-         flow_id TEXT NOT NULL,
-         event_id TEXT,
-         content_id TEXT NOT NULL,
-         tenant_id INTEGER NOT NULL,
-         matched INTEGER NOT NULL DEFAULT 1,
-         created_at TEXT NOT NULL
        )`
     ).run();
 
     await env.FLOW_DB.batch([
       env.FLOW_DB.prepare(
-        `INSERT INTO flows (id, tenant_id, name, graph_json, domain, status, created_at, updated_at) VALUES ('f-user', ?, 'u', ?, 'user', 'draft', datetime('now'), datetime('now'))`
+        `INSERT INTO flows (id, tenant_id, name, graph_json, domain, status, trigger_count, created_at, updated_at) VALUES ('f-user', ?, 'u', ?, 'user', 'draft', 11, datetime('now'), datetime('now'))`
       ).bind(TENANT_ID, userFlowGraph),
       env.FLOW_DB.prepare(
-        `INSERT INTO flows (id, tenant_id, name, graph_json, domain, status, created_at, updated_at) VALUES ('f-content', ?, 'c', ?, 'content', 'draft', datetime('now'), datetime('now'))`
+        `INSERT INTO flows (id, tenant_id, name, graph_json, domain, status, trigger_count, created_at, updated_at) VALUES ('f-content', ?, 'c', ?, 'content', 'draft', NULL, datetime('now'), datetime('now'))`
       ).bind(TENANT_ID, contentFlowGraph),
     ]);
   });
@@ -99,6 +78,16 @@ describe("GET /api/flows domain filter", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { flows: { id: string }[] };
     expect(body.flows.map((f) => f.id)).toEqual(["f-user"]);
+  });
+
+  it("returns the cached trigger_count column, null when not yet computed", async () => {
+    const res = await worker.fetch(req("/api/flows"), env);
+    const body = await res.json() as { flows: { id: string; trigger_count: number | null }[] };
+    expect(body.flows.find((f) => f.id === "f-user")?.trigger_count).toBe(11);
+
+    const contentRes = await worker.fetch(req("/api/flows?domain=content"), env);
+    const contentBody = await contentRes.json() as { flows: { id: string; trigger_count: number | null }[] };
+    expect(contentBody.flows.find((f) => f.id === "f-content")?.trigger_count).toBeNull();
   });
 
   it("keeps a content flow in the content list after its only trigger is deleted", async () => {

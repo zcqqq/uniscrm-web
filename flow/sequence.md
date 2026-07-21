@@ -34,8 +34,10 @@ sequenceDiagram
         Note over FW,CFP: resumed later by scheduled() sweep
     end
     FW->>STUB: repost / xContentAction (stub, 501)
-    FW->>FW: INSERT content_flow_executions
 ```
+
+`content_flow_executions`（连同 `flow_executions`）已移除 — 触发次数改由
+`recomputeFlowCounts()` 从 R2 日志聚合，缓存到 `flows.trigger_count`。
 
 ## Content-domain: xContentAction (real generation + publish)
 

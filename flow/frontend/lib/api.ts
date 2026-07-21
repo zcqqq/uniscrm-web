@@ -91,6 +91,10 @@ export const api = {
       request<{ connected: boolean; accountChannelId: string | null; email?: string; subscriptions: { channelId: string; channelName: string; thumbnailUrl: string }[] }>(
         `/api/channels/youtube/subscriptions`
       ),
+    youtubePlaylists: () =>
+      request<{ connected: boolean; needsReconnect?: boolean; playlists: { id: string; title: string }[] }>(
+        `/api/channels/youtube/playlists`
+      ),
   },
   lists: {
     list: () =>

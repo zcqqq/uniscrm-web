@@ -322,6 +322,6 @@ export const USER_FLOW_SIDEBAR_ORDER: string[] = [
 ];
 
 export const CONTENT_FLOW_SIDEBAR_ORDER: string[] = [
-  "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "videoAction", "videoCondition",
+  "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition",
   "wait", "timeCondition", "abSplit", "webhook",
 ];

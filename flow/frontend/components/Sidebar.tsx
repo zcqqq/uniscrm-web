@@ -132,6 +132,12 @@ export default function Sidebar() {
       el: <DraggableItem key="tiktokContentAction" type="tiktokContentAction" label={NODE_TYPE_REGISTRY.tiktokContentAction.label!} description={NODE_TYPE_REGISTRY.tiktokContentAction.description!} color="border-accent bg-accent/50" icon={<TikTokIcon className="w-4 h-4" />} />,
     });
   }
+  if (visible("youtubeContentAction")) {
+    actionItems.push({
+      key: "youtubeContentAction",
+      el: <DraggableItem key="youtubeContentAction" type="youtubeContentAction" label={NODE_TYPE_REGISTRY.youtubeContentAction.label!} description={NODE_TYPE_REGISTRY.youtubeContentAction.description!} color="border-accent bg-accent/50" icon={<YouTubeIcon className="w-4 h-4" />} />,
+    });
+  }
   if (visible("videoAction")) {
     actionItems.push({
       key: "videoAction",

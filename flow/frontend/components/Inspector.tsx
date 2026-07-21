@@ -568,6 +568,10 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
     return <TikTokContentActionInspector nodeId={nodeId} data={data} />;
   }
 
+  if (actionType === "youtubeContentAction") {
+    return <YouTubeContentActionInspector nodeId={nodeId} data={data} />;
+  }
+
   if (actionType === "videoAction") {
     return <VideoActionInspector nodeId={nodeId} data={data} />;
   }
@@ -651,9 +655,69 @@ const TIKTOK_PHOTO_POST_PROPS = ContentMetadata_TikTok.find((m) => m.sourceConte
 const CONTENT_TIKTOK_ACTION_OPERATIONS = ContentMetadata_TikTok.filter((m) => m.flowType === "action");
 const TIKTOK_VIDEO_POST_PROPS = CONTENT_TIKTOK_ACTION_OPERATIONS.find((m) => m.sourceContentType === "video-post")!.contentProps;
 
+const CONTENT_YOUTUBE_ACTION_OPERATIONS = ContentMetadata_YouTube.filter((m) => m.flowType === "action");
+
 function propLabel(propId: string): string {
   const def = PROPS.find((p) => p.propId === propId);
   return def ? localizeLabel(def.label, "en") : propId;
+}
+
+function YouTubeContentActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+  const [playlists, setPlaylists] = useState<{ id: string; title: string }[]>([]);
+  const [needsReconnect, setNeedsReconnect] = useState(false);
+  const operation = (data.operation as string) || "save-to-playlist";
+
+  useEffect(() => {
+    if (operation !== "save-to-playlist") return;
+    api.channels.youtubePlaylists()
+      .then((res) => { setPlaylists(res.playlists); setNeedsReconnect(!!res.needsReconnect); })
+      .catch(() => { setPlaylists([]); });
+  }, [operation]);
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.youtubeContentAction.label}</h4>
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Operation</Label>
+          <OperationSelect
+            value={operation}
+            onChange={(v) => updateNodeData(nodeId, { operation: v })}
+            options={CONTENT_YOUTUBE_ACTION_OPERATIONS.map((op) => ({
+              value: op.sourceContentType,
+              label: op.label ? localizeLabel(op.label, "en") : op.sourceContentType,
+              price: op.price,
+            }))}
+          />
+        </div>
+        {operation === "save-to-playlist" && (
+          <div>
+            <Label className="text-xs block mb-1">Playlist</Label>
+            <Select
+              value={data.playlistId || ""}
+              onChange={(e: SelectChange) => {
+                const id = e.target.value;
+                const title = playlists.find((p) => p.id === id)?.title || "";
+                updateNodeData(nodeId, { playlistId: id, playlistTitle: title });
+              }}
+              className="w-full text-sm"
+            >
+              <option value="">Select a playlist…</option>
+              {playlists.map((p) => (
+                <option key={p.id} value={p.id}>{p.title}</option>
+              ))}
+            </Select>
+            {needsReconnect && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Reconnect your YouTube account on the Social page to grant save/like permission.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {

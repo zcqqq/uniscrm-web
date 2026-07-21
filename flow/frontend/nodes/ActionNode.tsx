@@ -3,13 +3,15 @@ import AnalyticsBadges from "./AnalyticsBadges";
 import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 import { CHANNEL_TYPES } from "../config/trigger-fields";
 import { ContentMetadata_X } from "../../../metadata/x-byok";
+import { ContentMetadata_YouTube } from "../../../metadata/youtube";
 import { t as localizeLabel } from "../../../metadata/locale";
-import { XIcon, TikTokIcon } from "../../../shared/frontend/ui/icons";
+import { XIcon, TikTokIcon, YouTubeIcon } from "../../../shared/frontend/ui/icons";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
 
-const EXTERNAL_API_ACTIONS = ["xAction", "xContentAction", "tiktokContentAction", "videoAction"];
+const EXTERNAL_API_ACTIONS = ["xAction", "xContentAction", "tiktokContentAction", "videoAction", "youtubeContentAction"];
 const X_ACTION_COUNT = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!.actions.length;
 const CONTENT_X_ACTION_OPERATIONS = ContentMetadata_X.filter((m) => m.flowType === "action");
+const CONTENT_YOUTUBE_ACTION_OPERATIONS_NODE = ContentMetadata_YouTube.filter((m) => m.flowType === "action");
 
 export default function ActionNode({ data, selected }: NodeProps) {
   const actionType = data.actionType as string;
@@ -49,6 +51,13 @@ export default function ActionNode({ data, selected }: NodeProps) {
     description = channelId ? "Target channel selected" : "Select a target channel...";
     icon = TikTokIcon;
     isConfigured = !!channelId;
+  } else if (actionType === "youtubeContentAction") {
+    const operation = (data.operation as string) || "save-to-playlist";
+    const selectedOperation = CONTENT_YOUTUBE_ACTION_OPERATIONS_NODE.find((op) => op.sourceContentType === operation);
+    label = NODE_TYPE_REGISTRY.youtubeContentAction.label!;
+    description = selectedOperation?.label ? localizeLabel(selectedOperation.label, "en") : undefined;
+    icon = YouTubeIcon;
+    isConfigured = operation === "rate-like" || (operation === "save-to-playlist" && !!data.playlistId);
   } else if (actionType === "videoAction") {
     const operation = (data.operation as string) || "add-subtitle";
     label = NODE_TYPE_REGISTRY.videoAction.label!;

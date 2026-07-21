@@ -28,6 +28,7 @@ export interface PendingWait {
 
 export interface ActionResult {
   type: string;
+  playlistId?: string;
   [key: string]: unknown;
 }
 
@@ -260,9 +261,9 @@ function durationToMs(duration: number, unit: string): number {
   }
 }
 
-function buildActionData(targetNode: FlowNode): ActionResult {
+export function buildActionData(targetNode: FlowNode): ActionResult {
   const actionType = targetNode.data.actionType as string;
-  const isExternalApi = actionType === "xAction" || actionType === "xContentAction" || actionType === "tiktokContentAction" || actionType === "videoAction";
+  const isExternalApi = actionType === "xAction" || actionType === "xContentAction" || actionType === "tiktokContentAction" || actionType === "videoAction" || actionType === "youtubeContentAction";
   const actionData: ActionResult = { type: actionType, nodeId: targetNode.id, hasBranches: isExternalApi };
   if (actionType === "addToList") actionData.listId = targetNode.data.listId as string;
   if (actionType === "xAction") {
@@ -290,6 +291,10 @@ function buildActionData(targetNode: FlowNode): ActionResult {
   if (actionType === "videoAction") {
     actionData.operation = (targetNode.data.operation as string) || "add-subtitle";
     actionData.targetLanguage = (targetNode.data.targetLanguage as string) || "zh";
+  }
+  if (actionType === "youtubeContentAction") {
+    actionData.operation = (targetNode.data.operation as string) || "save-to-playlist";
+    actionData.playlistId = (targetNode.data.playlistId as string) || "";
   }
   return actionData;
 }

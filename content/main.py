@@ -133,23 +133,27 @@ def burn_subtitles():
     client = r2_client()
     client.download_file(bucket, video_key, video_path)
 
-    # Explicit flush+fsync before ffmpeg reads this file in a subprocess — without it, this
-    # container runtime does not reliably make the write visible to the child process (unlike
-    # source.mp4 above, whose durable write comes from boto3's own download_file). Observed
-    # live: ffmpeg's libass filter reporting "Unable to open subs.srt" immediately after this
-    # write, 100% reproducible in the deployed container, 0% reproducible in a local Docker run
-    # of the same image — the one thing that differs is this write's durability guarantee.
     with open(srt_path, "w", encoding="utf-8") as f:
         f.write(subtitle_srt)
         f.flush()
         os.fsync(f.fileno())
+
+    # DIAGNOSTIC (temporary): the fsync above did not fix a live, 100%-reproducible
+    # "Unable to open subs.srt" failure from ffmpeg's subtitles filter, immediately after this
+    # exact write — but is NOT reproducible locally with equivalent inputs. Surfacing what's
+    # actually on disk right before the ffmpeg call, since guessing a second fix without this
+    # data would just be another blind guess.
+    srt_exists = os.path.exists(srt_path)
+    srt_size = os.path.getsize(srt_path) if srt_exists else -1
+    srt_preview = subtitle_srt[:200]
 
     burn = subprocess.run(
         ["ffmpeg", "-y", "-i", video_path, "-vf", f"subtitles={srt_path}", "-c:a", "copy", output_path],
         capture_output=True, text=True, timeout=600,
     )
     if burn.returncode != 0 or not os.path.exists(output_path):
-        return jsonify({"error": f"burn-in failed: {burn.stderr[-2000:]}"}), 200
+        diag = f"[diag: srt_exists={srt_exists} srt_size={srt_size} srt_preview={srt_preview!r} srt_path={srt_path!r}]"
+        return jsonify({"error": f"burn-in failed: {diag} {burn.stderr[-2000:]}"}), 200
 
     final_key = f"{uuid.uuid4()}.mp4"
     client.upload_file(output_path, bucket, final_key, ExtraArgs={"ContentType": "video/mp4"})

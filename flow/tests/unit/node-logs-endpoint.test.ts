@@ -198,3 +198,60 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — content domain reads R2 only
     expect(calls.every((u) => u.includes("/api/auth/me") || u.includes("r2-sql"))).toBe(true);
   });
 });
+
+// Regression: a YouTube-only content flow has no "xContentTrigger" substring anywhere in its
+// graph_json (only "youtubeContentTrigger"). Domain classification must still recognize it as
+// content-domain — querying uniscrm.content_flow_log by content_id — matching the frontend's
+// `n.type === "xContentTrigger" || n.type === "youtubeContentTrigger"` check.
+describe("GET /api/flows/:id/nodes/:nodeId/logs — YouTube-only content flow is still content domain", () => {
+  const TENANT_ID = 1001;
+  const FLOW_ID = "55555555-5555-5555-5555-555555555555";
+  const NODE_ID = "66666666-6666-6666-6666-666666666666";
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  function req(path: string) {
+    return new Request(`https://flow.test${path}`, { headers: { Cookie: "session=test" } });
+  }
+
+  beforeEach(async () => {
+    fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/api/auth/me")) {
+        return new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: String(TENANT_ID) } }), { status: 200 });
+      }
+      return mockR2Response([
+        { content_id: "c-yt", created_at: "2026-01-03T00:00:00.000Z", direction: "enter", outcome: null, title: "a video", content_text: null, content_url: "https://youtube.com/watch?v=abc" },
+      ]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await env.FLOW_DB.prepare(
+      `CREATE TABLE IF NOT EXISTS flows (
+         id TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, member_id TEXT NOT NULL DEFAULT '',
+         name TEXT NOT NULL DEFAULT 'Untitled Flow', description TEXT DEFAULT '',
+         graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}', status TEXT NOT NULL DEFAULT 'draft',
+         created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+       )`
+    ).run();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, graph_json, status, created_at, updated_at) VALUES (?, ?, '{"nodes":[{"id":"t1","type":"youtubeContentTrigger","data":{}}],"edges":[]}', 'published', datetime('now'), datetime('now'))`
+    ).bind(FLOW_ID, TENANT_ID).run();
+  });
+
+  afterEach(async () => {
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE tenant_id = ?`).bind(TENANT_ID).run();
+    vi.unstubAllGlobals();
+  });
+
+  it("queries uniscrm.content_flow_log by content_id and returns content-shaped logs, not { logs: [] }", async () => {
+    const res = await worker.fetch(req(`/api/flows/${FLOW_ID}/nodes/${NODE_ID}/logs`), env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { logs: any[] };
+    expect(body.logs).toEqual([{
+      content_id: "c-yt", created_at: "2026-01-03T00:00:00.000Z", outcome: undefined,
+      title: "a video", content_text: null, content_url: "https://youtube.com/watch?v=abc",
+    }]);
+    const r2Call = fetchMock.mock.calls.find((c) => String(c[0]).includes("r2-sql"));
+    const body2 = JSON.parse(r2Call![1].body as string);
+    expect(body2.query).toContain("FROM uniscrm.content_flow_log");
+  });
+});

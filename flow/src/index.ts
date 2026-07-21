@@ -7,6 +7,15 @@ import { TenantDataDB } from "../../shared/tenant-data-db";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../nodeTypeRegistry";
 
+// A flow is content-domain if its graph contains any content trigger node type. Keep this in
+// sync with the frontend's equivalent check (flow/frontend/pages/AnalyticsPage.tsx,
+// flow/frontend/components/Sidebar.tsx, flow/frontend/pages/EditorPage.tsx), which tests
+// `n.type === "xContentTrigger" || n.type === "youtubeContentTrigger"` against parsed nodes.
+// graph_json is a raw JSON string here (not parsed), so this stays a substring check.
+function isContentDomainGraph(graphJson: string): boolean {
+  return graphJson.includes("xContentTrigger") || graphJson.includes("youtubeContentTrigger");
+}
+
 async function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenantId: number, env: Env): Promise<void> {
   if (nodeLogs.length === 0) return;
   const timestamp = new Date().toISOString();
@@ -1290,7 +1299,7 @@ app.get("/api/flows/:id/analytics", async (c) => {
   const flowRow = await c.env.FLOW_DB.prepare("SELECT graph_json FROM flows WHERE id = ? AND tenant_id = ?")
     .bind(flowId, tenantId).first<{ graph_json: string }>();
   if (!flowRow) return c.json({ nodes: {} });
-  const isContentDomain = flowRow.graph_json.includes("xContentTrigger");
+  const isContentDomain = isContentDomainGraph(flowRow.graph_json);
   const table = isContentDomain ? "content_flow_counts" : "flow_counts";
 
   const row = await c.env.WEB_DB.prepare(
@@ -1337,7 +1346,7 @@ app.get("/api/flows/:id/nodes/:nodeId/logs", async (c) => {
     const flowRow = await c.env.FLOW_DB.prepare("SELECT graph_json FROM flows WHERE id = ? AND tenant_id = ?")
       .bind(flowId, tenantId).first<{ graph_json: string }>();
     if (!flowRow) return c.json({ logs: [] });
-    const isContentDomain = flowRow.graph_json.includes("xContentTrigger");
+    const isContentDomain = isContentDomainGraph(flowRow.graph_json);
 
     const rows = await queryNodeLogRows(
       c.env,

@@ -579,8 +579,13 @@ def remove_face():
         segment_paths = []
         for idx, (start, end) in enumerate(keep_segments):
             segment_path = f"{work_dir}/segment_{idx:04d}.mp4"
+            # Deliberately NOT "-c copy": stream-copy trimming snaps cuts to the nearest
+            # keyframe, silently discarding the padding/merge math above and risking
+            # freeze/desync artifacts at segment boundaries. Re-encoding here means each
+            # segment starts on a real keyframe, so the later concat (which IS "-c copy",
+            # safe because its inputs are now clean) doesn't need to re-encode again.
             trim = subprocess.run(
-                ["ffmpeg", "-y", "-i", video_path, "-ss", str(start), "-to", str(end), "-c", "copy", segment_path],
+                ["ffmpeg", "-y", "-i", video_path, "-ss", str(start), "-to", str(end), "-c:v", "libx264", "-c:a", "aac", segment_path],
                 capture_output=True, text=True, timeout=300,
             )
             if trim.returncode != 0 or not os.path.exists(segment_path):

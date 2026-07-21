@@ -110,7 +110,7 @@ kept on the message but is only meaningful for `add-subtitle`.
 - `rotate-to-vertical`: download (video-only, via new `/download` endpoint, no audio
   extraction) → rotate → `success`, resuming with only `processed_video_url`.
 - `remove-face`: download (video-only) → detect+cut → if remaining duration < 2s,
-  `failed` (step `"cutting"`, error `"video too short after face removal"`); else
+  `failed` (step `"detecting_faces"`, error `"video too short after face removal"`); else
   `success` with only `processed_video_url`.
 
 The `MAX_DURATION_SECONDS = 600` cap in `flow/src/index.ts` stays shared across all three
@@ -121,7 +121,10 @@ operations — it's a general container-runtime safety limit, not add-subtitle-s
 stays `NOT NULL`; the two new operations pass `""` (avoids a SQLite nullability migration
 for a column that exists purely for diagnostics). `JobStatus`
 (`content/src/services/video-action/job-store.ts`) extends with `"rotating"` and
-`"detecting_faces" | "cutting"`.
+`"detecting_faces"` — Remove Face's detection and cutting happen inside one atomic
+container call, so there's no Worker-observable midpoint to justify a separate `"cutting"`
+status; `"detecting_faces"` covers the whole in-flight call, including its own
+`failed_step` value on error.
 
 ## Container implementation
 

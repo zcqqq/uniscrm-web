@@ -18,32 +18,43 @@ describe("queryNodeLogRows", () => {
     return { CF_ACCOUNT_ID: "acct-1", R2_SQL_TOKEN: "tok-1", R2_BUCKET: "uniscrm-dev", R2_WAREHOUSE: "acct-1_uniscrm-dev" } as any;
   }
 
-  it("queries uniscrm.flow_log filtered by tenant/flow/node/direction=enter, ordered and limited", async () => {
-    fetchMock.mockResolvedValue(mockR2Response([{ user_id: "u1", created_at: "2026-01-01T00:00:00.000Z" }]));
+  it("queries uniscrm.flow_log filtered by tenant/flow/node/direction, ordered and limited", async () => {
+    fetchMock.mockResolvedValue(mockR2Response([
+      { user_id: "u1", created_at: "2026-01-01T00:00:00.000Z", direction: "enter", outcome: null, title: null, content_text: null, content_url: null },
+    ]));
 
     const rows = await queryNodeLogRows(baseEnv(), "uniscrm.flow_log", "user_id", 42, "flow-1", "node-1");
 
-    expect(rows).toEqual([{ subjectId: "u1", created_at: "2026-01-01T00:00:00.000Z" }]);
+    expect(rows).toEqual([{
+      subjectId: "u1", created_at: "2026-01-01T00:00:00.000Z", direction: "enter",
+      outcome: null, title: null, content_text: null, content_url: null,
+    }]);
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(init.body as string);
     expect(body.query).toContain("FROM uniscrm.flow_log");
     expect(body.query).toContain("tenant_id = 42");
     expect(body.query).toContain("flow_id = 'flow-1'");
     expect(body.query).toContain("node_id = 'node-1'");
-    expect(body.query).toContain("direction = 'enter'");
+    expect(body.query).toContain("direction IN ('enter', 'outcome')");
     expect(body.query).toContain("ORDER BY created_at DESC");
     expect(body.query).toContain("LIMIT 50");
   });
 
-  it("queries uniscrm.content_flow_log with content_id as the subject column", async () => {
-    fetchMock.mockResolvedValue(mockR2Response([{ content_id: "c1", created_at: "2026-01-01T00:00:00.000Z" }]));
+  it("queries uniscrm.content_flow_log for both enter and outcome rows, returning the new detail columns", async () => {
+    fetchMock.mockResolvedValue(mockR2Response([
+      { content_id: "c1", created_at: "2026-01-01T00:00:01.000Z", direction: "outcome", outcome: "failed", title: null, content_text: "hello world", content_url: "https://x.com/i/status/1" },
+    ]));
 
     const rows = await queryNodeLogRows(baseEnv(), "uniscrm.content_flow_log", "content_id", 42, "flow-2", "node-2");
 
-    expect(rows).toEqual([{ subjectId: "c1", created_at: "2026-01-01T00:00:00.000Z" }]);
+    expect(rows).toEqual([{
+      subjectId: "c1", created_at: "2026-01-01T00:00:01.000Z", direction: "outcome",
+      outcome: "failed", title: null, content_text: "hello world", content_url: "https://x.com/i/status/1",
+    }]);
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(init.body as string);
     expect(body.query).toContain("FROM uniscrm.content_flow_log");
+    expect(body.query).toContain("direction IN ('enter', 'outcome')");
   });
 
   it("returns an empty array when the R2 query is unsuccessful", async () => {
@@ -129,5 +140,61 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — UUID validation guard", () =
     const res = await worker.fetch(req(`/api/flows/${FLOW_ID}/nodes/${NODE_ID}/logs`), env);
     expect(res.status).toBe(200);
     expect(r2Calls()).toHaveLength(1);
+  });
+});
+
+describe("GET /api/flows/:id/nodes/:nodeId/logs — content domain reads R2 only, no D1 join", () => {
+  const TENANT_ID = 999;
+  const FLOW_ID = "33333333-3333-3333-3333-333333333333";
+  const NODE_ID = "44444444-4444-4444-4444-444444444444";
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  function req(path: string) {
+    return new Request(`https://flow.test${path}`, { headers: { Cookie: "session=test" } });
+  }
+
+  beforeEach(async () => {
+    fetchMock = vi.fn(async (url: string, init?: any) => {
+      if (String(url).includes("/api/auth/me")) {
+        return new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: String(TENANT_ID) } }), { status: 200 });
+      }
+      // Two rows for the same content_id: an earlier "enter" and a later "outcome" — the route
+      // must dedupe to the latest (the outcome row), not return both.
+      return mockR2Response([
+        { content_id: "c-dup", created_at: "2026-01-02T00:00:00.000Z", direction: "outcome", outcome: "success", title: null, content_text: "second tweet text", content_url: "https://x.com/i/status/2" },
+        { content_id: "c-dup", created_at: "2026-01-01T00:00:00.000Z", direction: "enter", outcome: null, title: null, content_text: "second tweet text", content_url: "https://x.com/i/status/2" },
+      ]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await env.FLOW_DB.prepare(
+      `CREATE TABLE IF NOT EXISTS flows (
+         id TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, member_id TEXT NOT NULL DEFAULT '',
+         name TEXT NOT NULL DEFAULT 'Untitled Flow', description TEXT DEFAULT '',
+         graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}', status TEXT NOT NULL DEFAULT 'draft',
+         created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+       )`
+    ).run();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, graph_json, status, created_at, updated_at) VALUES (?, ?, '{"nodes":[{"id":"t1","type":"xContentTrigger","data":{}}],"edges":[]}', 'published', datetime('now'), datetime('now'))`
+    ).bind(FLOW_ID, TENANT_ID).run();
+  });
+
+  afterEach(async () => {
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE tenant_id = ?`).bind(TENANT_ID).run();
+    vi.unstubAllGlobals();
+  });
+
+  it("returns one deduped row per content_id with title/content_text/content_url/outcome, no D1 query", async () => {
+    const res = await worker.fetch(req(`/api/flows/${FLOW_ID}/nodes/${NODE_ID}/logs`), env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { logs: any[] };
+    expect(body.logs).toEqual([{
+      content_id: "c-dup", created_at: "2026-01-02T00:00:00.000Z", outcome: "success",
+      title: null, content_text: "second tweet text", content_url: "https://x.com/i/status/2",
+    }]);
+    // No D1 SELECT against the content table — every fetch call was either /api/auth/me or R2 SQL.
+    const calls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(calls.every((u) => u.includes("/api/auth/me") || u.includes("r2-sql"))).toBe(true);
   });
 });

@@ -82,6 +82,16 @@ async function queryR2Counts(env: Env, table: string): Promise<CountRow[]> {
   return data.result?.rows || [];
 }
 
+export interface NodeLogRow {
+  subjectId: string;
+  created_at: string;
+  direction: string;
+  outcome: string | null;
+  title: string | null;
+  content_text: string | null;
+  content_url: string | null;
+}
+
 export async function queryNodeLogRows(
   env: Env,
   table: "uniscrm.flow_log" | "uniscrm.content_flow_log",
@@ -89,7 +99,7 @@ export async function queryNodeLogRows(
   tenantId: number,
   flowId: string,
   nodeId: string
-): Promise<{ subjectId: string; created_at: string }[]> {
+): Promise<NodeLogRow[]> {
   const res = await fetch(
     `https://api.sql.cloudflarestorage.com/api/v1/accounts/${env.CF_ACCOUNT_ID}/r2-sql/query/${env.R2_BUCKET}`,
     {
@@ -97,15 +107,23 @@ export async function queryNodeLogRows(
       headers: { Authorization: `Bearer ${env.R2_SQL_TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         warehouse: env.R2_WAREHOUSE,
-        query: `SELECT ${subjectColumn}, created_at FROM ${table}
-                WHERE tenant_id = ${tenantId} AND flow_id = '${flowId}' AND node_id = '${nodeId}' AND direction = 'enter'
+        query: `SELECT ${subjectColumn}, created_at, direction, outcome, title, content_text, content_url FROM ${table}
+                WHERE tenant_id = ${tenantId} AND flow_id = '${flowId}' AND node_id = '${nodeId}' AND direction IN ('enter', 'outcome')
                 ORDER BY created_at DESC LIMIT 50`,
       }),
     }
   );
   const data = await res.json() as { result?: { rows: Record<string, unknown>[] }; success: boolean };
   if (!data.success) return [];
-  return (data.result?.rows || []).map((r) => ({ subjectId: String(r[subjectColumn]), created_at: String(r.created_at) }));
+  return (data.result?.rows || []).map((r) => ({
+    subjectId: String(r[subjectColumn]),
+    created_at: String(r.created_at),
+    direction: String(r.direction),
+    outcome: (r.outcome as string | null) ?? null,
+    title: (r.title as string | null) ?? null,
+    content_text: (r.content_text as string | null) ?? null,
+    content_url: (r.content_url as string | null) ?? null,
+  }));
 }
 
 export async function recomputeFlowCounts(env: Env): Promise<void> {
@@ -1331,22 +1349,43 @@ app.get("/api/flows/:id/nodes/:nodeId/logs", async (c) => {
     );
     if (rows.length === 0) return c.json({ logs: [] });
 
+    if (isContentDomain) {
+      // Rows arrive ordered by created_at DESC; a content_id can have both an "enter" row
+      // (outcome unresolved yet) and a later "outcome" row (same title/content_text/content_url,
+      // since both come from the same payload batch) — keep only the first (= latest) occurrence
+      // per content_id, which is the outcome row whenever one exists. No D1 join: every display
+      // field now lives directly on the R2 row.
+      const seen = new Set<string>();
+      const logs = [];
+      for (const r of rows) {
+        if (seen.has(r.subjectId)) continue;
+        seen.add(r.subjectId);
+        logs.push({
+          content_id: r.subjectId,
+          created_at: r.created_at,
+          outcome: r.outcome ?? undefined,
+          title: r.title,
+          content_text: r.content_text,
+          content_url: r.content_url,
+        });
+      }
+      return c.json({ logs });
+    }
+
     const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
       .bind(tenantId).first<{ d1_database_id: string | null }>();
     if (!tenantRow?.d1_database_id) {
-      return c.json({ logs: rows.map((r) => ({ [isContentDomain ? "content_id" : "user_id"]: r.subjectId, name: null, created_at: r.created_at })) });
+      return c.json({ logs: rows.map((r) => ({ user_id: r.subjectId, name: null, created_at: r.created_at })) });
     }
 
     const tdb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
     const ids = [...new Set(rows.map((r) => r.subjectId))];
     const placeholders = ids.map(() => "?").join(",");
-    const nameRows = isContentDomain
-      ? await tdb.query<{ id: string; title: string | null }>(`SELECT id, title FROM content WHERE id IN (${placeholders})`, ids)
-      : await tdb.query<{ id: string; name: string | null }>(`SELECT id, name FROM user WHERE id IN (${placeholders})`, ids);
-    const nameMap = new Map(nameRows.map((r) => [r.id, isContentDomain ? (r as any).title : (r as any).name]));
+    const nameRows = await tdb.query<{ id: string; name: string | null }>(`SELECT id, name FROM user WHERE id IN (${placeholders})`, ids);
+    const nameMap = new Map(nameRows.map((r) => [r.id, r.name]));
 
     const logs = rows.map((r) => ({
-      [isContentDomain ? "content_id" : "user_id"]: r.subjectId,
+      user_id: r.subjectId,
       name: nameMap.get(r.subjectId) ?? null,
       created_at: r.created_at,
     }));

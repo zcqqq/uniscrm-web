@@ -37,20 +37,32 @@ def _download_video(job_id, video_url):
 
 
 def _probe_duration(video_path):
+    """Returns (duration, error)."""
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_path],
         capture_output=True, text=True, timeout=30,
     )
-    return float(probe.stdout.strip())
+    if probe.returncode != 0:
+        return None, f"duration probe failed: {probe.stderr[-2000:]}"
+    try:
+        return float(probe.stdout.strip()), None
+    except ValueError:
+        return None, f"duration probe returned unparseable output: {probe.stdout!r}"
 
 
 def _probe_dimensions(video_path):
+    """Returns (width, height, error)."""
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", video_path],
         capture_output=True, text=True, timeout=30,
     )
-    width, height = probe.stdout.strip().split("x")
-    return int(width), int(height)
+    if probe.returncode != 0:
+        return None, None, f"dimension probe failed: {probe.stderr[-2000:]}"
+    try:
+        width, height = probe.stdout.strip().split("x")
+        return int(width), int(height), None
+    except ValueError:
+        return None, None, f"dimension probe returned unparseable output: {probe.stdout!r}"
 
 
 @app.route("/health")
@@ -152,7 +164,9 @@ def rotate_to_vertical():
     client = r2_client()
     client.download_file(bucket, video_key, video_path)
 
-    width, height = _probe_dimensions(video_path)
+    width, height, error = _probe_dimensions(video_path)
+    if error:
+        return jsonify({"error": error}), 200
 
     if not needs_rotation(width, height):
         final_key = f"{uuid.uuid4()}.mp4"
@@ -191,7 +205,9 @@ def remove_face():
         client = r2_client()
         client.download_file(bucket, video_key, video_path)
 
-        video_duration = _probe_duration(video_path)
+        video_duration, error = _probe_duration(video_path)
+        if error:
+            return jsonify({"error": error}), 200
 
         extract_frames = subprocess.run(
             ["ffmpeg", "-y", "-i", video_path, "-vf", "fps=1", f"{frames_dir}/frame_%04d.jpg"],

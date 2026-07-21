@@ -1070,6 +1070,15 @@ app.get("/api/channels/youtube/subscriptions", async (c) => {
   return new Response(body, { status: res.status, headers: { "Content-Type": "application/json" } });
 });
 
+app.get("/api/channels/youtube/playlists", async (c) => {
+  const linkUrl = c.env.LINK_URL;
+  const res = await fetch(`${linkUrl}/api/channels/youtube/playlists`, {
+    headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
+  });
+  const body = await res.text();
+  return new Response(body, { status: res.status, headers: { "Content-Type": "application/json" } });
+});
+
 // Proxy configured LLM providers from content worker (tenant-scoped, forwards the session cookie)
 app.get("/api/llm-providers", async (c) => {
   const res = await fetch(`${c.env.CONTENT_URL}/api/llm-credentials`, {

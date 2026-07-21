@@ -25,18 +25,41 @@ export async function translateCues(
     return null;
   }
 
-  const lines = response
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((l) => l.replace(/^\d+\.\s*/, ""));
+  // Match by the model's own leading number ("14. ...") rather than raw line position — on a
+  // long numbered batch the model occasionally merges or drops one line, which used to fail
+  // the entire batch even though every other cue translated correctly. Any cue whose number
+  // never shows up in the response falls back to its own original (untranslated) text instead.
+  const byNumber = new Map<number, string>();
+  for (const rawLine of response.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const match = line.match(/^(\d+)\.\s*(.*)$/);
+    if (!match) continue;
+    const text = match[2].trim();
+    if (!text) continue;
+    byNumber.set(parseInt(match[1], 10), text);
+  }
 
-  if (lines.length !== cues.length) {
-    console.error(JSON.stringify({ event: "translate_cue_count_mismatch", expected: cues.length, got: lines.length }));
+  if (byNumber.size === 0) {
+    console.error(JSON.stringify({ event: "translate_no_numbered_lines_parsed", cueCount: cues.length }));
     return null;
   }
 
-  const translatedCues = cues.map((cue, i) => ({ ...cue, text: lines[i] }));
+  const missing: number[] = [];
+  const translatedCues = cues.map((cue, i) => {
+    const cueNumber = i + 1;
+    const translated = byNumber.get(cueNumber);
+    if (translated === undefined) {
+      missing.push(cueNumber);
+      return { ...cue };
+    }
+    return { ...cue, text: translated };
+  });
+
+  if (missing.length > 0) {
+    console.error(JSON.stringify({ event: "translate_cue_fallback_to_original", missingCueNumbers: missing, totalCues: cues.length }));
+  }
+
   const plainText = translatedCues.map((c) => c.text).join(" ");
   return { translatedCues, plainText };
 }

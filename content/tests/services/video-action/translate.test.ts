@@ -27,8 +27,37 @@ describe("translateCues", () => {
     expect(result?.plainText).toBe("你好。 这是一个测试。");
   });
 
-  it("returns null on a cue-count mismatch", async () => {
+  it("falls back to the original text for a cue whose number never appears in the response", async () => {
     vi.spyOn(generateModule, "generateContent").mockResolvedValue("1. 你好。");
+    const result = await translateCues({} as any, 1, cues, "zh");
+    expect(result?.translatedCues).toEqual([
+      { start: "00:00:00.000", end: "00:00:02.000", text: "你好。" },
+      { start: "00:00:02.000", end: "00:00:04.000", text: "This is a test." },
+    ]);
+    expect(result?.plainText).toBe("你好。 This is a test.");
+  });
+
+  it("matches cues by their own leading number, not by line position", async () => {
+    // Out-of-order response — line position would misalign these, number matching won't.
+    vi.spyOn(generateModule, "generateContent").mockResolvedValue("2. 这是一个测试。\n1. 你好。");
+    const result = await translateCues({} as any, 1, cues, "zh");
+    expect(result?.translatedCues).toEqual([
+      { start: "00:00:00.000", end: "00:00:02.000", text: "你好。" },
+      { start: "00:00:02.000", end: "00:00:04.000", text: "这是一个测试。" },
+    ]);
+  });
+
+  it("ignores a numbered line outside the cue range instead of letting it shift alignment", async () => {
+    vi.spyOn(generateModule, "generateContent").mockResolvedValue("1. 你好。\n2. 这是一个测试。\n3. 多出来的一行。");
+    const result = await translateCues({} as any, 1, cues, "zh");
+    expect(result?.translatedCues).toEqual([
+      { start: "00:00:00.000", end: "00:00:02.000", text: "你好。" },
+      { start: "00:00:02.000", end: "00:00:04.000", text: "这是一个测试。" },
+    ]);
+  });
+
+  it("returns null when no numbered line can be parsed from the response at all", async () => {
+    vi.spyOn(generateModule, "generateContent").mockResolvedValue("I cannot translate this content.");
     const result = await translateCues({} as any, 1, cues, "zh");
     expect(result).toBeNull();
   });

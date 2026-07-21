@@ -17,14 +17,27 @@ async function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string,
     node_id: log.nodeId,
     user_id: userId,
     direction: log.direction,
+    outcome: log.direction === "outcome" ? log.outcome : undefined,
     created_at: timestamp,
   }));
   await env.PIPELINE_FLOW_LOG?.send(records).catch(() => {});
 }
 
-async function emitContentNodeLogs(nodeLogs: NodeLog[], flowId: string, contentId: string, tenantId: string, env: Env): Promise<void> {
+async function emitContentNodeLogs(
+  nodeLogs: NodeLog[],
+  flowId: string,
+  contentId: string,
+  tenantId: string,
+  env: Env,
+  payload: Record<string, unknown>
+): Promise<void> {
   if (nodeLogs.length === 0) return;
   const timestamp = new Date().toISOString();
+  // processed_video_url (set once a videoAction node produces a new video) takes priority over
+  // the originating trigger's content_url — any node downstream of a resolved videoAction is
+  // now "about" that produced video, including a second chained videoAction (see engine.ts's
+  // videoAction handling in executeContentActions).
+  const contentUrl = (payload?.processed_video_url as string) || (payload?.content_url as string) || undefined;
   const records = nodeLogs.map((log) => ({
     tenant_id: Number(tenantId),
     id: crypto.randomUUID(),
@@ -32,6 +45,10 @@ async function emitContentNodeLogs(nodeLogs: NodeLog[], flowId: string, contentI
     node_id: log.nodeId,
     content_id: contentId,
     direction: log.direction,
+    outcome: log.direction === "outcome" ? log.outcome : undefined,
+    title: payload?.title as string | undefined,
+    content_text: payload?.content_text as string | undefined,
+    content_url: contentUrl,
     created_at: timestamp,
   }));
   await env.PIPELINE_CONTENT_FLOW_LOG?.send(records).catch(() => {});
@@ -362,7 +379,7 @@ async function executeContentActions(
             console.log(JSON.stringify({ event: "content_action_x_content_action_missing_video", contentId, channelId }));
             const nodeId = action.nodeId as string;
             const resumed = resumeFromNode(graph, nodeId, payload, "failed");
-            if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+            if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
             if (resumed.actions.length > 0) {
               const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
               rateLimited.push(...nested.rateLimited);
@@ -419,7 +436,7 @@ async function executeContentActions(
           const branch = videoBody.ok ? "success" : "failed";
           const nodeId = action.nodeId as string;
           const resumed = resumeFromNode(graph, nodeId, payload, branch);
-          if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+          if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
           if (resumed.actions.length > 0) {
             const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
             rateLimited.push(...nested.rateLimited);
@@ -462,10 +479,10 @@ async function executeContentActions(
       const branch = body.ok ? "success" : "failed";
       const nodeId = action.nodeId as string;
       const resumed = resumeFromNode(graph, nodeId, payload, branch);
-      // resumed.nodeLogs[0] is always a duplicate exit for `nodeId` itself (already logged when
-      // this xContentAction node was first collected as an action) — everything from index 1
-      // onward is the genuinely new downstream enter/exit reached by resolving this branch.
-      if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+      // resumed.nodeLogs[0] is `nodeId`'s own duplicate exit, relabeled direction:"outcome"
+      // (carrying the resolved branch) rather than dropped — everything from index 1 onward is
+      // the genuinely new downstream enter/exit reached by resolving this branch.
+      if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
       if (resumed.actions.length > 0) {
         const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
         rateLimited.push(...nested.rateLimited);
@@ -495,7 +512,7 @@ async function executeContentActions(
           console.log(JSON.stringify({ event: "content_action_tiktok_video_post_missing_video", contentId, channelId: action.channelId }));
           const nodeId = action.nodeId as string;
           const resumed = resumeFromNode(graph, nodeId, payload, "failed");
-          if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+          if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
           if (resumed.actions.length > 0) {
             const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
             rateLimited.push(...nested.rateLimited);
@@ -543,7 +560,7 @@ async function executeContentActions(
         const branch = respBody.ok ? "success" : "failed";
         const nodeId = action.nodeId as string;
         const resumed = resumeFromNode(graph, nodeId, payload, branch);
-        if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+        if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
         if (resumed.actions.length > 0) {
           const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
           rateLimited.push(...nested.rateLimited);
@@ -598,7 +615,7 @@ async function executeContentActions(
       const branch = respBody.ok ? "success" : "failed";
       const nodeId = action.nodeId as string;
       const resumed = resumeFromNode(graph, nodeId, payload, branch);
-      if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+      if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
       if (resumed.actions.length > 0) {
         const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
         rateLimited.push(...nested.rateLimited);
@@ -636,7 +653,7 @@ async function executeContentActions(
       const branch = respBody.ok ? "success" : "failed";
       const nodeId = action.nodeId as string;
       const resumed = resumeFromNode(graph, nodeId, payload, branch);
-      if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+      if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
       if (resumed.actions.length > 0) {
         const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
         rateLimited.push(...nested.rateLimited);
@@ -680,7 +697,7 @@ async function executeContentActions(
 
       const nodeId = action.nodeId as string;
       const resumed = resumeFromNode(graph, nodeId, payload, branch);
-      if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+      if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
       if (resumed.actions.length > 0) {
         const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
         rateLimited.push(...nested.rateLimited);
@@ -708,7 +725,7 @@ async function executeContentActions(
       if (duration > MAX_DURATION_SECONDS) {
         console.log(JSON.stringify({ event: "content_action_video_action_duration_exceeded", contentId, duration }));
         const resumed = resumeFromNode(graph, nodeId, payload, "failed");
-        if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+        if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
         if (resumed.actions.length > 0) {
           const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
           rateLimited.push(...nested.rateLimited);
@@ -752,7 +769,7 @@ async function executeContentActions(
       if (!videoUrl) {
         console.log(JSON.stringify({ event: "content_action_video_action_no_video", contentId }));
         const resumed = resumeFromNode(graph, nodeId, payload, "failed");
-        if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+        if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
         if (resumed.actions.length > 0) {
           const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
           rateLimited.push(...nested.rateLimited);
@@ -894,7 +911,7 @@ app.post("/internal/video-action/resume", async (c) => {
   const graph: FlowGraph = JSON.parse(flow.graph_json);
   const payload = { ...JSON.parse(row.payload), ...(props || {}) };
   const resumed = resumeFromNode(graph, row.node_id, payload, branch);
-  if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), row.flow_id, row.content_id, String(row.tenant_id), c.env);
+  if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, row.flow_id, row.content_id, String(row.tenant_id), c.env, payload);
   if (resumed.actions.length > 0) {
     await executeContentActions(graph, resumed.actions, row.content_id, String(payload.channel_id ?? ""), String(row.tenant_id), c.env, payload, row.flow_id);
     await c.env.FLOW_DB.prepare(
@@ -1422,7 +1439,7 @@ export default {
           for (const flow of rows.results) {
             const graph: FlowGraph = JSON.parse(flow.graph_json);
             const result = executeFlow(graph, eventType, matchPayload);
-            if (result.nodeLogs.length > 0) await emitContentNodeLogs(result.nodeLogs, flow.id, contentId, tenantId, env);
+            if (result.nodeLogs.length > 0) await emitContentNodeLogs(result.nodeLogs, flow.id, contentId, tenantId, env, matchPayload);
             if (result.actions.length > 0) {
               const { rateLimited } = await executeContentActions(graph, result.actions, contentId, channelId, tenantId, env, payload, flow.id);
               await env.FLOW_DB.prepare(
@@ -1652,7 +1669,7 @@ export default {
 
             const branch = !statusBody.pending && statusBody.ok ? "success" : "failed";
             const resolved = resumeFromNode(graph, action.nodeId as string, payload, branch);
-            if (resolved.nodeLogs.length > 1) await emitContentNodeLogs(resolved.nodeLogs.slice(1), row.flow_id, row.content_id, row.tenant_id, env);
+            if (resolved.nodeLogs.length > 0) await emitContentNodeLogs(resolved.nodeLogs, row.flow_id, row.content_id, row.tenant_id, env, payload);
             if (resolved.actions.length > 0) {
               const { rateLimited: nestedRateLimited } = await executeContentActions(graph, resolved.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
               await env.FLOW_DB.prepare(
@@ -1692,10 +1709,11 @@ export default {
               // below (lines ~983-1004) — mustn't just drop the row per flow/CLAUDE.md's
               // "Rate limit重试耗尽后才走failed分支" rule.
               const failedResult = resumeFromNode(graph, action.nodeId as string, payload, "failed");
-              // failedResult.nodeLogs[0] is always a duplicate exit for the retried action node
-              // itself — everything from index 1 onward is the genuinely new downstream enter/exit
-              // reached by resolving the "failed" branch.
-              if (failedResult.nodeLogs.length > 1) await emitContentNodeLogs(failedResult.nodeLogs.slice(1), row.flow_id, row.content_id, row.tenant_id, env);
+              // failedResult.nodeLogs[0] is the retried action node's own duplicate exit,
+              // relabeled direction:"outcome" (carrying the resolved branch) rather than dropped —
+              // everything from index 1 onward is the genuinely new downstream enter/exit reached
+              // by resolving the "failed" branch.
+              if (failedResult.nodeLogs.length > 0) await emitContentNodeLogs(failedResult.nodeLogs, row.flow_id, row.content_id, row.tenant_id, env, payload);
               if (failedResult.actions.length > 0) {
                 const { rateLimited: nestedRateLimited } = await executeContentActions(graph, failedResult.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
                 await env.FLOW_DB.prepare(
@@ -1743,7 +1761,7 @@ export default {
         const isTimedOutVideoAction = timedOutNode?.type === "action" && timedOutNode?.data?.actionType === "videoAction";
         const branch = isTimedOutVideoAction ? "failed" : (row.awaiting_event ? "no" : undefined);
         const result = resumeFromNode(graph, row.node_id, payload, branch);
-        if (result.nodeLogs.length > 0) await emitContentNodeLogs(result.nodeLogs, row.flow_id, row.content_id, row.tenant_id, env);
+        if (result.nodeLogs.length > 0) await emitContentNodeLogs(result.nodeLogs, row.flow_id, row.content_id, row.tenant_id, env, payload);
 
         if (result.actions.length > 0) {
           const channelId = String(payload.channel_id ?? "");

@@ -125,7 +125,7 @@ describe("POST /internal/video-action/resume", () => {
     // resumeFromNode resolves a1's "success" branch down to a2 — its enter+exit must be emitted.
     expect(pipelineSend).toHaveBeenCalledTimes(1);
     const [records] = pipelineSend.mock.calls[0];
-    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a2:enter", "a2:exit"]);
+    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a2:enter", "a2:exit"]);
 
     const exec = await env.FLOW_DB.prepare(
       `SELECT content_id FROM content_flow_executions WHERE flow_id = 'flow-resume-1'`

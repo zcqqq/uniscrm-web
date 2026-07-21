@@ -10,11 +10,10 @@ import worker from "../../src/index";
 //           fetch response (queue() dispatch path).
 //   Site 2: scheduled()'s content_flow_pending retry-exhausted handling (a1 was rate-limited on
 //           every attempt, so once retries are exhausted the "failed" branch is resolved directly).
-// resumeFromNode's returned nodeLogs always has a duplicate exit for "a1" at index 0 (a1's
-// enter+exit were already logged when it was first collected as an action) — everything from
-// index 1 onward (a2 or a3's genuine enter+exit) is new and must be emitted via
-// emitContentNodeLogs/PIPELINE_CONTENT_FLOW_LOG.send. Prior to the fix, both call sites silently
-// dropped resumed/failedResult.nodeLogs entirely.
+// resumeFromNode's returned nodeLogs[0] is a1's own duplicate exit, relabeled direction:"outcome"
+// (carrying the resolved branch) rather than dropped — everything from index 1 onward (a2 or a3's
+// genuine enter+exit) is the new downstream traversal. Both are emitted via
+// emitContentNodeLogs/PIPELINE_CONTENT_FLOW_LOG.send.
 const graphWithBranches = JSON.stringify({
   nodes: [
     { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
@@ -107,10 +106,11 @@ describe("xContentAction branch resolution: downstream node logs (Site 1 — que
     ]);
 
     const [secondCallRecords] = pipelineSend.mock.calls[1];
-    // Exactly a2's enter+exit — NOT a1's duplicate exit (resumeFromNode's raw nodeLogs[0]).
+    // a1's relabeled outcome row, then a2's genuine enter+exit.
     expect(secondCallRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual([
-      "a2:enter", "a2:exit",
+      "a1:outcome", "a2:enter", "a2:exit",
     ]);
+    expect(secondCallRecords[0].outcome).toBe("success");
     expect(secondCallRecords.every((r: any) => r.content_id === "content-nodelog-1")).toBe(true);
   });
 
@@ -134,8 +134,9 @@ describe("xContentAction branch resolution: downstream node logs (Site 1 — que
     expect(pipelineSend).toHaveBeenCalledTimes(2);
     const [secondCallRecords] = pipelineSend.mock.calls[1];
     expect(secondCallRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual([
-      "a3:enter", "a3:exit",
+      "a1:outcome", "a3:enter", "a3:exit",
     ]);
+    expect(secondCallRecords[0].outcome).toBe("failed");
   });
 });
 
@@ -175,10 +176,10 @@ describe("xContentAction branch resolution: downstream node logs (Site 2 — sch
 
     expect(pipelineSend).toHaveBeenCalledTimes(1);
     const [records] = pipelineSend.mock.calls[0];
-    // Exactly a3's enter+exit — NOT a1's duplicate exit (failedResult.nodeLogs[0]).
     expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual([
-      "a3:enter", "a3:exit",
+      "a1:outcome", "a3:enter", "a3:exit",
     ]);
+    expect(records[0].outcome).toBe("failed");
     expect(records.every((r: any) => r.content_id === "content-nodelog-3")).toBe(true);
   });
 });

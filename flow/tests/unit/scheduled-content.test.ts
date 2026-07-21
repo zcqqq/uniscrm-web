@@ -156,16 +156,13 @@ describe("scheduled(): content_flow_pending sweep", () => {
 
     // The "failed" branch (a3) must have been reached — not a silent no-op, which is what
     // resolving the old hardcoded "no" branch (a nonexistent edge on this node) would produce.
-    // Note: this generic sweep path emits result.nodeLogs unsliced (unlike the dedicated
-    // resume route and the xContentAction retry-exhausted path, which both slice off index 0
-    // to avoid a duplicate exit log) — nodeLogs[0] here is a duplicate exit for a1 (whose
-    // enter+exit were already logged at initial dispatch, before the async videoAction queue
-    // hand-off). That's a pre-existing minor log-duplication quirk of the general timeout path,
-    // out of this task's scope (which is limited to the branch-resolution fix); only the
-    // "failed"-branch resolution below (a3, not a hang) is what this test asserts on.
+    // This generic sweep path emits result.nodeLogs in full (no slicing) — a1's index-0 entry
+    // is now correctly relabeled direction:"outcome" (Task 2's engine.ts fix) instead of the
+    // previous "a1:exit" duplicate, so the exit badge for a1 is no longer double-counted here.
     expect(pipelineSend).toHaveBeenCalledTimes(1);
     const [records] = pipelineSend.mock.calls[0];
-    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:exit", "a3:enter", "a3:exit"]);
+    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
+    expect(records[0].outcome).toBe("failed");
 
     const exec = await env.FLOW_DB.prepare(
       `SELECT content_id FROM content_flow_executions WHERE flow_id = 'flow-c2' AND content_id = 'content-vaction-1'`

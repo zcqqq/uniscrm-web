@@ -1316,29 +1316,17 @@ app.get("/api/flows/:id/analytics", async (c) => {
   if (isContentDomain === null) return c.json({ nodes: {} });
   const table = isContentDomain ? "content_flow_counts" : "flow_counts";
 
-  const row = await c.env.WEB_DB.prepare(
-    "SELECT d1_database_id FROM tenants WHERE tenant_id = ?"
-  ).bind(Number(tenantId)).first<{ d1_database_id: string | null }>();
-  if (!row?.d1_database_id) return c.json({ nodes: {} });
+  const rows = await c.env.FLOW_DB.prepare(
+    `SELECT node_id, direction, count FROM ${table} WHERE tenant_id = ? AND flow_id = ?`
+  ).bind(Number(tenantId), flowId).all<{ node_id: string; direction: string; count: number }>();
 
-  const tdb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, row.d1_database_id);
-
-  try {
-    const rows = await tdb.query<{ node_id: string; direction: string; count: number }>(
-      `SELECT node_id, direction, count FROM ${table} WHERE flow_id = ?`,
-      [flowId]
-    );
-    const nodes: Record<string, { enter: number; exit: number }> = {};
-    for (const r of rows) {
-      if (!nodes[r.node_id]) nodes[r.node_id] = { enter: 0, exit: 0 };
-      if (r.direction === "enter") nodes[r.node_id].enter = r.count;
-      if (r.direction === "exit") nodes[r.node_id].exit = r.count;
-    }
-    return c.json({ nodes });
-  } catch (e) {
-    console.error(JSON.stringify({ event: "flow_analytics_query_error", error: String(e) }));
-    return c.json({ nodes: {} });
+  const nodes: Record<string, { enter: number; exit: number }> = {};
+  for (const r of rows.results) {
+    if (!nodes[r.node_id]) nodes[r.node_id] = { enter: 0, exit: 0 };
+    if (r.direction === "enter") nodes[r.node_id].enter = r.count;
+    if (r.direction === "exit") nodes[r.node_id].exit = r.count;
   }
+  return c.json({ nodes });
 });
 
 // flowId/nodeId are always crypto.randomUUID() values in this codebase (see flow creation and

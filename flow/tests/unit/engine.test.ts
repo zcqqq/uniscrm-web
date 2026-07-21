@@ -423,3 +423,29 @@ describe("resumeFromNode: action branch targets get full actionData", () => {
     expect(result.pendingWaits[0]).toMatchObject({ nodeId: "e1", awaitingEvent: "user.joined" });
   });
 });
+
+describe("resumeFromNode: outcome relabeling is conditional on the resumed node's type", () => {
+  it("relabels index-0 to 'outcome' with the branch when resuming an action node (exit was already logged eagerly at dispatch)", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "a1", type: "action", data: { actionType: "xContentAction" }, position: { x: 0, y: 0 } },
+        { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "a1", target: "a2", sourceHandle: "success" }],
+    };
+    const result = resumeFromNode(graph, "a1", {}, "success");
+    expect(result.nodeLogs[0]).toEqual({ nodeId: "a1", direction: "outcome", outcome: "success" });
+  });
+
+  it("keeps index-0 as a plain 'exit' (no outcome) when resuming a wait/waitForEvent/timeCondition node", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "w1", type: "wait", data: { duration: 5, unit: "minutes" }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "noopLeaf" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "w1", target: "a1" }],
+    };
+    const result = resumeFromNode(graph, "w1", {}, undefined);
+    expect(result.nodeLogs[0]).toEqual({ nodeId: "w1", direction: "exit" });
+  });
+});

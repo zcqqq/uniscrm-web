@@ -34,7 +34,8 @@ export interface ActionResult {
 
 export interface NodeLog {
   nodeId: string;
-  direction: "enter" | "exit";
+  direction: "enter" | "exit" | "outcome";
+  outcome?: string;
 }
 
 export interface ExecutionResult {
@@ -208,7 +209,19 @@ export function resumeFromNode(
   const pendingWaits: PendingWait[] = [];
   const nodeLogs: NodeLog[] = [];
 
-  nodeLogs.push({ nodeId, direction: "exit" });
+  // wait/waitForEvent/timeCondition defer logging "exit" until resolution (collectActions never
+  // logs it eagerly for these three types — see their branches below) — this IS their one
+  // legitimate exit and must stay countable. Every other resumable type (all "action" nodes,
+  // plus webhook/abSplit/userPropsCondition/videoCondition) already had "exit" logged eagerly at
+  // dispatch time; this second push is a duplicate, so it's relabeled "outcome" (carrying the
+  // resolved branch) instead of counted again.
+  const originatingNode = graph.nodes.find((n) => n.id === nodeId);
+  const DEFERRED_EXIT_TYPES = ["wait", "waitForEvent", "timeCondition"];
+  if (originatingNode && DEFERRED_EXIT_TYPES.includes(originatingNode.type)) {
+    nodeLogs.push({ nodeId, direction: "exit" });
+  } else {
+    nodeLogs.push({ nodeId, direction: "outcome", outcome: branch });
+  }
 
   if (branch) {
     const branchEdges = graph.edges.filter((e) => e.source === nodeId && e.sourceHandle === branch);

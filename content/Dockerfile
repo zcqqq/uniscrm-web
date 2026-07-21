@@ -1,6 +1,10 @@
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg curl && rm -rf /var/lib/apt/lists/*
+# fonts-noto-cjk is required, not cosmetic: the base image ships only DejaVu, which has zero
+# CJK coverage, so burned-in Chinese/Japanese/Korean subtitles render as tofu boxes (□) while
+# ffmpeg still reports success. The Target Language dropdown offers zh/ja/ko, so this font is
+# what makes three of the seven supported languages actually legible.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg curl fonts-noto-cjk && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir yt-dlp flask boto3 opencv-python-headless
 
 WORKDIR /app

@@ -6,6 +6,7 @@
     { "name": "node_id", "type": "string", "required": true },
     { "name": "user_id", "type": "string", "required": true },
     { "name": "direction", "type": "string", "required": true },
+    { "name": "outcome", "type": "string", "required": false },
     { "name": "created_at", "type": "string", "required": true }
   ]
 }

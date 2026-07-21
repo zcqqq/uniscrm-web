@@ -56,11 +56,11 @@ queue = "uniscrm-video-action-dev"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_FLOW_LOG"
-stream = "cf0fca6467a043ec952b1a901ea62661"
+stream = "5545a9d599ee42e4b5479cd565fdf3ca"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_CONTENT_FLOW_LOG"
-stream = "2549560664bf4351b132f860a30c3d0c"
+stream = "68ce7acd4afe49568f273f349c91637b"
 
 [env.dev.ai]
 binding = "AI"

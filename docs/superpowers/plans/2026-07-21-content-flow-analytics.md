@@ -23,6 +23,7 @@
 **Files:**
 - Modify: `analytics/pipelines/flow-log-stream-schema.json`
 - Modify: `analytics/pipelines/content-flow-log-stream-schema.json`
+- Modify: `flow/wrangler.toml` (`[env.dev.pipelines]` and `[env.production.pipelines]` — stream IDs are rebound after each stream recreation, see Steps 2a/3a/5a)
 
 **Interfaces:**
 - Produces: the R2 Iceberg tables `uniscrm.flow_log` (adds `outcome`) and `uniscrm.content_flow_log` (adds `outcome`, `title`, `content_text`, `content_url`) that Task 3's `emitNodeLogs`/`emitContentNodeLogs` write to and Task 4's `queryNodeLogRows` reads from.
@@ -72,19 +73,35 @@ This is an infrastructure task — no application code changes, no Vitest tests.
 
 `wrangler pipelines streams` has no update command (create/list/get/delete only) and R2 SQL rejects `ALTER`/`CREATE`/`DROP` ("only read-only queries are allowed") — schema changes require deleting and recreating the stream + pipeline. The sink (`flow_log_sink_dev`, pointing at Iceberg table `uniscrm.flow_log` by `--table` name) is untouched here — sinks persist independently of stream/pipeline lifecycle, so existing rows are not affected.
 
+A stream cannot be deleted while a pipeline still references it (`wrangler pipelines streams delete` errors `Stream still in use and cannot be deleted without force [code: 1010]`) — delete the dependent pipeline first, then the stream:
+
 ```bash
+wrangler pipelines delete uniscrm_flow_log_pipeline_dev -y
 wrangler pipelines streams delete uniscrm_flow_log_dev -y
 wrangler pipelines streams create uniscrm_flow_log_dev --schema-file analytics/pipelines/flow-log-stream-schema.json
 wrangler pipelines create uniscrm_flow_log_pipeline_dev --sql "INSERT INTO flow_log_sink_dev SELECT * FROM uniscrm_flow_log_dev"
 ```
 
-Expected: each command prints a new resource ID. `wrangler pipelines streams get uniscrm_flow_log_dev` should show `outcome` in the Input Schema table.
+Expected: each command prints a new resource ID (record the new stream ID — the create command's output — for Step 2a below). `wrangler pipelines streams get uniscrm_flow_log_dev` should show `outcome` in the Input Schema table.
+
+- [ ] **Step 2a: Rebind `flow/wrangler.toml`'s `PIPELINE_FLOW_LOG` stream ID (dev)**
+
+`flow/wrangler.toml` binds each pipeline by the stream's literal ID, not by name — delete+recreate always mints a new ID, and since `emitNodeLogs`/`emitContentNodeLogs` wrap `.send()` in `.catch(() => {})`, a stale ID here silently drops all writes with no error anywhere. Find, in `[env.dev.pipelines]`:
+
+```toml
+[[env.dev.pipelines]]
+binding = "PIPELINE_FLOW_LOG"
+stream = "<old-stream-id>"
+```
+
+Replace `<old-stream-id>` with the new stream ID printed by Step 2's `streams create` command.
 
 - [ ] **Step 3: Rebuild the dev stream, sink, and pipeline for `content_flow_log` (also fixes the pre-existing failed sink credential)**
 
-`content_flow_log_sink_dev`'s `--catalog-token` is currently invalid (`wrangler pipelines list` shows `uniscrm_content_flow_log_pipeline_dev` in `failed` status with `R2 bucket [uniscrm-dev]: invalid credentials (signature mismatch)`) — pre-existing, unrelated to this feature, but since the sink is being rebuilt anyway, use a fresh token. Get a current, valid R2 API token (Cloudflare dashboard → R2 → Manage API Tokens, or check the project's password manager entry used when this sink was first created) and export it as `R2_TOKEN` before running:
+`content_flow_log_sink_dev`'s `--catalog-token` is currently invalid (`wrangler pipelines list` shows `uniscrm_content_flow_log_pipeline_dev` in `failed` status with `R2 bucket [uniscrm-dev]: invalid credentials (signature mismatch)`) — pre-existing, unrelated to this feature, but since the sink is being rebuilt anyway, use a fresh token. Get a current, valid R2 API token with R2 Data Catalog write access (Cloudflare dashboard → R2 → Manage API Tokens → "Admin Read & Write" or "Object Read & Write" scoped to the account — do NOT reuse the old invalid token or any other token found lying around without confirming it actually authenticates; `wrangler pipelines sinks create` fails fast with `could not authenticate against the catalog with the provided token [code: 1012]` if it's wrong) and export it as `R2_TOKEN` before running. Delete the dependent pipeline before the stream, same as Step 2:
 
 ```bash
+wrangler pipelines delete uniscrm_content_flow_log_pipeline_dev -y
 wrangler pipelines streams delete uniscrm_content_flow_log_dev -y
 wrangler pipelines streams create uniscrm_content_flow_log_dev --schema-file analytics/pipelines/content-flow-log-stream-schema.json
 wrangler pipelines sinks delete content_flow_log_sink_dev -y
@@ -95,6 +112,26 @@ wrangler pipelines create uniscrm_content_flow_log_pipeline_dev --sql "INSERT IN
 ```
 
 Expected: each command prints a new resource ID. `wrangler pipelines list` should show `uniscrm_content_flow_log_pipeline_dev` in `running` status (not `failed`).
+
+- [ ] **Step 3a: Rebind `flow/wrangler.toml`'s `PIPELINE_CONTENT_FLOW_LOG` stream ID (dev)**
+
+Same reasoning as Step 2a. Find, in `[env.dev.pipelines]`:
+
+```toml
+[[env.dev.pipelines]]
+binding = "PIPELINE_CONTENT_FLOW_LOG"
+stream = "<old-stream-id>"
+```
+
+Replace `<old-stream-id>` with the new stream ID from Step 3's `streams create` command.
+
+- [ ] **Step 3b: Redeploy the `flow` worker (dev) with the rebound `wrangler.toml`**
+
+The stream-ID edits in Steps 2a/3a only take effect once the running Worker is redeployed with the updated config — this doesn't happen automatically. If Tasks 2–3's code changes haven't landed and redeployed yet, note that this redeploy will naturally happen together with that later deploy; otherwise redeploy now:
+
+```bash
+cd flow && wrangler deploy --env dev
+```
 
 - [ ] **Step 4: Verify dev via a real write, then read-only R2 SQL**
 
@@ -109,13 +146,15 @@ wrangler r2 sql query <warehouse> "SELECT node_id, direction, outcome, title, co
 
 - [ ] **Step 5: Repeat Steps 2–3 for production (no `_dev` suffix, bucket `uniscrm`)**
 
-Only proceed once dev verification in Step 4 succeeds.
+Only proceed once dev verification in Step 4 succeeds. Same dependent-pipeline-first deletion order as dev:
 
 ```bash
+wrangler pipelines delete uniscrm_flow_log_pipeline -y
 wrangler pipelines streams delete uniscrm_flow_log -y
 wrangler pipelines streams create uniscrm_flow_log --schema-file analytics/pipelines/flow-log-stream-schema.json
 wrangler pipelines create uniscrm_flow_log_pipeline --sql "INSERT INTO flow_log_sink SELECT * FROM uniscrm_flow_log"
 
+wrangler pipelines delete uniscrm_content_flow_log_pipeline -y
 wrangler pipelines streams delete uniscrm_content_flow_log -y
 wrangler pipelines streams create uniscrm_content_flow_log --schema-file analytics/pipelines/content-flow-log-stream-schema.json
 wrangler pipelines create uniscrm_content_flow_log_pipeline --sql "INSERT INTO content_flow_log_sink SELECT * FROM uniscrm_content_flow_log"
@@ -124,6 +163,16 @@ wrangler pipelines create uniscrm_content_flow_log_pipeline --sql "INSERT INTO c
 Production's `content_flow_log_sink` credential is not known to be broken — do NOT delete/recreate that sink, only the stream and pipeline (which don't need the sink's token).
 
 Expected: `wrangler pipelines list` shows both production pipelines in `running` status.
+
+- [ ] **Step 5a: Rebind `flow/wrangler.toml`'s `[env.production.pipelines]` stream IDs, then redeploy**
+
+Same as Steps 2a/3a but for the `[env.production.pipelines]` block (no `_dev` suffix on the binding values). Then:
+
+```bash
+cd flow && wrangler deploy --env production
+```
+
+Confirm with the user before running a production deploy if it wasn't already clearly authorized as part of this task.
 
 - [ ] **Step 6: Commit the schema files**
 

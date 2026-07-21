@@ -101,7 +101,8 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
       id: "social", label: "Social", icon: Icons.Users,
       items: [
         { id: "channels", label: "Channels", href: `${urls.link}/channel` },
-        { id: "flow", label: "Flow", href: urls.flow },
+        // id stays "flow" so the "social.flow" tier gating key in shared/plans.ts keeps matching.
+        { id: "flow", label: "User Flow", href: urls.flow },
         { id: "users", label: "Users", href: `${urls.link}/users` },
         { id: "lists", label: "Lists", href: `${urls.link}/list` },
       ],
@@ -115,9 +116,10 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
     {
       id: "content", label: "Content", icon: Icons.Content,
       items: [
+        { id: "content-flow", label: "Content Flow", href: `${urls.flow}/content` },
         { id: "recommendations", label: "Recommendation", href: `${urls.web}/recommendations` },
         { id: "content", label: "Content Library", href: `${urls.link}/content` },
-        { id: "ai-generation", label: "AI Generation Settings", href: urls.content },
+        { id: "ai-generation", label: "AI Content Settings", href: urls.content },
       ],
     },
     { id: "commerce", label: "Commerce", icon: Icons.ShoppingBag, href: `${urls.link}/commerce` },
@@ -149,14 +151,22 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
   const currentUrl = typeof window !== "undefined" ? window.location.origin + window.location.pathname : "";
 
   const isItemActive = (href: string) => {
-    if (!currentUrl || !href) return false;
+    if (!currentUrl) return false;
+    // Every module blanks out its own base URL in the `urls` it passes (see the per-module Nav
+    // wrappers), so an item pointing at that module's own root arrives here as "".
+    const target = href === "" ? "/" : href;
     const normalized = currentUrl.replace(/\/$/, "");
-    const hrefNormalized = href.replace(/\/$/, "");
+    const hrefNormalized = target.replace(/\/$/, "");
     if (normalized === hrefNormalized) return true;
     try {
-      const hrefUrl = new URL(href, window.location.origin);
-      if (hrefUrl.origin === window.location.origin && hrefUrl.pathname !== "/") {
-        return window.location.pathname.startsWith(hrefUrl.pathname);
+      const hrefUrl = new URL(target, window.location.origin);
+      if (hrefUrl.origin === window.location.origin) {
+        // A root href has to match exactly. Prefix-matching "/" would light the item up on
+        // every page the worker serves, including sibling pages belonging to a different menu
+        // group — flow serves "/" (Social > User Flow) and "/content" (Content > Content Flow).
+        return hrefUrl.pathname === "/"
+          ? window.location.pathname === "/"
+          : window.location.pathname.startsWith(hrefUrl.pathname);
       }
     } catch {}
     return normalized.startsWith(hrefNormalized);

@@ -53,7 +53,7 @@ export default function AnalyticsPage() {
   if (!flow) return <div className="flex items-center justify-center h-screen text-destructive">Flow not found</div>;
 
   const graph = JSON.parse(flow.graph_json || '{"nodes":[],"edges":[]}');
-  const isContentDomain = graph.nodes.some((n: any) => n.type === "xContentTrigger" || n.type === "youtubeContentTrigger");
+  const isContentDomain = flow.domain === "content";
   const nodes = graph.nodes.map((n: any) => ({
     ...n,
     draggable: false,
@@ -73,7 +73,7 @@ export default function AnalyticsPage() {
       <ReactFlowProvider>
         <div className="h-screen flex flex-col">
           <div className="flex items-center h-12 px-4 border-b border-border bg-background gap-3">
-            <Button variant="ghost" size="sm" onClick={() => navigate("/")}>← Back</Button>
+            <Button variant="ghost" size="sm" onClick={() => navigate(isContentDomain ? "/content" : "/")}>← Back</Button>
             <span className="text-sm font-medium flex-1">{flow.name}</span>
             <Button variant="outline" size="sm" onClick={handleUnpublish}>Unpublish</Button>
           </div>

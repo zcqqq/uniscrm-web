@@ -20,9 +20,10 @@ import Inspector from "../components/Inspector";
 
 
 function EditorToolbar() {
-  const { flowId, flowName, isDirty, setFlowName, markClean, toGraphJson, replaceGraph } =
+  const { flowId, flowName, flowDomain, isDirty, setFlowName, markClean, toGraphJson, replaceGraph } =
     useFlowEditor();
   const navigate = useNavigate();
+  const listPath = flowDomain === "content" ? "/content" : "/";
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -55,7 +56,7 @@ function EditorToolbar() {
       if (flowId) {
         await api.flows.update(flowId, { name: flowName, graph_json: toGraphJson() });
       } else {
-        const { flow } = await api.flows.create(flowName, toGraphJson());
+        const { flow } = await api.flows.create(flowName, toGraphJson(), flowDomain);
         useFlowEditor.setState({ flowId: flow.id });
         window.history.replaceState(null, "", `/flows/${flow.id}`);
       }
@@ -68,11 +69,11 @@ function EditorToolbar() {
   const handleBack = () => {
     if (isDirty) {
       if (confirm("You have unsaved changes. Save before leaving?")) {
-        handleSave().then(() => navigate("/"));
+        handleSave().then(() => navigate(listPath));
         return;
       }
     }
-    navigate("/");
+    navigate(listPath);
   };
 
   return (
@@ -88,12 +89,8 @@ function EditorToolbar() {
       <AiGenerateBar
         endpoint="/api/flows/generate"
         context={(() => { const { nodes, edges } = useFlowEditor.getState(); return { nodes, edges }; })()}
-        extraBody={{
-          domain: (useFlowEditor.getState().nodes.some((n) => n.type === "xContentTrigger" || n.type === "youtubeContentTrigger") ? "content" : "user") satisfies FlowDomain,
-        }}
-        allowedNodeTypes={generatableKeysForDomain(
-          useFlowEditor.getState().nodes.some((n) => n.type === "xContentTrigger" || n.type === "youtubeContentTrigger") ? "content" : "user"
-        )}
+        extraBody={{ domain: flowDomain satisfies FlowDomain }}
+        allowedNodeTypes={generatableKeysForDomain(flowDomain)}
         placeholder="Describe your flow..."
         onResult={(graph) => {
           if (Array.isArray(graph.nodes) && Array.isArray(graph.edges)) {
@@ -145,12 +142,16 @@ function EditorToolbar() {
 }
 
 export default function EditorPage() {
-  useEffect(() => { document.title = "Flow — UniSCRM" }, []);
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const { setFlow } = useFlowEditor();
+  const flowDomain = useFlowEditor((s) => s.flowDomain);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    document.title = `${flowDomain === "content" ? "Content Flow" : "User Flow"} — UniSCRM`;
+  }, [flowDomain]);
 
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
@@ -170,8 +171,11 @@ export default function EditorPage() {
       const name = tpl?.name || "Untitled Flow";
       const nodes = tpl?.graph.nodes || [];
       const edges = tpl?.graph.edges || [];
-      setFlow(null as any, name, false, nodes, edges);
-      if (!tpl && searchParams.get("domain") === "content") {
+      // A template carries its own domain; otherwise it comes from the list page that
+      // launched the "+ New" (?domain=). The flow keeps this domain for its whole life.
+      const domain: FlowDomain = tpl ? tpl.domain : (searchParams.get("domain") === "content" ? "content" : "user");
+      setFlow(null as any, name, false, nodes, edges, domain);
+      if (!tpl && domain === "content") {
         useFlowEditor.getState().addNode("xContentTrigger", { x: 0, y: 0 });
       }
       void useFlowEditor.getState().autoFillChannelIds();
@@ -183,7 +187,7 @@ export default function EditorPage() {
       .get(id)
       .then(({ flow }) => {
         const graph = JSON.parse(flow.graph_json || '{"nodes":[],"edges":[]}');
-        setFlow(flow.id, flow.name, !!flow.enabled, graph.nodes || [], graph.edges || []);
+        setFlow(flow.id, flow.name, !!flow.enabled, graph.nodes || [], graph.edges || [], flow.domain === "content" ? "content" : "user");
         void useFlowEditor.getState().autoFillChannelIds();
       })
       .catch((e) => setError(e.message))

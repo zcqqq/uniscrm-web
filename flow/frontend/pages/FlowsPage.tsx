@@ -49,9 +49,13 @@ function getNodeIcons(nodes: { type: string; data: Record<string, unknown> }[]) 
 type SortKey = "trigger_count" | "updated_at";
 type SortDir = "asc" | "desc";
 
-export default function FlowsPage() {
-  useEffect(() => { document.title = "Flow — UniSCRM"; }, []);
-  const [domain, setDomain] = useState<"user" | "content">("user");
+interface FlowsPageProps {
+  domain: "user" | "content";
+}
+
+export default function FlowsPage({ domain }: FlowsPageProps) {
+  const title = domain === "content" ? "Content Flow" : "User Flow";
+  useEffect(() => { document.title = `${title} — UniSCRM`; }, [title]);
   const { flows, loading, page, total, totalPages, setPage, createFlow, deleteFlow, refresh } = useFlows(domain);
   const { timezone } = useLocale();
   const navigate = useNavigate();
@@ -92,29 +96,13 @@ export default function FlowsPage() {
 
   return (
     <div className="flex min-h-screen">
-      <Nav />
+      <Nav currentModule={domain === "content" ? "content" : "social"} />
       <main className="flex-1 overflow-auto bg-background">
         <div className="max-w-6xl mx-auto p-6">
           {/* Header */}
-          <div className="mb-6">
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-xl font-semibold">{title}</h1>
             <Button onClick={() => handleCreate()}>+ New</Button>
-          </div>
-
-          <div className="flex gap-1 mb-6 border-b border-border">
-            <button
-              type="button"
-              onClick={() => setDomain("user")}
-              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${domain === "user" ? "border-primary text-foreground" : "border-transparent text-muted-foreground"}`}
-            >
-              User Flows
-            </button>
-            <button
-              type="button"
-              onClick={() => setDomain("content")}
-              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${domain === "content" ? "border-primary text-foreground" : "border-transparent text-muted-foreground"}`}
-            >
-              Content Flows
-            </button>
           </div>
 
           {/* Template cards */}

@@ -6,10 +6,11 @@ const TENANT_ID = 777;
 
 const userFlowGraph = JSON.stringify({ nodes: [{ id: "t1", type: "xTrigger", data: {}, position: { x: 0, y: 0 } }], edges: [] });
 const contentFlowGraph = JSON.stringify({ nodes: [{ id: "t1", type: "xContentTrigger", data: {}, position: { x: 0, y: 0 } }], edges: [] });
-// Regression fixture: a YouTube-only content flow has no "xContentTrigger" substring anywhere in
-// its graph_json. Domain classification must still recognize it as content-domain (matching the
-// frontend's `n.type === "xContentTrigger" || n.type === "youtubeContentTrigger"` check).
 const youtubeContentFlowGraph = JSON.stringify({ nodes: [{ id: "t1", type: "youtubeContentTrigger", data: {}, position: { x: 0, y: 0 } }], edges: [] });
+// Regression fixture: a content flow whose only trigger was deleted. Domain now comes from the
+// flows.domain column (migration 0014), so the graph having no trigger at all must not send this
+// flow's analytics to the user-domain flow_counts table.
+const triggerlessGraph = JSON.stringify({ nodes: [{ id: "a1", type: "action", data: { actionType: "xContentAction" }, position: { x: 0, y: 0 } }], edges: [] });
 
 function req(path: string) {
   return new Request(`https://flow.test${path}`, { headers: { Cookie: "session=test" } });
@@ -37,7 +38,8 @@ describe("GET /api/flows/:id/analytics", () => {
       `CREATE TABLE IF NOT EXISTS flows (
          id TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, member_id TEXT NOT NULL DEFAULT '',
          name TEXT NOT NULL DEFAULT 'Untitled Flow', description TEXT DEFAULT '',
-         graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}', status TEXT NOT NULL DEFAULT 'draft',
+         graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}', domain TEXT NOT NULL DEFAULT 'user',
+         status TEXT NOT NULL DEFAULT 'draft',
          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
        )`
     ).run();
@@ -52,14 +54,17 @@ describe("GET /api/flows/:id/analytics", () => {
     ).bind(TENANT_ID).run();
     await env.FLOW_DB.batch([
       env.FLOW_DB.prepare(
-        `INSERT INTO flows (id, tenant_id, graph_json, status, created_at, updated_at) VALUES ('flow-an-user', ?, ?, 'published', datetime('now'), datetime('now'))`
+        `INSERT INTO flows (id, tenant_id, graph_json, domain, status, created_at, updated_at) VALUES ('flow-an-user', ?, ?, 'user', 'published', datetime('now'), datetime('now'))`
       ).bind(TENANT_ID, userFlowGraph),
       env.FLOW_DB.prepare(
-        `INSERT INTO flows (id, tenant_id, graph_json, status, created_at, updated_at) VALUES ('flow-an-content', ?, ?, 'published', datetime('now'), datetime('now'))`
+        `INSERT INTO flows (id, tenant_id, graph_json, domain, status, created_at, updated_at) VALUES ('flow-an-content', ?, ?, 'content', 'published', datetime('now'), datetime('now'))`
       ).bind(TENANT_ID, contentFlowGraph),
       env.FLOW_DB.prepare(
-        `INSERT INTO flows (id, tenant_id, graph_json, status, created_at, updated_at) VALUES ('flow-an-youtube', ?, ?, 'published', datetime('now'), datetime('now'))`
+        `INSERT INTO flows (id, tenant_id, graph_json, domain, status, created_at, updated_at) VALUES ('flow-an-youtube', ?, ?, 'content', 'published', datetime('now'), datetime('now'))`
       ).bind(TENANT_ID, youtubeContentFlowGraph),
+      env.FLOW_DB.prepare(
+        `INSERT INTO flows (id, tenant_id, graph_json, domain, status, created_at, updated_at) VALUES ('flow-an-triggerless', ?, ?, 'content', 'published', datetime('now'), datetime('now'))`
+      ).bind(TENANT_ID, triggerlessGraph),
     ]);
   });
 
@@ -69,7 +74,7 @@ describe("GET /api/flows/:id/analytics", () => {
     vi.unstubAllGlobals();
   });
 
-  it("queries content_flow_counts for a flow whose graph_json contains xContentTrigger", async () => {
+  it("queries content_flow_counts for a content-domain flow", async () => {
     const res = await worker.fetch(req("/api/flows/flow-an-content/analytics"), env);
     expect(res.status).toBe(200);
     const d1Call = fetchMock.mock.calls.find((c) => !String(c[0]).includes("/api/auth/me"));
@@ -85,7 +90,15 @@ describe("GET /api/flows/:id/analytics", () => {
     expect(body.sql).toContain("FROM content_flow_counts");
   });
 
-  it("queries flow_counts for a flow without xContentTrigger", async () => {
+  it("queries content_flow_counts for a content flow whose only trigger was deleted", async () => {
+    const res = await worker.fetch(req("/api/flows/flow-an-triggerless/analytics"), env);
+    expect(res.status).toBe(200);
+    const d1Call = fetchMock.mock.calls.find((c) => !String(c[0]).includes("/api/auth/me"));
+    const body = JSON.parse(d1Call![1].body as string);
+    expect(body.sql).toContain("FROM content_flow_counts");
+  });
+
+  it("queries flow_counts for a user-domain flow", async () => {
     const res = await worker.fetch(req("/api/flows/flow-an-user/analytics"), env);
     expect(res.status).toBe(200);
     const d1Call = fetchMock.mock.calls.find((c) => !String(c[0]).includes("/api/auth/me"));

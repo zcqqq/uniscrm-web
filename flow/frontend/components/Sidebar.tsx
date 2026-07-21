@@ -50,8 +50,7 @@ function sortByOrder(items: SectionItem[], order: string[]): React.ReactNode[] {
 }
 
 export default function Sidebar() {
-  const nodes = useFlowEditor((s) => s.nodes);
-  const domain: FlowDomain = nodes.some((n) => n.type === "xContentTrigger" || n.type === "youtubeContentTrigger") ? "content" : "user";
+  const domain: FlowDomain = useFlowEditor((s) => s.flowDomain);
   const visible = (nodeTypeKey: string) => {
     const cfg = NODE_TYPE_REGISTRY[nodeTypeKey];
     return !cfg || cfg.domain === "both" || cfg.domain === domain;

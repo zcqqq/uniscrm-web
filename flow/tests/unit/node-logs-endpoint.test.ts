@@ -95,7 +95,8 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — UUID validation guard", () =
       `CREATE TABLE IF NOT EXISTS flows (
          id TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, member_id TEXT NOT NULL DEFAULT '',
          name TEXT NOT NULL DEFAULT 'Untitled Flow', description TEXT DEFAULT '',
-         graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}', status TEXT NOT NULL DEFAULT 'draft',
+         graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}', domain TEXT NOT NULL DEFAULT 'user',
+         status TEXT NOT NULL DEFAULT 'draft',
          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
        )`
     ).run();
@@ -171,12 +172,13 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — content domain reads R2 only
       `CREATE TABLE IF NOT EXISTS flows (
          id TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, member_id TEXT NOT NULL DEFAULT '',
          name TEXT NOT NULL DEFAULT 'Untitled Flow', description TEXT DEFAULT '',
-         graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}', status TEXT NOT NULL DEFAULT 'draft',
+         graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}', domain TEXT NOT NULL DEFAULT 'user',
+         status TEXT NOT NULL DEFAULT 'draft',
          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
        )`
     ).run();
     await env.FLOW_DB.prepare(
-      `INSERT INTO flows (id, tenant_id, graph_json, status, created_at, updated_at) VALUES (?, ?, '{"nodes":[{"id":"t1","type":"xContentTrigger","data":{}}],"edges":[]}', 'published', datetime('now'), datetime('now'))`
+      `INSERT INTO flows (id, tenant_id, graph_json, domain, status, created_at, updated_at) VALUES (?, ?, '{"nodes":[{"id":"t1","type":"xContentTrigger","data":{}}],"edges":[]}', 'content', 'published', datetime('now'), datetime('now'))`
     ).bind(FLOW_ID, TENANT_ID).run();
   });
 
@@ -228,12 +230,13 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — YouTube-only content flow is
       `CREATE TABLE IF NOT EXISTS flows (
          id TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, member_id TEXT NOT NULL DEFAULT '',
          name TEXT NOT NULL DEFAULT 'Untitled Flow', description TEXT DEFAULT '',
-         graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}', status TEXT NOT NULL DEFAULT 'draft',
+         graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}', domain TEXT NOT NULL DEFAULT 'user',
+         status TEXT NOT NULL DEFAULT 'draft',
          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
        )`
     ).run();
     await env.FLOW_DB.prepare(
-      `INSERT INTO flows (id, tenant_id, graph_json, status, created_at, updated_at) VALUES (?, ?, '{"nodes":[{"id":"t1","type":"youtubeContentTrigger","data":{}}],"edges":[]}', 'published', datetime('now'), datetime('now'))`
+      `INSERT INTO flows (id, tenant_id, graph_json, domain, status, created_at, updated_at) VALUES (?, ?, '{"nodes":[{"id":"t1","type":"youtubeContentTrigger","data":{}}],"edges":[]}', 'content', 'published', datetime('now'), datetime('now'))`
     ).bind(FLOW_ID, TENANT_ID).run();
   });
 

@@ -7,13 +7,13 @@ import { TenantDataDB } from "../../shared/tenant-data-db";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../nodeTypeRegistry";
 
-// A flow is content-domain if its graph contains any content trigger node type. Keep this in
-// sync with the frontend's equivalent check (flow/frontend/pages/AnalyticsPage.tsx,
-// flow/frontend/components/Sidebar.tsx, flow/frontend/pages/EditorPage.tsx), which tests
-// `n.type === "xContentTrigger" || n.type === "youtubeContentTrigger"` against parsed nodes.
-// graph_json is a raw JSON string here (not parsed), so this stays a substring check.
-function isContentDomainGraph(graphJson: string): boolean {
-  return graphJson.includes("xContentTrigger") || graphJson.includes("youtubeContentTrigger");
+// A flow's domain is stored on the row (migration 0014), set at creation and never changed.
+// It used to be sniffed from graph_json for a content trigger node type, which broke as soon
+// as the graph lost its trigger — the flow then read the user-domain counts/log tables.
+async function isContentDomainFlow(env: Env, flowId: string, tenantId: string): Promise<boolean | null> {
+  const row = await env.FLOW_DB.prepare("SELECT domain FROM flows WHERE id = ? AND tenant_id = ?")
+    .bind(flowId, tenantId).first<{ domain: string }>();
+  return row ? row.domain === "content" : null;
 }
 
 async function emitNodeLogs(nodeLogs: NodeLog[], flowId: string, userId: string, tenantId: number, env: Env): Promise<void> {
@@ -1135,21 +1135,20 @@ app.get("/api/flows", async (c) => {
   const limit = Math.min(50, Math.max(1, parseInt(c.req.query("limit") || "10", 10)));
   const offset = (page - 1) * limit;
   const domain = c.req.query("domain") === "content" ? "content" : "user";
-  const domainClause = domain === "content" ? "AND f.graph_json LIKE '%xContentTrigger%'" : "AND f.graph_json NOT LIKE '%xContentTrigger%'";
 
   const countRow = await c.env.FLOW_DB.prepare(
-    `SELECT COUNT(*) as total FROM flows f WHERE f.tenant_id = ? ${domainClause}`
+    `SELECT COUNT(*) as total FROM flows f WHERE f.tenant_id = ? AND f.domain = ?`
   )
-    .bind(tenantId)
+    .bind(tenantId, domain)
     .first<{ total: number }>();
   const total = countRow?.total || 0;
 
   const rows = await c.env.FLOW_DB.prepare(
     `SELECT f.id, f.name, f.description, f.status, f.member_id, f.created_at, f.updated_at,
        (SELECT COUNT(*) FROM flow_executions WHERE flow_id = f.id) + (SELECT COUNT(*) FROM content_flow_executions WHERE flow_id = f.id) as trigger_count
-     FROM flows f WHERE f.tenant_id = ? ${domainClause} ORDER BY f.updated_at DESC LIMIT ? OFFSET ?`
+     FROM flows f WHERE f.tenant_id = ? AND f.domain = ? ORDER BY f.updated_at DESC LIMIT ? OFFSET ?`
   )
-    .bind(tenantId, limit, offset)
+    .bind(tenantId, domain, limit, offset)
     .all<{ id: string; name: string; description: string; status: string; member_id: string; created_at: string; updated_at: string; trigger_count: number }>();
 
   const memberIds = [...new Set(rows.results.map(r => r.member_id).filter(Boolean))];
@@ -1173,21 +1172,23 @@ app.get("/api/flows", async (c) => {
 app.post("/api/flows", async (c) => {
   const tenantId = c.get("tenantId");
   const memberId = c.get("memberId");
-  const body = await c.req.json<{ name?: string; description?: string; graph_json?: string }>().catch(() => ({ name: undefined, description: undefined, graph_json: undefined }));
+  const body = await c.req.json<{ name?: string; description?: string; graph_json?: string; domain?: string }>().catch(() => ({ name: undefined, description: undefined, graph_json: undefined, domain: undefined }));
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const name = body.name || "Untitled Flow";
   const description = body.description || "";
   const graphJson = body.graph_json || '{"nodes":[],"edges":[]}';
+  // Fixed at creation and never updated afterwards — see migration 0014.
+  const domain = body.domain === "content" ? "content" : "user";
 
   await c.env.FLOW_DB.prepare(
-    `INSERT INTO flows (id, tenant_id, member_id, name, description, graph_json, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)`
+    `INSERT INTO flows (id, tenant_id, member_id, name, description, graph_json, domain, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`
   )
-    .bind(id, tenantId, memberId, name, description, graphJson, now, now)
+    .bind(id, tenantId, memberId, name, description, graphJson, domain, now, now)
     .run();
 
-  return c.json({ flow: { id, name, description } }, 201);
+  return c.json({ flow: { id, name, description, domain } }, 201);
 });
 
 // Get flow
@@ -1296,10 +1297,8 @@ app.get("/api/flows/:id/analytics", async (c) => {
   const flowId = c.req.param("id");
   const tenantId = c.get("tenantId");
 
-  const flowRow = await c.env.FLOW_DB.prepare("SELECT graph_json FROM flows WHERE id = ? AND tenant_id = ?")
-    .bind(flowId, tenantId).first<{ graph_json: string }>();
-  if (!flowRow) return c.json({ nodes: {} });
-  const isContentDomain = isContentDomainGraph(flowRow.graph_json);
+  const isContentDomain = await isContentDomainFlow(c.env, flowId, tenantId);
+  if (isContentDomain === null) return c.json({ nodes: {} });
   const table = isContentDomain ? "content_flow_counts" : "flow_counts";
 
   const row = await c.env.WEB_DB.prepare(
@@ -1343,10 +1342,8 @@ app.get("/api/flows/:id/nodes/:nodeId/logs", async (c) => {
   if (!UUID_RE.test(flowId) || !UUID_RE.test(nodeId)) return c.json({ logs: [] });
 
   try {
-    const flowRow = await c.env.FLOW_DB.prepare("SELECT graph_json FROM flows WHERE id = ? AND tenant_id = ?")
-      .bind(flowId, tenantId).first<{ graph_json: string }>();
-    if (!flowRow) return c.json({ logs: [] });
-    const isContentDomain = isContentDomainGraph(flowRow.graph_json);
+    const isContentDomain = await isContentDomainFlow(c.env, flowId, tenantId);
+    if (isContentDomain === null) return c.json({ logs: [] });
 
     const rows = await queryNodeLogRows(
       c.env,

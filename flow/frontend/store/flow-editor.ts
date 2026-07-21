@@ -10,19 +10,23 @@ import {
   addEdge,
 } from "@xyflow/react";
 import { api } from "../lib/api";
-import { CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../../nodeTypeRegistry";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, type FlowDomain } from "../../nodeTypeRegistry";
 
 export interface FlowEditorState {
   flowId: string | null;
   flowName: string;
   flowEnabled: boolean;
+  // Which domain this flow belongs to. Comes from the flow row (or, for an unsaved new flow,
+  // from the ?domain= param) — never inferred from the nodes currently on the canvas, so
+  // deleting the trigger can't silently reclassify the flow. See migration 0014.
+  flowDomain: FlowDomain;
   nodes: Node[];
   edges: Edge[];
   selectedNodeId: string | null;
   isDirty: boolean;
   errorNodeIds: string[];
 
-  setFlow: (id: string | null, name: string, enabled: boolean, nodes: Node[], edges: Edge[]) => void;
+  setFlow: (id: string | null, name: string, enabled: boolean, nodes: Node[], edges: Edge[], domain: FlowDomain) => void;
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   onConnect: (connection: Connection) => void;
@@ -70,14 +74,15 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
   flowId: null,
   flowName: "Untitled Flow",
   flowEnabled: false,
+  flowDomain: "user",
   nodes: [],
   edges: [],
   selectedNodeId: null,
   isDirty: false,
   errorNodeIds: [],
 
-  setFlow: (id, name, enabled, nodes, edges) =>
-    set({ flowId: id, flowName: name, flowEnabled: enabled, nodes, edges, isDirty: false, selectedNodeId: null, errorNodeIds: [] }),
+  setFlow: (id, name, enabled, nodes, edges, domain) =>
+    set({ flowId: id, flowName: name, flowEnabled: enabled, flowDomain: domain, nodes, edges, isDirty: false, selectedNodeId: null, errorNodeIds: [] }),
 
   onNodesChange: (changes) =>
     set((state) => ({ nodes: applyNodeChanges(changes, state.nodes), isDirty: true })),

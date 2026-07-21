@@ -8,7 +8,8 @@ export default function App() {
   return (
     <>
       <Routes>
-        <Route path="/" element={<FlowsPage />} />
+        <Route path="/" element={<FlowsPage domain="user" />} />
+        <Route path="/content" element={<FlowsPage domain="content" />} />
         <Route path="/flows/:id" element={<EditorPage />} />
         <Route path="/flows/:id/analytics" element={<AnalyticsPage />} />
       </Routes>

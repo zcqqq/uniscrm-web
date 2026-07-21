@@ -28,6 +28,26 @@ async function resolveSession(c: Context<{ Bindings: Env }>): Promise<{ tenant_i
   return dbRow || null;
 }
 
+export function buildYouTubeAuthUrl(clientId: string, clientSecret: string, redirectUri: string): {
+  url: URL; state: string; codeVerifier: string;
+} {
+  const google = new Google(clientId, clientSecret, redirectUri);
+  const state = generateState();
+  const codeVerifier = generateCodeVerifier();
+  const url = google.createAuthorizationURL(state, codeVerifier, [
+    "openid",
+    "email",
+    "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/youtube.force-ssl",
+  ]);
+  // access_type=offline + prompt=consent are BOTH required for Google to return a refresh
+  // token. select_account keeps the account chooser so a tenant can connect a different
+  // Google account after disconnecting.
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent select_account");
+  return { url, state, codeVerifier };
+}
+
 export function oauthRoutes() {
   const router = new Hono<{ Bindings: Env }>();
 
@@ -390,18 +410,9 @@ export function oauthRoutes() {
     const memberId = session?.member_id || null;
 
     const url = new URL(c.req.url);
-    const google = new Google(c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, `${url.origin}/api/auth/youtube/callback`);
-    const state = generateState();
-    const codeVerifier = generateCodeVerifier();
-    const oauthUrl = google.createAuthorizationURL(state, codeVerifier, [
-      "openid",
-      "email",
-      "https://www.googleapis.com/auth/youtube.readonly",
-    ]);
-    // Without this, Google silently reuses the browser's existing session and skips the
-    // account chooser entirely — a tenant wanting to connect a *different* Google account
-    // (e.g. after disconnecting) lands right back on whichever account was used last time.
-    oauthUrl.searchParams.set("prompt", "select_account");
+    const { url: oauthUrl, state, codeVerifier } = buildYouTubeAuthUrl(
+      c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, `${url.origin}/api/auth/youtube/callback`
+    );
 
     await c.env.KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier, tenantId, memberId }), { expirationTtl: 300 });
     return c.redirect(oauthUrl.toString(), 302);
@@ -442,11 +453,15 @@ export function oauthRoutes() {
       expiresAt = new Date(Date.now() + 3600 * 1000).toISOString();
     }
 
+    let refreshToken: string | null = null;
+    try { refreshToken = tokens.refreshToken(); } catch { refreshToken = null; }
+
     const sourceChannelId = `${tenantId}:${googleUserId}`;
     const config = {
       google_user_id: googleUserId,
       email,
       access_token: tokens.accessToken(),
+      refresh_token: refreshToken,
       expires_at: expiresAt,
       subscriptions: [] as unknown[],
       sync_status: "pending" as const,

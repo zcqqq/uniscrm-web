@@ -785,25 +785,42 @@ const VIDEO_ACTION_LANGUAGES = [
   { value: "de", label: "German" },
 ];
 
+const VIDEO_ACTION_OPERATIONS = [
+  { value: "add-subtitle", label: "Add Subtitle" },
+  { value: "rotate-to-vertical", label: "Rotate to Vertical" },
+  { value: "remove-face", label: "Remove Face" },
+];
+
 function VideoActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
+  const operation = (data.operation as string) || "add-subtitle";
 
   return (
     <div>
       <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.videoAction.label}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Target Language</Label>
-          <Select
-            value={data.targetLanguage || "zh"}
-            onChange={(e: SelectChange) => updateNodeData(nodeId, { targetLanguage: e.target.value })}
-            className="w-full text-sm"
-          >
-            {VIDEO_ACTION_LANGUAGES.map((l) => (
-              <option key={l.value} value={l.value}>{l.label}</option>
-            ))}
-          </Select>
+          <Label className="text-xs block mb-1">Operation</Label>
+          <OperationSelect
+            value={operation}
+            onChange={(v) => updateNodeData(nodeId, { operation: v })}
+            options={VIDEO_ACTION_OPERATIONS}
+          />
         </div>
+        {operation === "add-subtitle" && (
+          <div>
+            <Label className="text-xs block mb-1">Target Language</Label>
+            <Select
+              value={data.targetLanguage || "zh"}
+              onChange={(e: SelectChange) => updateNodeData(nodeId, { targetLanguage: e.target.value })}
+              className="w-full text-sm"
+            >
+              {VIDEO_ACTION_LANGUAGES.map((l) => (
+                <option key={l.value} value={l.value}>{l.label}</option>
+              ))}
+            </Select>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -50,8 +50,11 @@ export default function ActionNode({ data, selected }: NodeProps) {
     icon = TikTokIcon;
     isConfigured = !!channelId;
   } else if (actionType === "videoAction") {
+    const operation = (data.operation as string) || "add-subtitle";
     label = NODE_TYPE_REGISTRY.videoAction.label!;
-    description = NODE_TYPE_REGISTRY.videoAction.description;
+    description = operation === "rotate-to-vertical" ? "Rotate to Vertical"
+      : operation === "remove-face" ? "Remove Face"
+      : "Add Subtitle";
     icon = "🎬";
     isConfigured = true;
   } else {

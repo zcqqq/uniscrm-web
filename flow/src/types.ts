@@ -4,7 +4,7 @@ export interface Pipeline {
 
 export interface Env {
   WEB_DB: D1Database;   // uniscrm-db (tenants, sessions)
-  FLOW_DB: D1Database;  // flow DB (flows, flow_pending, flow_executions, rate_limits)
+  FLOW_DB: D1Database;  // flow DB (flows, flow_pending, flow_counts, content_flow_counts, rate_limits)
   ADMIN_DB: D1Database; // admin DB (subscriptions)
   ASSETS: Fetcher;
   AI: Ai;

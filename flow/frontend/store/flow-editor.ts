@@ -10,7 +10,7 @@ import {
   addEdge,
 } from "@xyflow/react";
 import { api } from "../lib/api";
-import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, type FlowDomain } from "../../nodeTypeRegistry";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY, type FlowDomain } from "../../nodeTypeRegistry";
 
 export interface FlowEditorState {
   flowId: string | null;
@@ -30,7 +30,7 @@ export interface FlowEditorState {
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   onConnect: (connection: Connection) => void;
-  addNode: (type: string, position: { x: number; y: number }) => void;
+  addNode: (type: string, position: { x: number; y: number }) => boolean;
   updateNodeData: (nodeId: string, data: Record<string, unknown>) => void;
   deleteSelectedNode: () => void;
   setSelectedNode: (nodeId: string | null) => void;
@@ -103,6 +103,10 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
   },
 
   addNode: (type, position) => {
+    if (NODE_TYPE_REGISTRY[type]?.role === "trigger" && get().nodes.some((n) => NODE_TYPE_REGISTRY[n.type!]?.role === "trigger")) {
+      return false;
+    }
+
     let nodeType: string;
     let data: Record<string, unknown>;
 
@@ -164,7 +168,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
       nodeType = "youtubeContentTrigger";
       data = { channelId: "", subscriptionChannelId: "", subscriptionChannelName: "", conditions: [] };
     } else {
-      return;
+      return false;
     }
 
     const node: Node = {
@@ -178,6 +182,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
     if (ACTION_CHANNEL_TYPE[type]) {
       void get().autoFillChannelIds();
     }
+    return true;
   },
 
   updateNodeData: (nodeId, data) =>

@@ -13,6 +13,7 @@ import {
 import dagre from "@dagrejs/dagre";
 import { useFlowEditor, isValidConnection as isValidNodeConnection } from "../store/flow-editor";
 import { Button } from "../../../shared/frontend/ui/button";
+import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import DeletableEdge from "../edges/DeletableEdge";
 
 const edgeTypes = { default: DeletableEdge };
@@ -22,6 +23,7 @@ export default function Canvas() {
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
   const { nodes, edges, errorNodeIds, onNodesChange, onEdgesChange, onConnect, addNode, setSelectedNode } =
     useFlowEditor();
+  const { toast } = useToast();
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -38,9 +40,12 @@ export default function Canvas() {
         x: e.clientX,
         y: e.clientY,
       });
-      addNode(type, position);
+      const added = addNode(type, position);
+      if (!added) {
+        toast({ title: "一个流程只能有一个触发节点", variant: "destructive" });
+      }
     },
-    [addNode]
+    [addNode, toast]
   );
 
   const onNodeClick = useCallback(

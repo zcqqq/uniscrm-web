@@ -13,6 +13,7 @@ import { encrypt } from "./services/crypto";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { XTokenService } from "./services/x-token";
 import { fetchOwnedLists } from "./services/x-posts-api";
+import { YouTubeTokenService } from "./services/youtube-token";
 
 export function channelsRoutes() {
   const router = new Hono<{ Bindings: Env }>();
@@ -259,6 +260,36 @@ export function channelsRoutes() {
       accountChannelId: accountRow.id,
       email: config.email,
       subscriptions: config.subscriptions || [],
+    });
+  });
+
+  router.get("/youtube/playlists", async (c) => {
+    const tenantId = c.get("tenantId" as never) as number;
+    const accountRow = await c.env.LINK_DB
+      .prepare("SELECT id FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND tenant_id = ? AND is_active = 1")
+      .bind(tenantId)
+      .first<{ id: string }>();
+    if (!accountRow) return c.json({ connected: false, playlists: [] });
+
+    const tokenService = new YouTubeTokenService(c.env.LINK_DB, c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET);
+    let accessToken: string;
+    try {
+      accessToken = await tokenService.getValidToken(accountRow.id);
+    } catch {
+      // Account connected before offline access → no refresh token to list with. The user
+      // must reconnect to use write actions anyway.
+      return c.json({ connected: true, needsReconnect: true, playlists: [] });
+    }
+
+    const res = await fetch(
+      "https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true&maxResults=50",
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!res.ok) return c.json({ connected: true, playlists: [] });
+    const data = (await res.json()) as { items?: { id: string; snippet?: { title?: string } }[] };
+    return c.json({
+      connected: true,
+      playlists: (data.items || []).map((i) => ({ id: i.id, title: i.snippet?.title || i.id })),
     });
   });
 

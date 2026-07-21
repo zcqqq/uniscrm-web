@@ -280,6 +280,27 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
   return { stmts, rateLimited };
 }
 
+export function youtubeActionRequest(args: {
+  env: { LINK_URL: string; INTERNAL_SECRET: string };
+  action: { operation?: string; playlistId?: string };
+  channelId: string; contentId: string; flowId?: string | null;
+  payload: Record<string, unknown>;
+}): { url: string; body: string } {
+  const { env, action, channelId, contentId, flowId, payload } = args;
+  const videoId = String(payload?.source_content_id ?? "");
+  const operation = action.operation || "save-to-playlist";
+  if (operation === "rate-like") {
+    return {
+      url: `${env.LINK_URL}/internal/youtube/rate`,
+      body: JSON.stringify({ channelId, contentId, videoId, flowId: flowId || null }),
+    };
+  }
+  return {
+    url: `${env.LINK_URL}/internal/youtube/playlist-insert`,
+    body: JSON.stringify({ channelId, contentId, videoId, playlistId: action.playlistId || "", flowId: flowId || null }),
+  };
+}
+
 interface ContentActionExecResult {
   rateLimited: { action: ActionResult; retryAt: string }[];
 }
@@ -568,6 +589,44 @@ async function executeContentActions(
       });
       const respBody = await res.json().catch(() => ({ ok: false })) as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string };
       console.log(JSON.stringify({ event: "content_action_tiktok_content_action", contentId, status: res.status, ok: respBody.ok, channelId: body.channelId }));
+
+      if (respBody.rateLimited) {
+        rateLimited.push({ action, retryAt: respBody.rateLimitReset || new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+        continue;
+      }
+
+      const branch = respBody.ok ? "success" : "failed";
+      const nodeId = action.nodeId as string;
+      const resumed = resumeFromNode(graph, nodeId, payload, branch);
+      if (resumed.nodeLogs.length > 1) await emitContentNodeLogs(resumed.nodeLogs.slice(1), flowId || "", contentId, tenantId, env);
+      if (resumed.actions.length > 0) {
+        const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
+        rateLimited.push(...nested.rateLimited);
+        await env.FLOW_DB.prepare(
+          `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
+           VALUES (?, ?, ?, ?, 1, ?)`
+        ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
+      }
+      for (const wait of resumed.pendingWaits) {
+        const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
+        await env.FLOW_DB.prepare(
+          `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
+          JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
+          wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
+        ).run();
+      }
+    } else if (action.type === "youtubeContentAction") {
+      const { url, body } = youtubeActionRequest({ env, action, channelId, contentId, flowId, payload });
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+        body,
+      });
+      const respBody = await res.json().catch(() => ({ ok: false })) as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string };
+      console.log(JSON.stringify({ event: "content_action_youtube", contentId, status: res.status, ok: respBody.ok, channelId, operation: action.operation || "save-to-playlist" }));
 
       if (respBody.rateLimited) {
         rateLimited.push({ action, retryAt: respBody.rateLimitReset || new Date(Date.now() + 15 * 60 * 1000).toISOString() });

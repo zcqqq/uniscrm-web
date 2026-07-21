@@ -1,8 +1,10 @@
 import os
 import shutil
 import subprocess
+import time
 import uuid
 import boto3
+from botocore.config import Config
 import cv2
 from flask import Flask, request, jsonify
 from video_action_lib import compute_keep_segments, needs_rotation, is_too_short
@@ -11,6 +13,14 @@ app = Flask(__name__)
 
 FACE_DETECTOR_PATH = "/app/face_detector.onnx"
 
+# A stuck job's remove-face call was observed live sitting at "detecting_faces" indefinitely,
+# and a container's stdout is not queryable remotely (confirmed: zero observability events for
+# this container's Application ID across the whole session) — so every blocking operation here
+# needs its own bounded timeout, or a hang becomes permanently invisible and blocks the whole
+# queue (max_batch_size=1, no concurrency override, so one stuck message stalls everything).
+R2_CONNECT_TIMEOUT_SECONDS = 20
+R2_READ_TIMEOUT_SECONDS = 60
+
 
 def r2_client():
     return boto3.client(
@@ -18,6 +28,11 @@ def r2_client():
         endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
         aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
         aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+        config=Config(
+            connect_timeout=R2_CONNECT_TIMEOUT_SECONDS,
+            read_timeout=R2_READ_TIMEOUT_SECONDS,
+            retries={"max_attempts": 2},
+        ),
     )
 
 
@@ -226,8 +241,17 @@ def remove_face():
         detector = cv2.FaceDetectorYN.create(FACE_DETECTOR_PATH, "", (320, 320))
         face_timestamps = []
         frame_files = sorted(os.listdir(frames_dir))
+        loop_start = time.monotonic()
+        DETECTION_LOOP_BUDGET_SECONDS = 120
         for i, fname in enumerate(frame_files):
+            if time.monotonic() - loop_start > DETECTION_LOOP_BUDGET_SECONDS:
+                return jsonify({
+                    "error": f"face detection loop exceeded {DETECTION_LOOP_BUDGET_SECONDS}s "
+                             f"budget at frame {i}/{len(frame_files)} (job_id={job_id})"
+                }), 200
             frame = cv2.imread(f"{frames_dir}/{fname}")
+            if frame is None:
+                continue
             h, w = frame.shape[:2]
             detector.setInputSize((w, h))
             _, faces = detector.detect(frame)
@@ -271,6 +295,12 @@ def remove_face():
         final_key = f"{uuid.uuid4()}.mp4"
         client.upload_file(output_path, bucket, final_key, ExtraArgs={"ContentType": "video/mp4"})
         return jsonify({"final_key": final_key})
+    except Exception as e:
+        # Without this, any unhandled exception (e.g. the new bounded R2 client timing out)
+        # becomes an opaque Flask 500 instead of the {"error": ...} shape every other failure
+        # path in this file uses — and a container's stdout isn't queryable remotely, so this
+        # response IS the only diagnostic trail available for whatever throws here.
+        return jsonify({"error": f"remove-face unexpected error ({type(e).__name__}): {e}"}), 200
     finally:
         # Frame extraction can produce hundreds of jpg files per job — meaningfully more local
         # disk than any other route here — so this route alone cleans up its own /tmp scratch.

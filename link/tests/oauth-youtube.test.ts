@@ -244,6 +244,14 @@ describe("GET /youtube/callback", () => {
       last_synced_at: null,
     });
     const linkDb = createMockLinkDb([
+      // Regression guard for the "AND is_active = 1" filter bug: disconnect
+      // only flips is_active to 0 (does not clear source_channel_id), so at
+      // callback time the prior row is still is_active = 0 — reactivation to
+      // 1 happens later, inside the upsert. If the preserve-SELECT were to
+      // reintroduce "AND is_active = 1" it would produce exactly this SQL
+      // text and find nothing (simulated here as null), which would silently
+      // null out rt-old below and fail the final assertion.
+      ["SELECT config FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id = ? AND is_active = 1", null],
       ["SELECT config FROM channels", { config: existingConfig }],
       ["SELECT id FROM channels", { id: "existing-row-id" }],
     ]);
@@ -259,6 +267,16 @@ describe("GET /youtube/callback", () => {
     await flush();
 
     expect(res.status).toBe(302);
+
+    // Direct assertion on the preserve-SELECT's SQL text: it must match on
+    // source_channel_id alone and must NOT filter on is_active, since the
+    // disconnect→reconnect row this exists to protect is is_active = 0 at
+    // this point in the request.
+    const preserveSelectCall = linkDb.calls.find((c) => c.sql.startsWith("SELECT config FROM channels"));
+    expect(preserveSelectCall).toBeDefined();
+    expect(preserveSelectCall!.sql).toContain("source_channel_id");
+    expect(preserveSelectCall!.sql).not.toContain("is_active = 1");
+
     const insertCall = linkDb.calls.find((c) => c.sql.includes("INSERT INTO channels"));
     expect(insertCall).toBeDefined();
     const config = JSON.parse(insertCall!.args[1] as string);

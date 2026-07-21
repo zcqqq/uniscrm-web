@@ -465,9 +465,18 @@ export function oauthRoutes() {
       // below is unconditional (config = excluded.config), so without this,
       // a token-omitting reconnect would silently null out a previously
       // working refresh token. Reuse whatever is already stored, if anything.
+      //
+      // Deliberately NOT filtering "AND is_active = 1" here: disconnect only
+      // flips is_active to 0, it does not clear source_channel_id (see the
+      // ON CONFLICT comment on the upsert below), and reactivation to 1 only
+      // happens inside that same upsert — which runs AFTER this SELECT. So
+      // the exact disconnect→reconnect case this exists to protect always has
+      // is_active = 0 at this point; filtering on it would find nothing and
+      // defeat the whole purpose. Match on source_channel_id alone, mirroring
+      // the upsert's own unique index (also unconditional on is_active).
       let preservedRefreshToken: string | null = null;
       const existingChannel = await c.env.LINK_DB
-        .prepare("SELECT config FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id = ? AND is_active = 1")
+        .prepare("SELECT config FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id = ?")
         .bind(sourceChannelId)
         .first<{ config: string }>();
       if (existingChannel?.config) {

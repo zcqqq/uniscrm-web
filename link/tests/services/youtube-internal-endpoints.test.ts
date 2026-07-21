@@ -26,6 +26,14 @@ async function callRate(env: any, body: any) {
   }, env);
 }
 
+async function callPlaylistInsert(env: any, body: any) {
+  const { internalRoutes } = await import("../../src/routes-internal");
+  const app = internalRoutes();
+  return app.request("/youtube/playlist-insert", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  }, env);
+}
+
 describe("POST /internal/youtube/rate", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -48,5 +56,36 @@ describe("POST /internal/youtube/rate", () => {
     const res = await callRate(makeEnv(), { channelId: "ch", contentId: "c", videoId: "v" });
     expect(await res.json()).toEqual({ ok: true });
     expect(forceRefresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST /internal/youtube/playlist-insert", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns ok and records quota on success", async () => {
+    insertPlaylistItem.mockResolvedValue({ ok: true });
+    const res = await callPlaylistInsert(makeEnv(), { channelId: "ch", contentId: "c", videoId: "v", playlistId: "pl" });
+    expect(await res.json()).toEqual({ ok: true });
+    expect(recordYouTubeWriteQuota).toHaveBeenCalled();
+  });
+
+  it("propagates rateLimited without recording quota", async () => {
+    insertPlaylistItem.mockResolvedValue({ ok: false, rateLimited: true, rateLimitReset: "2026-07-22T07:00:00.000Z" });
+    const res = await callPlaylistInsert(makeEnv(), { channelId: "ch", contentId: "c", videoId: "v", playlistId: "pl" });
+    expect(await res.json()).toEqual({ ok: false, rateLimited: true, rateLimitReset: "2026-07-22T07:00:00.000Z" });
+    expect(recordYouTubeWriteQuota).not.toHaveBeenCalled();
+  });
+
+  it("retries once after unauthorized", async () => {
+    insertPlaylistItem.mockResolvedValueOnce({ ok: false, unauthorized: true }).mockResolvedValueOnce({ ok: true });
+    const res = await callPlaylistInsert(makeEnv(), { channelId: "ch", contentId: "c", videoId: "v", playlistId: "pl" });
+    expect(await res.json()).toEqual({ ok: true });
+    expect(forceRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns ok:false without calling insertPlaylistItem when playlistId is empty", async () => {
+    const res = await callPlaylistInsert(makeEnv(), { channelId: "ch", contentId: "c", videoId: "v", playlistId: "" });
+    expect(await res.json()).toEqual({ ok: false });
+    expect(insertPlaylistItem).not.toHaveBeenCalled();
   });
 });

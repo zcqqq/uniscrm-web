@@ -36,3 +36,47 @@ export async function burnSubtitles(env: Env, jobId: string, videoKey: string, s
   if (body.error) return { error: body.error };
   return { finalKey: body.final_key };
 }
+
+export interface VideoOnlyDownloadResult {
+  videoKey?: string;
+  error?: string;
+}
+
+export async function downloadVideo(env: Env, jobId: string, videoUrl: string): Promise<VideoOnlyDownloadResult> {
+  const container = env.SUBTITLE_CONTAINER.getByName("subtitle-singleton");
+  await container.startAndWaitForPorts();
+  const res = await container.fetch("http://container/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job_id: jobId, video_url: videoUrl }),
+  });
+  const body = await res.json() as { video_key?: string; error?: string };
+  if (body.error) return { error: body.error };
+  return { videoKey: body.video_key };
+}
+
+export async function rotateToVertical(env: Env, jobId: string, videoKey: string): Promise<BurnResult> {
+  const container = env.SUBTITLE_CONTAINER.getByName("subtitle-singleton");
+  await container.startAndWaitForPorts();
+  const res = await container.fetch("http://container/rotate-to-vertical", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job_id: jobId, video_key: videoKey }),
+  });
+  const body = await res.json() as { final_key?: string; error?: string };
+  if (body.error) return { error: body.error };
+  return { finalKey: body.final_key };
+}
+
+export async function removeFace(env: Env, jobId: string, videoKey: string): Promise<BurnResult> {
+  const container = env.SUBTITLE_CONTAINER.getByName("subtitle-singleton");
+  await container.startAndWaitForPorts();
+  const res = await container.fetch("http://container/remove-face", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job_id: jobId, video_key: videoKey }),
+  });
+  const body = await res.json() as { final_key?: string; error?: string };
+  if (body.error) return { error: body.error };
+  return { finalKey: body.final_key };
+}

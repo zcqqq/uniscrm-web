@@ -425,10 +425,6 @@ async function executeContentActions(
             if (resumed.actions.length > 0) {
               const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
               rateLimited.push(...nested.rateLimited);
-              await env.FLOW_DB.prepare(
-                `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-                 VALUES (?, ?, ?, ?, 1, ?)`
-              ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
             }
             for (const wait of resumed.pendingWaits) {
               const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
@@ -482,10 +478,6 @@ async function executeContentActions(
           if (resumed.actions.length > 0) {
             const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
             rateLimited.push(...nested.rateLimited);
-            await env.FLOW_DB.prepare(
-              `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-               VALUES (?, ?, ?, ?, 1, ?)`
-            ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
           }
           for (const wait of resumed.pendingWaits) {
             const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
@@ -528,10 +520,6 @@ async function executeContentActions(
       if (resumed.actions.length > 0) {
         const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
         rateLimited.push(...nested.rateLimited);
-        await env.FLOW_DB.prepare(
-          `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-           VALUES (?, ?, ?, ?, 1, ?)`
-        ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
       }
       for (const wait of resumed.pendingWaits) {
         const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
@@ -558,10 +546,6 @@ async function executeContentActions(
           if (resumed.actions.length > 0) {
             const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
             rateLimited.push(...nested.rateLimited);
-            await env.FLOW_DB.prepare(
-              `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-               VALUES (?, ?, ?, ?, 1, ?)`
-            ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
           }
           for (const wait of resumed.pendingWaits) {
             const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
@@ -606,10 +590,6 @@ async function executeContentActions(
         if (resumed.actions.length > 0) {
           const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
           rateLimited.push(...nested.rateLimited);
-          await env.FLOW_DB.prepare(
-            `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-             VALUES (?, ?, ?, ?, 1, ?)`
-          ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
         }
         for (const wait of resumed.pendingWaits) {
           const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
@@ -661,10 +641,6 @@ async function executeContentActions(
       if (resumed.actions.length > 0) {
         const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
         rateLimited.push(...nested.rateLimited);
-        await env.FLOW_DB.prepare(
-          `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-           VALUES (?, ?, ?, ?, 1, ?)`
-        ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
       }
       for (const wait of resumed.pendingWaits) {
         const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
@@ -699,10 +675,6 @@ async function executeContentActions(
       if (resumed.actions.length > 0) {
         const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
         rateLimited.push(...nested.rateLimited);
-        await env.FLOW_DB.prepare(
-          `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-           VALUES (?, ?, ?, ?, 1, ?)`
-        ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
       }
       for (const wait of resumed.pendingWaits) {
         const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
@@ -743,10 +715,6 @@ async function executeContentActions(
       if (resumed.actions.length > 0) {
         const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
         rateLimited.push(...nested.rateLimited);
-        await env.FLOW_DB.prepare(
-          `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-           VALUES (?, ?, ?, ?, 1, ?)`
-        ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
       }
       for (const wait of resumed.pendingWaits) {
         const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
@@ -771,10 +739,6 @@ async function executeContentActions(
         if (resumed.actions.length > 0) {
           const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
           rateLimited.push(...nested.rateLimited);
-          await env.FLOW_DB.prepare(
-            `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-             VALUES (?, ?, ?, ?, 1, ?)`
-          ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
         }
         for (const wait of resumed.pendingWaits) {
           const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
@@ -815,10 +779,6 @@ async function executeContentActions(
         if (resumed.actions.length > 0) {
           const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
           rateLimited.push(...nested.rateLimited);
-          await env.FLOW_DB.prepare(
-            `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-             VALUES (?, ?, ?, ?, 1, ?)`
-          ).bind(crypto.randomUUID(), flowId || "", contentId, Number(tenantId), new Date().toISOString()).run();
         }
         for (const wait of resumed.pendingWaits) {
           const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
@@ -901,7 +861,6 @@ app.post("/internal/trigger", async (c) => {
   const secret = c.req.header("X-Internal-Secret");
   if (secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
   const { tenantId, eventType, userId, channelId, payload } = await c.req.json<any>();
-  const now = new Date().toISOString();
   const flows = await c.env.FLOW_DB.prepare("SELECT id, graph_json FROM flows WHERE tenant_id = ? AND status = 'published'")
     .bind(tenantId).all<{ id: string; graph_json: string }>();
   const results: any[] = [];
@@ -910,11 +869,7 @@ app.post("/internal/trigger", async (c) => {
     const result = executeFlow(graph, eventType, payload || {});
     if (result.matched) {
       const { stmts } = await executeActions(result.actions, userId || "", String(tenantId), c.env, payload, flow.id);
-      await c.env.FLOW_DB.batch([
-        c.env.FLOW_DB.prepare("INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at) VALUES (?, ?, ?, ?, 1, ?)")
-          .bind(crypto.randomUUID(), flow.id, userId || "", tenantId, now),
-        ...stmts,
-      ]);
+      if (stmts.length > 0) await c.env.FLOW_DB.batch(stmts);
       results.push({ flowId: flow.id, actions: result.actions.length, matched: true });
     }
   }
@@ -956,10 +911,6 @@ app.post("/internal/video-action/resume", async (c) => {
   if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, row.flow_id, row.content_id, String(row.tenant_id), c.env, payload);
   if (resumed.actions.length > 0) {
     await executeContentActions(graph, resumed.actions, row.content_id, String(payload.channel_id ?? ""), String(row.tenant_id), c.env, payload, row.flow_id);
-    await c.env.FLOW_DB.prepare(
-      `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-       VALUES (?, ?, ?, ?, 1, ?)`
-    ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, new Date().toISOString()).run();
   }
   for (const wait of resumed.pendingWaits) {
     const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
@@ -1498,10 +1449,6 @@ export default {
             if (result.nodeLogs.length > 0) await emitContentNodeLogs(result.nodeLogs, flow.id, contentId, tenantId, env, matchPayload);
             if (result.actions.length > 0) {
               const { rateLimited } = await executeContentActions(graph, result.actions, contentId, channelId, tenantId, env, payload, flow.id);
-              await env.FLOW_DB.prepare(
-                `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-                 VALUES (?, ?, ?, ?, 1, ?)`
-              ).bind(crypto.randomUUID(), flow.id, contentId, tenantId, new Date().toISOString()).run();
               for (const rl of rateLimited) {
                 await env.FLOW_DB.prepare(
                   `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
@@ -1548,13 +1495,7 @@ export default {
 
           if (result.actions.length > 0) {
             const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, userId, tenantId, env, payload, flow.id);
-            const stmts: D1PreparedStatement[] = [
-              env.FLOW_DB.prepare(
-                `INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at)
-                 VALUES (?, ?, ?, ?, 1, ?)`
-              ).bind(crypto.randomUUID(), flow.id, userId, tenantId, new Date().toISOString()),
-              ...actionStmts,
-            ];
+            const stmts: D1PreparedStatement[] = [...actionStmts];
 
             for (const r of rl) {
               stmts.push(env.FLOW_DB.prepare(
@@ -1563,7 +1504,7 @@ export default {
               ).bind(crypto.randomUUID(), flow.id, userId, tenantId, JSON.stringify(payload), r.retryAt, new Date().toISOString(), JSON.stringify(r.action)));
             }
 
-            await env.FLOW_DB.batch(stmts);
+            if (stmts.length > 0) await env.FLOW_DB.batch(stmts);
             console.log(JSON.stringify({ event: "flow_matched", flowId: flow.id, userId, eventType, actions: result.actions, rateLimited: rl.length }));
           }
 
@@ -1618,12 +1559,7 @@ export default {
           const stmts: D1PreparedStatement[] = [];
           if (result.actions.length > 0) {
             const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, pending.user_id, pending.tenant_id, env, undefined, pending.flow_id);
-            stmts.push(
-              env.FLOW_DB.prepare(
-                `INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at) VALUES (?, ?, ?, ?, 1, ?)`
-              ).bind(crypto.randomUUID(), pending.flow_id, pending.user_id, pending.tenant_id, new Date().toISOString()),
-              ...actionStmts
-            );
+            stmts.push(...actionStmts);
             for (const r of rl) {
               stmts.push(env.FLOW_DB.prepare(
                 `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
@@ -1664,11 +1600,7 @@ export default {
             const result = executeFlow(graph, "cron.trigger", {});
             if (result.matched && result.actions.length > 0) {
               const { stmts } = await executeActions(result.actions, "", flow.tenant_id, env, {}, flow.id);
-              await env.FLOW_DB.batch([
-                env.FLOW_DB.prepare("INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at) VALUES (?, ?, '', ?, 1, ?)")
-                  .bind(crypto.randomUUID(), flow.id, flow.tenant_id, now),
-                ...stmts,
-              ]);
+              if (stmts.length > 0) await env.FLOW_DB.batch(stmts);
               console.log(JSON.stringify({ event: "cron_trigger_fired", flowId: flow.id, actions: result.actions.length }));
             }
           }
@@ -1679,8 +1611,8 @@ export default {
     }
 
     // content_flow_pending sweep: resumes wait/timeCondition/abSplit nodes downstream of a
-    // xContentTrigger, mirroring the flow_pending sweep below but for the content domain (Task 5's
-    // executeContentActions + content_flow_executions, keyed by content_id instead of user_id).
+    // xContentTrigger, mirroring the flow_pending sweep below but for the content domain
+    // (executeContentActions, keyed by content_id instead of user_id).
     // Placed before the flow_pending sweep (rather than strictly after it, per the plan) so that
     // the flow_pending sweep's own early return on an empty flow_pending table can't skip this
     // block — the two sweeps are independent (different tables), so order between them doesn't
@@ -1728,10 +1660,6 @@ export default {
             if (resolved.nodeLogs.length > 0) await emitContentNodeLogs(resolved.nodeLogs, row.flow_id, row.content_id, row.tenant_id, env, payload);
             if (resolved.actions.length > 0) {
               const { rateLimited: nestedRateLimited } = await executeContentActions(graph, resolved.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
-              await env.FLOW_DB.prepare(
-                `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-                 VALUES (?, ?, ?, ?, 1, ?)`
-              ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, now).run();
               for (const rl of nestedRateLimited) {
                 await env.FLOW_DB.prepare(
                   `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
@@ -1772,10 +1700,6 @@ export default {
               if (failedResult.nodeLogs.length > 0) await emitContentNodeLogs(failedResult.nodeLogs, row.flow_id, row.content_id, row.tenant_id, env, payload);
               if (failedResult.actions.length > 0) {
                 const { rateLimited: nestedRateLimited } = await executeContentActions(graph, failedResult.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
-                await env.FLOW_DB.prepare(
-                  `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-                   VALUES (?, ?, ?, ?, 1, ?)`
-                ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, now).run();
                 for (const rl of nestedRateLimited) {
                   await env.FLOW_DB.prepare(
                     `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
@@ -1822,10 +1746,6 @@ export default {
         if (result.actions.length > 0) {
           const channelId = String(payload.channel_id ?? "");
           const { rateLimited } = await executeContentActions(graph, result.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
-          await env.FLOW_DB.prepare(
-            `INSERT INTO content_flow_executions (id, flow_id, content_id, tenant_id, matched, created_at)
-             VALUES (?, ?, ?, ?, 1, ?)`
-          ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, now).run();
           for (const rl of rateLimited) {
             await env.FLOW_DB.prepare(
               `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
@@ -1902,13 +1822,7 @@ export default {
 
         if (result.actions.length > 0) {
           const { stmts: actionStmts, rateLimited: rl } = await executeActions(result.actions, row.user_id, row.tenant_id, env, undefined, row.flow_id);
-          stmts.push(
-            env.FLOW_DB.prepare(
-              `INSERT INTO flow_executions (id, flow_id, user_id, tenant_id, matched, created_at)
-               VALUES (?, ?, ?, ?, 1, ?)`
-            ).bind(crypto.randomUUID(), row.flow_id, row.user_id, row.tenant_id, now),
-            ...actionStmts
-          );
+          stmts.push(...actionStmts);
           for (const r of rl) {
             stmts.push(env.FLOW_DB.prepare(
               `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)

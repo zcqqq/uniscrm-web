@@ -54,12 +54,6 @@ async function setupSchema() {
      )`
   ).run();
   await env.FLOW_DB.prepare(
-    `CREATE TABLE IF NOT EXISTS content_flow_executions (
-       id TEXT PRIMARY KEY, flow_id TEXT NOT NULL, event_id TEXT, content_id TEXT NOT NULL,
-       tenant_id INTEGER NOT NULL, matched INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL
-     )`
-  ).run();
-  await env.FLOW_DB.prepare(
     `CREATE TABLE IF NOT EXISTS content_flow_pending (
        id TEXT PRIMARY KEY, flow_id TEXT NOT NULL, node_id TEXT NOT NULL, content_id TEXT NOT NULL,
        tenant_id INTEGER NOT NULL, payload TEXT NOT NULL, execute_at TEXT NOT NULL,
@@ -73,7 +67,6 @@ async function setupSchema() {
 describe("xContentAction branch resolution: downstream node logs (Site 1 — queue() dispatch)", () => {
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-nodelog-1'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-nodelog-1'`).run();
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-nodelog-1'`).run();
     vi.unstubAllGlobals();
   });
@@ -144,7 +137,6 @@ describe("xContentAction branch resolution: downstream node logs (Site 2 — sch
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-nodelog-2'`).run();
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-nodelog-2'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-nodelog-2'`).run();
     vi.unstubAllGlobals();
   });
 

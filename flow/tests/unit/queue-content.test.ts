@@ -1,15 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
 import { executeFlow } from "../../src/engine";
-
-const graphContentToStatus = JSON.stringify({
-  nodes: [
-    { id: "t1", type: "xContentTrigger", data: { channelId: "chan-1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
-    { id: "a1", type: "action", data: { actionType: "noopLeaf" }, position: { x: 200, y: 0 } },
-  ],
-  edges: [{ id: "e1", source: "t1", target: "a1" }],
-});
 
 function makeBatch(body: Record<string, unknown>) {
   return {
@@ -18,116 +10,48 @@ function makeBatch(body: Record<string, unknown>) {
   } as any;
 }
 
-describe("queue(): content.created dispatch", () => {
-  beforeEach(async () => {
-    // vitest-pool-workers does not auto-apply this module's migrations/ directory (no
-    // <BINDING>_MIGRATIONS binding is wired up, and there's no setupFiles hook calling
-    // applyD1Migrations — verified empirically: env.FLOW_DB starts with zero tables).
-    // Create the post-migration schema by hand, matching migrations/0001_init.sql (as
-    // amended by 0011_drop_enabled.sql, which removed flows.enabled),
-    // migrations/0013_content_flow_tables.sql, and web/migrations/0001_init.sql's
-    // `tenants` table. This mirrors the existing CREATE TABLE IF NOT EXISTS pattern this
-    // file already uses for tenant-scoped D1 in handleLogQueue(). A durable fix (out of
-    // scope for this task, which only touches this test file and src/index.ts) would be
-    // wiring readD1Migrations()/applyD1Migrations() into vitest.config.ts + a setup file.
-    await env.FLOW_DB.prepare(
-      `CREATE TABLE IF NOT EXISTS flows (
-         id TEXT PRIMARY KEY,
-         tenant_id INTEGER NOT NULL,
-         member_id TEXT NOT NULL DEFAULT '',
-         name TEXT NOT NULL DEFAULT 'Untitled Flow',
-         description TEXT DEFAULT '',
-         graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}',
-         status TEXT NOT NULL DEFAULT 'draft',
-         created_at TEXT NOT NULL,
-         updated_at TEXT NOT NULL
-       )`
-    ).run();
-    await env.FLOW_DB.prepare(
-      `CREATE TABLE IF NOT EXISTS flow_executions (
-         id TEXT PRIMARY KEY,
-         flow_id TEXT NOT NULL,
-         event_id TEXT,
-         user_id TEXT NOT NULL,
-         tenant_id INTEGER NOT NULL,
-         matched INTEGER NOT NULL DEFAULT 1,
-         created_at TEXT NOT NULL
-       )`
-    ).run();
-    await env.FLOW_DB.prepare(
-      `CREATE TABLE IF NOT EXISTS content_flow_executions (
-         id TEXT PRIMARY KEY,
-         flow_id TEXT NOT NULL,
-         event_id TEXT,
-         content_id TEXT NOT NULL,
-         tenant_id INTEGER NOT NULL,
-         matched INTEGER NOT NULL DEFAULT 1,
-         created_at TEXT NOT NULL
-       )`
-    ).run();
-    await env.FLOW_DB.prepare(
-      `CREATE TABLE IF NOT EXISTS content_flow_pending (
-         id TEXT PRIMARY KEY,
-         flow_id TEXT NOT NULL,
-         node_id TEXT NOT NULL,
-         content_id TEXT NOT NULL,
-         tenant_id INTEGER NOT NULL,
-         payload TEXT NOT NULL,
-         execute_at TEXT NOT NULL,
-         awaiting_event TEXT NOT NULL DEFAULT '',
-         conditions TEXT NOT NULL DEFAULT '',
-         retry_action TEXT NOT NULL DEFAULT '',
-         retry_count INTEGER NOT NULL DEFAULT 0,
-         created_at TEXT NOT NULL
-       )`
-    ).run();
-    await env.WEB_DB.prepare(
-      `CREATE TABLE IF NOT EXISTS tenants (
-         tenant_id INTEGER PRIMARY KEY AUTOINCREMENT,
-         email TEXT NOT NULL,
-         d1_database_id TEXT,
-         created_at TEXT NOT NULL
-       )`
-    ).run();
-
-    await env.FLOW_DB.prepare(
-      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
-       VALUES ('flow-c1', 1, 'content flow', ?, 'published', datetime('now'), datetime('now'))`
-    ).bind(graphContentToStatus).run();
-    await env.WEB_DB.prepare(
-      `INSERT INTO tenants (tenant_id, d1_database_id) VALUES (1, 'tenant-db-1')`
-    ).run().catch(() => {}); // no-op: violates tenants.email NOT NULL — intentionally left unresolvable
-  });
-
-  afterEach(async () => {
-    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-c1'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-c1'`).run();
-  });
-
-  it("matches a published flow with an xContentTrigger and records content_flow_executions keyed by content_id", async () => {
-    await worker.queue(
-      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-abc", channelId: "chan-1", payload: {} }),
-      env
-    );
-
-    const row = await env.FLOW_DB.prepare(
-      `SELECT flow_id, content_id, tenant_id, matched FROM content_flow_executions WHERE flow_id = 'flow-c1'`
-    ).first<{ flow_id: string; content_id: string; tenant_id: number; matched: number }>();
-
-    expect(row).toMatchObject({ flow_id: "flow-c1", content_id: "content-abc", tenant_id: 1, matched: 1 });
-  });
-
-  it("does not touch flow_executions (the user-domain table) for a content message", async () => {
-    await worker.queue(
-      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-xyz", channelId: "chan-1", payload: {} }),
-      env
-    );
-
-    const row = await env.FLOW_DB.prepare(
-      `SELECT id FROM flow_executions WHERE flow_id = 'flow-c1'`
-    ).first();
-    expect(row).toBeNull();
-  });
+// vitest-pool-workers does not auto-apply this module's migrations/ directory (no
+// <BINDING>_MIGRATIONS binding is wired up, and there's no setupFiles hook calling
+// applyD1Migrations — verified empirically: env.FLOW_DB starts with zero tables). Create the
+// post-migration schema by hand, matching migrations/0001_init.sql (as amended by
+// 0011_drop_enabled.sql, which removed flows.enabled) and migrations/0013_content_flow_tables.sql.
+// A durable fix (out of scope for this task) would be wiring readD1Migrations()/
+// applyD1Migrations() into vitest.config.ts + a setup file.
+// This used to live in a beforeEach inside "queue(): content.created dispatch" below — hoisted to
+// a file-level beforeAll because every other describe block in this file implicitly depends on
+// this schema existing, and a describe's beforeEach never fires once that describe has zero
+// tests left in it (which is now the case, after removing the two tests that asserted directly on
+// the now-deleted D1 write path this refactor removed).
+beforeAll(async () => {
+  await env.FLOW_DB.prepare(
+    `CREATE TABLE IF NOT EXISTS flows (
+       id TEXT PRIMARY KEY,
+       tenant_id INTEGER NOT NULL,
+       member_id TEXT NOT NULL DEFAULT '',
+       name TEXT NOT NULL DEFAULT 'Untitled Flow',
+       description TEXT DEFAULT '',
+       graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}',
+       status TEXT NOT NULL DEFAULT 'draft',
+       created_at TEXT NOT NULL,
+       updated_at TEXT NOT NULL
+     )`
+  ).run();
+  await env.FLOW_DB.prepare(
+    `CREATE TABLE IF NOT EXISTS content_flow_pending (
+       id TEXT PRIMARY KEY,
+       flow_id TEXT NOT NULL,
+       node_id TEXT NOT NULL,
+       content_id TEXT NOT NULL,
+       tenant_id INTEGER NOT NULL,
+       payload TEXT NOT NULL,
+       execute_at TEXT NOT NULL,
+       awaiting_event TEXT NOT NULL DEFAULT '',
+       conditions TEXT NOT NULL DEFAULT '',
+       retry_action TEXT NOT NULL DEFAULT '',
+       retry_count INTEGER NOT NULL DEFAULT 0,
+       created_at TEXT NOT NULL
+     )`
+  ).run();
 });
 
 describe("queue(): xContentAction branch resolution", () => {
@@ -160,7 +84,6 @@ describe("queue(): xContentAction branch resolution", () => {
 
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-branch1'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-branch1'`).run();
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-branch1'`).run();
     vi.unstubAllGlobals();
   });
@@ -168,38 +91,38 @@ describe("queue(): xContentAction branch resolution", () => {
   it("resolves the success branch and runs a2 when link returns ok:true", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })));
 
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
     await worker.queue(
       makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-branch-1", channelId: "src-chan", payload: {} }),
-      env
+      testEnv as any
     );
 
-    // What we're actually asserting here is that resumeFromNode fired at all (a second
-    // content_flow_executions row was recorded for the resumed action) after the fetch resolved.
-    // The outer queue() call site unconditionally writes one row whenever the initial
-    // executeFlow() call produces any actions (i.e. just for matching xContentAction itself), so
-    // >=1 would pass even without branch resolution — >=2 discriminates "resumeFromNode ran".
-    // NOTE: this count does NOT by itself prove only one branch (not both) resolved — that
-    // one-vs-both gating property is proven separately above by the "does not collect both
-    // branches on the initial dispatch" test, which asserts on executeFlow()'s actions array
-    // directly.
-    const rows = await env.FLOW_DB.prepare(
-      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-branch1'`
-    ).first<{ c: number }>();
-    expect(rows?.c).toBeGreaterThanOrEqual(2);
+    // resumeFromNode resolved a1's "success" branch down to a2 -- the second pipelineSend call
+    // (the first is the initial t1/a1 dispatch) carries a2's enter+exit.
+    // NOTE: this does NOT by itself prove only one branch (not both) resolved — that one-vs-both
+    // gating property is proven separately above by the "does not collect both branches on the
+    // initial dispatch" test, which asserts on executeFlow()'s actions array directly.
+    expect(pipelineSend).toHaveBeenCalledTimes(2);
+    const [, secondCallRecords] = pipelineSend.mock.calls.map((c: any[]) => c[0]);
+    expect(secondCallRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a2:enter", "a2:exit"]);
+    expect(secondCallRecords[0].outcome).toBe("success");
   });
 
   it("resolves the failed branch when link returns ok:false", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false }), { status: 502 })));
 
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
     await worker.queue(
       makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-branch-2", channelId: "src-chan", payload: {} }),
-      env
+      testEnv as any
     );
 
-    const rows = await env.FLOW_DB.prepare(
-      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-branch1'`
-    ).first<{ c: number }>();
-    expect(rows?.c).toBeGreaterThanOrEqual(2);
+    expect(pipelineSend).toHaveBeenCalledTimes(2);
+    const [, secondCallRecords] = pipelineSend.mock.calls.map((c: any[]) => c[0]);
+    expect(secondCallRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
+    expect(secondCallRecords[0].outcome).toBe("failed");
   });
 
   it("schedules a content_flow_pending retry row when link reports rateLimited, instead of resolving a branch immediately", async () => {
@@ -416,13 +339,15 @@ describe("queue(): xContentAction branch resolution", () => {
     // flow-branch1 and its own (non-video) xContentAction fires a real fetch call — fetchMock must
     // resolve to something usable (an unconfigured vi.fn() returns undefined, and flow-branch1's
     // code unconditionally awaits res.json(), throwing and aborting the whole queue message before
-    // this test's own flow ever gets to record its content_flow_executions row).
+    // this test's own flow ever gets to emit its resumed-branch pipeline records).
     const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ ok: false }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
     await worker.queue(
       makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-video-no-url", channelId: "src-chan", payload: {} }),
-      env
+      testEnv as any
     );
 
     // Assert no call carried a videoUrl (rather than "zero calls total", since flow-branch1's own
@@ -433,11 +358,17 @@ describe("queue(): xContentAction branch resolution", () => {
       return !!body.videoUrl;
     });
     expect(anyCallWithVideoUrl).toBe(false);
-    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-video-no-url'`).first<{ c: number }>();
-    expect(execCount?.c).toBeGreaterThanOrEqual(1);
+    // flow-branch1 (same "src-chan" trigger) also fires concurrently, so filter the emitted
+    // records down to this test's own flow rather than assuming call order/index.
+    const flowRecords = pipelineSend.mock.calls
+      .flatMap((c: any[]) => c[0])
+      .filter((r: any) => r.flow_id === "flow-video-no-url");
+    expect(flowRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual([
+      "t1:enter", "t1:exit", "a1:enter", "a1:exit", "a1:outcome", "a3:enter", "a3:exit",
+    ]);
+    expect(flowRecords.find((r: any) => r.node_id === "a1" && r.direction === "outcome")?.outcome).toBe("failed");
 
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-video-no-url'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-video-no-url'`).run();
     vi.unstubAllGlobals();
   });
 
@@ -477,7 +408,6 @@ describe("queue(): xContentAction branch resolution", () => {
     expect(body.videoUrl).toBe("https://content-dev.uni-scrm.com/public/media/vid-9");
 
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-video-url'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-video-url'`).run();
     vi.unstubAllGlobals();
   });
 
@@ -508,9 +438,11 @@ describe("queue(): xContentAction branch resolution", () => {
       async () => new Response(JSON.stringify({ pending: true, mediaId: "media-9", channelId: "src-chan", text: "caption", checkAfterSecs: 5 }), { status: 200 })
     ));
 
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
     await worker.queue(
       makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-video-pending", channelId: "src-chan", payload: { processed_video_url: "https://content-dev.uni-scrm.com/public/media/vid-10" } }),
-      env
+      testEnv as any
     );
 
     const pending = await env.FLOW_DB.prepare(
@@ -521,13 +453,17 @@ describe("queue(): xContentAction branch resolution", () => {
     expect(JSON.parse(pending!.retry_action)).toMatchObject({ type: "xVideoStatusPoll", channelId: "src-chan", mediaId: "media-9", text: "caption", nodeId: "a1" });
     expect(new Date(pending!.execute_at).getTime()).toBeGreaterThan(Date.now());
 
-    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-video-pending'`).first<{ c: number }>();
-    // Only the initial dispatch row (matching the trigger) — no resumed-branch row yet, since
-    // the branch hasn't resolved.
-    expect(execCount?.c).toBe(1);
+    // Only the initial dispatch's records (matching the trigger) — no resumed-branch records yet,
+    // since a "pending" videoBody response short-circuits before resumeFromNode is ever called.
+    // flow-branch1 (same "src-chan" trigger) also fires concurrently, so filter by flow_id.
+    const flowRecords = pipelineSend.mock.calls
+      .flatMap((c: any[]) => c[0])
+      .filter((r: any) => r.flow_id === "flow-video-pending");
+    expect(flowRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual([
+      "t1:enter", "t1:exit", "a1:enter", "a1:exit",
+    ]);
 
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-video-pending'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-video-pending'`).run();
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-video-pending'`).run();
     vi.unstubAllGlobals();
   });
@@ -570,7 +506,6 @@ describe("queue(): xContentAction branch resolution", () => {
     expect(new Date(waitRow!.execute_at).getTime() - Date.now()).toBeLessThan(301000);
 
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-video-with-wait'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-video-with-wait'`).run();
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-video-with-wait'`).run();
     vi.unstubAllGlobals();
   });
@@ -579,7 +514,6 @@ describe("queue(): xContentAction branch resolution", () => {
 describe("queue(): tiktokContentAction dispatch", () => {
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-tiktok1'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-tiktok1'`).run();
     vi.unstubAllGlobals();
   });
 
@@ -685,7 +619,6 @@ describe("queue(): tiktokContentAction dispatch", () => {
     expect(fetchMock).not.toHaveBeenCalled();
 
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-tiktok-video-no-url'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-tiktok-video-no-url'`).run();
     vi.unstubAllGlobals();
   });
 
@@ -727,7 +660,6 @@ describe("queue(): tiktokContentAction dispatch", () => {
     expect(new Date(waitRow!.execute_at).getTime() - Date.now()).toBeLessThan(301000);
 
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-tiktok-video-failed-wait'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-tiktok-video-failed-wait'`).run();
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-tiktok-video-failed-wait'`).run();
     vi.unstubAllGlobals();
   });
@@ -761,7 +693,6 @@ describe("queue(): tiktokContentAction dispatch", () => {
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/internal/tiktok/photo-post"))).toBe(false);
 
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-tiktok-video'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-tiktok-video'`).run();
     vi.unstubAllGlobals();
   });
 });
@@ -769,7 +700,6 @@ describe("queue(): tiktokContentAction dispatch", () => {
 describe("queue(): videoCondition dispatch", () => {
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-video1'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-video1'`).run();
     vi.unstubAllGlobals();
   });
 
@@ -798,12 +728,14 @@ describe("queue(): videoCondition dispatch", () => {
        VALUES ('flow-video1', 1, 'video flow', ?, 'published', datetime('now'), datetime('now'))`
     ).bind(graphWithVideoCondition()).run();
 
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
     await worker.queue(
       makeBatch({
         tenantId: "1", eventType: "content.created", contentId: "content-vid-1", channelId: "src-chan",
         payload: { cover_image_url: "https://img/thumb.jpg" },
       }),
-      env
+      testEnv as any
     );
 
     const call = fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/internal/detect-face"));
@@ -811,14 +743,12 @@ describe("queue(): videoCondition dispatch", () => {
     const body = JSON.parse(call![1].body as string);
     expect(body.imageUrl).toBe("https://img/thumb.jpg");
 
-    // The outer queue() call site unconditionally writes one row whenever the initial
-    // executeFlow() call produces any actions (i.e. just for matching videoCondition itself), so
-    // >=1 would pass even without branch resolution — >=2 discriminates "resumeFromNode ran and
-    // resolved into a wired downstream node (a2, the has-face target)".
-    const rows = await env.FLOW_DB.prepare(
-      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-video1' AND content_id = 'content-vid-1'`
-    ).first<{ c: number }>();
-    expect(rows?.c).toBeGreaterThanOrEqual(2);
+    // resumeFromNode resolved a1's "has-face" branch down to a2 -- the second pipelineSend call
+    // (the first is the initial t1/a1 dispatch) carries a2's enter+exit.
+    expect(pipelineSend).toHaveBeenCalledTimes(2);
+    const [, secondCallRecords] = pipelineSend.mock.calls.map((c: any[]) => c[0]);
+    expect(secondCallRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a2:enter", "a2:exit"]);
+    expect(secondCallRecords[0].outcome).toBe("has-face");
   });
 
   it("resumes on the no-face branch when content's /internal/detect-face reports hasFace: false", async () => {
@@ -829,20 +759,22 @@ describe("queue(): videoCondition dispatch", () => {
        VALUES ('flow-video1', 1, 'video flow', ?, 'published', datetime('now'), datetime('now'))`
     ).bind(graphWithVideoCondition()).run();
 
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
     await worker.queue(
       makeBatch({
         tenantId: "1", eventType: "content.created", contentId: "content-vid-2", channelId: "src-chan",
         payload: { cover_image_url: "https://img/thumb.jpg" },
       }),
-      env
+      testEnv as any
     );
 
-    // Same reasoning as the has-face test above: >=2 proves resumeFromNode resolved into a3 (the
-    // no-face target), not just that the outer unconditional row for the initial match exists.
-    const rows = await env.FLOW_DB.prepare(
-      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-video1' AND content_id = 'content-vid-2'`
-    ).first<{ c: number }>();
-    expect(rows?.c).toBeGreaterThanOrEqual(2);
+    // Same reasoning as the has-face test above: proves resumeFromNode resolved into a3 (the
+    // no-face target), not just that the initial dispatch happened.
+    expect(pipelineSend).toHaveBeenCalledTimes(2);
+    const [, secondCallRecords] = pipelineSend.mock.calls.map((c: any[]) => c[0]);
+    expect(secondCallRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
+    expect(secondCallRecords[0].outcome).toBe("no-face");
   });
 
   it("resumes on the failed branch when content's /internal/detect-face returns a non-2xx", async () => {
@@ -853,30 +785,24 @@ describe("queue(): videoCondition dispatch", () => {
        VALUES ('flow-video1', 1, 'video flow', ?, 'published', datetime('now'), datetime('now'))`
     ).bind(graphWithVideoCondition()).run();
 
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
     await worker.queue(
       makeBatch({
         tenantId: "1", eventType: "content.created", contentId: "content-vid-3", channelId: "src-chan",
         payload: { cover_image_url: "https://img/thumb.jpg" },
       }),
-      env
+      testEnv as any
     );
 
-    // DEVIATION FROM BRIEF: the brief's literal test body asserted
-    // `expect(execution).toBeFalsy()` against a single-row SELECT. That can never pass: the
-    // outer queue() call site (src/index.ts ~line 1005) unconditionally inserts ONE
-    // content_flow_executions row whenever executeFlow()'s initial pass yields any action at
-    // all — which it does here (the videoCondition node itself is the one action), regardless
-    // of how the branch inside executeContentActions resolves. This exact masking behavior is
-    // called out by this same file's xContentAction branch tests (see the comment above the
-    // `>=2` assertion around line 176-188), which deliberately use a COUNT-based check instead
-    // of truthy/falsy for this reason. Neither a2 (has-face) nor a3 (no-face) is wired to the
-    // "failed" branch in this graph, so resumeFromNode's downstream resolution is empty and no
-    // *second* (inner) row is written — the discriminator for "it went to failed" is exactly
-    // ONE row (the outer one only), not zero.
-    const rows = await env.FLOW_DB.prepare(
-      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-video1' AND content_id = 'content-vid-3'`
-    ).first<{ c: number }>();
-    expect(rows?.c).toBe(1);
+    // Neither a2 (has-face) nor a3 (no-face) is wired to a "failed" edge in this graph, so
+    // resolving "failed" reaches no downstream node at all. resumeFromNode's nodeLogs is exactly
+    // a1's relabeled outcome entry (non-empty, so emitContentNodeLogs still fires) — proving the
+    // exact resolved outcome value, and that nothing further executed (no second/third entry).
+    expect(pipelineSend).toHaveBeenCalledTimes(2);
+    const [, secondCallRecords] = pipelineSend.mock.calls.map((c: any[]) => c[0]);
+    expect(secondCallRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome"]);
+    expect(secondCallRecords[0].outcome).toBe("failed");
   });
 
   it("resumes on the failed branch without calling content when cover_image_url is missing", async () => {
@@ -925,7 +851,6 @@ describe("queue(): videoAction dispatch", () => {
 
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-videoaction1'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-videoaction1'`).run();
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-videoaction1'`).run();
     vi.unstubAllGlobals();
   });
@@ -934,7 +859,8 @@ describe("queue(): videoAction dispatch", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const queueSend = vi.fn();
-    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend } };
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend }, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
 
     await env.FLOW_DB.prepare(
       `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
@@ -952,13 +878,12 @@ describe("queue(): videoAction dispatch", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(queueSend).not.toHaveBeenCalled();
 
-    // Same discriminator used by the videoCondition/xContentAction tests above: the outer
-    // queue() call site unconditionally writes one row for the initial match, so >=2 proves
-    // resumeFromNode resolved into a3 (the wired "failed" target).
-    const rows = await env.FLOW_DB.prepare(
-      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-videoaction1' AND content_id = 'content-va-1'`
-    ).first<{ c: number }>();
-    expect(rows?.c).toBeGreaterThanOrEqual(2);
+    // Same discriminator used by the videoCondition/xContentAction tests above: resumeFromNode
+    // resolved a1's "failed" branch down to a3 (the wired "failed" target).
+    expect(pipelineSend).toHaveBeenCalledTimes(2);
+    const [, secondCallRecords] = pipelineSend.mock.calls.map((c: any[]) => c[0]);
+    expect(secondCallRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
+    expect(secondCallRecords[0].outcome).toBe("failed");
 
     const pending = await env.FLOW_DB.prepare(
       `SELECT id FROM content_flow_pending WHERE flow_id = 'flow-videoaction1' AND content_id = 'content-va-1'`
@@ -970,7 +895,8 @@ describe("queue(): videoAction dispatch", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: null }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const queueSend = vi.fn();
-    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend } };
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend }, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
 
     await env.FLOW_DB.prepare(
       `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
@@ -989,10 +915,10 @@ describe("queue(): videoAction dispatch", () => {
     expect(call).toBeDefined();
     expect(queueSend).not.toHaveBeenCalled();
 
-    const rows = await env.FLOW_DB.prepare(
-      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-videoaction1' AND content_id = 'content-va-2'`
-    ).first<{ c: number }>();
-    expect(rows?.c).toBeGreaterThanOrEqual(2);
+    expect(pipelineSend).toHaveBeenCalledTimes(2);
+    const [, secondCallRecords] = pipelineSend.mock.calls.map((c: any[]) => c[0]);
+    expect(secondCallRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
+    expect(secondCallRecords[0].outcome).toBe("failed");
 
     // Minor symmetry fix: this graph has no wait node wired to the "failed" handle (a3 is a
     // plain noopLeaf), so resumed.pendingWaits is empty and no content_flow_pending row should
@@ -1051,7 +977,6 @@ describe("queue(): videoAction dispatch", () => {
     expect(new Date(waitRow!.execute_at).getTime() - Date.now()).toBeLessThan(301000);
 
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-videoaction-failed-wait'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-videoaction-failed-wait'`).run();
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-videoaction-failed-wait'`).run();
   });
 
@@ -1059,13 +984,15 @@ describe("queue(): videoAction dispatch", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: "https://youtube.com/watch?v=x" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const queueSend = vi.fn();
-    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend } };
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend }, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
 
     // Deliberately use the both-branches graph (a2 wired to "success") rather than a graph with
-    // no success edge at all — otherwise execCount === 1 below would hold trivially regardless
-    // of whether the code resolves the success branch, since there'd be nothing to resolve into.
-    // With a2 wired, execCount === 1 genuinely proves resumeFromNode was NOT called on the
-    // success path (a2 never ran), which is the architectural property this test exists to check.
+    // no success edge at all — otherwise "only one pipelineSend call" below would hold trivially
+    // regardless of whether the code resolves the success branch, since there'd be nothing to
+    // resolve into. With a2 wired, exactly one pipelineSend call genuinely proves resumeFromNode
+    // was NOT called on the success path (a2 never ran), which is the architectural property this
+    // test exists to check.
     await env.FLOW_DB.prepare(
       `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
        VALUES ('flow-videoaction1', 1, 'video action flow', ?, 'published', datetime('now'), datetime('now'))`
@@ -1095,12 +1022,11 @@ describe("queue(): videoAction dispatch", () => {
     expect(pending!.tenant_id).toBe(1);
     expect(message.pendingId).toBeTruthy();
 
-    // Only the initial dispatch row — no resumed-branch row, since videoAction's success path
-    // does not call resumeFromNode synchronously.
-    const execCount = await env.FLOW_DB.prepare(
-      `SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-videoaction1' AND content_id = 'content-va-3'`
-    ).first<{ c: number }>();
-    expect(execCount?.c).toBe(1);
+    // Only the initial dispatch's records — no resumed-branch records, since videoAction's
+    // success path does not call resumeFromNode synchronously.
+    expect(pipelineSend).toHaveBeenCalledTimes(1);
+    const [records] = pipelineSend.mock.calls[0];
+    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["t1:enter", "t1:exit", "a1:enter", "a1:exit"]);
   });
 
   it("uses payload.processed_video_url as the video source and skips the link lookup, when chained from a prior Video Action node", async () => {

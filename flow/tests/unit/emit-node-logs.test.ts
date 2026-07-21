@@ -28,12 +28,6 @@ describe("emitNodeLogs: sends directly to PIPELINE_FLOW_LOG, no queue", () => {
        )`
     ).run();
     await env.FLOW_DB.prepare(
-      `CREATE TABLE IF NOT EXISTS flow_executions (
-         id TEXT PRIMARY KEY, flow_id TEXT NOT NULL, event_id TEXT, user_id TEXT NOT NULL,
-         tenant_id INTEGER NOT NULL, matched INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL
-       )`
-    ).run();
-    await env.FLOW_DB.prepare(
       `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
        VALUES ('flow-elog1', 1, 'x flow', ?, 'published', datetime('now'), datetime('now'))`
     ).bind(graphWithXTrigger).run();
@@ -41,7 +35,6 @@ describe("emitNodeLogs: sends directly to PIPELINE_FLOW_LOG, no queue", () => {
 
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-elog1'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM flow_executions WHERE flow_id = 'flow-elog1'`).run();
   });
 
   it("calls PIPELINE_FLOW_LOG.send with the expected records and never touches FLOW_LOG_QUEUE", async () => {

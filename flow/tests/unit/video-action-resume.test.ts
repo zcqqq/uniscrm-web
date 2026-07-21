@@ -56,12 +56,6 @@ async function setupSchema() {
      )`
   ).run();
   await env.FLOW_DB.prepare(
-    `CREATE TABLE IF NOT EXISTS content_flow_executions (
-       id TEXT PRIMARY KEY, flow_id TEXT NOT NULL, event_id TEXT, content_id TEXT NOT NULL,
-       tenant_id INTEGER NOT NULL, matched INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL
-     )`
-  ).run();
-  await env.FLOW_DB.prepare(
     `CREATE TABLE IF NOT EXISTS content_flow_pending (
        id TEXT PRIMARY KEY, flow_id TEXT NOT NULL, node_id TEXT NOT NULL, content_id TEXT NOT NULL,
        tenant_id INTEGER NOT NULL, payload TEXT NOT NULL, execute_at TEXT NOT NULL,
@@ -127,13 +121,7 @@ describe("POST /internal/video-action/resume", () => {
     const [records] = pipelineSend.mock.calls[0];
     expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a2:enter", "a2:exit"]);
 
-    const exec = await env.FLOW_DB.prepare(
-      `SELECT content_id FROM content_flow_executions WHERE flow_id = 'flow-resume-1'`
-    ).first<{ content_id: string }>();
-    expect(exec).toMatchObject({ content_id: "content-resume-1" });
-
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-resume-1'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-resume-1'`).run();
   });
 
   it("merges props into the payload carried forward to a re-scheduled downstream wait node", async () => {

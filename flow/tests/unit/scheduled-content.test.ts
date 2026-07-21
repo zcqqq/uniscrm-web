@@ -56,17 +56,6 @@ describe("scheduled(): content_flow_pending sweep", () => {
        )`
     ).run();
     await env.FLOW_DB.prepare(
-      `CREATE TABLE IF NOT EXISTS content_flow_executions (
-         id TEXT PRIMARY KEY,
-         flow_id TEXT NOT NULL,
-         event_id TEXT,
-         content_id TEXT NOT NULL,
-         tenant_id INTEGER NOT NULL,
-         matched INTEGER NOT NULL DEFAULT 1,
-         created_at TEXT NOT NULL
-       )`
-    ).run();
-    await env.FLOW_DB.prepare(
       `CREATE TABLE IF NOT EXISTS content_flow_pending (
          id TEXT PRIMARY KEY,
          flow_id TEXT NOT NULL,
@@ -87,7 +76,6 @@ describe("scheduled(): content_flow_pending sweep", () => {
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-c2'`).run();
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-c2'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-c2'`).run();
   });
 
   it("resumes a due content_flow_pending row via resumeFromNode and clears it", async () => {
@@ -102,15 +90,18 @@ describe("scheduled(): content_flow_pending sweep", () => {
        VALUES ('pend-1', 'flow-c2', 'w1', 'content-abc', 1, '{}', ?, datetime('now'))`
     ).bind(past).run();
 
-    await worker.scheduled({} as any, env);
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+    await worker.scheduled({} as any, testEnv as any);
 
     const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE id = 'pend-1'`).first();
     expect(remaining).toBeNull();
 
-    const exec = await env.FLOW_DB.prepare(
-      `SELECT content_id FROM content_flow_executions WHERE flow_id = 'flow-c2'`
-    ).first<{ content_id: string }>();
-    expect(exec).toMatchObject({ content_id: "content-abc" });
+    // w1 is a "wait" node -- its own exit is not eagerly logged at dispatch time, so resuming it
+    // emits its real exit (not relabeled to "outcome"), followed by a1's genuine enter+exit.
+    expect(pipelineSend).toHaveBeenCalledTimes(1);
+    const [records] = pipelineSend.mock.calls[0];
+    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["w1:exit", "a1:enter", "a1:exit"]);
   });
 
   // videoAction nodes are stored as generic `action` nodes with data.actionType ===
@@ -163,11 +154,6 @@ describe("scheduled(): content_flow_pending sweep", () => {
     const [records] = pipelineSend.mock.calls[0];
     expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
     expect(records[0].outcome).toBe("failed");
-
-    const exec = await env.FLOW_DB.prepare(
-      `SELECT content_id FROM content_flow_executions WHERE flow_id = 'flow-c2' AND content_id = 'content-vaction-1'`
-    ).first<{ content_id: string }>();
-    expect(exec).toMatchObject({ content_id: "content-vaction-1" });
   });
 });
 
@@ -175,7 +161,6 @@ describe("scheduled(): content_flow_pending retry_action handling", () => {
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-retry1'`).run();
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-retry1'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-retry1'`).run();
     vi.unstubAllGlobals();
   });
 
@@ -233,13 +218,18 @@ describe("scheduled(): content_flow_pending retry_action handling", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })));
 
-    await worker.scheduled({} as any, env);
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+    await worker.scheduled({} as any, testEnv as any);
 
     const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE id = 'pend-retry-2'`).first();
     expect(remaining).toBeNull();
 
-    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-retry1' AND content_id = 'content-retry-2'`).first<{ c: number }>();
-    expect(execCount?.c).toBeGreaterThanOrEqual(1);
+    // The retried xContentAction resolves the "success" branch (graphWithBranches's a1 -> a2).
+    expect(pipelineSend).toHaveBeenCalledTimes(1);
+    const [records] = pipelineSend.mock.calls[0];
+    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a2:enter", "a2:exit"]);
+    expect(records[0].outcome).toBe("success");
   });
 
   it("resolves the failed branch once rate-limit retries are exhausted (retry_count >= 5)", async () => {
@@ -262,13 +252,19 @@ describe("scheduled(): content_flow_pending retry_action handling", () => {
       vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, rateLimited: true, rateLimitReset: "2099-01-01T00:00:00.000Z" }), { status: 429 }))
     );
 
-    await worker.scheduled({} as any, env);
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+    await worker.scheduled({} as any, testEnv as any);
 
     const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE id = 'pend-retry-3'`).first();
     expect(remaining).toBeNull();
 
-    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-retry1' AND content_id = 'content-retry-3'`).first<{ c: number }>();
-    expect(execCount?.c).toBeGreaterThanOrEqual(1);
+    // Retries exhausted (retry_count >= 5): resolves the "failed" branch (a3), per
+    // flow/CLAUDE.md's "Rate limit重试耗尽后才走failed分支" rule.
+    expect(pipelineSend).toHaveBeenCalledTimes(1);
+    const [records] = pipelineSend.mock.calls[0];
+    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
+    expect(records[0].outcome).toBe("failed");
   });
 });
 
@@ -276,7 +272,6 @@ describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-vpoll1'`).run();
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-vpoll1'`).run();
-    await env.FLOW_DB.prepare(`DELETE FROM content_flow_executions WHERE flow_id = 'flow-vpoll1'`).run();
     vi.unstubAllGlobals();
   });
 
@@ -310,7 +305,9 @@ describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, id: "tweet-poll-1" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await worker.scheduled({} as any, env);
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+    await worker.scheduled({} as any, testEnv as any);
 
     const statusCall = fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/internal/content/x-video-status"));
     expect(statusCall).toBeDefined();
@@ -320,8 +317,11 @@ describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
     const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE id = 'pend-vpoll-1'`).first();
     expect(remaining).toBeNull();
 
-    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-vpoll1' AND content_id = 'content-vpoll-1'`).first<{ c: number }>();
-    expect(execCount?.c).toBeGreaterThanOrEqual(1);
+    // x-video-status reports ok:true (not pending) -- resolves the "success" branch (a1 -> a2).
+    expect(pipelineSend).toHaveBeenCalledTimes(1);
+    const [records] = pipelineSend.mock.calls[0];
+    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a2:enter", "a2:exit"]);
+    expect(records[0].outcome).toBe("success");
   });
 
   it("resolves the failed branch when x-video-status reports ok:false", async () => {
@@ -339,12 +339,18 @@ describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false }), { status: 200 })));
 
-    await worker.scheduled({} as any, env);
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+    await worker.scheduled({} as any, testEnv as any);
 
     const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE id = 'pend-vpoll-2'`).first();
     expect(remaining).toBeNull();
-    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-vpoll1' AND content_id = 'content-vpoll-2'`).first<{ c: number }>();
-    expect(execCount?.c).toBeGreaterThanOrEqual(1);
+
+    // x-video-status reports ok:false (not pending) -- resolves the "failed" branch (a1 -> a3).
+    expect(pipelineSend).toHaveBeenCalledTimes(1);
+    const [records] = pipelineSend.mock.calls[0];
+    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
+    expect(records[0].outcome).toBe("failed");
   });
 
   it("reschedules (retry_count+1) when still pending and under the 5-attempt ceiling", async () => {
@@ -384,11 +390,18 @@ describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ pending: true, checkAfterSecs: 10 }), { status: 200 })));
 
-    await worker.scheduled({} as any, env);
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+    await worker.scheduled({} as any, testEnv as any);
 
     const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE id = 'pend-vpoll-4'`).first();
     expect(remaining).toBeNull();
-    const execCount = await env.FLOW_DB.prepare(`SELECT COUNT(*) as c FROM content_flow_executions WHERE flow_id = 'flow-vpoll1' AND content_id = 'content-vpoll-4'`).first<{ c: number }>();
-    expect(execCount?.c).toBeGreaterThanOrEqual(1);
+
+    // Still pending but retries exhausted (retry_count >= 5) -- resolves the "failed" branch
+    // (a1 -> a3), same rule as the retry_action describe block above.
+    expect(pipelineSend).toHaveBeenCalledTimes(1);
+    const [records] = pipelineSend.mock.calls[0];
+    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
+    expect(records[0].outcome).toBe("failed");
   });
 });

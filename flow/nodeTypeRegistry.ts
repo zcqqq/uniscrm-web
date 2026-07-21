@@ -1,5 +1,6 @@
 import { ContentMetadata_X } from "../metadata/x-byok";
 import { ContentMetadata_TikTok } from "../metadata/tiktok";
+import { ContentMetadata_YouTube } from "../metadata/youtube";
 import { CHANNEL_TYPES } from "./frontend/config/trigger-fields";
 
 export type FlowDomain = "user" | "content";
@@ -83,6 +84,10 @@ const CONTENT_TIKTOK_ACTION_OPERATIONS = CONTENT_TIKTOK_ACTION_ENTRIES.map((m) =
 const CONTENT_TIKTOK_ACTION_BULLETS = CONTENT_TIKTOK_ACTION_ENTRIES.map((m) => {
   return `   - operation "${m.sourceContentType}": ${m.description!.en}`;
 }).join("\n");
+
+const CONTENT_YOUTUBE_ACTION_ENTRIES = ContentMetadata_YouTube.filter((m) => m.flowType === "action");
+const CONTENT_YOUTUBE_ACTION_OPERATIONS = CONTENT_YOUTUBE_ACTION_ENTRIES.map((m) => `"${m.sourceContentType}"`).join("|");
+const CONTENT_YOUTUBE_ACTION_BULLETS = CONTENT_YOUTUBE_ACTION_ENTRIES.map((m) => `   - operation "${m.sourceContentType}": ${m.description!.en}`).join("\n");
 
 // Exported so every consumer of the mode field (Inspector, flow-editor default data, the
 // XContentTriggerNode canvas subtitle, templates, and the engine's runtime dispatch) reads the
@@ -218,6 +223,18 @@ ${CONTENT_X_ACTION_BULLETS}`,
     promptFragment: `   For TikTok content actions: data: { actionType: "tiktokContentAction", operation: ${CONTENT_TIKTOK_ACTION_OPERATIONS}, channelId: "", prompts: {}, textProvider: "default", textSkillId: "none", imageCount: 1, imageProvider: "default", imageSkillId: "none" }
    - Leave all fields at these defaults for the user to configure via the Inspector. imageCount/imageProvider/imageSkillId only apply to "photo-post".
 ${CONTENT_TIKTOK_ACTION_BULLETS}`,
+  },
+  youtubeContentAction: {
+    reactFlowType: "action",
+    label: "YouTube Action",
+    description: `${CONTENT_YOUTUBE_ACTION_ENTRIES.length} actions`,
+    domain: "content",
+    role: "action",
+    generatable: true,
+    promptFragment: `   For YouTube content actions: data: { actionType: "youtubeContentAction", operation: ${CONTENT_YOUTUBE_ACTION_OPERATIONS}, playlistId: "" }
+   - Every operation acts via the triggering channel's own YouTube account — there is no target-account picker.
+   - "save-to-playlist" needs playlistId (user picks a playlist in the Inspector); "rate-like" needs no additional fields.
+${CONTENT_YOUTUBE_ACTION_BULLETS}`,
   },
   videoAction: {
     reactFlowType: "action",

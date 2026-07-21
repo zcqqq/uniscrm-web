@@ -288,6 +288,7 @@ function buildActionData(targetNode: FlowNode): ActionResult {
     actionData.imageSkillId = (targetNode.data.imageSkillId as string) || "none";
   }
   if (actionType === "videoAction") {
+    actionData.operation = (targetNode.data.operation as string) || "add-subtitle";
     actionData.targetLanguage = (targetNode.data.targetLanguage as string) || "zh";
   }
   return actionData;

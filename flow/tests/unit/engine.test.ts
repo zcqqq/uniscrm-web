@@ -328,7 +328,7 @@ describe("collectActions: new content-domain action types", () => {
     };
     const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
     expect(result.actions).toEqual([
-      { type: "videoAction", nodeId: "a1", hasBranches: true, targetLanguage: "zh" },
+      { type: "videoAction", nodeId: "a1", hasBranches: true, operation: "add-subtitle", targetLanguage: "zh" },
     ]);
   });
 
@@ -342,6 +342,30 @@ describe("collectActions: new content-domain action types", () => {
     };
     const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
     expect(result.actions[0]).toMatchObject({ targetLanguage: "zh" });
+  });
+
+  it("captures operation on a videoAction node, defaulting to 'add-subtitle'", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "videoAction" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
+    expect(result.actions[0]).toMatchObject({ operation: "add-subtitle" });
+  });
+
+  it("captures an explicit operation on a videoAction node", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "videoAction", operation: "rotate-to-vertical" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
+    expect(result.actions[0]).toMatchObject({ operation: "rotate-to-vertical" });
   });
 });
 

@@ -226,8 +226,10 @@ ${CONTENT_TIKTOK_ACTION_BULLETS}`,
     domain: "content",
     role: "action",
     generatable: true,
-    promptFragment: `   For video actions: data: { actionType: "videoAction", operation: ["add-subtitle"], targetLanguage: "zh" }
-   - "add-subtitle": downloads the content's video, transcribes speech, translates it into targetLanguage, burns in subtitles, caches the result in R2. Has "success"/"failed" branches. Never publishes anywhere — produces $content.processed_video_url, $content.video_transcript, $content.translated_subtitle_text for later nodes to use.`,
+    promptFragment: `   For video actions: data: { actionType: "videoAction", operation: "add-subtitle"|"rotate-to-vertical"|"remove-face", targetLanguage: "zh" }
+   - "add-subtitle": downloads the content's video (or the previous Video Action node's output, if chained), transcribes speech, translates it into targetLanguage, burns in subtitles, caches the result in R2. Has "success"/"failed" branches. Produces $content.processed_video_url, $content.video_transcript, $content.translated_subtitle_text.
+   - "rotate-to-vertical": pads the video into 9:16 (1080x1920), centered, black bars top/bottom. No-ops (still succeeds) if already portrait/square. Has "success"/"failed" branches. Produces $content.processed_video_url only. targetLanguage is ignored.
+   - "remove-face": cuts every segment containing a human face, shortening the video. Fails if the remaining duration drops below ~2 seconds. Has "success"/"failed" branches. Produces $content.processed_video_url only. targetLanguage is ignored.`,
   },
   videoCondition: {
     reactFlowType: "videoCondition",

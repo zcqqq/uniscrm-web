@@ -67,9 +67,18 @@ export const api = {
     analytics: (id: string) =>
       request<{ nodes: Record<string, { enter: number; exit: number }> }>(`/api/flows/${id}/analytics`),
     nodeLogs: (flowId: string, nodeId: string) =>
-      request<{ logs: { user_id: string; name: string | null; created_at: string }[] }>(
-        `/api/flows/${flowId}/nodes/${nodeId}/logs`
-      ),
+      request<{
+        logs: {
+          user_id?: string;
+          name?: string | null;
+          content_id?: string;
+          created_at: string;
+          outcome?: string;
+          title?: string | null;
+          content_text?: string | null;
+          content_url?: string | null;
+        }[];
+      }>(`/api/flows/${flowId}/nodes/${nodeId}/logs`),
     generate: (prompt: string, currentGraph: { nodes: any[]; edges: any[] }) =>
       request<{ nodes: any[]; edges: any[] }>("/api/flows/generate", {
         method: "POST",

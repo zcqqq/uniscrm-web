@@ -5,7 +5,7 @@ import { executeFlow, resumeFromNode, evaluateCondition, type FlowGraph, type Ac
 import { EventMetadata_X } from "../../metadata/x";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
-import { CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../nodeTypeRegistry";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY } from "../nodeTypeRegistry";
 
 // A flow's domain is stored on the row (migration 0014), set at creation and never changed.
 // It used to be sniffed from graph_json for a content trigger node type, which broke as soon
@@ -141,44 +141,46 @@ export async function recomputeFlowCounts(env: Env): Promise<void> {
     queryR2Counts(env, "uniscrm.content_flow_log"),
   ]);
 
-  const byTenant = new Map<number, { flow: CountRow[]; content: CountRow[] }>();
-  for (const row of flowRows) {
-    if (!byTenant.has(row.tenant_id)) byTenant.set(row.tenant_id, { flow: [], content: [] });
-    byTenant.get(row.tenant_id)!.flow.push(row);
+  const now = new Date().toISOString();
+  const allRows = [...flowRows, ...contentFlowRows];
+
+  for (const r of flowRows) {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(flow_id, node_id, direction) DO UPDATE SET tenant_id = excluded.tenant_id, count = excluded.count, updated_at = excluded.updated_at`
+    ).bind(r.tenant_id, r.flow_id, r.node_id, r.direction, r.cnt, now).run();
   }
-  for (const row of contentFlowRows) {
-    if (!byTenant.has(row.tenant_id)) byTenant.set(row.tenant_id, { flow: [], content: [] });
-    byTenant.get(row.tenant_id)!.content.push(row);
+  for (const r of contentFlowRows) {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(flow_id, node_id, direction) DO UPDATE SET tenant_id = excluded.tenant_id, count = excluded.count, updated_at = excluded.updated_at`
+    ).bind(r.tenant_id, r.flow_id, r.node_id, r.direction, r.cnt, now).run();
   }
 
-  for (const [tenantId, rows] of byTenant) {
+  // Cache each flow's trigger-node "entered" count directly on flows.trigger_count, so the list
+  // page's GET /api/flows can read it as a plain column with no per-request join, R2 call, or
+  // tenant-db round-trip. "enter" rows for both domains are already in allRows above.
+  const enterCountByFlowNode = new Map<string, number>();
+  for (const r of allRows) {
+    if (r.direction === "enter") enterCountByFlowNode.set(`${r.flow_id}:${r.node_id}`, r.cnt);
+  }
+
+  const flows = await env.FLOW_DB.prepare(`SELECT id, graph_json FROM flows`).all<{ id: string; graph_json: string }>();
+  for (const flow of flows.results) {
+    let triggerNodeId: string | undefined;
     try {
-      const tenantRow = await env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-        .bind(tenantId).first<{ d1_database_id: string | null }>();
-      if (!tenantRow?.d1_database_id) continue;
-
-      const tdb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
-      const now = new Date().toISOString();
-
-      for (const r of rows.flow) {
-        await tdb.run(
-          `INSERT INTO flow_counts (flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(flow_id, node_id, direction) DO UPDATE SET count = excluded.count, updated_at = excluded.updated_at`,
-          [r.flow_id, r.node_id, r.direction, r.cnt, now]
-        );
-      }
-      for (const r of rows.content) {
-        await tdb.run(
-          `INSERT INTO content_flow_counts (flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(flow_id, node_id, direction) DO UPDATE SET count = excluded.count, updated_at = excluded.updated_at`,
-          [r.flow_id, r.node_id, r.direction, r.cnt, now]
-        );
-      }
-      console.log(JSON.stringify({ event: "flow_counts_recomputed", tenantId, flowRows: rows.flow.length, contentFlowRows: rows.content.length }));
-    } catch (e) {
-      console.error(JSON.stringify({ event: "flow_counts_recompute_error", tenantId, error: String(e) }));
+      const graph = JSON.parse(flow.graph_json) as { nodes: { id: string; type: string }[] };
+      triggerNodeId = graph.nodes.find((n) => NODE_TYPE_REGISTRY[n.type]?.role === "trigger")?.id;
+    } catch {
+      continue;
     }
+    if (!triggerNodeId) continue;
+    const count = enterCountByFlowNode.get(`${flow.id}:${triggerNodeId}`);
+    if (count === undefined) continue;
+    await env.FLOW_DB.prepare(`UPDATE flows SET trigger_count = ? WHERE id = ?`).bind(count, flow.id).run();
   }
+
+  console.log(JSON.stringify({ event: "flow_counts_recomputed", flowRows: flowRows.length, contentFlowRows: contentFlowRows.length }));
 }
 
 function shouldCronFire(data: Record<string, unknown>, now: Date): boolean {

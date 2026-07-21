@@ -187,6 +187,84 @@ describe("GET /youtube/callback", () => {
     expect(syncYouTubeSubscriptionsMock).toHaveBeenCalledWith(expect.anything(), "existing-row-id", "access-tok-2");
   });
 
+  it("persists the refresh token from a fresh consent grant", async () => {
+    validateAuthorizationCodeMock.mockResolvedValueOnce({
+      accessToken: () => "access-tok-3",
+      idToken: () => "mock-id-token",
+      accessTokenExpiresInSeconds: () => 3600,
+      refreshToken: () => "rt-happy",
+    });
+    decodeIdTokenMock.mockReturnValueOnce({ sub: "google-user-1", email: "tenant@example.com" });
+
+    const kv = createMockKv({ codeVerifier: "verifier", tenantId: "1", memberId: "member1" });
+    const linkDb = createMockLinkDb([
+      ["channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id", { id: "row-1" }],
+    ]);
+
+    const app = buildApp();
+    const { ctx, flush } = createMockExecutionCtx();
+    const res = await app.request(
+      "/youtube/callback?code=abc&state=xyz",
+      {},
+      { KV: kv, LINK_DB: linkDb, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any,
+      ctx as any
+    );
+    await flush();
+
+    expect(res.status).toBe(302);
+    const insertCall = linkDb.calls.find((c) => c.sql.includes("INSERT INTO channels"));
+    expect(insertCall).toBeDefined();
+    const config = JSON.parse(insertCall!.args[1] as string);
+    expect(config.refresh_token).toBe("rt-happy");
+  });
+
+  it("preserves a previously stored refresh token when Google's response omits one on reconnect", async () => {
+    // Google only returns refresh_token on the FIRST consent grant for a given
+    // scope set — a reconnect where the user has already consented can omit it.
+    // The upsert is unconditional (config = excluded.config), so without
+    // preservation logic this would silently null out a working refresh token.
+    validateAuthorizationCodeMock.mockResolvedValueOnce({
+      accessToken: () => "access-tok-4",
+      idToken: () => "mock-id-token",
+      accessTokenExpiresInSeconds: () => 3600,
+      // No refreshToken() method — mirrors arctic's real shape when Google's
+      // token response has no refresh_token field.
+    });
+    decodeIdTokenMock.mockReturnValueOnce({ sub: "google-user-1", email: "tenant@example.com" });
+
+    const kv = createMockKv({ codeVerifier: "verifier", tenantId: "1", memberId: "member1" });
+    const existingConfig = JSON.stringify({
+      google_user_id: "google-user-1",
+      email: "tenant@example.com",
+      access_token: "old-access-tok",
+      refresh_token: "rt-old",
+      expires_at: "2020-01-01T00:00:00.000Z",
+      subscriptions: [],
+      sync_status: "pending",
+      last_synced_at: null,
+    });
+    const linkDb = createMockLinkDb([
+      ["SELECT config FROM channels", { config: existingConfig }],
+      ["SELECT id FROM channels", { id: "existing-row-id" }],
+    ]);
+
+    const app = buildApp();
+    const { ctx, flush } = createMockExecutionCtx();
+    const res = await app.request(
+      "/youtube/callback?code=abc&state=xyz",
+      {},
+      { KV: kv, LINK_DB: linkDb, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any,
+      ctx as any
+    );
+    await flush();
+
+    expect(res.status).toBe(302);
+    const insertCall = linkDb.calls.find((c) => c.sql.includes("INSERT INTO channels"));
+    expect(insertCall).toBeDefined();
+    const config = JSON.parse(insertCall!.args[1] as string);
+    expect(config.refresh_token).toBe("rt-old");
+  });
+
   it("returns 400 when state is missing or expired", async () => {
     const kv = createMockKv(null);
     const app = buildApp();

@@ -457,6 +457,33 @@ export function oauthRoutes() {
     try { refreshToken = tokens.refreshToken(); } catch { refreshToken = null; }
 
     const sourceChannelId = `${tenantId}:${googleUserId}`;
+
+    if (!refreshToken) {
+      // Google only returns refresh_token on the FIRST consent grant for a
+      // given scope set — a reconnect where the user already granted consent
+      // can omit it even with access_type=offline+prompt=consent. The upsert
+      // below is unconditional (config = excluded.config), so without this,
+      // a token-omitting reconnect would silently null out a previously
+      // working refresh token. Reuse whatever is already stored, if anything.
+      let preservedRefreshToken: string | null = null;
+      const existingChannel = await c.env.LINK_DB
+        .prepare("SELECT config FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id = ? AND is_active = 1")
+        .bind(sourceChannelId)
+        .first<{ config: string }>();
+      if (existingChannel?.config) {
+        try {
+          const existingConfig = JSON.parse(existingChannel.config) as { refresh_token?: string | null };
+          preservedRefreshToken = existingConfig.refresh_token ?? null;
+        } catch { preservedRefreshToken = null; }
+      }
+      console.error(JSON.stringify({
+        event: "youtube_oauth_refresh_token_absent",
+        sourceChannelId,
+        preservedPriorToken: !!preservedRefreshToken,
+      }));
+      refreshToken = preservedRefreshToken;
+    }
+
     const config = {
       google_user_id: googleUserId,
       email,

@@ -133,8 +133,16 @@ def burn_subtitles():
     client = r2_client()
     client.download_file(bucket, video_key, video_path)
 
+    # Explicit flush+fsync before ffmpeg reads this file in a subprocess — without it, this
+    # container runtime does not reliably make the write visible to the child process (unlike
+    # source.mp4 above, whose durable write comes from boto3's own download_file). Observed
+    # live: ffmpeg's libass filter reporting "Unable to open subs.srt" immediately after this
+    # write, 100% reproducible in the deployed container, 0% reproducible in a local Docker run
+    # of the same image — the one thing that differs is this write's durability guarantee.
     with open(srt_path, "w", encoding="utf-8") as f:
         f.write(subtitle_srt)
+        f.flush()
+        os.fsync(f.fileno())
 
     burn = subprocess.run(
         ["ffmpeg", "-y", "-i", video_path, "-vf", f"subtitles={srt_path}", "-c:a", "copy", output_path],

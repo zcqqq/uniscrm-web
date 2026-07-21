@@ -673,19 +673,21 @@ async function executeContentActions(
       }
 
       const sourceContentId = String(payload?.source_content_id ?? "");
-      let videoUrl: string | null = null;
-      try {
-        const res = await fetch(`${env.LINK_URL}/internal/content/video-url`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
-          body: JSON.stringify({ contentId, channelId, sourceContentId }),
-        });
-        if (res.ok) {
-          const body = await res.json() as { url: string | null };
-          videoUrl = body.url;
+      let videoUrl: string | null = String(payload?.processed_video_url ?? "") || null;
+      if (!videoUrl) {
+        try {
+          const res = await fetch(`${env.LINK_URL}/internal/content/video-url`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+            body: JSON.stringify({ contentId, channelId, sourceContentId }),
+          });
+          if (res.ok) {
+            const body = await res.json() as { url: string | null };
+            videoUrl = body.url;
+          }
+        } catch {
+          // network error: treated the same as "no video" below
         }
-      } catch {
-        // network error: treated the same as "no video" below
       }
 
       if (!videoUrl) {
@@ -732,7 +734,7 @@ async function executeContentActions(
 
       await env.VIDEO_ACTION_QUEUE.send({
         pendingId, contentId, tenantId: Number(tenantId),
-        videoUrl, targetLanguage: (action.targetLanguage as string) || "zh",
+        videoUrl, operation: (action.operation as string) || "add-subtitle", targetLanguage: (action.targetLanguage as string) || "zh",
         flowId: flowId || "", nodeId, payload,
       });
 

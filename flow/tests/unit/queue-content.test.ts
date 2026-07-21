@@ -1102,4 +1102,52 @@ describe("queue(): videoAction dispatch", () => {
     ).first<{ c: number }>();
     expect(execCount?.c).toBe(1);
   });
+
+  it("uses payload.processed_video_url as the video source and skips the link lookup, when chained from a prior Video Action node", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: "https://youtube.com/watch?v=should-not-be-used" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const queueSend = vi.fn();
+    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend } };
+
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-videoaction-chain', 1, 'chained video action flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithVideoAction()).run();
+
+    await worker.queue(
+      makeBatch({
+        tenantId: "1", eventType: "content.created", contentId: "content-va-chain", channelId: "src-chan",
+        payload: { processed_video_url: "https://content-dev.uni-scrm.com/public/media/rotated.mp4" },
+      }),
+      testEnv as any
+    );
+
+    expect(queueSend).toHaveBeenCalledTimes(1);
+    const message = queueSend.mock.calls[0][0];
+    expect(message.videoUrl).toBe("https://content-dev.uni-scrm.com/public/media/rotated.mp4");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards operation in the VIDEO_ACTION_QUEUE message, defaulting to 'add-subtitle'", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: "https://youtube.com/watch?v=x" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const queueSend = vi.fn();
+    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend } };
+
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-videoaction-op', 1, 'video action op flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithVideoAction()).run();
+
+    await worker.queue(
+      makeBatch({
+        tenantId: "1", eventType: "content.created", contentId: "content-va-op", channelId: "src-chan",
+        payload: { source_content_id: "x" },
+      }),
+      testEnv as any
+    );
+
+    const message = queueSend.mock.calls[0][0];
+    expect(message.operation).toBe("add-subtitle");
+  });
 });

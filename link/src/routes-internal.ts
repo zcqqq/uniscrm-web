@@ -10,6 +10,9 @@ import { ContentService } from "./services/content";
 import { createPost, repostPost, createBookmark, likePost, initMediaUpload, appendMediaChunk, finalizeMediaUpload, getMediaUploadStatus } from "./services/x-posts-api";
 import { TikTokTokenService } from "./services/tiktok-token";
 import { initPhotoPost, initVideoPost } from "./services/tiktok-publish";
+import { YouTubeTokenService } from "./services/youtube-token";
+import { rateVideo, insertPlaylistItem } from "./services/youtube-actions";
+import { recordYouTubeWriteQuota } from "./services/youtube-quota";
 
 const ACTION_TO_EVENT_TYPE: Record<string, string> = {
   follow: "follow-user",
@@ -332,6 +335,81 @@ export function internalRoutes() {
       return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
     }
     return c.json({ ok: likeResult.ok });
+  });
+
+  // Likes contentId's originating YouTube video via the channel that ingested it. channelId is
+  // always the flow's triggering YouTube account — no account picker.
+  router.post("/youtube/rate", async (c) => {
+    const { channelId, contentId, videoId, flowId } = await c.req.json<{
+      channelId: string; contentId: string; videoId: string; flowId?: string | null;
+    }>();
+
+    const channel = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE id = ? AND channel_type = 'YOUTUBE_ACCOUNT'")
+      .bind(channelId).first<{ config: string }>();
+    if (!channel) return c.json({ ok: false });
+
+    const tokenService = new YouTubeTokenService(c.env.LINK_DB, c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET);
+    let accessToken: string;
+    try {
+      accessToken = await tokenService.getValidToken(channelId);
+    } catch (e) {
+      // Existing channel connected before write scope / offline access — no refresh token.
+      console.log(JSON.stringify({ event: "youtube_rate_no_token", contentId, channelId, error: String(e) }));
+      return c.json({ ok: false });
+    }
+
+    let result = await rateVideo(accessToken, videoId);
+    if (result.unauthorized) {
+      try {
+        accessToken = await tokenService.forceRefresh(channelId);
+        result = await rateVideo(accessToken, videoId);
+      } catch {
+        return c.json({ ok: false });
+      }
+    }
+    if (result.ok) await recordYouTubeWriteQuota(c.env);
+
+    console.log(JSON.stringify({ event: "youtube_rate", contentId, channelId, videoId, flowId: flowId || null, ok: result.ok, rateLimited: !!result.rateLimited }));
+    if (result.rateLimited) return c.json({ ok: false, rateLimited: true, rateLimitReset: result.rateLimitReset });
+    return c.json({ ok: result.ok });
+  });
+
+  // Saves contentId's originating YouTube video into a user-owned playlist via the triggering channel.
+  router.post("/youtube/playlist-insert", async (c) => {
+    const { channelId, contentId, videoId, playlistId, flowId } = await c.req.json<{
+      channelId: string; contentId: string; videoId: string; playlistId: string; flowId?: string | null;
+    }>();
+    if (!playlistId) return c.json({ ok: false });
+
+    const channel = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE id = ? AND channel_type = 'YOUTUBE_ACCOUNT'")
+      .bind(channelId).first<{ config: string }>();
+    if (!channel) return c.json({ ok: false });
+
+    const tokenService = new YouTubeTokenService(c.env.LINK_DB, c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET);
+    let accessToken: string;
+    try {
+      accessToken = await tokenService.getValidToken(channelId);
+    } catch (e) {
+      console.log(JSON.stringify({ event: "youtube_playlist_insert_no_token", contentId, channelId, error: String(e) }));
+      return c.json({ ok: false });
+    }
+
+    let result = await insertPlaylistItem(accessToken, playlistId, videoId);
+    if (result.unauthorized) {
+      try {
+        accessToken = await tokenService.forceRefresh(channelId);
+        result = await insertPlaylistItem(accessToken, playlistId, videoId);
+      } catch {
+        return c.json({ ok: false });
+      }
+    }
+    if (result.ok) await recordYouTubeWriteQuota(c.env);
+
+    console.log(JSON.stringify({ event: "youtube_playlist_insert", contentId, channelId, videoId, playlistId, flowId: flowId || null, ok: result.ok, rateLimited: !!result.rateLimited }));
+    if (result.rateLimited) return c.json({ ok: false, rateLimited: true, rateLimitReset: result.rateLimitReset });
+    return c.json({ ok: result.ok });
   });
 
   // Real X publish path: content's generated (or literal, for provider:"none") text gets

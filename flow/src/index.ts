@@ -145,16 +145,24 @@ export async function recomputeFlowCounts(env: Env): Promise<void> {
   const allRows = [...flowRows, ...contentFlowRows];
 
   for (const r of flowRows) {
-    await env.FLOW_DB.prepare(
-      `INSERT INTO flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(flow_id, node_id, direction) DO UPDATE SET tenant_id = excluded.tenant_id, count = excluded.count, updated_at = excluded.updated_at`
-    ).bind(r.tenant_id, r.flow_id, r.node_id, r.direction, r.cnt, now).run();
+    try {
+      await env.FLOW_DB.prepare(
+        `INSERT INTO flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(flow_id, node_id, direction) DO UPDATE SET tenant_id = excluded.tenant_id, count = excluded.count, updated_at = excluded.updated_at`
+      ).bind(r.tenant_id, r.flow_id, r.node_id, r.direction, r.cnt, now).run();
+    } catch (e) {
+      console.error(JSON.stringify({ event: "flow_counts_upsert_error", tenantId: r.tenant_id, flowId: r.flow_id, nodeId: r.node_id, direction: r.direction, error: String(e) }));
+    }
   }
   for (const r of contentFlowRows) {
-    await env.FLOW_DB.prepare(
-      `INSERT INTO content_flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(flow_id, node_id, direction) DO UPDATE SET tenant_id = excluded.tenant_id, count = excluded.count, updated_at = excluded.updated_at`
-    ).bind(r.tenant_id, r.flow_id, r.node_id, r.direction, r.cnt, now).run();
+    try {
+      await env.FLOW_DB.prepare(
+        `INSERT INTO content_flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(flow_id, node_id, direction) DO UPDATE SET tenant_id = excluded.tenant_id, count = excluded.count, updated_at = excluded.updated_at`
+      ).bind(r.tenant_id, r.flow_id, r.node_id, r.direction, r.cnt, now).run();
+    } catch (e) {
+      console.error(JSON.stringify({ event: "content_flow_counts_upsert_error", tenantId: r.tenant_id, flowId: r.flow_id, nodeId: r.node_id, direction: r.direction, error: String(e) }));
+    }
   }
 
   // Cache each flow's trigger-node "entered" count directly on flows.trigger_count, so the list
@@ -171,13 +179,18 @@ export async function recomputeFlowCounts(env: Env): Promise<void> {
     try {
       const graph = JSON.parse(flow.graph_json) as { nodes: { id: string; type: string }[] };
       triggerNodeId = graph.nodes.find((n) => NODE_TYPE_REGISTRY[n.type]?.role === "trigger")?.id;
-    } catch {
+    } catch (e) {
+      console.error(JSON.stringify({ event: "flow_counts_recompute_graph_parse_error", flowId: flow.id, error: String(e) }));
       continue;
     }
     if (!triggerNodeId) continue;
     const count = enterCountByFlowNode.get(`${flow.id}:${triggerNodeId}`);
     if (count === undefined) continue;
-    await env.FLOW_DB.prepare(`UPDATE flows SET trigger_count = ? WHERE id = ?`).bind(count, flow.id).run();
+    try {
+      await env.FLOW_DB.prepare(`UPDATE flows SET trigger_count = ? WHERE id = ?`).bind(count, flow.id).run();
+    } catch (e) {
+      console.error(JSON.stringify({ event: "flow_trigger_count_update_error", flowId: flow.id, count, error: String(e) }));
+    }
   }
 
   console.log(JSON.stringify({ event: "flow_counts_recomputed", flowRows: flowRows.length, contentFlowRows: contentFlowRows.length }));

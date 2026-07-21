@@ -66,6 +66,9 @@ async function upsertPage(
     if (item.article) {
       props.content_type = "ARTICLE";
     }
+    // X's tweet.fields has no permalink field; x.com/i/status/{id} is the official,
+    // username-independent status URL format.
+    props.content_url = `https://x.com/i/status/${props.source_content_id}`;
     const sourceContentId = String(props.source_content_id ?? "");
     // ALWAYS record, including during the seed phase (emitFlowEvent=false) — the dedup table
     // is the only place "already seen" state lives now, so skipping the record during seed

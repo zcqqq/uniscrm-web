@@ -14,6 +14,7 @@ const VIDEO_FIELDS = [
   "comment_count",
   "share_count",
   "view_count",
+  "share_url",
 ].join(",");
 
 export interface TikTokVideoPage {

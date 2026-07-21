@@ -83,6 +83,20 @@ describe("ingestYouTubeVideo", () => {
     expect(flowQueue.send.mock.calls[0][0].payload).toMatchObject({ duration: 120 });
   });
 
+  it("populates content_url as the YouTube watch permalink, derived from source_content_id", async () => {
+    vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
+      id: "vid5",
+      snippet: { title: "Linked", publishedAt: "2026-07-18T00:00:00Z", thumbnails: { default: { url: "https://img/t.jpg" } } },
+      contentDetails: { duration: "PT1M" },
+    });
+
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+    const ctx = baseCtx({ flowQueue });
+    await ingestYouTubeVideo(ctx, "vid5");
+
+    expect(flowQueue.send.mock.calls[0][0].payload).toMatchObject({ content_url: "https://www.youtube.com/watch?v=vid5" });
+  });
+
   it("does not emit content.created when the video was already seen (dedup insert reports changes: 0)", async () => {
     vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
       id: "vid4",

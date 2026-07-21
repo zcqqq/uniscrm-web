@@ -165,6 +165,12 @@ export const PROPS = definePropDefinitions([
     label: { en: "Content Text", zh: "内容文本" },
   },
   {
+    propId: "content_url",
+    dataType: "TEXT",
+    entity: ["content"],
+    label: { en: "Content URL", zh: "内容链接" },
+  },
+  {
     propId: "cover_image_url",
     dataType: "TEXT",
     fieldType: "IMAGE",

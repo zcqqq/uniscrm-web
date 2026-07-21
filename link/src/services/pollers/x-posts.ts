@@ -64,6 +64,9 @@ async function upsertPage(
     if (item.article) {
       props.content_type = "ARTICLE";
     }
+    // X's tweet.fields has no permalink field; x.com/i/status/{id} is the official,
+    // username-independent status URL format — same reasoning as the article fixup above.
+    props.content_url = `https://x.com/i/status/${props.source_content_id}`;
     const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "X", emitFlowEvent);
     if (isNew) newCount++;
   }

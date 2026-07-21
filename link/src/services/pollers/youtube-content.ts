@@ -27,6 +27,9 @@ export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: str
   }
 
   const props = resolveProps(item, YOUTUBE_METADATA.contentProps, YOUTUBE_METADATA.linkPrefix);
+  // YouTube's videos.list response has no permalink field; youtube.com/watch?v={id} is the
+  // official, stable watch URL format, no username/channel handle required.
+  props.content_url = `https://www.youtube.com/watch?v=${props.source_content_id}`;
 
   const contentDetails = item.contentDetails as Record<string, unknown> | undefined;
   const durationIso = contentDetails?.duration as string | undefined;

@@ -26,7 +26,7 @@ describe("fetchVideoListPage", () => {
     expect((url as string)).toContain("fields=");
     const calledUrl = new URL(url as string);
     expect(calledUrl.searchParams.get("fields")).toBe(
-      "id,video_description,create_time,cover_image_url,duration,height,width,title,like_count,comment_count,share_count,view_count"
+      "id,video_description,create_time,cover_image_url,duration,height,width,title,like_count,comment_count,share_count,view_count,share_url"
     );
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body).toEqual({ max_count: 20, cursor: 42 });

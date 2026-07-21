@@ -11,6 +11,7 @@ export const ContentMetadata_TikTok: ContentMetadata[] = [
       { propId: "source_created_at", dataId: "{linkPrefix}.create_time" },
       { propId: "cover_image_url", dataId: "{linkPrefix}.cover_image_url" },
       { propId: "content_text", dataId: "{linkPrefix}.video_description" },
+      { propId: "content_url", dataId: "{linkPrefix}.share_url" },
       { propId: "duration", dataId: "{linkPrefix}.duration" },
       { propId: "height", dataId: "{linkPrefix}.height" },
       { propId: "width", dataId: "{linkPrefix}.width" },

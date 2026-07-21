@@ -121,6 +121,18 @@ describe("runListPostsPoller", () => {
     expect(flowQueue.send.mock.calls[0][0]).toMatchObject({ eventType: "content.created", channelId: "chan1", listId: "listA" });
   });
 
+  it("populates content_url as the X status permalink, derived from source_content_id", async () => {
+    const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
+    const tenantDb = createMockTenantDb();
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+
+    fetchMock.mockImplementationOnce(() => jsonResponse({ data: [{ id: "12345", text: "hello" }], meta: {} }));
+
+    await runListPostsPoller(baseCtx(linkDb, tenantDb, { flowQueue }));
+
+    expect(flowQueue.send.mock.calls[0][0].payload).toMatchObject({ content_url: "https://x.com/i/status/12345" });
+  });
+
   it("passes listId as the dedup table's secondary_id", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
     const tenantDb = createMockTenantDb();

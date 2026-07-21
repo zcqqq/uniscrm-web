@@ -138,22 +138,17 @@ def burn_subtitles():
         f.flush()
         os.fsync(f.fileno())
 
-    # DIAGNOSTIC (temporary): the fsync above did not fix a live, 100%-reproducible
-    # "Unable to open subs.srt" failure from ffmpeg's subtitles filter, immediately after this
-    # exact write — but is NOT reproducible locally with equivalent inputs. Surfacing what's
-    # actually on disk right before the ffmpeg call, since guessing a second fix without this
-    # data would just be another blind guess.
-    srt_exists = os.path.exists(srt_path)
-    srt_size = os.path.getsize(srt_path) if srt_exists else -1
-    srt_preview = subtitle_srt[:200]
-
+    # Confirmed via live diagnostics that the file exists with correct content at this point
+    # (fsync alone didn't fix the failure) — the absolute path passed through ffmpeg's -vf
+    # filtergraph STRING is what's unreliable in this container runtime, not the file itself.
+    # Running ffmpeg with cwd=work_dir and a bare relative filename sidesteps that string
+    # parsing entirely, regardless of the exact underlying cause.
     burn = subprocess.run(
-        ["ffmpeg", "-y", "-i", video_path, "-vf", f"subtitles={srt_path}", "-c:a", "copy", output_path],
-        capture_output=True, text=True, timeout=600,
+        ["ffmpeg", "-y", "-i", video_path, "-vf", "subtitles=subs.srt", "-c:a", "copy", output_path],
+        capture_output=True, text=True, timeout=600, cwd=work_dir,
     )
     if burn.returncode != 0 or not os.path.exists(output_path):
-        diag = f"[diag: srt_exists={srt_exists} srt_size={srt_size} srt_preview={srt_preview!r} srt_path={srt_path!r}]"
-        return jsonify({"error": f"burn-in failed: {diag} {burn.stderr[-2000:]}"}), 200
+        return jsonify({"error": f"burn-in failed: {burn.stderr[-2000:]}"}), 200
 
     final_key = f"{uuid.uuid4()}.mp4"
     client.upload_file(output_path, bucket, final_key, ExtraArgs={"ContentType": "video/mp4"})

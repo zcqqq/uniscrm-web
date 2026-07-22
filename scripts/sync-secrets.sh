@@ -48,5 +48,22 @@ if [ -n "$MISSING" ]; then
   exit 1
 fi
 
-echo "$BULK_JSON" | npx wrangler secret bulk --env "$ENV" --config "$CONFIG"
-echo "✅ Secrets synced for $MODULE ($ENV)"
+# The Cloudflare API rate-limits the secrets-bulk endpoint (error 10429) when
+# many workers are synced in a short window — including budget consumed by other
+# wrangler activity against the same account. Retry with exponential backoff so a
+# transient limit self-heals instead of failing the whole deploy pipeline.
+ATTEMPTS=5
+DELAY=15
+for i in $(seq 1 "$ATTEMPTS"); do
+  if echo "$BULK_JSON" | npx wrangler secret bulk --env "$ENV" --config "$CONFIG"; then
+    echo "✅ Secrets synced for $MODULE ($ENV)"
+    exit 0
+  fi
+  if [ "$i" -lt "$ATTEMPTS" ]; then
+    echo "⚠️  secret bulk failed for $MODULE ($ENV) — attempt $i/$ATTEMPTS, retrying in ${DELAY}s (Cloudflare API may be rate-limited: 10429)"
+    sleep "$DELAY"
+    DELAY=$((DELAY * 2))
+  fi
+done
+echo "❌ secret bulk failed for $MODULE ($ENV) after $ATTEMPTS attempts"
+exit 1

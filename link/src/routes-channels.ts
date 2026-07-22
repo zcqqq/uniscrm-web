@@ -37,12 +37,15 @@ export function channelsRoutes() {
 
   // --- X ---
   router.get("/x/status", async (c) => {
+    const tenantId = c.get("tenantId" as never) as number;
     const [row, byokRow] = await Promise.all([
       c.env.LINK_DB
-        .prepare("SELECT id, config, created_at FROM channels WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1 AND (is_byok = 0 OR is_byok IS NULL) LIMIT 1")
+        .prepare("SELECT id, config, created_at FROM channels WHERE tenant_id = ? AND channel_type IN ('TWITTER', 'X') AND is_active = 1 AND (is_byok = 0 OR is_byok IS NULL) LIMIT 1")
+        .bind(tenantId)
         .first<{ id: string; config: string; created_at: string }>(),
       c.env.LINK_DB
-        .prepare("SELECT id FROM channels WHERE channel_type = 'X' AND is_active = 1 AND is_byok = 1 LIMIT 1")
+        .prepare("SELECT id FROM channels WHERE tenant_id = ? AND channel_type = 'X' AND is_active = 1 AND is_byok = 1 LIMIT 1")
+        .bind(tenantId)
         .first<{ id: string }>(),
     ]);
     const hasByok = !!byokRow;
@@ -75,9 +78,14 @@ export function channelsRoutes() {
     }
   });
 
+  // Disconnects only the system-app connection this tenant sees on the X card.
+  // BYOK apps are separate cards with their own DELETE /x/byok/:channelId, so the
+  // is_byok predicate keeps this in step with what GET /x/status reports.
   router.delete("/x", async (c) => {
+    const tenantId = c.get("tenantId" as never) as number;
     await c.env.LINK_DB
-      .prepare("UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1")
+      .prepare("UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE tenant_id = ? AND channel_type IN ('TWITTER', 'X') AND is_active = 1 AND (is_byok = 0 OR is_byok IS NULL)")
+      .bind(tenantId)
       .run();
     return c.json({ ok: true });
   });
@@ -127,6 +135,7 @@ export function channelsRoutes() {
         app_consumer_secret: encConsumerSecret,
       });
       await c.env.LINK_DB
+        // tenant-scope-ok: `existing` was fetched WHERE id = ? AND tenant_id = ? above; reached only if this tenant owns channel_id
         .prepare("UPDATE channels SET config = ?, updated_at = datetime('now') WHERE id = ?")
         .bind(updatedConfig, channel_id)
         .run();
@@ -144,6 +153,7 @@ export function channelsRoutes() {
       // future change made the insert an upsert) silently overwrite someone
       // else's row.
       const claimedElsewhere = await c.env.LINK_DB
+        // tenant-scope-ok: intentional global probe — detects a channel_id already claimed by ANY tenant before INSERT
         .prepare("SELECT id FROM channels WHERE id = ?")
         .bind(channel_id)
         .first<{ id: string }>();

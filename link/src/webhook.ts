@@ -359,6 +359,7 @@ export function webhookRoutes() {
 
     const channelId = c.req.param("channelId");
     const row = await c.env.LINK_DB
+      // tenant-scope-ok: external X webhook CRC challenge, authed by provider signature not a tenant session
       .prepare("SELECT config FROM channels WHERE id = ? AND is_active = 1")
       .bind(channelId)
       .first<{ config: string }>();

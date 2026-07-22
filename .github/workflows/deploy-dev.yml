@@ -26,6 +26,16 @@ jobs:
             echo "analytics=false" >> "$GITHUB_OUTPUT"
           fi
 
+  tenant-scope-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Tenant-scope audit
+        run: node scripts/tenant-scope-audit.mjs --check
+
   sync-secrets:
     runs-on: ubuntu-latest
     environment: dev
@@ -137,7 +147,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
   deploy:
-    needs: [migrate, migrate-tenant-dbs, changes]
+    needs: [migrate, migrate-tenant-dbs, changes, tenant-scope-audit]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

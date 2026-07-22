@@ -63,9 +63,15 @@ export function oauthRoutes() {
     let clientSecret = c.env.X_CLIENT_SECRET;
 
     if (byokChannelId) {
+      // channelId is caller-supplied, so the lookup must be tenant-scoped: an
+      // unscoped one would decrypt another tenant's BYOK app credentials and put
+      // their client_id into the authorization URL we hand back, and the callback
+      // would then write the caller's X account into that tenant's channel row.
+      // 404 (not 403) so the response can't be used to probe which ids exist.
+      if (!session) return c.json({ error: "Must be logged in to connect a BYOK app" }, 401);
       const row = await c.env.LINK_DB
-        .prepare("SELECT config FROM channels WHERE id = ? AND is_active = 1")
-        .bind(byokChannelId)
+        .prepare("SELECT config FROM channels WHERE id = ? AND tenant_id = ? AND is_active = 1")
+        .bind(byokChannelId, session.tenant_id)
         .first<{ config: string }>();
       if (!row) return c.json({ error: "Channel not found" }, 404);
       const config = JSON.parse(row.config) as ByokConfig;
@@ -104,16 +110,20 @@ export function oauthRoutes() {
     let clientSecret = c.env.X_CLIENT_SECRET;
 
     if (byokChannelId) {
+      // /x/connect already proved this channel belongs to the session's tenant
+      // before writing the state, but the whole BYOK branch below writes tokens
+      // into this row by id — so re-check ownership here rather than trusting
+      // that a state blob and its channel id were paired by us.
+      if (!tenantId) return c.json({ error: "Must be logged in to connect a BYOK app" }, 401);
       const row = await c.env.LINK_DB
-        .prepare("SELECT config FROM channels WHERE id = ? AND is_active = 1")
-        .bind(byokChannelId)
+        .prepare("SELECT config FROM channels WHERE id = ? AND tenant_id = ? AND is_active = 1")
+        .bind(byokChannelId, Number(tenantId))
         .first<{ config: string }>();
-      if (row) {
-        const cfg = JSON.parse(row.config) as ByokConfig;
-        const creds = await getAppCredentials(c.env, cfg);
-        clientId = creds.clientId;
-        clientSecret = creds.clientSecret;
-      }
+      if (!row) return c.json({ error: "Channel not found" }, 404);
+      const cfg = JSON.parse(row.config) as ByokConfig;
+      const creds = await getAppCredentials(c.env, cfg);
+      clientId = creds.clientId;
+      clientSecret = creds.clientSecret;
     }
 
     const twitter = new Twitter(clientId, clientSecret, `${url.origin}/api/auth/x/callback`);
@@ -180,12 +190,14 @@ export function oauthRoutes() {
         // admin/src/routes/webhook.ts) so a later tier upgrade never reactivates it,
         // and records the freed source_channel_id since the column itself is cleared.
         await c.env.LINK_DB
+          // tenant-scope-ok: conflictingRow cross-tenant check rejected with 409 above; only same-tenant rows reach here
           .prepare("UPDATE channels SET is_active = 0, source_channel_id = NULL, deactivated_reason = ?, updated_at = datetime('now') WHERE id = ?")
           .bind(`byok_merged source_channel_id=${xUser.id}`, conflictingRow.id)
           .run();
       }
 
       await c.env.LINK_DB
+        // tenant-scope-ok: byokChannelId ownership proven by the tenant-scoped credential lookup earlier in this branch
         .prepare(`UPDATE channels SET config = ?, source_channel_id = ?, access_token = ?, is_byok = 1, is_active = 1, updated_at = datetime('now') WHERE id = ?`)
         .bind(updatedConfig, xUser.id, tokens.accessToken(), byokChannelId)
         .run();
@@ -255,6 +267,7 @@ export function oauthRoutes() {
         .run();
 
       const row = await c.env.LINK_DB
+        // tenant-scope-ok: keyed by source_channel_id = the just-OAuth-authenticated X account id, not caller-supplied
         .prepare(`SELECT id FROM channels WHERE channel_type IN ('X', 'TWITTER') AND source_channel_id = ? AND is_active = 1`)
         .bind(xUser.id)
         .first<{ id: string }>();
@@ -377,6 +390,7 @@ export function oauthRoutes() {
     // never actually written to any row. Re-query for the real active row's id,
     // mirroring the X System App connect path's actualChannelId pattern above.
     const tiktokRow = await c.env.LINK_DB
+      // tenant-scope-ok: keyed by source_channel_id = the just-OAuth-authenticated TikTok openId, not caller-supplied
       .prepare(`SELECT id FROM channels WHERE channel_type = 'TIKTOK' AND source_channel_id = ? AND is_active = 1`)
       .bind(openId)
       .first<{ id: string }>();
@@ -476,6 +490,7 @@ export function oauthRoutes() {
       // the upsert's own unique index (also unconditional on is_active).
       let preservedRefreshToken: string | null = null;
       const existingChannel = await c.env.LINK_DB
+        // tenant-scope-ok: keyed by source_channel_id = the just-OAuth-authenticated YouTube channel id, not caller-supplied
         .prepare("SELECT config FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id = ?")
         .bind(sourceChannelId)
         .first<{ config: string }>();
@@ -527,6 +542,7 @@ export function oauthRoutes() {
     // id, mirroring the X System App / TikTok connect paths' actualChannelId
     // pattern above.
     const existing = await c.env.LINK_DB
+      // tenant-scope-ok: keyed by source_channel_id = the just-OAuth-authenticated YouTube channel id, not caller-supplied
       .prepare("SELECT id FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id = ? AND is_active = 1")
       .bind(sourceChannelId)
       .first<{ id: string }>();

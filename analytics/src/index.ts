@@ -322,6 +322,7 @@ app.get("/api/dashboards/:id", async (c) => {
   ).bind(dashId, tenantId).first();
   if (!dashboard) return c.json({ error: "Not found" }, 404);
 
+  // tenant-scope-ok: dashboard ownership verified by the SELECT ... AND tenant_id above; items belong to that dashboard
   const items = await c.env.ANALYTICS_DB.prepare(
     `SELECT di.id, di.report_id, di.size, di.position,
             ar.name as report_name, ar.type, ar.params_json, ar.status, ar.results_json

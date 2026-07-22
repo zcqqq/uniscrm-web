@@ -196,6 +196,7 @@ app.post("/api/segments/:id/compute", async (c) => {
 
   if (!segment) return c.json({ error: "Not found" }, 404);
 
+  // tenant-scope-ok: segmentId ownership verified by the SELECT ... AND tenant_id = ? guard above (404s a non-owner)
   await c.env.WEB_DB.prepare(`UPDATE segments SET status = 'computing', updated_at = datetime('now') WHERE id = ?`)
     .bind(segmentId)
     .run();
@@ -222,6 +223,7 @@ app.post("/api/segments/:id/compute", async (c) => {
       await tenantDataDb.batch(stmts);
     }
 
+    // tenant-scope-ok: segmentId ownership verified by the SELECT ... AND tenant_id = ? guard above (404s a non-owner)
     await c.env.WEB_DB.prepare(
       `UPDATE segments SET status = 'ready', user_count = ?, updated_at = datetime('now') WHERE id = ?`
     )
@@ -231,6 +233,7 @@ app.post("/api/segments/:id/compute", async (c) => {
     return c.json({ segment: { id: segmentId, status: "ready", user_count: profileIds.length } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    // tenant-scope-ok: segmentId ownership verified by the SELECT ... AND tenant_id = ? guard above (404s a non-owner)
     await c.env.WEB_DB.prepare(
       `UPDATE segments SET status = 'error', updated_at = datetime('now') WHERE id = ?`
     )

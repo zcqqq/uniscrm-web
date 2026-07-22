@@ -20,6 +20,7 @@ export function createSettingsRouter() {
 
   router.get("/", async (c) => {
     const memberId = c.get("memberId" as never) as string;
+    // tenant-scope-ok: id bound to session memberId (a member belongs to one tenant — the scoping key)
     const member = await c.env.WEB_DB.prepare("SELECT preferred_location, timezone FROM members WHERE id = ?")
       .bind(memberId)
       .first<{ preferred_location: string; timezone: string }>();
@@ -34,6 +35,7 @@ export function createSettingsRouter() {
       return c.json({ error: "Invalid location" }, 400);
     }
 
+    // tenant-scope-ok: id bound to session memberId (a member belongs to one tenant — the scoping key)
     await c.env.WEB_DB.prepare("UPDATE members SET preferred_location = ? WHERE id = ?")
       .bind(preferred_location, memberId)
       .run();
@@ -57,6 +59,7 @@ export function createSettingsRouter() {
       return c.json({ error: "Invalid language" }, 400);
     }
 
+    // tenant-scope-ok: id bound to session memberId (a member belongs to one tenant — the scoping key)
     await c.env.WEB_DB.prepare("UPDATE members SET language = ? WHERE id = ?")
       .bind(language, memberId)
       .run();
@@ -72,6 +75,7 @@ export function createSettingsRouter() {
       return c.json({ error: "Invalid timezone" }, 400);
     }
 
+    // tenant-scope-ok: id bound to session memberId (a member belongs to one tenant — the scoping key)
     await c.env.WEB_DB.prepare("UPDATE members SET timezone = ? WHERE id = ?")
       .bind(timezone, memberId)
       .run();

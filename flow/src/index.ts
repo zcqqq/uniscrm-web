@@ -1151,6 +1151,7 @@ app.get("/api/flows", async (c) => {
   const memberIds = [...new Set(rows.results.map(r => r.member_id).filter(Boolean))];
   let memberMap: Record<string, string> = {};
   if (memberIds.length > 0) {
+    // tenant-scope-ok: memberIds are drawn only from this tenant's flows (WHERE f.tenant_id = ? above), so the id set is already tenant-scoped
     const members = await c.env.WEB_DB.prepare(
       `SELECT id, email FROM members WHERE id IN (${memberIds.map(() => "?").join(",")})`
     ).bind(...memberIds).all<{ id: string; email: string }>();
@@ -1258,6 +1259,7 @@ app.delete("/api/flows/:id", async (c) => {
 
   if (!result.meta.changes) return c.json({ error: "Not found" }, 404);
 
+  // tenant-scope-ok: ownership already proven by the tenant-scoped DELETE above (404 on 0 changes)
   await c.env.FLOW_DB.prepare(`DELETE FROM flow_pending WHERE flow_id = ?`).bind(flowId).run();
 
   return c.json({ ok: true });
@@ -1281,10 +1283,16 @@ app.post("/api/flows/:id/unpublish", async (c) => {
   const tenantId = c.get("tenantId");
   const flowId = c.req.param("id");
 
-  await c.env.FLOW_DB.prepare(
+  const result = await c.env.FLOW_DB.prepare(
     `UPDATE flows SET status = 'draft', updated_at = ? WHERE id = ? AND tenant_id = ?`
   ).bind(new Date().toISOString(), flowId, tenantId).run();
 
+  // Gate the flow_pending cleanup on ownership, exactly as DELETE /api/flows/:id
+  // does: without the changes check, a caller passing another tenant's flowId
+  // would fall through to a cross-tenant DELETE FROM flow_pending WHERE flow_id = ?.
+  if (!result.meta.changes) return c.json({ error: "Not found" }, 404);
+
+  // tenant-scope-ok: ownership already proven by the tenant-scoped UPDATE above (404 on 0 changes)
   await c.env.FLOW_DB.prepare(`DELETE FROM flow_pending WHERE flow_id = ?`).bind(flowId).run();
   return c.json({ ok: true });
 });

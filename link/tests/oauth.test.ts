@@ -98,11 +98,16 @@ describe("GET /x/connect — scope selection", () => {
     const { prepare } = createMockLinkDb([
       ["FROM channels", { config: JSON.stringify({ is_byok: true }) }],
     ]);
+    // A BYOK connect is tenant-scoped, so it needs a real session — see
+    // oauth-x-byok-tenant-isolation.test.ts for what an unscoped one allowed.
     const env = {
-      KV: { put: vi.fn().mockResolvedValue(undefined) },
+      KV: {
+        get: vi.fn().mockResolvedValue(JSON.stringify({ tenant_id: 5, member_id: "m1", email: "a@b.c" })),
+        put: vi.fn().mockResolvedValue(undefined),
+      },
       LINK_DB: { prepare },
     };
-    await app.request("/x/connect?channelId=byok-chan-1", {}, env as never);
+    await app.request("/x/connect?channelId=byok-chan-1", { headers: { Cookie: "session=sess-1" } }, env as never);
     expect(createAuthorizationURLMock).toHaveBeenCalledWith("state", "verifier", X_BYOK_SCOPES);
   });
 });
@@ -126,9 +131,11 @@ function createMockLinkDb(responses: Array<[string, MockRow]>) {
   return { prepare, calls };
 }
 
-function createMockKv(byokChannelId: string) {
+// tenantId matches the channel rows' owner below: the BYOK callback only writes
+// to a channel the state's tenant actually owns.
+function createMockKv(byokChannelId: string, tenantId = "5") {
   return {
-    get: vi.fn().mockResolvedValue(JSON.stringify({ codeVerifier: "verifier", tenantId: undefined, memberId: undefined, byokChannelId })),
+    get: vi.fn().mockResolvedValue(JSON.stringify({ codeVerifier: "verifier", tenantId, memberId: "m1", byokChannelId })),
     put: vi.fn().mockResolvedValue(undefined),
     delete: vi.fn().mockResolvedValue(undefined),
   };
@@ -177,7 +184,7 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     const oldChannelId = "old-system-app-chan";
     const kv = createMockKv(byokChannelId);
     const linkDb = createMockLinkDb([
-      ["WHERE id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
+      ["WHERE id = ? AND tenant_id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
       ["SELECT config, tenant_id FROM channels WHERE id = ?", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }), tenant_id: 5 }],
       ["channel_type = 'X' AND source_channel_id", { id: oldChannelId, tenant_id: 5 }],
     ]);
@@ -223,7 +230,7 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     const byokChannelId = "placeholder-chan";
     const kv = createMockKv(byokChannelId);
     const linkDb = createMockLinkDb([
-      ["WHERE id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
+      ["WHERE id = ? AND tenant_id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
       ["SELECT config, tenant_id FROM channels WHERE id = ?", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }), tenant_id: 5 }],
       ["channel_type = 'X' AND source_channel_id", null],
     ]);
@@ -254,7 +261,7 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     const byokChannelId = "placeholder-chan";
     const kv = createMockKv(byokChannelId);
     const linkDb = createMockLinkDb([
-      ["WHERE id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
+      ["WHERE id = ? AND tenant_id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
       ["SELECT config, tenant_id FROM channels WHERE id = ?", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }), tenant_id: 5 }],
       ["channel_type = 'X' AND source_channel_id", null],
     ]);
@@ -283,7 +290,7 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     const otherTenantChannelId = "other-tenant-chan";
     const kv = createMockKv(byokChannelId);
     const linkDb = createMockLinkDb([
-      ["WHERE id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
+      ["WHERE id = ? AND tenant_id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
       ["SELECT config, tenant_id FROM channels WHERE id = ?", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }), tenant_id: 5 }],
       ["channel_type = 'X' AND source_channel_id", { id: otherTenantChannelId, tenant_id: 999 }],
     ]);

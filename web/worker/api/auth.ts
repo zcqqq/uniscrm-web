@@ -62,6 +62,7 @@ export function createAuthRouter() {
       const memberId = crypto.randomUUID();
       const now = new Date().toISOString();
 
+      // tenant-scope-ok: registration — this INSERT creates the tenant row; no tenant scope exists yet
       await c.env.WEB_DB.prepare("INSERT INTO tenants (email, created_at) VALUES (?, ?)")
         .bind(link.email, now)
         .run();

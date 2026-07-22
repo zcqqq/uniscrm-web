@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -131,6 +132,39 @@ def download_and_extract():
     return jsonify({"video_key": video_key, "audio_key": audio_key})
 
 
+# ffmpeg converts SRT to ASS with a 288-unit-tall script, so force_style's MarginV is in those
+# units, not pixels (measured in-container: 1 unit == frame_height/288 px, linear across
+# MarginV 0/50/100/200). MarginV pins the BOTTOM of the text block and the block grows upward,
+# so the clearance has to cover a full two-line subtitle (~12 units per line, measured) plus a
+# gap — budgeting for one line let a wrapped subtitle's first line spill onto the picture.
+ASS_PLAY_RES_Y = 288
+SUBTITLE_CLEARANCE_UNITS = 34
+
+
+def _detect_content_bottom(video_path, frame_height):
+    """Bottom edge (px) of the real picture inside any letterbox bars, or None if undetectable."""
+    probe = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-i", video_path, "-vf", "cropdetect=limit=24:round=2:reset=0",
+         "-frames:v", "60", "-f", "null", "-"],
+        capture_output=True, text=True, timeout=120,
+    )
+    matches = re.findall(r"crop=(\d+):(\d+):(\d+):(\d+)", probe.stderr)
+    if not matches:
+        return None
+    _, height, _, y = (int(v) for v in matches[-1])
+    bottom = y + height
+    return bottom if 0 < bottom <= frame_height else None
+
+
+def _subtitle_margin_v(frame_height, content_bottom):
+    """Parks subtitles just under the letterboxed picture rather than at the very bottom of the
+    canvas. After rotate-to-vertical a 16:9 clip leaves a ~656px black bar, which stranded the
+    text far from what the viewer is actually looking at. None => keep ffmpeg's default."""
+    scale = frame_height / ASS_PLAY_RES_Y
+    margin = round((frame_height - content_bottom) / scale) - SUBTITLE_CLEARANCE_UNITS
+    return margin if margin > 0 else None
+
+
 @app.route("/burn-subtitles", methods=["POST"])
 def burn_subtitles():
     body = request.get_json()
@@ -151,12 +185,23 @@ def burn_subtitles():
     with open(srt_path, "w", encoding="utf-8") as f:
         f.write(subtitle_srt)
 
+    subtitle_filter = "subtitles=subs.srt"
+    _, frame_height, dim_error = _probe_dimensions(video_path)
+    if not dim_error and frame_height:
+        content_bottom = _detect_content_bottom(video_path, frame_height)
+        if content_bottom is not None:
+            margin_v = _subtitle_margin_v(frame_height, content_bottom)
+            if margin_v is not None:
+                subtitle_filter += f":force_style='MarginV={margin_v}'"
+    # A failed probe/detect is not fatal here — it only costs the improved placement, so fall
+    # through to ffmpeg's default bottom margin rather than failing an otherwise-fine burn-in.
+
     # cwd + a bare relative filename: the subtitles filter's argument goes through ffmpeg's
     # filtergraph parser, where ":" and "\" in an absolute path are separator/escape
     # characters. job_id is a UUID today so an absolute path happens to be safe, but keeping
     # the filtergraph argument free of path syntax removes that coupling entirely.
     burn = subprocess.run(
-        ["ffmpeg", "-y", "-i", video_path, "-vf", "subtitles=subs.srt", "-c:a", "copy", output_path],
+        ["ffmpeg", "-y", "-i", video_path, "-vf", subtitle_filter, "-c:a", "copy", output_path],
         capture_output=True, text=True, timeout=600, cwd=work_dir,
     )
     if burn.returncode != 0 or not os.path.exists(output_path):

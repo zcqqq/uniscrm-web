@@ -69,9 +69,9 @@ queue = "uniscrm-maigret-dev"
 binding = "FLOW_QUEUE"
 queue = "uniscrm-event-dev"
 
-# [[env.dev.pipelines]]
-# binding = "PIPELINE_EVENT"
-# pipeline = "TODO_REBUILD_EVENT_STREAM"
+[[env.dev.pipelines]]
+binding = "PIPELINE_EVENT"
+stream = "e2963f332d41416a999bda06760285a6"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_USER"

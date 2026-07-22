@@ -101,6 +101,11 @@ export async function run(env: string, migrations?: TenantMigration[]): Promise<
     try {
       await migrateTenantDb(tdb, tenant.tenant_id, migs);
     } catch (e) {
+      // 手动删掉租户 D1 库后 tenants 表里可能残留悬空引用，跳过而不算失败
+      if (String(e).includes("could not be found")) {
+        console.warn(JSON.stringify({ event: "tenant_migration_db_missing", tenantId: tenant.tenant_id, d1DatabaseId: tenant.d1_database_id }));
+        continue;
+      }
       failures.push({ tenantId: tenant.tenant_id, error: String(e) });
       console.error(JSON.stringify({ event: "tenant_migration_failed", tenantId: tenant.tenant_id, error: String(e) }));
     }

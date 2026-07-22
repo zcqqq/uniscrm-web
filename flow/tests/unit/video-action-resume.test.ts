@@ -37,6 +37,25 @@ const graphWithWaitAfterSuccess = JSON.stringify({
   ],
 });
 
+// videoCondition keeps its own node.type (unlike videoAction, which is stored as a generic
+// "action"), and its branches are "true"/"false"/"failed" — content reports only the measured
+// ratio, so this graph is what the resume route consults to turn 0.35 into a branch.
+const graphWithVideoCondition = JSON.stringify({
+  nodes: [
+    { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+    { id: "a1", type: "videoCondition", data: { operation: "check-face", operator: "<=", threshold: 0.2 }, position: { x: 200, y: 0 } },
+    { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 0 } },
+    { id: "a3", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 100 } },
+    { id: "a4", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 200 } },
+  ],
+  edges: [
+    { id: "e1", source: "t1", target: "a1" },
+    { id: "e2", source: "a1", target: "a2", sourceHandle: "true" },
+    { id: "e3", source: "a1", target: "a3", sourceHandle: "false" },
+    { id: "e4", source: "a1", target: "a4", sourceHandle: "failed" },
+  ],
+});
+
 async function setupSchema() {
   await env.FLOW_DB.prepare(
     `CREATE TABLE IF NOT EXISTS flows (
@@ -182,5 +201,68 @@ describe("POST /internal/video-action/resume", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as any;
     expect(body).toMatchObject({ ok: true, alreadyResolved: true });
+  });
+
+  async function resumeVideoCondition(pendingId: string, contentId: string, body: Record<string, unknown>) {
+    await setupSchema();
+    await env.FLOW_DB.prepare(
+      `INSERT OR REPLACE INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-vc', 1, 'video condition flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithVideoCondition).run();
+
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event)
+       VALUES (?, 'flow-vc', 'a1', ?, 1, ?, ?, datetime('now'), 'video_action_complete')`
+    ).bind(pendingId, contentId, JSON.stringify({ channel_id: "src-chan" }), past).run();
+
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const res = await worker.fetch(
+      req("/internal/video-action/resume", { pendingId, ...body }, { "X-Internal-Secret": (env as any).INTERNAL_SECRET }),
+      { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } } as any
+    );
+    expect(res.status).toBe(200);
+    const [records] = pipelineSend.mock.calls[0];
+    return { outcome: records[0].outcome, reached: records.slice(1).map((r: any) => r.node_id) };
+  }
+
+  it("videoCondition: a ratio at or under the threshold resolves the true branch", async () => {
+    const { outcome, reached } = await resumeVideoCondition("pend-vc-1", "content-vc-1", {
+      branch: "success", props: { face_ratio: 0.15 },
+    });
+    expect(outcome).toBe("true");
+    expect(reached).toContain("a2");
+  });
+
+  it("videoCondition: a ratio above the threshold resolves the false branch", async () => {
+    const { outcome, reached } = await resumeVideoCondition("pend-vc-2", "content-vc-2", {
+      branch: "success", props: { face_ratio: 0.35 },
+    });
+    expect(outcome).toBe("false");
+    expect(reached).toContain("a3");
+  });
+
+  it("videoCondition: a measured ratio of 0 is a real answer, not a failure", async () => {
+    const { outcome, reached } = await resumeVideoCondition("pend-vc-3", "content-vc-3", {
+      branch: "success", props: { face_ratio: 0 },
+    });
+    expect(outcome).toBe("true");
+    expect(reached).toContain("a2");
+  });
+
+  it("videoCondition: content reporting failed resolves the failed branch, never true/false", async () => {
+    const { outcome, reached } = await resumeVideoCondition("pend-vc-4", "content-vc-4", {
+      branch: "failed", props: {},
+    });
+    expect(outcome).toBe("failed");
+    expect(reached).toContain("a4");
+  });
+
+  it("videoCondition: a success callback with no measurable ratio resolves failed, not a guess", async () => {
+    const { outcome, reached } = await resumeVideoCondition("pend-vc-5", "content-vc-5", {
+      branch: "success", props: {},
+    });
+    expect(outcome).toBe("failed");
+    expect(reached).toContain("a4");
   });
 });

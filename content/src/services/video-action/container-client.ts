@@ -68,6 +68,26 @@ export async function rotateToVertical(env: Env, jobId: string, videoKey: string
   return { finalKey: body.final_key };
 }
 
+export interface FaceRatioResult {
+  ratio?: number;
+  sampled?: number;
+  detected?: number;
+  error?: string;
+}
+
+export async function faceRatio(env: Env, jobId: string, videoKey: string): Promise<FaceRatioResult> {
+  const container = env.SUBTITLE_CONTAINER.getByName("subtitle-singleton");
+  await container.startAndWaitForPorts();
+  const res = await container.fetch("http://container/face-ratio", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job_id: jobId, video_key: videoKey }),
+  });
+  const body = await res.json() as { ratio?: number; sampled?: number; detected?: number; error?: string };
+  if (body.error) return { error: body.error };
+  return { ratio: body.ratio, sampled: body.sampled, detected: body.detected };
+}
+
 export async function removeFace(env: Env, jobId: string, videoKey: string): Promise<BurnResult> {
   const container = env.SUBTITLE_CONTAINER.getByName("subtitle-singleton");
   await container.startAndWaitForPorts();

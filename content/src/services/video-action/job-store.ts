@@ -7,6 +7,7 @@ export type JobStatus =
   | "burning_in"
   | "rotating"
   | "detecting_faces"
+  | "sampling_faces"
   | "success"
   | "failed";
 

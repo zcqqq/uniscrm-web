@@ -109,8 +109,10 @@ content's dedicated queue consumer (max_batch_size=1, one job at a time globally
   ├─ UPDATE job_status="burning_in"
   ├─ container call #2: given videoKey (R2) + translated subtitle text (small, in body),
   │    container pulls the video from R2 (S3 API), ffmpeg burns in the subtitles,
-  │    uploads the result to R2 under videos/{newKey} (this key follows the existing
-  │    48h lifecycle rule, unlike the video-action-jobs/ scratch prefix)
+  │    uploads the result to R2 under a flat key (a bare UUID, same convention as the
+  │    existing /internal/generate-image route — no folder prefix, so it round-trips
+  │    through the existing GET /public/media/:key route unmodified, since Hono's :key
+  │    param does not match across "/")
   │    → returns {finalKey}; any failure → job_status="failed", step recorded
   ├─ DELETE the video-action-jobs/{jobId}/* scratch keys (success or failure, always)
   ├─ UPDATE job_status="success" (or "failed" with failed_step + error)

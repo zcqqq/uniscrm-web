@@ -722,8 +722,21 @@ function YouTubeContentActionInspector({ nodeId, data }: { nodeId: string; data:
 
 function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
+  const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
   const [providers, setProviders] = useState<{ provider: string; model: string }[]>([]);
   const [skills, setSkills] = useState<{ id: string; label: string; hasCachedContent: boolean }[]>([]);
+
+  useEffect(() => {
+    api.channels.list("X")
+      .then((chs) => {
+        setChannels(chs);
+        // Same one-account auto-fill XActionInspector does. Without a channelId the backend
+        // falls back to the TRIGGERING channel, which silently fails whenever the trigger
+        // isn't an X channel (e.g. a YouTube trigger) — so filling it in matters.
+        if (chs.length === 1 && !data.channelId) updateNodeData(nodeId, { channelId: chs[0].id });
+      })
+      .catch(() => setChannels([]));
+  }, []);
 
   const selectedOperation = CONTENT_ACTION_OPERATIONS.find((op) => op.sourceContentType === (data.operation || "create-post"));
   // VIDEO never means "AI-generates from this prompt" (unlike TEXT/IMAGE) — it means
@@ -746,6 +759,22 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
     <div>
       <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.xContentAction.label}</h4>
       <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">Target Account</Label>
+          {channels.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">No X accounts linked</p>
+          ) : (
+            <Select
+              value={data.channelId || ""}
+              onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
+              className="w-full text-sm"
+            >
+              <option value="">Select account...</option>
+              {channels.map((ch) => <option key={ch.id} value={ch.id}>@{ch.username}</option>)}
+            </Select>
+          )}
+        </div>
+
         <div>
           <Label className="text-xs block mb-1">Operation</Label>
           <OperationSelect
@@ -819,6 +848,10 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
 
 const VIDEO_CONDITION_OPERATIONS = [{ value: "check-face", label: "Check Face" }];
 
+// Equality is deliberately absent: the ratio is a float measured from a sample of frames, so
+// "== 0.2" would break on a single missed or spurious detection and read as "always False".
+const FACE_RATIO_OPERATORS = ["<=", "<", ">=", ">"];
+
 function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
 
@@ -833,6 +866,32 @@ function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Recor
             onChange={(v) => updateNodeData(nodeId, { operation: v })}
             options={VIDEO_CONDITION_OPERATIONS}
           />
+        </div>
+        <div>
+          <Label className="text-xs block mb-1">Face Ratio</Label>
+          <div className="flex items-center gap-2">
+            <Select
+              value={data.operator || "<="}
+              onChange={(e: SelectChange) => updateNodeData(nodeId, { operator: e.target.value })}
+              className="w-20 text-sm"
+            >
+              {FACE_RATIO_OPERATORS.map((op) => (
+                <option key={op} value={op}>{op}</option>
+              ))}
+            </Select>
+            <Input
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={data.threshold ?? 0.2}
+              onChange={(e: InputChange) => updateNodeData(nodeId, { threshold: Math.max(0, Math.min(1, parseFloat(e.target.value) || 0)) })}
+              className="w-24 text-sm"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Share of 20 sampled frames containing a face, 0 to 1. True when the measured ratio satisfies this comparison.
+          </p>
         </div>
       </div>
     </div>

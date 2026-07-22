@@ -125,16 +125,21 @@ join the R2 analytics pipeline in this phase (see the design spec's Global Const
 analytics collapses both rows to one via the existing `(tenant_id, channel_id,
 source_content_id)` compactor key.
 
-## Content-domain: videoAction (dispatch to the dedicated video-action queue)
+## Content-domain: videoAction / videoCondition (dispatch to the dedicated video-action queue)
 
 Architecturally different from every other branch in `executeContentActions`: the
 success path does **not** call `resumeFromNode` synchronously — branch resolution
 happens later, when `content`'s queue consumer finishes the job and calls back into
-`POST /internal/video-action/resume` (a route `flow` itself must expose — not yet
-implemented as of this diagram). Only the two early-exit guards below (duration cap,
-no video found) resolve the "failed" branch synchronously here. The full
-download/transcribe/translate/burn-in pipeline inside `content`'s consumer is
-diagrammed separately in `content/src/services/video-action/sequence.md`.
+`POST /internal/video-action/resume`. Only the two early-exit guards below (duration
+cap, no video found) resolve the "failed" branch synchronously here. The full
+pipeline inside `content`'s consumer is diagrammed separately in
+`content/src/services/video-action/sequence.md`.
+
+`videoCondition` shares this entire path — same video resolution, same duration cap,
+same pending row, same queue — dispatching `operation: "check-face"`. It differs only
+at the callback: `content` returns a measured `face_ratio` and the resume route
+compares it against the node's own `operator`/`threshold` to pick `true`/`false`.
+That comparison lives here, in the graph, never in `content`.
 
 ```mermaid
 sequenceDiagram
@@ -158,8 +163,9 @@ sequenceDiagram
             FW->>Q: enqueue { pendingId, contentId, tenantId, videoUrl, targetLanguage, flowId, nodeId, payload }
             Note over FW,Q: branch NOT resolved yet — awaits async callback
             Q->>CW: processVideoActionJob(message)
-            CW-->>FW: POST /internal/video-action/resume { pendingId, branch, props } (Task 11)
+            CW-->>FW: POST /internal/video-action/resume { pendingId, branch, props }
             Note over FW: resumeFromNode(graph, nodeId, payload, branch) happens here, asynchronously
+            Note over FW: videoCondition: branch = evaluateFaceRatioBranch(node.data, props.face_ratio)
         end
     end
 ```

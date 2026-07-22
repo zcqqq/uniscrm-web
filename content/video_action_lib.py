@@ -44,3 +44,25 @@ def needs_rotation(width, height):
 
 def is_too_short(total_kept_duration, min_duration=2.0):
     return total_kept_duration < min_duration
+
+
+def sample_timestamps(duration, count):
+    """Evenly spaced sampling points (seconds) for the face-ratio probe.
+
+    Takes the MIDPOINT of each of `count` equal slices rather than the slice edges: t=0 is
+    frequently a black frame or fade-in, and t=duration is past the last frame, so both ends
+    would bias the ratio downward."""
+    if duration <= 0 or count <= 0:
+        return []
+    slice_width = duration / count
+    return [round(slice_width * (i + 0.5), 3) for i in range(count)]
+
+
+def face_ratio(detected, sampled):
+    """Fraction of successfully decoded frames that contained at least one face.
+
+    Returns None (not 0.0) when nothing was decodable — "no frame could be read" is a failure
+    and must fail the node, whereas 0.0 is the legitimate answer "no faces in this video"."""
+    if sampled <= 0:
+        return None
+    return detected / sampled

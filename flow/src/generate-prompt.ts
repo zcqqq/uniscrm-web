@@ -65,7 +65,7 @@ Rules:
 - action nodes with actionType "xContentAction", "tiktokContentAction", or "videoAction" have sourceHandle "success" or "failed" for branching
 - abSplit nodes have sourceHandle "a" or "b"
 - webhook nodes have sourceHandle "success" or "failed"
-- videoCondition nodes have sourceHandle "has-face", "no-face", or "failed"
+- videoCondition nodes have sourceHandle "true", "false", or "failed"
 - Flow must start with exactly one trigger node: ${triggerTypes.join(" or ")}
 - Generate UUIDs for all ids (8-4-4-4-12 format)
 

@@ -82,7 +82,7 @@ describe("POST /internal/tiktok/video-post", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: false });
+    expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^unsupported_channel_type(:|$)/) });
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });

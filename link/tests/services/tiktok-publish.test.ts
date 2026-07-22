@@ -46,7 +46,7 @@ describe("initPhotoPost", () => {
 
     const result = await initPhotoPost("access-token-1", ["https://link-dev.uni-scrm.com/public/media/a"], "T", "D");
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.stringMatching(/^tiktok_api_error(:|$)/) });
   });
 
   it("returns ok: false when response body is not valid JSON, even with 2xx status", async () => {
@@ -56,7 +56,7 @@ describe("initPhotoPost", () => {
 
     const result = await initPhotoPost("access-token-1", ["https://link-dev.uni-scrm.com/public/media/a"], "T", "D");
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.stringMatching(/^tiktok_api_error(:|$)/) });
   });
 });
 
@@ -98,12 +98,12 @@ describe("initVideoPost", () => {
       new Response(JSON.stringify({ error: { code: "invalid_param", message: "" } }), { status: 400 })
     ));
     const result = await initVideoPost("access-token-1", "https://x/video.mp4", "T", "D");
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.stringMatching(/^tiktok_api_error(:|$)/) });
   });
 
   it("returns ok: false when response body is not valid JSON, even with 2xx status", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not json", { status: 200 })));
     const result = await initVideoPost("access-token-1", "https://x/video.mp4", "T", "D");
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.stringMatching(/^tiktok_api_error(:|$)/) });
   });
 });

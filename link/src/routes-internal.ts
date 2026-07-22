@@ -165,6 +165,9 @@ export function internalRoutes() {
       });
     }
 
+    // X returns its own errors in the body (`detail`/`title`), which is what distinguishes an
+    // expired token from a duplicate follow — keep it so the analytics drawer can show why.
+    const xDetail = (xBody as { detail?: string; title?: string } | null);
     return c.json({
       ok: xRes.ok,
       status: xRes.status,
@@ -172,6 +175,9 @@ export function internalRoutes() {
       rateLimitRemaining,
       rateLimitReset,
       data: xBody,
+      reason: xRes.ok
+        ? undefined
+        : `x_api_error: HTTP ${xRes.status}${xDetail?.detail || xDetail?.title ? ` — ${xDetail.detail || xDetail.title}` : ""}`,
     });
   });
 
@@ -265,11 +271,11 @@ export function internalRoutes() {
 
     const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id FROM channels WHERE id = ?")
       .bind(channelId).first<{ config: string; tenant_id: number }>();
-    if (!channel) return c.json({ ok: false }, 200);
+    if (!channel) return c.json({ ok: false, reason: "channel_not_found" }, 200);
 
     const config = JSON.parse(channel.config);
     const sourceUserId = config.x_user_id;
-    if (!sourceUserId) return c.json({ ok: false }, 200);
+    if (!sourceUserId) return c.json({ ok: false, reason: "channel_not_authorized: the X channel has no linked user id" }, 200);
 
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
     const accessToken = await tokenService.getValidToken(channelId);
@@ -280,7 +286,7 @@ export function internalRoutes() {
     if (repostResult.rateLimited) {
       return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
     }
-    return c.json({ ok: repostResult.ok });
+    return c.json({ ok: repostResult.ok, reason: repostResult.ok ? undefined : "x_api_error: repost rejected" });
   });
 
   // Bookmarks contentId's originating tweet via the channel that ingested it. Same shape as
@@ -292,11 +298,11 @@ export function internalRoutes() {
 
     const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id FROM channels WHERE id = ?")
       .bind(channelId).first<{ config: string; tenant_id: number }>();
-    if (!channel) return c.json({ ok: false }, 200);
+    if (!channel) return c.json({ ok: false, reason: "channel_not_found" }, 200);
 
     const config = JSON.parse(channel.config);
     const sourceUserId = config.x_user_id;
-    if (!sourceUserId) return c.json({ ok: false }, 200);
+    if (!sourceUserId) return c.json({ ok: false, reason: "channel_not_authorized: the X channel has no linked user id" }, 200);
 
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
     const accessToken = await tokenService.getValidToken(channelId);
@@ -307,7 +313,7 @@ export function internalRoutes() {
     if (bookmarkResult.rateLimited) {
       return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
     }
-    return c.json({ ok: bookmarkResult.ok });
+    return c.json({ ok: bookmarkResult.ok, reason: bookmarkResult.ok ? undefined : "x_api_error: bookmark rejected" });
   });
 
   // Likes contentId's originating tweet via the channel that ingested it. Same shape as
@@ -319,11 +325,11 @@ export function internalRoutes() {
 
     const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id FROM channels WHERE id = ?")
       .bind(channelId).first<{ config: string; tenant_id: number }>();
-    if (!channel) return c.json({ ok: false }, 200);
+    if (!channel) return c.json({ ok: false, reason: "channel_not_found" }, 200);
 
     const config = JSON.parse(channel.config);
     const sourceUserId = config.x_user_id;
-    if (!sourceUserId) return c.json({ ok: false }, 200);
+    if (!sourceUserId) return c.json({ ok: false, reason: "channel_not_authorized: the X channel has no linked user id" }, 200);
 
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
     const accessToken = await tokenService.getValidToken(channelId);
@@ -334,7 +340,7 @@ export function internalRoutes() {
     if (likeResult.rateLimited) {
       return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
     }
-    return c.json({ ok: likeResult.ok });
+    return c.json({ ok: likeResult.ok, reason: likeResult.ok ? undefined : "x_api_error: like rejected" });
   });
 
   // Likes contentId's originating YouTube video via the channel that ingested it. channelId is
@@ -347,7 +353,7 @@ export function internalRoutes() {
     const channel = await c.env.LINK_DB
       .prepare("SELECT config FROM channels WHERE id = ? AND channel_type = 'YOUTUBE_ACCOUNT'")
       .bind(channelId).first<{ config: string }>();
-    if (!channel) return c.json({ ok: false });
+    if (!channel) return c.json({ ok: false, reason: "channel_not_found: no YouTube account channel with this id" });
 
     const tokenService = new YouTubeTokenService(c.env.LINK_DB, c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET);
     let accessToken: string;
@@ -356,7 +362,7 @@ export function internalRoutes() {
     } catch (e) {
       // Existing channel connected before write scope / offline access — no refresh token.
       console.log(JSON.stringify({ event: "youtube_rate_no_token", contentId, channelId, error: String(e) }));
-      return c.json({ ok: false });
+      return c.json({ ok: false, reason: "channel_not_authorized: reconnect the YouTube account to grant write access" });
     }
 
     let result = await rateVideo(accessToken, videoId);
@@ -365,14 +371,14 @@ export function internalRoutes() {
         accessToken = await tokenService.forceRefresh(channelId);
         result = await rateVideo(accessToken, videoId);
       } catch {
-        return c.json({ ok: false });
+        return c.json({ ok: false, reason: "channel_not_authorized: token refresh failed" });
       }
     }
     if (result.ok) await recordYouTubeWriteQuota(c.env);
 
     console.log(JSON.stringify({ event: "youtube_rate", contentId, channelId, videoId, flowId: flowId || null, ok: result.ok, rateLimited: !!result.rateLimited }));
     if (result.rateLimited) return c.json({ ok: false, rateLimited: true, rateLimitReset: result.rateLimitReset });
-    return c.json({ ok: result.ok });
+    return c.json({ ok: result.ok, reason: result.ok ? undefined : "youtube_api_error: request rejected" });
   });
 
   // Saves contentId's originating YouTube video into a user-owned playlist via the triggering channel.
@@ -380,12 +386,12 @@ export function internalRoutes() {
     const { channelId, contentId, videoId, playlistId, flowId } = await c.req.json<{
       channelId: string; contentId: string; videoId: string; playlistId: string; flowId?: string | null;
     }>();
-    if (!playlistId) return c.json({ ok: false });
+    if (!playlistId) return c.json({ ok: false, reason: "missing_playlist: the node has no playlist selected" });
 
     const channel = await c.env.LINK_DB
       .prepare("SELECT config FROM channels WHERE id = ? AND channel_type = 'YOUTUBE_ACCOUNT'")
       .bind(channelId).first<{ config: string }>();
-    if (!channel) return c.json({ ok: false });
+    if (!channel) return c.json({ ok: false, reason: "channel_not_found: no YouTube account channel with this id" });
 
     const tokenService = new YouTubeTokenService(c.env.LINK_DB, c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET);
     let accessToken: string;
@@ -393,7 +399,7 @@ export function internalRoutes() {
       accessToken = await tokenService.getValidToken(channelId);
     } catch (e) {
       console.log(JSON.stringify({ event: "youtube_playlist_insert_no_token", contentId, channelId, error: String(e) }));
-      return c.json({ ok: false });
+      return c.json({ ok: false, reason: "channel_not_authorized: reconnect the YouTube account to grant write access" });
     }
 
     let result = await insertPlaylistItem(accessToken, playlistId, videoId);
@@ -402,14 +408,14 @@ export function internalRoutes() {
         accessToken = await tokenService.forceRefresh(channelId);
         result = await insertPlaylistItem(accessToken, playlistId, videoId);
       } catch {
-        return c.json({ ok: false });
+        return c.json({ ok: false, reason: "channel_not_authorized: token refresh failed" });
       }
     }
     if (result.ok) await recordYouTubeWriteQuota(c.env);
 
     console.log(JSON.stringify({ event: "youtube_playlist_insert", contentId, channelId, videoId, playlistId, flowId: flowId || null, ok: result.ok, rateLimited: !!result.rateLimited }));
     if (result.rateLimited) return c.json({ ok: false, rateLimited: true, rateLimitReset: result.rateLimitReset });
-    return c.json({ ok: result.ok });
+    return c.json({ ok: result.ok, reason: result.ok ? undefined : "youtube_api_error: request rejected" });
   });
 
   // Real X publish path: content's generated (or literal, for provider:"none") text gets
@@ -424,11 +430,11 @@ export function internalRoutes() {
 
     const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
       .bind(channelId).first<{ config: string; channel_type: string; tenant_id: number }>();
-    if (!channel) return c.json({ ok: false }, 200);
+    if (!channel) return c.json({ ok: false, reason: "channel_not_found" }, 200);
 
     if (channel.channel_type !== "X") {
       console.log(JSON.stringify({ event: "create_post_unsupported_platform", contentId, channelId, channelType: channel.channel_type }));
-      return c.json({ ok: false }, 200);
+      return c.json({ ok: false, reason: `unsupported_channel_type: expected X, got ${channel.channel_type}` }, 200);
     }
 
     let text = interpolatedPrompt;
@@ -440,7 +446,7 @@ export function internalRoutes() {
       });
       if (!genRes.ok) {
         console.error(JSON.stringify({ event: "create_post_generate_failed", contentId, channelId, provider, status: genRes.status }));
-        return c.json({ ok: false }, 200);
+        return c.json({ ok: false, reason: `text_generation_failed: HTTP ${genRes.status} from content/internal/generate` }, 200);
       }
       const generated = await genRes.json<{ text: string }>();
       text = generated.text;
@@ -448,7 +454,7 @@ export function internalRoutes() {
 
     const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
       .bind(channel.tenant_id).first<{ d1_database_id: string | null }>();
-    if (!tenantRow?.d1_database_id) return c.json({ ok: false }, 200);
+    if (!tenantRow?.d1_database_id) return c.json({ ok: false, reason: "tenant_db_not_provisioned" }, 200);
 
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
     const accessToken = await tokenService.getValidToken(channelId);
@@ -458,7 +464,7 @@ export function internalRoutes() {
       const upload = await uploadVideoToX(accessToken, videoUrl);
       if (!upload.ok) {
         console.error(JSON.stringify({ event: "create_post_video_upload_failed", contentId, channelId }));
-        return c.json({ ok: false }, 200);
+        return c.json({ ok: false, reason: "video_upload_failed: X rejected the media upload" }, 200);
       }
       if (upload.state === "succeeded") {
         mediaId = upload.mediaId;
@@ -469,7 +475,7 @@ export function internalRoutes() {
         // "failed" (or any other unexpected state) is terminal — never report pending:true here,
         // or the flow worker would poll a media upload that will never succeed.
         console.error(JSON.stringify({ event: "create_post_video_upload_failed", contentId, channelId, mediaId: upload.mediaId, state: upload.state }));
-        return c.json({ ok: false }, 200);
+        return c.json({ ok: false, reason: `video_upload_failed: X media processing state "${upload.state}"` }, 200);
       }
     }
 
@@ -481,7 +487,7 @@ export function internalRoutes() {
       return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
     }
     if (!postResult.ok || !postResult.id) {
-      return c.json({ ok: false }, 200);
+      return c.json({ ok: false, reason: "x_api_error: create post rejected" }, 200);
     }
 
     const tenantDataDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
@@ -505,7 +511,7 @@ export function internalRoutes() {
 
     const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
       .bind(channelId).first<{ config: string; channel_type: string; tenant_id: number }>();
-    if (!channel || channel.channel_type !== "X") return c.json({ ok: false }, 200);
+    if (!channel || channel.channel_type !== "X") return c.json({ ok: false, reason: "unsupported_channel_type: expected X" }, 200);
 
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
     const accessToken = await tokenService.getValidToken(channelId);
@@ -513,7 +519,7 @@ export function internalRoutes() {
 
     if (!status.ok) {
       console.error(JSON.stringify({ event: "x_video_status_failed", contentId, channelId, mediaId }));
-      return c.json({ ok: false }, 200);
+      return c.json({ ok: false, reason: "video_upload_failed: could not read X media status" }, 200);
     }
     if (status.state === "succeeded") {
       // proceed to post
@@ -523,13 +529,13 @@ export function internalRoutes() {
       // "failed" or any other unrecognized state is terminal — never report pending:true here,
       // or the flow worker would poll a media upload that will never succeed.
       console.error(JSON.stringify({ event: "x_video_status_failed", contentId, channelId, mediaId, state: status.state }));
-      return c.json({ ok: false }, 200);
+      return c.json({ ok: false, reason: `video_upload_failed: X media processing state "${status.state}"` }, 200);
     }
 
     const postResult = await createPost(accessToken, text, mediaId);
     console.log(JSON.stringify({ event: "x_video_status_post", contentId, channelId, ok: postResult.ok }));
     if (!postResult.ok || !postResult.id) {
-      return c.json({ ok: false }, 200);
+      return c.json({ ok: false, reason: "x_api_error: create post rejected" }, 200);
     }
 
     const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
@@ -603,7 +609,10 @@ export function internalRoutes() {
 
     const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
       .bind(channelId).first<{ config: string; channel_type: string; tenant_id: number }>();
-    if (!channel || channel.channel_type !== "TIKTOK") return c.json({ ok: false }, 200);
+    if (!channel) return c.json({ ok: false, reason: "channel_not_found" }, 200);
+    if (channel.channel_type !== "TIKTOK") {
+      return c.json({ ok: false, reason: `unsupported_channel_type: expected TIKTOK, got ${channel.channel_type}` }, 200);
+    }
 
     const tenantId = channel.tenant_id;
 
@@ -622,7 +631,7 @@ export function internalRoutes() {
     const [title, description] = await Promise.all([generateText(prompts.title), generateText(prompts.description)]);
     if (title === null || description === null) {
       console.error(JSON.stringify({ event: "tiktok_photo_post_text_failed", contentId, channelId }));
-      return c.json({ ok: false }, 200);
+      return c.json({ ok: false, reason: "text_generation_failed: content/internal/generate returned no text" }, 200);
     }
 
     const requestedCount = Math.max(1, Math.min(9, imageCount || 1));
@@ -644,7 +653,7 @@ export function internalRoutes() {
     }));
 
     if (photoUrls.length === 0) {
-      return c.json({ ok: false }, 200);
+      return c.json({ ok: false, reason: "image_generation_failed: no images were produced for the post" }, 200);
     }
 
     const tokenService = new TikTokTokenService(c.env.LINK_DB, c.env.TIKTOK_CLIENT_KEY, c.env.TIKTOK_CLIENT_SECRET);
@@ -660,7 +669,7 @@ export function internalRoutes() {
       return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
     }
     if (!publishResult.ok) {
-      return c.json({ ok: false }, 200);
+      return c.json({ ok: false, reason: publishResult.reason || "tiktok_api_error" }, 200);
     }
 
     const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
@@ -690,7 +699,10 @@ export function internalRoutes() {
 
     const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
       .bind(channelId).first<{ config: string; channel_type: string; tenant_id: number }>();
-    if (!channel || channel.channel_type !== "TIKTOK") return c.json({ ok: false }, 200);
+    if (!channel) return c.json({ ok: false, reason: "channel_not_found" }, 200);
+    if (channel.channel_type !== "TIKTOK") {
+      return c.json({ ok: false, reason: `unsupported_channel_type: expected TIKTOK, got ${channel.channel_type}` }, 200);
+    }
 
     const tenantId = channel.tenant_id;
 
@@ -709,7 +721,7 @@ export function internalRoutes() {
     const [title, description] = await Promise.all([generateText(prompts.title), generateText(prompts.description)]);
     if (title === null || description === null) {
       console.error(JSON.stringify({ event: "tiktok_video_post_text_failed", contentId, channelId }));
-      return c.json({ ok: false }, 200);
+      return c.json({ ok: false, reason: "text_generation_failed: content/internal/generate returned no text" }, 200);
     }
 
     const tokenService = new TikTokTokenService(c.env.LINK_DB, c.env.TIKTOK_CLIENT_KEY, c.env.TIKTOK_CLIENT_SECRET);
@@ -725,7 +737,7 @@ export function internalRoutes() {
       return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
     }
     if (!publishResult.ok) {
-      return c.json({ ok: false }, 200);
+      return c.json({ ok: false, reason: publishResult.reason || "tiktok_api_error" }, 200);
     }
 
     const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")

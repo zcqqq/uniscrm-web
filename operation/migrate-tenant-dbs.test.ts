@@ -124,6 +124,27 @@ describe("run", () => {
     await expect(run("dev", [])).rejects.toThrow("CLOUDFLARE_ACCOUNT_ID");
   });
 
+  it("skips a tenant whose D1 database no longer exists without failing the run", async () => {
+    (execFileSync as any).mockReturnValue(
+      JSON.stringify([{ results: [{ tenant_id: 1, d1_database_id: "db-gone" }, { tenant_id: 2, d1_database_id: "db-2" }] }])
+    );
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("db-gone")) return Promise.resolve(new Response(JSON.stringify({ success: false, errors: [{ message: "The database db-gone could not be found" }] }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({ success: true, result: [{ results: [], success: true, meta: { changes: 0, duration: 0, rows_read: 0, rows_written: 0 } }] }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+    await run("dev", []);
+
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("db-2"), expect.anything());
+    expect(process.exitCode).not.toBe(1);
+
+    process.exitCode = previousExitCode;
+    vi.unstubAllGlobals();
+  });
+
   it("continues to the next tenant when one tenant's migration fails, and sets a non-zero exitCode", async () => {
     (execFileSync as any).mockReturnValue(
       JSON.stringify([{ results: [{ tenant_id: 1, d1_database_id: "db-1" }, { tenant_id: 2, d1_database_id: "db-2" }] }])

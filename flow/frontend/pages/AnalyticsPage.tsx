@@ -7,6 +7,8 @@ import { api, type FlowDetail } from "../lib/api";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 import { TooltipProvider } from "../../../shared/frontend/ui/tooltip";
+import { FailureReasonDialog } from "../components/FailureReasonDialog";
+import { ContentLogLink } from "../components/ContentLogLink";
 
 interface NodeLogEntry {
   user_id?: string;
@@ -14,6 +16,7 @@ interface NodeLogEntry {
   content_id?: string;
   created_at: string;
   outcome?: string;
+  failure_reason?: string | null;
   title?: string | null;
   content_text?: string | null;
   content_url?: string | null;
@@ -138,18 +141,17 @@ export default function AnalyticsPage() {
                     {nodeLogs.map((log, i) => (
                       <li key={i} className="flex items-start justify-between gap-3 text-xs border-b border-border pb-2">
                         <div className="min-w-0 flex-1">
-                          <p className="text-foreground truncate">
-                            {log.title || (log.content_text ? `${log.content_text.slice(0, 5)}…` : "(no content)")}
-                          </p>
-                          {log.content_url && (
-                            <a href={log.content_url} target="_blank" rel="noopener noreferrer" className="text-primary underline break-all">
-                              {log.content_url}
-                            </a>
-                          )}
+                          <ContentLogLink title={log.title} contentText={log.content_text} contentUrl={log.content_url} />
                         </div>
                         <div className="text-right shrink-0">
                           <p className="text-muted-foreground whitespace-nowrap">{new Date(log.created_at).toLocaleString()}</p>
-                          {log.outcome === "failed" && <p className="text-destructive font-medium">Failed</p>}
+                          {log.outcome === "failed" && (
+                            <FailureReasonDialog
+                              reason={log.failure_reason}
+                              nodeName={nodeName}
+                              subject={log.title || log.content_id}
+                            />
+                          )}
                         </div>
                       </li>
                     ))}
@@ -157,9 +159,18 @@ export default function AnalyticsPage() {
                 ) : (
                   <ul className="space-y-2">
                     {nodeLogs.map((log, i) => (
-                      <li key={i} className="flex items-center justify-between text-xs">
-                        <span className="text-foreground">{log.name || log.user_id}</span>
-                        <span className="text-muted-foreground">{new Date(log.created_at).toLocaleString()}</span>
+                      <li key={i} className="flex items-start justify-between gap-3 text-xs">
+                        <span className="text-foreground min-w-0 truncate">{log.name || log.user_id}</span>
+                        <div className="text-right shrink-0">
+                          <p className="text-muted-foreground whitespace-nowrap">{new Date(log.created_at).toLocaleString()}</p>
+                          {log.outcome === "failed" && (
+                            <FailureReasonDialog
+                              reason={log.failure_reason}
+                              nodeName={nodeName}
+                              subject={log.name || log.user_id}
+                            />
+                          )}
+                        </div>
                       </li>
                     ))}
                   </ul>

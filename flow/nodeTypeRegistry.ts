@@ -251,13 +251,15 @@ ${CONTENT_YOUTUBE_ACTION_BULLETS}`,
   videoCondition: {
     reactFlowType: "videoCondition",
     label: "Video Condition",
-    description: "Run a model-based check on the content's thumbnail",
+    description: "Sample frames across the video and branch on the face ratio",
     domain: "content",
     role: "condition",
     generatable: true,
-    promptFragment: `videoCondition - runs a model-based check on the content's thumbnail, has "has-face"/"no-face"/"failed" branches
-   data: { operation: "check-face" }
-   - "check-face": detects whether the content's cover image contains a human face. "failed" covers a missing thumbnail or a model error — never guess a result on failure.`,
+    promptFragment: `videoCondition - samples frames across the content's video and compares the share of frames containing a face against a threshold, has "true"/"false"/"failed" branches
+   data: { operation: "check-face", operator: "<=", threshold: 0.2 }
+   - "check-face": samples 20 frames spread across the video, measures what fraction of them contain a human face (0-1), and takes the "true" branch when that ratio satisfies operator/threshold. operator is one of "<=", "<", ">=", ">"; threshold is a number between 0 and 1. The default "<= 0.2" therefore means "almost no faces in this video".
+   - Uses the upstream Video Action node's output video when one precedes it, otherwise the original. Exposes $content.face_ratio.
+   - "failed" covers content with no video (image-only posts), a video longer than 600 seconds, and detection errors — never guess a result on failure.`,
   },
   // --- shared across both domains ---
   wait: {

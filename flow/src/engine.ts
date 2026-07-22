@@ -36,6 +36,10 @@ export interface NodeLog {
   nodeId: string;
   direction: "enter" | "exit" | "outcome";
   outcome?: string;
+  // Only ever set on an outcome:"failed" row — the machine-stable reason code, optionally
+  // followed by ": " and the external API's own (untranslatable) error text. Surfaced in the
+  // analytics drawer so a failure says WHY, not just "Failed".
+  failureReason?: string;
 }
 
 export interface ExecutionResult {
@@ -203,7 +207,8 @@ export function resumeFromNode(
   graph: FlowGraph,
   nodeId: string,
   payload: Record<string, unknown>,
-  branch?: string
+  branch?: string,
+  failureReason?: string
 ): ExecutionResult {
   const actions: ActionResult[] = [];
   const pendingWaits: PendingWait[] = [];
@@ -220,43 +225,21 @@ export function resumeFromNode(
   if (originatingNode && DEFERRED_EXIT_TYPES.includes(originatingNode.type)) {
     nodeLogs.push({ nodeId, direction: "exit" });
   } else {
-    nodeLogs.push({ nodeId, direction: "outcome", outcome: branch });
+    nodeLogs.push({ nodeId, direction: "outcome", outcome: branch, failureReason: branch === "failed" ? failureReason : undefined });
   }
 
   if (branch) {
+    // Each branch target is processed by the SAME routine collectActions uses, so a resumed
+    // branch behaves identically to a freshly traversed edge. This used to be a partial copy
+    // handling only action/wait/waitForEvent, with everything else falling through to
+    // `collectActions(graph, target.id, ...)` — which walks the target's CHILDREN and therefore
+    // skipped the target node itself. A videoCondition/webhook wired to a branch handle silently
+    // never ran, and an abSplit ran both of its own branches at once.
     const branchEdges = graph.edges.filter((e) => e.source === nodeId && e.sourceHandle === branch);
     for (const edge of branchEdges) {
       const target = graph.nodes.find((n) => n.id === edge.target);
       if (!target) continue;
-      if (target.type === "action") {
-        nodeLogs.push({ nodeId: target.id, direction: "enter" });
-        const actionData = buildActionData(target);
-        actions.push(actionData);
-        nodeLogs.push({ nodeId: target.id, direction: "exit" });
-        if (!actionData.hasBranches) {
-          collectActions(graph, target.id, payload, actions, pendingWaits, nodeLogs);
-        }
-      } else if (target.type === "wait") {
-        nodeLogs.push({ nodeId: target.id, direction: "enter" });
-        const duration = Number(target.data.duration || 0);
-        const unit = String(target.data.unit || "minutes");
-        if (duration > 0) {
-          pendingWaits.push({ nodeId: target.id, durationMs: durationToMs(duration, unit) });
-        }
-        // wait node: enter logged, exit will be logged when cron resumes
-      } else if (target.type === "waitForEvent") {
-        nodeLogs.push({ nodeId: target.id, direction: "enter" });
-        const awaitingEvent = target.data.eventType as string;
-        const duration = Number(target.data.duration || 1);
-        const unit = String(target.data.unit || "days");
-        const conditions = (target.data.conditions as { field: string; operator: string; value: string }[]) || [];
-        if (awaitingEvent) {
-          pendingWaits.push({ nodeId: target.id, durationMs: durationToMs(duration, unit), awaitingEvent, conditions: conditions.length > 0 ? conditions : undefined });
-        }
-        // waitForEvent node: enter logged, exit will be logged when event triggers or timeout occurs
-      } else {
-        collectActions(graph, target.id, payload, actions, pendingWaits, nodeLogs);
-      }
+      processTargetNode(graph, target, payload, actions, pendingWaits, nodeLogs);
     }
   } else {
     collectActions(graph, nodeId, payload, actions, pendingWaits, nodeLogs);
@@ -274,6 +257,32 @@ function durationToMs(duration: number, unit: string): number {
   }
 }
 
+export const FACE_RATIO_DEFAULT_OPERATOR = "<=";
+export const FACE_RATIO_DEFAULT_THRESHOLD = 0.2;
+
+// Turns a videoCondition node's measured face ratio into its branch. The ratio is measured
+// once by content's container; the threshold lives only in the graph, so re-tuning it is pure
+// config with no re-detection. A ratio of 0 is a real answer ("no faces") and must not be
+// confused with a missing one — anything unmeasurable resolves to "failed", never a guess.
+export function evaluateFaceRatioBranch(
+  data: Record<string, unknown>,
+  ratio: unknown
+): "true" | "false" | "failed" {
+  if (typeof ratio !== "number" || !Number.isFinite(ratio)) return "failed";
+
+  const operator = (data.operator as string) || FACE_RATIO_DEFAULT_OPERATOR;
+  const rawThreshold = Number(data.threshold);
+  const threshold = Number.isFinite(rawThreshold) ? rawThreshold : FACE_RATIO_DEFAULT_THRESHOLD;
+
+  switch (operator) {
+    case "<=": return ratio <= threshold ? "true" : "false";
+    case "<": return ratio < threshold ? "true" : "false";
+    case ">=": return ratio >= threshold ? "true" : "false";
+    case ">": return ratio > threshold ? "true" : "false";
+    default: return "failed";
+  }
+}
+
 export function buildActionData(targetNode: FlowNode): ActionResult {
   const actionType = targetNode.data.actionType as string;
   const isExternalApi = actionType === "xAction" || actionType === "xContentAction" || actionType === "tiktokContentAction" || actionType === "videoAction" || actionType === "youtubeContentAction";
@@ -286,6 +295,9 @@ export function buildActionData(targetNode: FlowNode): ActionResult {
   }
   if (actionType === "xContentAction") {
     actionData.operation = (targetNode.data.operation as string) || "create-post";
+    // The X account that acts. Absent on nodes built before the picker existed — the executor
+    // then falls back to the triggering channel, which is only correct for X-triggered flows.
+    actionData.channelId = targetNode.data.channelId as string;
     actionData.prompt = targetNode.data.prompt as string;
     actionData.provider = targetNode.data.provider as string;
     actionData.skillId = (targetNode.data.skillId as string) || "none";
@@ -325,90 +337,103 @@ function collectActions(
   for (const edge of outEdges) {
     const targetNode = graph.nodes.find((n) => n.id === edge.target);
     if (!targetNode) continue;
+    processTargetNode(graph, targetNode, payload, actions, pendingWaits, nodeLogs);
+  }
+}
 
-    nodeLogs.push({ nodeId: targetNode.id, direction: "enter" });
+// Executes ONE node that an edge just led into. Shared by collectActions (normal traversal) and
+// resumeFromNode (asynchronous branch resolution) so the two can never drift apart — they did
+// once, and branch targets other than action/wait/waitForEvent were silently skipped.
+function processTargetNode(
+  graph: FlowGraph,
+  targetNode: FlowNode,
+  payload: Record<string, unknown>,
+  actions: ActionResult[],
+  pendingWaits: PendingWait[],
+  nodeLogs: NodeLog[]
+): void {
+  nodeLogs.push({ nodeId: targetNode.id, direction: "enter" });
 
-    if (targetNode.type === "action") {
-      const actionData = buildActionData(targetNode);
-      actions.push(actionData);
-      nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+  if (targetNode.type === "action") {
+    const actionData = buildActionData(targetNode);
+    actions.push(actionData);
+    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
 
-      if (!actionData.hasBranches) {
-        collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
-      }
-      continue;
+    if (!actionData.hasBranches) {
+      collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
     }
+    return;
+  }
 
-    if (targetNode.type === "wait") {
-      const duration = Number(targetNode.data.duration || 0);
-      const unit = String(targetNode.data.unit || "minutes");
-      if (duration > 0) {
-        pendingWaits.push({ nodeId: targetNode.id, durationMs: durationToMs(duration, unit) });
-      }
-      // wait node: enter logged, exit will be logged when cron resumes
-      continue;
+  if (targetNode.type === "wait") {
+    const duration = Number(targetNode.data.duration || 0);
+    const unit = String(targetNode.data.unit || "minutes");
+    if (duration > 0) {
+      pendingWaits.push({ nodeId: targetNode.id, durationMs: durationToMs(duration, unit) });
     }
+    // wait node: enter logged, exit will be logged when cron resumes
+    return;
+  }
 
-    if (targetNode.type === "waitForEvent") {
-      const awaitingEvent = targetNode.data.eventType as string;
-      const duration = Number(targetNode.data.duration || 1);
-      const unit = String(targetNode.data.unit || "days");
-      const conditions = (targetNode.data.conditions as { field: string; operator: string; value: string }[]) || [];
-      if (awaitingEvent) {
-        pendingWaits.push({ nodeId: targetNode.id, durationMs: durationToMs(duration, unit), awaitingEvent, conditions: conditions.length > 0 ? conditions : undefined });
-      }
-      // eventHistory: enter logged, exit will be logged on resolution
-      continue;
+  if (targetNode.type === "waitForEvent") {
+    const awaitingEvent = targetNode.data.eventType as string;
+    const duration = Number(targetNode.data.duration || 1);
+    const unit = String(targetNode.data.unit || "days");
+    const conditions = (targetNode.data.conditions as { field: string; operator: string; value: string }[]) || [];
+    if (awaitingEvent) {
+      pendingWaits.push({ nodeId: targetNode.id, durationMs: durationToMs(duration, unit), awaitingEvent, conditions: conditions.length > 0 ? conditions : undefined });
     }
+    // eventHistory: enter logged, exit will be logged on resolution
+    return;
+  }
 
-    if (targetNode.type === "condition") {
-      const { field, operator, value } = targetNode.data as { field?: string; operator?: string; value?: string };
-      if (!field || !operator || value === undefined || value === "") {
-        nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-        collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
-        continue;
-      }
-      if (evaluateCondition(field, operator, String(value), payload)) {
-        nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-        collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
-      }
-      continue;
-    }
-
-    if (targetNode.type === "timeCondition") {
-      pendingWaits.push({ nodeId: targetNode.id, durationMs: 0, timeCondition: true } as any);
-      continue;
-    }
-
-    if (targetNode.type === "userPropsCondition") {
-      actions.push({ type: "userPropsCondition", nodeId: targetNode.id, conditions: targetNode.data.conditions, hasBranches: true });
-      nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-      continue;
-    }
-
-    if (targetNode.type === "abSplit") {
-      actions.push({ type: "abSplit", nodeId: targetNode.id, mode: targetNode.data.mode, percentA: targetNode.data.percentA, conditions: targetNode.data.conditions, hasBranches: true });
-      nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-      continue;
-    }
-
-    if (targetNode.type === "webhook") {
-      actions.push({ type: "webhook", nodeId: targetNode.id, hasBranches: true, url: targetNode.data.url, method: targetNode.data.method, headers: targetNode.data.headers, body: targetNode.data.body });
-      nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-      continue;
-    }
-
-    if (targetNode.type === "videoCondition") {
-      actions.push({ type: "videoCondition", nodeId: targetNode.id, operation: (targetNode.data.operation as string) || "check-face", hasBranches: true });
-      nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-      continue;
-    }
-
-    if (targetNode.type === "changeUserProps") {
-      actions.push({ type: "changeUserProps", nodeId: targetNode.id, updates: targetNode.data.updates });
+  if (targetNode.type === "condition") {
+    const { field, operator, value } = targetNode.data as { field?: string; operator?: string; value?: string };
+    if (!field || !operator || value === undefined || value === "") {
       nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
       collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
-      continue;
+      return;
     }
+    if (evaluateCondition(field, operator, String(value), payload)) {
+      nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+      collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
+    }
+    return;
+  }
+
+  if (targetNode.type === "timeCondition") {
+    pendingWaits.push({ nodeId: targetNode.id, durationMs: 0, timeCondition: true } as any);
+    return;
+  }
+
+  if (targetNode.type === "userPropsCondition") {
+    actions.push({ type: "userPropsCondition", nodeId: targetNode.id, conditions: targetNode.data.conditions, hasBranches: true });
+    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+    return;
+  }
+
+  if (targetNode.type === "abSplit") {
+    actions.push({ type: "abSplit", nodeId: targetNode.id, mode: targetNode.data.mode, percentA: targetNode.data.percentA, conditions: targetNode.data.conditions, hasBranches: true });
+    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+    return;
+  }
+
+  if (targetNode.type === "webhook") {
+    actions.push({ type: "webhook", nodeId: targetNode.id, hasBranches: true, url: targetNode.data.url, method: targetNode.data.method, headers: targetNode.data.headers, body: targetNode.data.body });
+    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+    return;
+  }
+
+  if (targetNode.type === "videoCondition") {
+    actions.push({ type: "videoCondition", nodeId: targetNode.id, operation: (targetNode.data.operation as string) || "check-face", hasBranches: true });
+    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+    return;
+  }
+
+  if (targetNode.type === "changeUserProps") {
+    actions.push({ type: "changeUserProps", nodeId: targetNode.id, updates: targetNode.data.updates });
+    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+    collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
+    return;
   }
 }

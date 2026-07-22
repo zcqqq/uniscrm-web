@@ -8,11 +8,33 @@ import boto3
 from botocore.config import Config
 import cv2
 from flask import Flask, request, jsonify
-from video_action_lib import compute_keep_segments, needs_rotation, is_too_short
+from video_action_lib import compute_keep_segments, needs_rotation, is_too_short, sample_timestamps, face_ratio
 
 app = Flask(__name__)
 
 FACE_DETECTOR_PATH = "/app/face_detector.onnx"
+
+# YuNet's own default is 0.9, which was observed live missing a clear frontal face during
+# remove-face e2e testing — the face survived into the output video. Both routes below share
+# this one value deliberately: with two different thresholds, a flow could report a face ratio
+# of 0.5 and then have Remove Face cut nothing, i.e. the two nodes would disagree about what
+# counts as a face within the same run.
+FACE_SCORE_THRESHOLD = 0.6
+
+FACE_RATIO_SAMPLE_COUNT = 20
+
+
+def _create_face_detector():
+    return cv2.FaceDetectorYN.create(
+        FACE_DETECTOR_PATH, "", (320, 320), score_threshold=FACE_SCORE_THRESHOLD
+    )
+
+
+def _frame_has_face(detector, frame):
+    height, width = frame.shape[:2]
+    detector.setInputSize((width, height))
+    _, faces = detector.detect(frame)
+    return faces is not None and len(faces) > 0
 
 # A stuck job's remove-face call was observed live sitting at "detecting_faces" indefinitely,
 # and a container's stdout is not queryable remotely (confirmed: zero observability events for
@@ -280,7 +302,7 @@ def remove_face():
         if extract_frames.returncode != 0:
             return jsonify({"error": f"frame extraction failed: {extract_frames.stderr[-2000:]}"}), 200
 
-        detector = cv2.FaceDetectorYN.create(FACE_DETECTOR_PATH, "", (320, 320))
+        detector = _create_face_detector()
         face_timestamps = []
         frame_files = sorted(os.listdir(frames_dir))
         loop_start = time.monotonic()
@@ -294,10 +316,7 @@ def remove_face():
             frame = cv2.imread(f"{frames_dir}/{fname}")
             if frame is None:
                 continue
-            h, w = frame.shape[:2]
-            detector.setInputSize((w, h))
-            _, faces = detector.detect(frame)
-            if faces is not None and len(faces) > 0:
+            if _frame_has_face(detector, frame):
                 face_timestamps.append(float(i))
 
         keep_segments = compute_keep_segments(face_timestamps, video_duration)
@@ -346,6 +365,66 @@ def remove_face():
     finally:
         # Frame extraction can produce hundreds of jpg files per job — meaningfully more local
         # disk than any other route here — so this route alone cleans up its own /tmp scratch.
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@app.route("/face-ratio", methods=["POST"])
+def face_ratio_route():
+    """Samples FACE_RATIO_SAMPLE_COUNT frames spread across the video and reports what
+    fraction of them contain a face. Deliberately NOT the 1-fps full decode remove-face does:
+    seeking to a handful of timestamps keeps the cost flat regardless of video length, which
+    matters because this runs on a condition node that should resolve quickly."""
+    body = request.get_json()
+    job_id = body["job_id"]
+    video_key = body["video_key"]
+
+    work_dir = f"/tmp/{job_id}-ratio"
+    frames_dir = f"{work_dir}/frames"
+    video_path = f"{work_dir}/source.mp4"
+
+    try:
+        os.makedirs(frames_dir, exist_ok=True)
+
+        bucket = os.environ["R2_BUCKET_NAME"]
+        client = r2_client()
+        client.download_file(bucket, video_key, video_path)
+
+        duration, error = _probe_duration(video_path)
+        if error:
+            return jsonify({"error": error}), 200
+
+        timestamps = sample_timestamps(duration, FACE_RATIO_SAMPLE_COUNT)
+        if not timestamps:
+            return jsonify({"error": f"unusable video duration: {duration}"}), 200
+
+        detector = _create_face_detector()
+        detected = 0
+        sampled = 0
+        for idx, timestamp in enumerate(timestamps):
+            frame_path = f"{frames_dir}/frame_{idx:04d}.jpg"
+            # "-ss" BEFORE "-i" is the fast input seek: ffmpeg jumps to the nearest keyframe
+            # instead of decoding from the start, which is what keeps this flat in video length.
+            grab = subprocess.run(
+                ["ffmpeg", "-y", "-ss", str(timestamp), "-i", video_path, "-frames:v", "1", "-q:v", "2", frame_path],
+                capture_output=True, text=True, timeout=60,
+            )
+            if grab.returncode != 0 or not os.path.exists(frame_path):
+                continue
+            frame = cv2.imread(frame_path)
+            if frame is None:
+                continue
+            sampled += 1
+            if _frame_has_face(detector, frame):
+                detected += 1
+
+        ratio = face_ratio(detected, sampled)
+        if ratio is None:
+            return jsonify({"error": f"no frame could be decoded from {len(timestamps)} sample points"}), 200
+
+        return jsonify({"ratio": ratio, "sampled": sampled, "detected": detected})
+    except Exception as e:
+        return jsonify({"error": f"face-ratio unexpected error ({type(e).__name__}): {e}"}), 200
+    finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
 

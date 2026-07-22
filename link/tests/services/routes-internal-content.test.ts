@@ -70,7 +70,8 @@ describe("stub content-flow action endpoints", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
     const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toBe("https://api.x.com/2/users/x-user-src-1/repost");
+    // X names the resource "retweets", not "repost" — see the comment on repostPost().
+    expect(String(url)).toBe("https://api.x.com/2/users/x-user-src-1/retweets");
     expect(JSON.parse((init as Record<string, any>).body)).toEqual({ tweet_id: "tweet-999" });
     vi.unstubAllGlobals();
   });
@@ -117,7 +118,7 @@ describe("stub content-flow action endpoints", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: false });
+    expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^channel_not_authorized(:|$)/) });
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
@@ -191,7 +192,7 @@ describe("stub content-flow action endpoints", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: false });
+    expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^channel_not_authorized(:|$)/) });
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
@@ -265,7 +266,7 @@ describe("stub content-flow action endpoints", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: false });
+    expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^channel_not_authorized(:|$)/) });
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
@@ -475,7 +476,7 @@ describe("stub content-flow action endpoints", () => {
     const body = await res.json();
     // Terminal "failed" must NOT be reported as pending:true, or the flow worker would poll a
     // media upload that will never succeed (endless/dead polling loop).
-    expect(body).toEqual({ ok: false });
+    expect(body).toEqual({ ok: false, reason: expect.stringMatching(/^video_upload_failed(:|$)/) });
     expect(fetchMock.mock.calls.some(([u]: [string]) => String(u) === "https://api.x.com/2/tweets")).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -594,7 +595,7 @@ describe("stub content-flow action endpoints", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: false });
+    expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^video_upload_failed(:|$)/) });
 
     // Proves this hit the running-byte-count guard, not the Content-Length header guard: INIT
     // (and therefore at least one APPEND) must have fired, since the header guard would have
@@ -640,7 +641,7 @@ describe("stub content-flow action endpoints", () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ ok: false });
+    expect(body).toEqual({ ok: false, reason: expect.stringMatching(/^video_upload_failed(:|$)/) });
     expect(fetchMock.mock.calls.some(([u]: [string]) => String(u).includes("api.x.com"))).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -697,7 +698,7 @@ describe("stub content-flow action endpoints", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: false });
+    expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^unsupported_channel_type(:|$)/) });
     expect(fetchMock).not.toHaveBeenCalled(); // platform check happens before generate/X calls
     expect(tenantDataDbRunMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
@@ -724,7 +725,7 @@ describe("stub content-flow action endpoints", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: false });
+    expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^text_generation_failed(:|$)/) });
     expect(fetchMock).toHaveBeenCalledTimes(1); // generate only, no X call
     expect(tenantDataDbRunMock).not.toHaveBeenCalled(); // no content row recorded
     vi.unstubAllGlobals();
@@ -806,7 +807,7 @@ describe("stub content-flow action endpoints", () => {
       );
 
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: false });
+      expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^video_upload_failed(:|$)/) });
       vi.unstubAllGlobals();
     });
 
@@ -829,7 +830,7 @@ describe("stub content-flow action endpoints", () => {
       const body = await res.json();
       // Unrecognized state must NOT be reported as pending:true, or the flow worker would poll
       // a media upload in an unknown state, causing an endless polling loop.
-      expect(body).toEqual({ ok: false });
+      expect(body).toEqual({ ok: false, reason: expect.stringMatching(/^video_upload_failed(:|$)/) });
       vi.unstubAllGlobals();
     });
   });

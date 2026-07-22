@@ -698,8 +698,12 @@ describe("queue(): tiktokContentAction dispatch", () => {
 });
 
 describe("queue(): videoCondition dispatch", () => {
+  // videoCondition no longer resolves a branch synchronously: measuring the face ratio needs
+  // the whole video in the container, so it dispatches to VIDEO_ACTION_QUEUE exactly like
+  // videoAction and the true/false branch is decided later, in /internal/video-action/resume.
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-video1'`).run();
+    await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-video1'`).run();
     vi.unstubAllGlobals();
   });
 
@@ -707,123 +711,121 @@ describe("queue(): videoCondition dispatch", () => {
     return JSON.stringify({
       nodes: [
         { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
-        { id: "a1", type: "videoCondition", data: { operation: "check-face" }, position: { x: 200, y: 0 } },
+        { id: "a1", type: "videoCondition", data: { operation: "check-face", operator: "<=", threshold: 0.2 }, position: { x: 200, y: 0 } },
         { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: -50 } },
         { id: "a3", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 50 } },
       ],
       edges: [
         { id: "e1", source: "t1", target: "a1" },
-        { id: "e2", source: "a1", target: "a2", sourceHandle: "has-face" },
-        { id: "e3", source: "a1", target: "a3", sourceHandle: "no-face" },
+        { id: "e2", source: "a1", target: "a2", sourceHandle: "true" },
+        { id: "e3", source: "a1", target: "a3", sourceHandle: "failed" },
       ],
     });
   }
 
-  it("calls content's /internal/detect-face with the payload's cover_image_url and resumes on the has-face branch", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ hasFace: true }), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-
+  async function insertFlow() {
     await env.FLOW_DB.prepare(
       `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
        VALUES ('flow-video1', 1, 'video flow', ?, 'published', datetime('now'), datetime('now'))`
     ).bind(graphWithVideoCondition()).run();
+  }
 
+  it("enqueues a check-face job and a pending row, without resolving true/false yet", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: "https://youtube.com/watch?v=x" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const queueSend = vi.fn();
     const pipelineSend = vi.fn().mockResolvedValue(undefined);
-    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend }, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+
+    await insertFlow();
     await worker.queue(
       makeBatch({
         tenantId: "1", eventType: "content.created", contentId: "content-vid-1", channelId: "src-chan",
-        payload: { cover_image_url: "https://img/thumb.jpg" },
+        payload: { source_content_id: "x" },
       }),
       testEnv as any
     );
 
-    const call = fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/internal/detect-face"));
-    expect(call).toBeDefined();
-    const body = JSON.parse(call![1].body as string);
-    expect(body.imageUrl).toBe("https://img/thumb.jpg");
+    expect(queueSend).toHaveBeenCalledTimes(1);
+    const message = queueSend.mock.calls[0][0];
+    expect(message.operation).toBe("check-face");
+    expect(message.videoUrl).toBe("https://youtube.com/watch?v=x");
+    expect(message.nodeId).toBe("a1");
 
-    // resumeFromNode resolved a1's "has-face" branch down to a2 -- the second pipelineSend call
-    // (the first is the initial t1/a1 dispatch) carries a2's enter+exit.
-    expect(pipelineSend).toHaveBeenCalledTimes(2);
-    const [, secondCallRecords] = pipelineSend.mock.calls.map((c: any[]) => c[0]);
-    expect(secondCallRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a2:enter", "a2:exit"]);
-    expect(secondCallRecords[0].outcome).toBe("has-face");
+    const pending = await env.FLOW_DB.prepare(
+      `SELECT node_id, awaiting_event FROM content_flow_pending WHERE flow_id = 'flow-video1' AND content_id = 'content-vid-1'`
+    ).first<{ node_id: string; awaiting_event: string }>();
+    expect(pending!.node_id).toBe("a1");
+    expect(pending!.awaiting_event).toBe("video_action_complete");
+
+    // a2 is wired to "true", so a second pipelineSend call would mean a branch was resolved
+    // synchronously. Exactly one call proves the node is genuinely waiting on the callback.
+    expect(pipelineSend).toHaveBeenCalledTimes(1);
+    const [records] = pipelineSend.mock.calls[0];
+    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["t1:enter", "t1:exit", "a1:enter", "a1:exit"]);
   });
 
-  it("resumes on the no-face branch when content's /internal/detect-face reports hasFace: false", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ hasFace: false }), { status: 200 })));
+  it("prefers an upstream node's processed_video_url over calling link for the original video", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const queueSend = vi.fn();
+    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend } };
 
-    await env.FLOW_DB.prepare(
-      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
-       VALUES ('flow-video1', 1, 'video flow', ?, 'published', datetime('now'), datetime('now'))`
-    ).bind(graphWithVideoCondition()).run();
-
-    const pipelineSend = vi.fn().mockResolvedValue(undefined);
-    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+    await insertFlow();
     await worker.queue(
       makeBatch({
         tenantId: "1", eventType: "content.created", contentId: "content-vid-2", channelId: "src-chan",
-        payload: { cover_image_url: "https://img/thumb.jpg" },
+        payload: { processed_video_url: "https://content.test/cut.mp4" },
       }),
       testEnv as any
     );
 
-    // Same reasoning as the has-face test above: proves resumeFromNode resolved into a3 (the
-    // no-face target), not just that the initial dispatch happened.
-    expect(pipelineSend).toHaveBeenCalledTimes(2);
-    const [, secondCallRecords] = pipelineSend.mock.calls.map((c: any[]) => c[0]);
-    expect(secondCallRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
-    expect(secondCallRecords[0].outcome).toBe("no-face");
+    expect(fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/internal/content/video-url"))).toBeUndefined();
+    expect(queueSend.mock.calls[0][0].videoUrl).toBe("https://content.test/cut.mp4");
   });
 
-  it("resumes on the failed branch when content's /internal/detect-face returns a non-2xx", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "Detection failed" }), { status: 502 })));
-
-    await env.FLOW_DB.prepare(
-      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
-       VALUES ('flow-video1', 1, 'video flow', ?, 'published', datetime('now'), datetime('now'))`
-    ).bind(graphWithVideoCondition()).run();
-
+  it("resolves the failed branch immediately (no queue dispatch) when there is no video at all", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: null }), { status: 200 })));
+    const queueSend = vi.fn();
     const pipelineSend = vi.fn().mockResolvedValue(undefined);
-    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend }, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+
+    await insertFlow();
     await worker.queue(
       makeBatch({
         tenantId: "1", eventType: "content.created", contentId: "content-vid-3", channelId: "src-chan",
-        payload: { cover_image_url: "https://img/thumb.jpg" },
+        payload: {},
       }),
       testEnv as any
     );
 
-    // Neither a2 (has-face) nor a3 (no-face) is wired to a "failed" edge in this graph, so
-    // resolving "failed" reaches no downstream node at all. resumeFromNode's nodeLogs is exactly
-    // a1's relabeled outcome entry (non-empty, so emitContentNodeLogs still fires) — proving the
-    // exact resolved outcome value, and that nothing further executed (no second/third entry).
+    expect(queueSend).not.toHaveBeenCalled();
     expect(pipelineSend).toHaveBeenCalledTimes(2);
     const [, secondCallRecords] = pipelineSend.mock.calls.map((c: any[]) => c[0]);
-    expect(secondCallRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome"]);
+    expect(secondCallRecords.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
     expect(secondCallRecords[0].outcome).toBe("failed");
   });
 
-  it("resumes on the failed branch without calling content when cover_image_url is missing", async () => {
+  it("resolves the failed branch immediately when the video is longer than the 600s cap", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    const queueSend = vi.fn();
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, VIDEO_ACTION_QUEUE: { send: queueSend }, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
 
-    await env.FLOW_DB.prepare(
-      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
-       VALUES ('flow-video1', 1, 'video flow', ?, 'published', datetime('now'), datetime('now'))`
-    ).bind(graphWithVideoCondition()).run();
-
+    await insertFlow();
     await worker.queue(
       makeBatch({
         tenantId: "1", eventType: "content.created", contentId: "content-vid-4", channelId: "src-chan",
-        payload: {},
+        payload: { duration: 700 },
       }),
-      env
+      testEnv as any
     );
 
-    const detectFaceCall = fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/internal/detect-face"));
-    expect(detectFaceCall).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(queueSend).not.toHaveBeenCalled();
+    const [, secondCallRecords] = pipelineSend.mock.calls.map((c: any[]) => c[0]);
+    expect(secondCallRecords[0].outcome).toBe("failed");
   });
 });
 

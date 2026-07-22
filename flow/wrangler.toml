@@ -56,11 +56,11 @@ queue = "uniscrm-video-action-dev"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_FLOW_LOG"
-stream = "5545a9d599ee42e4b5479cd565fdf3ca"
+stream = "9d6d400897ff465eb7078bb204b10007"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_CONTENT_FLOW_LOG"
-stream = "68ce7acd4afe49568f273f349c91637b"
+stream = "005a014602b148bbb9a7de472e042186"
 
 [env.dev.ai]
 binding = "AI"
@@ -107,11 +107,11 @@ queue = "uniscrm-video-action"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_FLOW_LOG"
-stream = "237ac8578a614291a7a108e2d25950b5"
+stream = "1cf631ab266346998310eb36a7c31197"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_CONTENT_FLOW_LOG"
-stream = "2e610c670e7045f9b2d90880c5187564"
+stream = "5dc22e5305bf4a1893ce02076b8765fc"
 
 [env.production.ai]
 binding = "AI"

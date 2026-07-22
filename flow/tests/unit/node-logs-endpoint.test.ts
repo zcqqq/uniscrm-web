@@ -27,7 +27,7 @@ describe("queryNodeLogRows", () => {
 
     expect(rows).toEqual([{
       subjectId: "u1", created_at: "2026-01-01T00:00:00.000Z", direction: "enter",
-      outcome: null, title: null, content_text: null, content_url: null,
+      outcome: null, failure_reason: null, title: null, content_text: null, content_url: null,
     }]);
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(init.body as string);
@@ -38,18 +38,25 @@ describe("queryNodeLogRows", () => {
     expect(body.query).toContain("direction IN ('enter', 'outcome')");
     expect(body.query).toContain("ORDER BY created_at DESC");
     expect(body.query).toContain("LIMIT 50");
+    expect(body.query).toContain("failure_reason");
+    // flow_log has no title/content_text/content_url — selecting them makes R2 SQL reject the
+    // whole query, which silently emptied every user-domain drawer.
+    expect(body.query).not.toContain("title");
+    expect(body.query).not.toContain("content_text");
+    expect(body.query).not.toContain("content_url");
   });
 
   it("queries uniscrm.content_flow_log for both enter and outcome rows, returning the new detail columns", async () => {
     fetchMock.mockResolvedValue(mockR2Response([
-      { content_id: "c1", created_at: "2026-01-01T00:00:01.000Z", direction: "outcome", outcome: "failed", title: null, content_text: "hello world", content_url: "https://x.com/i/status/1" },
+      { content_id: "c1", created_at: "2026-01-01T00:00:01.000Z", direction: "outcome", outcome: "failed", failure_reason: "tiktok_api_error: url_ownership_unverified", title: null, content_text: "hello world", content_url: "https://x.com/i/status/1" },
     ]));
 
     const rows = await queryNodeLogRows(baseEnv(), "uniscrm.content_flow_log", "content_id", 42, "flow-2", "node-2");
 
     expect(rows).toEqual([{
       subjectId: "c1", created_at: "2026-01-01T00:00:01.000Z", direction: "outcome",
-      outcome: "failed", title: null, content_text: "hello world", content_url: "https://x.com/i/status/1",
+      outcome: "failed", failure_reason: "tiktok_api_error: url_ownership_unverified",
+      title: null, content_text: "hello world", content_url: "https://x.com/i/status/1",
     }]);
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(init.body as string);
@@ -193,6 +200,7 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — content domain reads R2 only
     const body = await res.json() as { logs: any[] };
     expect(body.logs).toEqual([{
       content_id: "c-dup", created_at: "2026-01-02T00:00:00.000Z", outcome: "success",
+      failure_reason: null,
       title: null, content_text: "second tweet text", content_url: "https://x.com/i/status/2",
     }]);
     // No D1 SELECT against the content table — every fetch call was either /api/auth/me or R2 SQL.
@@ -250,7 +258,7 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — YouTube-only content flow is
     expect(res.status).toBe(200);
     const body = await res.json() as { logs: any[] };
     expect(body.logs).toEqual([{
-      content_id: "c-yt", created_at: "2026-01-03T00:00:00.000Z", outcome: undefined,
+      content_id: "c-yt", created_at: "2026-01-03T00:00:00.000Z", outcome: undefined, failure_reason: null,
       title: "a video", content_text: null, content_url: "https://youtube.com/watch?v=abc",
     }]);
     const r2Call = fetchMock.mock.calls.find((c) => String(c[0]).includes("r2-sql"));

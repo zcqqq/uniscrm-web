@@ -155,6 +155,50 @@ describe("scheduled(): content_flow_pending sweep", () => {
     expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
     expect(records[0].outcome).toBe("failed");
   });
+
+  // videoCondition shares the same queue and the same "video_action_complete" pending row, but
+  // keeps its own node.type and has branches "true"/"false"/"failed" — so the sweep's guard has
+  // to cover it too. Matching only on data.actionType === "videoAction" would leave a timed-out
+  // videoCondition resolving the nonexistent "no" edge and dying silently.
+  const graphWithVideoConditionBranches = JSON.stringify({
+    nodes: [
+      { id: "t1", type: "xContentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+      { id: "a1", type: "videoCondition", data: { operation: "check-face", operator: "<=", threshold: 0.2 }, position: { x: 200, y: 0 } },
+      { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 0 } },
+      { id: "a3", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 100 } },
+    ],
+    edges: [
+      { id: "e1", source: "t1", target: "a1" },
+      { id: "e2", source: "a1", target: "a2", sourceHandle: "true" },
+      { id: "e3", source: "a1", target: "a3", sourceHandle: "failed" },
+    ],
+  });
+
+  it("a timed-out videoCondition pending row resumes the 'failed' branch, not 'no'", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-c2', 1, 'video condition timeout flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithVideoConditionBranches).run();
+
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event)
+       VALUES ('pend-vcond-timeout-1', 'flow-c2', 'a1', 'content-vcond-1', 1, '{}', ?, datetime('now'), 'video_action_complete')`
+    ).bind(past).run();
+
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+
+    await worker.scheduled({} as any, testEnv as any);
+
+    const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE id = 'pend-vcond-timeout-1'`).first();
+    expect(remaining).toBeNull();
+
+    expect(pipelineSend).toHaveBeenCalledTimes(1);
+    const [records] = pipelineSend.mock.calls[0];
+    expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
+    expect(records[0].outcome).toBe("failed");
+  });
 });
 
 describe("scheduled(): content_flow_pending retry_action handling", () => {

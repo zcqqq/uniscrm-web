@@ -261,7 +261,9 @@ export async function createBookmark(accessToken: string, sourceUserId: string, 
   }
   if (!res.ok) {
     const errorBody = await res.text().catch(() => "");
-    console.error(JSON.stringify({ event: "x_bookmark_api_error", status: res.status, errorBody }));
+    const headers: Record<string, string> = {};
+    for (const [k, v] of res.headers.entries()) headers[k] = v;
+    console.error(JSON.stringify({ event: "x_bookmark_api_error", status: res.status, errorBody, headers, sourceUserId }));
     return { ok: false };
   }
 

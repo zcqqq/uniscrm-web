@@ -1,6 +1,6 @@
 import type { Env } from "./types";
 import { createJob, updateJobStatus } from "./services/video-action/job-store";
-import { downloadAndExtract, downloadVideo, burnSubtitles, rotateToVertical, removeFace } from "./services/video-action/container-client";
+import { downloadAndExtract, downloadVideo, burnSubtitles, rotateToVertical, removeFace, faceRatio } from "./services/video-action/container-client";
 import { transcribeAudio } from "./services/video-action/transcribe";
 import { translateCues, cuesToSrt } from "./services/video-action/translate";
 
@@ -9,19 +9,25 @@ export interface VideoActionQueueMessage {
   contentId: string;
   tenantId: number;
   videoUrl: string;
-  operation: "add-subtitle" | "rotate-to-vertical" | "remove-face";
+  // "check-face" is the videoCondition node, not a videoAction — it shares this queue, job
+  // table and resume callback rather than duplicating the whole async pipeline. It produces no
+  // output video: it reports a face ratio and flow turns that into a true/false branch.
+  operation: "add-subtitle" | "rotate-to-vertical" | "remove-face" | "check-face";
   targetLanguage: string;
   flowId: string;
   nodeId: string;
   payload: Record<string, unknown>;
 }
 
-async function resumeFlow(env: Env, pendingId: string, branch: "success" | "failed", props: Record<string, unknown> = {}): Promise<void> {
+async function resumeFlow(env: Env, pendingId: string, branch: "success" | "failed", props: Record<string, unknown> = {}, reason?: string): Promise<void> {
   try {
     await fetch(`${env.FLOW_URL}/internal/video-action/resume`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
-      body: JSON.stringify({ pendingId, branch, props }),
+      // `reason` mirrors the stage + message already written to the job store, so the flow
+      // analytics drawer can say WHICH stage failed instead of a bare "Failed". Container
+      // stdout isn't queryable, so this callback is the only path that detail can travel.
+      body: JSON.stringify({ pendingId, branch, props, reason }),
     });
   } catch (err) {
     console.error(JSON.stringify({ event: "video_action_resume_callback_failed", pendingId, error: String(err) }));
@@ -43,7 +49,7 @@ async function processAddSubtitle(env: Env, jobId: string, message: VideoActionQ
   if (downloaded.error || !downloaded.videoKey || !downloaded.audioKey) {
     await updateJobStatus(env, jobId, "failed", "downloading", downloaded.error || "unknown download error");
     await cleanupScratch(env, jobId);
-    await resumeFlow(env, message.pendingId, "failed");
+    await resumeFlow(env, message.pendingId, "failed", {}, `video_action_failed: downloading — ${downloaded.error || "unknown download error"}`);
     return;
   }
 
@@ -52,7 +58,7 @@ async function processAddSubtitle(env: Env, jobId: string, message: VideoActionQ
   if (!cues) {
     await updateJobStatus(env, jobId, "failed", "transcribing", "no speech detected or transcription error");
     await cleanupScratch(env, jobId);
-    await resumeFlow(env, message.pendingId, "failed");
+    await resumeFlow(env, message.pendingId, "failed", {}, "video_action_failed: transcribing — no speech detected or transcription error");
     return;
   }
 
@@ -61,7 +67,7 @@ async function processAddSubtitle(env: Env, jobId: string, message: VideoActionQ
   if (!translated) {
     await updateJobStatus(env, jobId, "failed", "translating", "translation failed or cue count mismatch");
     await cleanupScratch(env, jobId);
-    await resumeFlow(env, message.pendingId, "failed");
+    await resumeFlow(env, message.pendingId, "failed", {}, "video_action_failed: translating — translation failed or cue count mismatch");
     return;
   }
 
@@ -71,7 +77,7 @@ async function processAddSubtitle(env: Env, jobId: string, message: VideoActionQ
   if (burned.error || !burned.finalKey) {
     await updateJobStatus(env, jobId, "failed", "burning_in", burned.error || "unknown burn-in error");
     await cleanupScratch(env, jobId);
-    await resumeFlow(env, message.pendingId, "failed");
+    await resumeFlow(env, message.pendingId, "failed", {}, `video_action_failed: burning_in — ${burned.error || "unknown burn-in error"}`);
     return;
   }
 
@@ -91,7 +97,7 @@ async function processRotateToVertical(env: Env, jobId: string, message: VideoAc
   if (downloaded.error || !downloaded.videoKey) {
     await updateJobStatus(env, jobId, "failed", "downloading", downloaded.error || "unknown download error");
     await cleanupScratch(env, jobId);
-    await resumeFlow(env, message.pendingId, "failed");
+    await resumeFlow(env, message.pendingId, "failed", {}, `video_action_failed: downloading — ${downloaded.error || "unknown download error"}`);
     return;
   }
 
@@ -100,7 +106,7 @@ async function processRotateToVertical(env: Env, jobId: string, message: VideoAc
   if (rotated.error || !rotated.finalKey) {
     await updateJobStatus(env, jobId, "failed", "rotating", rotated.error || "unknown rotate error");
     await cleanupScratch(env, jobId);
-    await resumeFlow(env, message.pendingId, "failed");
+    await resumeFlow(env, message.pendingId, "failed", {}, `video_action_failed: rotating — ${rotated.error || "unknown rotate error"}`);
     return;
   }
 
@@ -116,7 +122,7 @@ async function processRemoveFace(env: Env, jobId: string, message: VideoActionQu
   if (downloaded.error || !downloaded.videoKey) {
     await updateJobStatus(env, jobId, "failed", "downloading", downloaded.error || "unknown download error");
     await cleanupScratch(env, jobId);
-    await resumeFlow(env, message.pendingId, "failed");
+    await resumeFlow(env, message.pendingId, "failed", {}, `video_action_failed: downloading — ${downloaded.error || "unknown download error"}`);
     return;
   }
 
@@ -125,7 +131,7 @@ async function processRemoveFace(env: Env, jobId: string, message: VideoActionQu
   if (cut.error || !cut.finalKey) {
     await updateJobStatus(env, jobId, "failed", "detecting_faces", cut.error || "unknown remove-face error");
     await cleanupScratch(env, jobId);
-    await resumeFlow(env, message.pendingId, "failed");
+    await resumeFlow(env, message.pendingId, "failed", {}, `video_action_failed: detecting_faces — ${cut.error || "unknown remove-face error"}`);
     return;
   }
 
@@ -134,6 +140,32 @@ async function processRemoveFace(env: Env, jobId: string, message: VideoActionQu
   await resumeFlow(env, message.pendingId, "success", {
     processed_video_url: `${env.CONTENT_URL}/public/media/${cut.finalKey}`,
   });
+}
+
+async function processCheckFace(env: Env, jobId: string, message: VideoActionQueueMessage): Promise<void> {
+  const downloaded = await downloadVideo(env, jobId, message.videoUrl);
+  if (downloaded.error || !downloaded.videoKey) {
+    await updateJobStatus(env, jobId, "failed", "downloading", downloaded.error || "unknown download error");
+    await cleanupScratch(env, jobId);
+    await resumeFlow(env, message.pendingId, "failed", {}, `video_action_failed: downloading — ${downloaded.error || "unknown download error"}`);
+    return;
+  }
+
+  await updateJobStatus(env, jobId, "sampling_faces");
+  const sampled = await faceRatio(env, jobId, downloaded.videoKey);
+  if (sampled.error || typeof sampled.ratio !== "number") {
+    await updateJobStatus(env, jobId, "failed", "sampling_faces", sampled.error || "unknown face-ratio error");
+    await cleanupScratch(env, jobId);
+    await resumeFlow(env, message.pendingId, "failed", {}, `video_action_failed: sampling_faces — ${sampled.error || "unknown face-ratio error"}`);
+    return;
+  }
+
+  await updateJobStatus(env, jobId, "success");
+  await cleanupScratch(env, jobId);
+  // "success" here means "the ratio was measured", not "the condition passed". Comparing the
+  // ratio against the node's operator/threshold happens in flow's resume route, which reads
+  // them from the graph — this module never learns that a threshold exists.
+  await resumeFlow(env, message.pendingId, "success", { face_ratio: sampled.ratio });
 }
 
 export async function processVideoActionJob(env: Env, message: VideoActionQueueMessage): Promise<void> {
@@ -145,7 +177,7 @@ export async function processVideoActionJob(env: Env, message: VideoActionQueueM
     });
   } catch (err) {
     console.error(JSON.stringify({ event: "video_action_job_create_failed", pendingId: message.pendingId, error: String(err) }));
-    await resumeFlow(env, message.pendingId, "failed");
+    await resumeFlow(env, message.pendingId, "failed", {}, `video_action_failed: job_create — ${String(err)}`);
     return;
   }
 
@@ -154,6 +186,8 @@ export async function processVideoActionJob(env: Env, message: VideoActionQueueM
       await processRotateToVertical(env, jobId, message);
     } else if (message.operation === "remove-face") {
       await processRemoveFace(env, jobId, message);
+    } else if (message.operation === "check-face") {
+      await processCheckFace(env, jobId, message);
     } else {
       await processAddSubtitle(env, jobId, message);
     }
@@ -165,6 +199,6 @@ export async function processVideoActionJob(env: Env, message: VideoActionQueueM
       console.error(JSON.stringify({ event: "video_action_job_status_update_failed", jobId, error: String(statusErr) }));
     }
     await cleanupScratch(env, jobId);
-    await resumeFlow(env, message.pendingId, "failed");
+    await resumeFlow(env, message.pendingId, "failed", {}, `video_action_failed: unknown — ${String(err)}`);
   }
 }

@@ -3,7 +3,7 @@ export async function initPhotoPost(
   photoUrls: string[],
   title: string,
   description: string
-): Promise<{ ok: boolean; publishId?: string; rateLimited?: boolean }> {
+): Promise<{ ok: boolean; publishId?: string; rateLimited?: boolean; reason?: string }> {
   const res = await fetch("https://open.tiktokapis.com/v2/post/publish/content/init/", {
     method: "POST",
     headers: {
@@ -32,7 +32,7 @@ export async function initPhotoPost(
 
   if (body === undefined) {
     // Body isn't parseable JSON at all — fall back to HTTP status.
-    return { ok: false };
+    return { ok: false, reason: `tiktok_api_error: HTTP ${res.status}, unparseable response` };
   }
 
   const errorCode = body?.error?.code;
@@ -40,7 +40,8 @@ export async function initPhotoPost(
     return { ok: false, rateLimited: true };
   }
   if (!res.ok || (errorCode && errorCode !== "ok")) {
-    return { ok: false };
+    const detail = [errorCode, body?.error?.message].filter(Boolean).join(" — ") || `HTTP ${res.status}`;
+    return { ok: false, reason: `tiktok_api_error: ${detail}` };
   }
 
   return { ok: true, publishId: body?.data?.publish_id };
@@ -51,7 +52,7 @@ export async function initVideoPost(
   videoUrl: string,
   title: string,
   description: string
-): Promise<{ ok: boolean; publishId?: string; rateLimited?: boolean }> {
+): Promise<{ ok: boolean; publishId?: string; rateLimited?: boolean; reason?: string }> {
   const res = await fetch("https://open.tiktokapis.com/v2/post/publish/video/init/", {
     method: "POST",
     headers: {
@@ -76,7 +77,7 @@ export async function initVideoPost(
   }
 
   if (body === undefined) {
-    return { ok: false };
+    return { ok: false, reason: `tiktok_api_error: HTTP ${res.status}, unparseable response` };
   }
 
   const errorCode = body?.error?.code;
@@ -84,7 +85,11 @@ export async function initVideoPost(
     return { ok: false, rateLimited: true };
   }
   if (!res.ok || (errorCode && errorCode !== "ok")) {
-    return { ok: false };
+    // TikTok's own code/message is the only thing that distinguishes (say) an unverified
+    // PULL_FROM_URL domain from an expired token — dropping it here is what made every
+    // TikTok failure indistinguishable in the analytics drawer.
+    const detail = [errorCode, body?.error?.message].filter(Boolean).join(" — ") || `HTTP ${res.status}`;
+    return { ok: false, reason: `tiktok_api_error: ${detail}` };
   }
 
   return { ok: true, publishId: body?.data?.publish_id };

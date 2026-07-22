@@ -44,7 +44,7 @@ describe("buildFlowGenerateSystemPrompt", () => {
     expect(prompt).toContain('actionType: "xContentAction"');
     expect(prompt).toContain('actionType: "tiktokContentAction"');
     expect(prompt).toContain("Flow must start with exactly one trigger node: xContentTrigger or youtubeContentTrigger");
-    expect(prompt).toContain('videoCondition nodes have sourceHandle "has-face", "no-face", or "failed"');
+    expect(prompt).toContain('videoCondition nodes have sourceHandle "true", "false", or "failed"');
   });
 
   it("content domain: forbids user-domain types and never documents their data shape", () => {

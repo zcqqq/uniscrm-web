@@ -155,6 +155,49 @@ describe("processVideoActionJob", () => {
     expect(body.branch).toBe("failed");
   });
 
+  it("check-face: posts the measured ratio and leaves the true/false decision to flow", async () => {
+    vi.spyOn(containerClient, "downloadVideo").mockResolvedValue({ videoKey: "v1" });
+    vi.spyOn(containerClient, "faceRatio").mockResolvedValue({ ratio: 0.35, sampled: 20, detected: 7 });
+
+    await processVideoActionJob(makeEnv(), { ...message, operation: "check-face" });
+
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(expect.anything(), "job1", "sampling_faces");
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(expect.anything(), "job1", "success");
+    const resumeCall = (fetch as any).mock.calls.find((c: any[]) => c[0].includes("/internal/video-action/resume"));
+    const body = JSON.parse(resumeCall[1].body);
+    // "success" means "the ratio was measured", not "the condition passed" — no threshold
+    // comparison happens in this module at all.
+    expect(body.branch).toBe("success");
+    expect(body.props).toEqual({ face_ratio: 0.35 });
+  });
+
+  it("check-face: reports a measured ratio of 0 as success, not as a failure", async () => {
+    vi.spyOn(containerClient, "downloadVideo").mockResolvedValue({ videoKey: "v1" });
+    vi.spyOn(containerClient, "faceRatio").mockResolvedValue({ ratio: 0, sampled: 20, detected: 0 });
+
+    await processVideoActionJob(makeEnv(), { ...message, operation: "check-face" });
+
+    const resumeCall = (fetch as any).mock.calls.find((c: any[]) => c[0].includes("/internal/video-action/resume"));
+    const body = JSON.parse(resumeCall[1].body);
+    expect(body.branch).toBe("success");
+    expect(body.props).toEqual({ face_ratio: 0 });
+  });
+
+  it("check-face: resolves failed when the container could not decode any frame", async () => {
+    vi.spyOn(containerClient, "downloadVideo").mockResolvedValue({ videoKey: "v1" });
+    vi.spyOn(containerClient, "faceRatio").mockResolvedValue({ error: "no frame could be decoded from 20 sample points" });
+
+    await processVideoActionJob(makeEnv(), { ...message, operation: "check-face" });
+
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(
+      expect.anything(), "job1", "failed", "sampling_faces", "no frame could be decoded from 20 sample points"
+    );
+    const resumeCall = (fetch as any).mock.calls.find((c: any[]) => c[0].includes("/internal/video-action/resume"));
+    const body = JSON.parse(resumeCall[1].body);
+    expect(body.branch).toBe("failed");
+    expect(body.props).toEqual({});
+  });
+
   it("rotate-to-vertical and remove-face: resolve failed when download fails, without calling the operation step", async () => {
     vi.spyOn(containerClient, "downloadVideo").mockResolvedValue({ error: "yt-dlp failed" });
     const rotateSpy = vi.spyOn(containerClient, "rotateToVertical");

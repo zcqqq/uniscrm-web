@@ -47,11 +47,21 @@ describe("emitNodeLogs: sends directly to PIPELINE_FLOW_LOG, no queue", () => {
       testEnv as any
     );
 
-    expect(pipelineSend).toHaveBeenCalledTimes(1);
+    // Two sends: the traversal's enter/exit batch, then the action's outcome batch. User-domain
+    // actions have no success/failed branches in the graph, so the outcome is recorded as a
+    // log-only row rather than by resuming a branch.
+    expect(pipelineSend).toHaveBeenCalledTimes(2);
     const [records] = pipelineSend.mock.calls[0];
     expect(records).toEqual(expect.arrayContaining([
       expect.objectContaining({ tenant_id: 1, flow_id: "flow-elog1", node_id: "t1", user_id: "user-elog-1", direction: "enter" }),
     ]));
+
+    const [outcomeRecords] = pipelineSend.mock.calls[1];
+    expect(outcomeRecords).toEqual([
+      expect.objectContaining({
+        tenant_id: 1, flow_id: "flow-elog1", node_id: "a1", user_id: "user-elog-1", direction: "outcome",
+      }),
+    ]);
     expect(queueSend).not.toHaveBeenCalled();
   });
 });

@@ -4,7 +4,9 @@ import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 
 export default function VideoConditionNode({ data, selected }: NodeProps) {
   const operation = (data.operation as string) || "check-face";
-  const summary = operation === "check-face" ? "Check Face" : operation;
+  const operator = (data.operator as string) || "<=";
+  const threshold = data.threshold === undefined || data.threshold === "" ? 0.2 : data.threshold;
+  const summary = operation === "check-face" ? `Face ratio ${operator} ${threshold}` : operation;
 
   return (
     <div className={`px-4 py-3 rounded-lg border-2 bg-white min-w-[170px] ${selected ? "border-blue-500 shadow-md" : "border-purple-300"}`}>
@@ -15,11 +17,11 @@ export default function VideoConditionNode({ data, selected }: NodeProps) {
       </div>
       <p className="text-xs text-gray-700">{summary}</p>
       <AnalyticsBadges analytics={data._analytics as any} />
-      <span className="absolute right-1 text-[10px] text-green-600" style={{ top: "25%", transform: "translateY(-50%)" }}>Has Face</span>
-      <span className="absolute right-1 text-[10px] text-gray-500" style={{ top: "50%", transform: "translateY(-50%)" }}>No Face</span>
+      <span className="absolute right-1 text-[10px] text-green-600" style={{ top: "25%", transform: "translateY(-50%)" }}>True</span>
+      <span className="absolute right-1 text-[10px] text-gray-500" style={{ top: "50%", transform: "translateY(-50%)" }}>False</span>
       <span className="absolute right-1 text-[10px] text-red-500" style={{ top: "75%", transform: "translateY(-50%)" }}>Failed</span>
-      <Handle type="source" position={Position.Right} id="has-face" className="!bg-green-500 !w-2.5 !h-2.5" style={{ top: "25%" }} />
-      <Handle type="source" position={Position.Right} id="no-face" className="!bg-gray-400 !w-2.5 !h-2.5" style={{ top: "50%" }} />
+      <Handle type="source" position={Position.Right} id="true" className="!bg-green-500 !w-2.5 !h-2.5" style={{ top: "25%" }} />
+      <Handle type="source" position={Position.Right} id="false" className="!bg-gray-400 !w-2.5 !h-2.5" style={{ top: "50%" }} />
       <Handle type="source" position={Position.Right} id="failed" className="!bg-red-400 !w-2.5 !h-2.5" style={{ top: "75%" }} />
     </div>
   );

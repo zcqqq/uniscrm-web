@@ -136,7 +136,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
       data = { url: "", method: "POST", headers: {}, body: "" };
     } else if (type === "videoCondition") {
       nodeType = "videoCondition";
-      data = { operation: "check-face" };
+      data = { operation: "check-face", operator: "<=", threshold: 0.2 };
     } else if (type === "changeUserProps") {
       nodeType = "changeUserProps";
       data = { updates: [] };

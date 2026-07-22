@@ -85,7 +85,7 @@ describe("POST /internal/youtube/playlist-insert", () => {
 
   it("returns ok:false without calling insertPlaylistItem when playlistId is empty", async () => {
     const res = await callPlaylistInsert(makeEnv(), { channelId: "ch", contentId: "c", videoId: "v", playlistId: "" });
-    expect(await res.json()).toEqual({ ok: false });
+    expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^missing_playlist(:|$)/) });
     expect(insertPlaylistItem).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { executeFlow, resumeFromNode, type FlowGraph } from "../../src/engine";
+import { executeFlow, resumeFromNode, evaluateFaceRatioBranch, type FlowGraph } from "../../src/engine";
 
 describe("executeFlow: xContentTrigger", () => {
   function graphWithXContentTrigger(
@@ -447,5 +447,96 @@ describe("resumeFromNode: outcome relabeling is conditional on the resumed node'
     };
     const result = resumeFromNode(graph, "w1", {}, undefined);
     expect(result.nodeLogs[0]).toEqual({ nodeId: "w1", direction: "exit" });
+  });
+});
+
+describe("evaluateFaceRatioBranch", () => {
+  it("defaults to '<= 0.2' when the node carries no operator/threshold", () => {
+    expect(evaluateFaceRatioBranch({}, 0.15)).toBe("true");
+    expect(evaluateFaceRatioBranch({}, 0.25)).toBe("false");
+  });
+
+  it("applies each supported operator", () => {
+    expect(evaluateFaceRatioBranch({ operator: "<=", threshold: 0.2 }, 0.2)).toBe("true");
+    expect(evaluateFaceRatioBranch({ operator: "<", threshold: 0.2 }, 0.2)).toBe("false");
+    expect(evaluateFaceRatioBranch({ operator: ">=", threshold: 0.2 }, 0.2)).toBe("true");
+    expect(evaluateFaceRatioBranch({ operator: ">", threshold: 0.2 }, 0.2)).toBe("false");
+    expect(evaluateFaceRatioBranch({ operator: ">", threshold: 0.2 }, 0.35)).toBe("true");
+  });
+
+  it("treats a ratio of 0 as a real measurement, not as missing data", () => {
+    expect(evaluateFaceRatioBranch({ operator: "<=", threshold: 0.2 }, 0)).toBe("true");
+    expect(evaluateFaceRatioBranch({ operator: ">", threshold: 0 }, 0)).toBe("false");
+  });
+
+  it("returns 'failed' rather than guessing when the ratio is missing or not a number", () => {
+    expect(evaluateFaceRatioBranch({}, undefined)).toBe("failed");
+    expect(evaluateFaceRatioBranch({}, null)).toBe("failed");
+    expect(evaluateFaceRatioBranch({}, "0.3")).toBe("failed");
+    expect(evaluateFaceRatioBranch({}, NaN)).toBe("failed");
+  });
+
+  it("returns 'failed' on an unrecognised operator instead of silently falling through", () => {
+    expect(evaluateFaceRatioBranch({ operator: "==", threshold: 0.2 }, 0.2)).toBe("failed");
+  });
+
+  it("falls back to the default threshold when the stored one is unusable", () => {
+    expect(evaluateFaceRatioBranch({ operator: "<=", threshold: "abc" }, 0.15)).toBe("true");
+    expect(evaluateFaceRatioBranch({ operator: "<=", threshold: 0.15 }, 0.2)).toBe("false");
+  });
+});
+
+describe("resumeFromNode: branch targets that are not action/wait nodes", () => {
+  // Regression: the branch path used to handle only action/wait/waitForEvent and send every
+  // other type to collectActions(target.id) — which walks the target's CHILDREN, skipping the
+  // target itself. Found by an end-to-end run where "Remove Face --success--> Video Condition"
+  // silently never measured anything.
+  function graphWithBranchInto(targetNode: any, extraNodes: any[] = [], extraEdges: any[] = []) {
+    return {
+      nodes: [
+        { id: "a1", type: "action", data: { actionType: "videoAction", operation: "remove-face" }, position: { x: 0, y: 0 } },
+        targetNode,
+        ...extraNodes,
+      ],
+      edges: [{ id: "e1", source: "a1", target: targetNode.id, sourceHandle: "success" }, ...extraEdges],
+    } as FlowGraph;
+  }
+
+  it("dispatches a videoCondition wired to a branch handle", () => {
+    const graph = graphWithBranchInto({
+      id: "vc1", type: "videoCondition", data: { operation: "check-face", operator: "<=", threshold: 0.2 }, position: { x: 200, y: 0 },
+    });
+    const result = resumeFromNode(graph, "a1", {}, "success");
+    expect(result.actions).toEqual([
+      { type: "videoCondition", nodeId: "vc1", operation: "check-face", hasBranches: true },
+    ]);
+    expect(result.nodeLogs.map((l) => `${l.nodeId}:${l.direction}`)).toEqual(["a1:outcome", "vc1:enter", "vc1:exit"]);
+  });
+
+  it("dispatches a webhook wired to a branch handle", () => {
+    const graph = graphWithBranchInto({
+      id: "wh1", type: "webhook", data: { url: "https://example.test/hook", method: "POST" }, position: { x: 200, y: 0 },
+    });
+    const result = resumeFromNode(graph, "a1", {}, "success");
+    expect(result.actions).toMatchObject([{ type: "webhook", nodeId: "wh1", hasBranches: true }]);
+  });
+
+  it("an abSplit wired to a branch handle is dispatched once, instead of both its own branches running", () => {
+    const graph = graphWithBranchInto(
+      { id: "ab1", type: "abSplit", data: { mode: "random", percentA: 50 }, position: { x: 200, y: 0 } },
+      [
+        { id: "leafA", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: -50 } },
+        { id: "leafB", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 50 } },
+      ],
+      [
+        { id: "e2", source: "ab1", target: "leafA", sourceHandle: "a" },
+        { id: "e3", source: "ab1", target: "leafB", sourceHandle: "b" },
+      ]
+    );
+    const result = resumeFromNode(graph, "a1", {}, "success");
+    expect(result.actions).toMatchObject([{ type: "abSplit", nodeId: "ab1", hasBranches: true }]);
+    // Neither leaf runs yet — the split itself decides that later.
+    expect(result.actions.map((a) => a.nodeId)).not.toContain("leafA");
+    expect(result.actions.map((a) => a.nodeId)).not.toContain("leafB");
   });
 });

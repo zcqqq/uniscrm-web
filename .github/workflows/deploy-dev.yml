@@ -41,9 +41,13 @@ jobs:
     environment: dev
     strategy:
       fail-fast: false
-      # Throttle the parallel `wrangler secret bulk` calls: firing all modules at
-      # once trips the Cloudflare API rate limit (error 10429) on secrets-bulk.
-      max-parallel: 2
+      # Sync every module's secrets on every deploy (never skip on unchanged
+      # .secrets.json — that file lists secret *names*, so a rotated *value* in
+      # GitHub would silently not propagate). To stay under the Cloudflare API
+      # rate limit (error 10429) on the secrets-bulk write endpoint, run the
+      # modules one at a time; combined with the retry/backoff in
+      # sync-secrets.sh this keeps write bursts minimal without ever skipping.
+      max-parallel: 1
       matrix:
         include:
           - module: web

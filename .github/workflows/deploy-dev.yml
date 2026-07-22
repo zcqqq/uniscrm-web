@@ -41,6 +41,9 @@ jobs:
     environment: dev
     strategy:
       fail-fast: false
+      # Throttle the parallel `wrangler secret bulk` calls: firing all modules at
+      # once trips the Cloudflare API rate limit (error 10429) on secrets-bulk.
+      max-parallel: 2
       matrix:
         include:
           - module: web

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildEntityColumns } from "../../../shared/frontend/lib/metadata-columns";
 import { PROPS } from "../../../metadata/props";
 import { DateCell } from "../../../shared/frontend/components/CellDate";
+import type { PropDefinition } from "../../../metadata/dataTypes";
 
 interface Row {
   [key: string]: unknown;
@@ -85,5 +86,27 @@ describe("buildEntityColumns", () => {
     const contentTypeProp = PROPS.find((p) => p.propId === "content_type")!;
     const values = contentTypeProp.enums!.map((e) => e.value);
     expect(values).toContain("VIDEO");
+  });
+
+  it("excludes a prop explicitly marked isList: false", () => {
+    const props: PropDefinition[] = [
+      { propId: "a", dataType: "TEXT", entity: ["user"], isList: false, label: { en: "A", zh: "A" } },
+      { propId: "b", dataType: "TEXT", entity: ["user"], label: { en: "B", zh: "B" } },
+    ];
+    const cols = buildEntityColumns<Row>(props, "user", "en", "UTC");
+    const keys = cols.map((c) => c.key);
+    expect(keys).not.toContain("a");
+    expect(keys).toContain("b");
+  });
+
+  it("includes a prop when isList is omitted or explicitly true (default-true behavior)", () => {
+    const props: PropDefinition[] = [
+      { propId: "c", dataType: "TEXT", entity: ["user"], label: { en: "C", zh: "C" } },
+      { propId: "d", dataType: "TEXT", entity: ["user"], isList: true, label: { en: "D", zh: "D" } },
+    ];
+    const cols = buildEntityColumns<Row>(props, "user", "en", "UTC");
+    const keys = cols.map((c) => c.key);
+    expect(keys).toContain("c");
+    expect(keys).toContain("d");
   });
 });

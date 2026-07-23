@@ -17,7 +17,7 @@ export function buildEntityColumns<T extends Record<string, unknown>>(
   timezone: string
 ): Column<T>[] {
   return props
-    .filter((p) => p.entity?.includes(entity))
+    .filter((p) => p.entity?.includes(entity) && p.isList !== false)
     .map((p) => {
       // Only INT/DATETIME columns are sortable — TEXT/ENUM comparison order isn't
       // well-defined (alphabetical enum order, free-text collation) and R2 SQL-backed

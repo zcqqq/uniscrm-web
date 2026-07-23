@@ -8,6 +8,11 @@ export interface PropDefinition {
   dataType: PropDataType;
   fieldType?: PropFieldType;
   isInsight?: boolean;
+  // Default true when omitted. Set to false to hide this prop's column from
+  // the User/Content list tables (buildEntityColumns in metadata-columns.tsx).
+  // Orthogonal to isInsight — does not affect the analytics dimension/measure
+  // picker (ReportConfig.tsx), which filters on isInsight + entity only.
+  isList?: boolean;
   // Which R2 snapshot table(s) this prop is a real column on. Drives which
   // props Content/User Analytics dimension & measure-field pickers offer —
   // keep in sync with link/src/services/x-users.ts's USER_TABLE_COLUMNS and

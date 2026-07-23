@@ -1315,7 +1315,7 @@ export default function Inspector() {
   if (!node) return null;
 
   return (
-    <aside className="w-72 border-l border-border bg-background p-4 overflow-y-auto">
+    <aside className="w-24 md:w-72 border-l border-border bg-background p-4 overflow-y-auto">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Properties</h3>
         <Button

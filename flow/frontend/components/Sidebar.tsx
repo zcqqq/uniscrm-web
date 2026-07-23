@@ -223,7 +223,7 @@ export default function Sidebar() {
 
   return (
     <TooltipProvider>
-      <aside className="w-32 md:w-60 border-r border-border bg-background p-4 overflow-y-auto">
+      <aside className="w-24 md:w-60 border-r border-border bg-background p-4 overflow-y-auto">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Triggers</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-6">{sortByOrder(triggerItems, sidebarOrder)}</div>
 

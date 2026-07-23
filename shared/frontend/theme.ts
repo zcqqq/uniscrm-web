@@ -1,5 +1,9 @@
 export type Theme = "light" | "dark" | "system";
 
+export function themeCookieString(theme: Theme): string {
+  return `theme=${theme}; path=/; max-age=31536000; secure; samesite=lax; domain=uni-scrm.com`;
+}
+
 export function applyTheme(theme: Theme): void {
   const root = document.documentElement;
   if (theme === "system") {
@@ -9,6 +13,7 @@ export function applyTheme(theme: Theme): void {
     root.classList.toggle("dark", theme === "dark");
   }
   localStorage.setItem("theme", theme);
+  document.cookie = themeCookieString(theme);
 }
 
 export function getTheme(): Theme {

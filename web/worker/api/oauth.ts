@@ -9,6 +9,15 @@ import { X_CHANNEL_SCOPES } from "../../../shared/x-scopes";
 import { PendingTaskService } from "../services/pending-tasks";
 import { executePendingTask } from "../services/task-executor";
 
+async function memberLanguage(db: Env["WEB_DB"], memberId: string, isNew: boolean): Promise<string> {
+  if (isNew) return "en";
+  // tenant-scope-ok: id bound to the OAuth-resolved memberId (a member belongs to one tenant — the scoping key)
+  const row = await db.prepare("SELECT language FROM members WHERE id = ?")
+    .bind(memberId)
+    .first<{ language: string }>();
+  return row?.language || "en";
+}
+
 export function createOAuthRouter() {
   const router = new Hono<{ Bindings: Env }>();
 
@@ -61,6 +70,7 @@ export function createOAuthRouter() {
     }
 
     const { memberId, tenantId, isNew } = await oauthService.resolveUser("google", sub, email, stored.timezone || "UTC");
+    const lang = await memberLanguage(c.env.WEB_DB, memberId, isNew);
     if (isNew) {
       const tasks = new PendingTaskService(c.env.WEB_DB);
       const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
@@ -73,7 +83,7 @@ export function createOAuthRouter() {
 
     setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/" });
     setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/", domain: "uni-scrm.com" });
-    return c.html(`<!DOCTYPE html><html><head><script>document.cookie="session=;path=/;max-age=0;secure";document.cookie="session=;path=/;domain=uni-scrm.com;max-age=0;secure";document.cookie="session=${newSessionId};path=/;max-age=${7*24*60*60};secure;samesite=lax;domain=uni-scrm.com";document.cookie="tier=basic;path=/;max-age=${30*24*60*60};secure;samesite=lax;domain=uni-scrm.com";window.location.replace("/")</script></head><body></body></html>`);
+    return c.html(`<!DOCTYPE html><html><head><script>document.cookie="session=;path=/;max-age=0;secure";document.cookie="session=;path=/;domain=uni-scrm.com;max-age=0;secure";document.cookie="session=${newSessionId};path=/;max-age=${7*24*60*60};secure;samesite=lax;domain=uni-scrm.com";document.cookie="tier=basic;path=/;max-age=${30*24*60*60};secure;samesite=lax;domain=uni-scrm.com";document.cookie="lang=${lang};path=/;max-age=${365*24*60*60};secure;samesite=lax;domain=uni-scrm.com";window.location.replace("/")</script></head><body></body></html>`);
   });
 
   router.get("/x", async (c) => {
@@ -151,6 +161,7 @@ export function createOAuthRouter() {
 
     if (email) {
       const { memberId, tenantId, isNew } = await oauthService.resolveUser("x", xUserId, email, stored.timezone || "UTC");
+      const lang = await memberLanguage(c.env.WEB_DB, memberId, isNew);
       if (isNew) {
         const tasks = new PendingTaskService(c.env.WEB_DB);
         const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
@@ -173,7 +184,7 @@ export function createOAuthRouter() {
 
       setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/" });
       setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/", domain: "uni-scrm.com" });
-      return c.html(`<!DOCTYPE html><html><head><script>document.cookie="session=;path=/;max-age=0;secure";document.cookie="session=;path=/;domain=uni-scrm.com;max-age=0;secure";document.cookie="session=${newSessionId};path=/;max-age=${7*24*60*60};secure;samesite=lax;domain=uni-scrm.com";document.cookie="tier=basic;path=/;max-age=${30*24*60*60};secure;samesite=lax;domain=uni-scrm.com";window.location.replace("/")</script></head><body></body></html>`);
+      return c.html(`<!DOCTYPE html><html><head><script>document.cookie="session=;path=/;max-age=0;secure";document.cookie="session=;path=/;domain=uni-scrm.com;max-age=0;secure";document.cookie="session=${newSessionId};path=/;max-age=${7*24*60*60};secure;samesite=lax;domain=uni-scrm.com";document.cookie="tier=basic;path=/;max-age=${30*24*60*60};secure;samesite=lax;domain=uni-scrm.com";document.cookie="lang=${lang};path=/;max-age=${365*24*60*60};secure;samesite=lax;domain=uni-scrm.com";window.location.replace("/")</script></head><body></body></html>`);
     }
 
     // No email — store pending with tokens and redirect to complete-profile
@@ -282,6 +293,15 @@ export function createOAuthRouter() {
       secure: true,
       sameSite: "Lax",
       maxAge: 30 * 24 * 60 * 60,
+      path: "/",
+      domain: "uni-scrm.com",
+    });
+    // Readable by the static help center (help.uni-scrm.com) to pick the doc language
+    setCookie(c, "lang", await memberLanguage(c.env.WEB_DB, memberId, isNew), {
+      httpOnly: false,
+      secure: true,
+      sameSite: "Lax",
+      maxAge: 365 * 24 * 60 * 60,
       path: "/",
       domain: "uni-scrm.com",
     });

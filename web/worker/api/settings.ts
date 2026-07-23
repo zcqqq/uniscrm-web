@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { setCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { RecommendService } from "../services/recommend";
 import { OAuthService } from "../services/oauth";
@@ -63,6 +64,16 @@ export function createSettingsRouter() {
     await c.env.WEB_DB.prepare("UPDATE members SET language = ? WHERE id = ?")
       .bind(language, memberId)
       .run();
+
+    // Readable by the static help center (help.uni-scrm.com) to pick the doc language
+    setCookie(c, "lang", language, {
+      httpOnly: false,
+      secure: true,
+      sameSite: "Lax",
+      maxAge: 365 * 24 * 60 * 60,
+      path: "/",
+      domain: "uni-scrm.com",
+    });
 
     return c.json({ ok: true, language });
   });

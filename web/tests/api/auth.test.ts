@@ -92,6 +92,7 @@ describe("auth routes", () => {
       const res = await app.request("/auth/verify?token=tok");
       expect(res.status).toBe(200);
       expect(res.headers.get("set-cookie")).toContain("session=");
+      expect(res.headers.get("set-cookie")).toContain("lang=en");
     });
   });
 

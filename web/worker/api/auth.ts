@@ -108,6 +108,15 @@ export function createAuthRouter() {
       path: "/",
       domain: "uni-scrm.com",
     });
+    // Readable by the static help center (help.uni-scrm.com) to pick the doc language
+    setCookie(c, "lang", member.language || "en", {
+      httpOnly: false,
+      secure: true,
+      sameSite: "Lax",
+      maxAge: 365 * 24 * 60 * 60,
+      path: "/",
+      domain: "uni-scrm.com",
+    });
 
     return c.json({
       ok: true,

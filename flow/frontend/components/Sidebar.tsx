@@ -1,8 +1,11 @@
+import { useEffect, useState } from "react";
 import { useFlowEditor } from "../store/flow-editor";
 import { CHANNEL_TYPES } from "../config/trigger-fields";
 import { NODE_TYPE_REGISTRY, USER_FLOW_SIDEBAR_ORDER, CONTENT_FLOW_SIDEBAR_ORDER, type FlowDomain } from "../../nodeTypeRegistry";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
 import { XIcon, TikTokIcon, YouTubeIcon } from "../../../shared/frontend/ui/icons";
+import { useToast } from "../../../shared/frontend/hooks/use-toast";
+import { computeAddPosition } from "../lib/compute-add-position";
 
 interface DraggableItemProps {
   type: string;
@@ -12,10 +15,46 @@ interface DraggableItemProps {
   icon: React.ReactNode;
 }
 
+// Only 767px-and-below gets a click handler at all — desktop keeps drag-only, matching the
+// md: 768px breakpoint the grid layout switches on (see Sidebar's grid className below).
+const MOBILE_QUERY = "(max-width: 767.98px)";
+
+function useIsMobileViewport(): boolean {
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia(MOBILE_QUERY).matches);
+  useEffect(() => {
+    const mql = window.matchMedia(MOBILE_QUERY);
+    const onChange = () => setIsMobile(mql.matches);
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+  return isMobile;
+}
+
 function DraggableItem({ type, label, description, color, icon }: DraggableItemProps) {
+  const addNode = useFlowEditor((s) => s.addNode);
+  const isMobile = useIsMobileViewport();
+  const { toast } = useToast();
+
   const onDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData("application/reactflow-type", type);
     e.dataTransfer.effectAllowed = "move";
+  };
+
+  const onClick = () => {
+    if (!isMobile) return;
+    const { reactFlowInstance, nodes } = useFlowEditor.getState();
+    const wrapper = document.querySelector(".react-flow");
+    if (!reactFlowInstance || !wrapper) return;
+    const rect = wrapper.getBoundingClientRect();
+    const center = reactFlowInstance.screenToFlowPosition({
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    });
+    const position = computeAddPosition(center, nodes);
+    const added = addNode(type, position);
+    if (!added) {
+      toast({ title: "一个流程只能有一个触发节点", variant: "destructive" });
+    }
   };
 
   return (
@@ -24,6 +63,7 @@ function DraggableItem({ type, label, description, color, icon }: DraggableItemP
         <div
           draggable
           onDragStart={onDragStart}
+          onClick={onClick}
           className={`flex flex-col items-center gap-1 p-2 rounded-lg border cursor-grab active:cursor-grabbing hover:shadow-sm transition-shadow text-center ${color}`}
         >
           <span className="text-lg leading-none">{icon}</span>

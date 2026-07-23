@@ -80,7 +80,10 @@ export default function Canvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onInit={(instance) => { reactFlowRef.current = instance; }}
+        onInit={(instance) => {
+          reactFlowRef.current = instance;
+          useFlowEditor.getState().setReactFlowInstance(instance);
+        }}
         onDrop={onDrop}
         onDragOver={onDragOver}
         onNodeClick={onNodeClick}

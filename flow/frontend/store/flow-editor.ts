@@ -5,6 +5,7 @@ import {
   type OnNodesChange,
   type OnEdgesChange,
   type Connection,
+  type ReactFlowInstance,
   applyNodeChanges,
   applyEdgeChanges,
   addEdge,
@@ -25,6 +26,10 @@ export interface FlowEditorState {
   selectedNodeId: string | null;
   isDirty: boolean;
   errorNodeIds: string[];
+  // Set once by Canvas.tsx's onInit. Lets Sidebar.tsx compute canvas-viewport-relative
+  // positions (e.g. "center of what's currently visible") for tap-to-add, without Canvas
+  // having to expose a dedicated action for every future caller.
+  reactFlowInstance: ReactFlowInstance | null;
 
   setFlow: (id: string | null, name: string, enabled: boolean, nodes: Node[], edges: Edge[], domain: FlowDomain) => void;
   onNodesChange: OnNodesChange;
@@ -44,6 +49,7 @@ export interface FlowEditorState {
   // that channelType. No-ops (and skips the API call) if nothing needs filling.
   autoFillChannelIds: () => Promise<void>;
   setErrorNodeIds: (ids: string[]) => void;
+  setReactFlowInstance: (instance: ReactFlowInstance | null) => void;
 }
 
 const ACTION_TYPES = ["addToList", "xAction", "xContentAction", "tiktokContentAction", "videoAction", "youtubeContentAction"];
@@ -80,6 +86,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
   selectedNodeId: null,
   isDirty: false,
   errorNodeIds: [],
+  reactFlowInstance: null,
 
   setFlow: (id, name, enabled, nodes, edges, domain) =>
     set({ flowId: id, flowName: name, flowEnabled: enabled, flowDomain: domain, nodes, edges, isDirty: false, selectedNodeId: null, errorNodeIds: [] }),
@@ -205,6 +212,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
   setSelectedNode: (nodeId) => set({ selectedNodeId: nodeId }),
 
   setErrorNodeIds: (ids) => set({ errorNodeIds: ids }),
+  setReactFlowInstance: (instance) => set({ reactFlowInstance: instance }),
 
   setFlowName: (name) => set({ flowName: name, isDirty: true }),
 

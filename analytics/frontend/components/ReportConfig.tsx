@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { EventMetadata_X } from "../../../metadata/x";
 import { PROPS } from "../../../metadata/props";
 import type { PropDefinition } from "../../../metadata/dataTypes";
@@ -110,7 +109,6 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
   const numericEntityProps = entityProps.filter((p) => p.dataType === "INT");
   const selectedDimensionIsInt = PROPS.find((p) => p.propId === values.dimension)?.dataType === "INT";
   const selectedDimensionIsDatetime = PROPS.find((p) => p.propId === values.dimension)?.dataType === "DATETIME";
-  const [showFilter, setShowFilter] = useState((values.filters?.length || 0) > 0);
 
   const update = (partial: Partial<ReportConfigValues>) => onChange({ ...values, ...partial });
 
@@ -129,6 +127,12 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
     const filters = (values.filters || []).filter((_, i) => i !== idx);
     update({ filters });
   };
+
+  const filterFieldOptions: PropDefinition[] =
+    mode === "user" || mode === "content" ? entityProps
+    : mode === "interval" ? eventPropsFor(values.eventTypeA || "")
+    : mode === "funnel" ? eventPropsFor((values.funnelSteps || [])[0] || "")
+    : eventPropsFor(values.eventType);
 
   return (
     <Card className="mb-5">
@@ -276,12 +280,12 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
         </div>}
 
         {/* Filter conditions */}
-        {showFilter && (values.filters || []).length > 0 && (
+        {(values.filters || []).length > 0 && (
           <div className="mt-4 space-y-2">
             {(values.filters || []).map((f, i) => (
               <div key={i} className="flex items-center gap-2 flex-wrap">
                 <SelectProps
-                  options={eventPropsFor(values.eventType)}
+                  options={filterFieldOptions}
                   value={f.field}
                   onChange={(v) => updateFilter(i, { field: v })}
                   locale={locale}
@@ -302,7 +306,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
           </div>
         )}
         <div className="mt-3">
-          <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => { setShowFilter(true); addFilter(); }}>
+          <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={addFilter}>
             + {s.addFilter}
           </Button>
         </div>

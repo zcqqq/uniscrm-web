@@ -155,6 +155,36 @@ describe("buildSQL", () => {
   });
 });
 
+describe("buildSQL interval filters", () => {
+  it("applies a filter only on the eventTypeA leg, after next_type is narrowed", () => {
+    const sql = buildSQL(
+      "interval",
+      {
+        event_type_a: "follow.follow", event_type_b: "dm.received",
+        filters: [{ field: "followers_count", operator: ">", value: "100" }],
+      },
+      "1"
+    );
+    expect(sql).toContain("WHERE event_type = 'follow.follow' AND next_type = 'dm.received' AND followers_count > 100");
+    // the base CTE (which still contains B-leg rows) must stay filter-free,
+    // otherwise B-leg rows lacking the A-only prop would be dropped and break LEAD pairing
+    expect(sql.split("next_time\n  FROM uniscrm.event")[1].split(")")[0]).not.toContain("followers_count");
+  });
+
+  it("has value / no value / between operators behave the same as other modes", () => {
+    const hasValue = buildSQL("interval", { event_type_a: "a", event_type_b: "b", filters: [{ field: "x", operator: "has value", value: "" }] }, "1");
+    expect(hasValue).toContain("AND x IS NOT NULL");
+
+    const between = buildSQL("interval", { event_type_a: "a", event_type_b: "b", filters: [{ field: "x", operator: "between", value: "1", value2: "9" }] }, "1");
+    expect(between).toContain("AND x BETWEEN 1 AND 9");
+  });
+
+  it("omits filter clauses entirely when none are provided (regression check)", () => {
+    const sql = buildSQL("interval", { event_type_a: "a", event_type_b: "b" }, "1");
+    expect(sql.trim().endsWith("next_type = 'b'")).toBe(true);
+  });
+});
+
 describe("buildSQL event dimension bucketing", () => {
   it("still groups by the raw dimension column when no bucket mode is set (regression check)", () => {
     const sql = buildSQL("event", { event_type: "follow.follow", measure: "count", dimension: "followers_count", granularity: "day" }, "1");

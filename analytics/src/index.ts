@@ -532,13 +532,26 @@ GROUP BY period${dimGroupCol ? `, ${dimGroupCol}` : ""} ORDER BY period`;
   }
 
   if (type === "interval") {
-    const { event_type_a, event_type_b, time_range_start, time_range_end } = params as {
+    const { event_type_a, event_type_b, time_range_start, time_range_end, filters } = params as {
       event_type_a: string; event_type_b: string; time_range_start?: string; time_range_end?: string;
+      filters?: { field: string; operator: string; value: string; value2?: string }[];
     };
     const timeFilter = [
       time_range_start ? `AND event_time >= '${time_range_start}'` : "",
       time_range_end ? `AND event_time <= '${time_range_end}'` : "",
     ].join(" ");
+
+    // Filters describe eventTypeA's own props (see ReportConfig's dimension/filter field
+    // source for interval mode), so they're applied after narrowing to the A-leg rows below —
+    // applying them inside the `ordered` CTE would also drop B-leg rows and break LEAD pairing.
+    const filterClauses = (filters || []).filter(f => f.field && f.operator).map(f => {
+      if (f.operator === "has value") return `AND ${f.field} IS NOT NULL`;
+      if (f.operator === "no value") return `AND ${f.field} IS NULL`;
+      if (f.operator === "between") return `AND ${f.field} BETWEEN ${f.value} AND ${f.value2 || f.value}`;
+      const op = f.operator === "≠" ? "!=" : f.operator;
+      const val = isNaN(Number(f.value)) ? `'${f.value}'` : f.value;
+      return `AND ${f.field} ${op} ${val}`;
+    }).join(" ");
 
     return `WITH ordered AS (
   SELECT user_id, event_type, event_time,
@@ -549,7 +562,7 @@ GROUP BY period${dimGroupCol ? `, ${dimGroupCol}` : ""} ORDER BY period`;
 )
 SELECT user_id, event_time, next_time
 FROM ordered
-WHERE event_type = '${event_type_a}' AND next_type = '${event_type_b}'`;
+WHERE event_type = '${event_type_a}' AND next_type = '${event_type_b}' ${filterClauses}`;
   }
 
   if (type === "user") {

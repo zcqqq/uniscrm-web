@@ -120,6 +120,62 @@ describe("recomputeFlowCounts", () => {
     expect(row?.trigger_count).toBeNull();
   });
 
+  it("deletes stale count rows whose combo is absent from the fresh R2 aggregate", async () => {
+    // The R2 log tables can be rebuilt (schema changes archive/drop them). Combos that no
+    // longer exist in R2 must disappear from D1 too — upsert-only left ghost counts behind.
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (1, 'f-ghost', 'n-ghost', 'exit', 9, '2020-01-01T00:00:00.000Z')`
+    ).run();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (1, 'cf-ghost', 'n-ghost', 'exit', 4, '2020-01-01T00:00:00.000Z')`
+    ).run();
+    fetchMock
+      .mockResolvedValueOnce(mockR2Response([{ tenant_id: 1, flow_id: "f1", node_id: "n1", direction: "enter", cnt: 5 }]))
+      .mockResolvedValueOnce(mockR2Response([]));
+
+    await recomputeFlowCounts(env as any);
+
+    const ghost = await env.FLOW_DB.prepare(`SELECT count FROM flow_counts WHERE flow_id = 'f-ghost'`).first();
+    expect(ghost).toBeNull();
+    const contentGhost = await env.FLOW_DB.prepare(`SELECT count FROM content_flow_counts WHERE flow_id = 'cf-ghost'`).first();
+    expect(contentGhost).toBeNull();
+    const fresh = await env.FLOW_DB.prepare(`SELECT count FROM flow_counts WHERE flow_id = 'f1' AND node_id = 'n1' AND direction = 'enter'`).first<{ count: number }>();
+    expect(fresh?.count).toBe(5);
+  });
+
+  it("aggregates with COUNT(DISTINCT id) so pipeline at-least-once duplicates count once", async () => {
+    fetchMock.mockResolvedValue(mockR2Response([]));
+
+    await recomputeFlowCounts(env as any);
+
+    const queries = fetchMock.mock.calls.map((c: any[]) => JSON.parse(c[1].body).query);
+    expect(queries.every((q: string) => q.includes("COUNT(DISTINCT id)"))).toBe(true);
+  });
+
+  it("keeps existing counts untouched when an R2 query fails, instead of wiping them", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (1, 'f-keep', 'n1', 'enter', 3, '2020-01-01T00:00:00.000Z')`
+    ).run();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: false, errors: [{ code: 1 }] }), { status: 200 }));
+
+    await recomputeFlowCounts(env as any);
+
+    const kept = await env.FLOW_DB.prepare(`SELECT count FROM flow_counts WHERE flow_id = 'f-keep'`).first<{ count: number }>();
+    expect(kept?.count).toBe(3);
+  });
+
+  it("clears a stale trigger_count back to NULL when the trigger no longer has R2 rows", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, domain, status, trigger_count, created_at, updated_at) VALUES ('flow-stale', 1, 's', ?, 'user', 'published', 42, datetime('now'), datetime('now'))`
+    ).bind(userFlowGraph).run();
+    fetchMock.mockResolvedValue(mockR2Response([]));
+
+    await recomputeFlowCounts(env as any);
+
+    const row = await env.FLOW_DB.prepare(`SELECT trigger_count FROM flows WHERE id = 'flow-stale'`).first<{ trigger_count: number | null }>();
+    expect(row?.trigger_count).toBeNull();
+  });
+
   it("leaves trigger_count NULL for a flow whose trigger node has no R2 activity yet", async () => {
     await env.FLOW_DB.prepare(
       `INSERT INTO flows (id, tenant_id, name, graph_json, domain, status, created_at, updated_at) VALUES ('flow-quiet', 1, 'q', ?, 'user', 'published', datetime('now'), datetime('now'))`

@@ -73,27 +73,37 @@ interface CountRow {
   cnt: number;
 }
 
-async function queryR2Counts(env: Env, table: string): Promise<CountRow[]> {
-  const res = await fetch(
-    `https://api.sql.cloudflarestorage.com/api/v1/accounts/${env.CF_ACCOUNT_ID}/r2-sql/query/${env.R2_BUCKET}`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${env.R2_SQL_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        warehouse: env.R2_WAREHOUSE,
-        query: `SELECT tenant_id, flow_id, node_id, direction, COUNT(*) as cnt FROM ${table} GROUP BY tenant_id, flow_id, node_id, direction`,
-      }),
+// null = the query failed (as opposed to []: the table is genuinely empty). The caller treats
+// them very differently — a failure must keep the last good counts, an empty table must wipe.
+async function queryR2Counts(env: Env, table: string): Promise<CountRow[] | null> {
+  try {
+    const res = await fetch(
+      `https://api.sql.cloudflarestorage.com/api/v1/accounts/${env.CF_ACCOUNT_ID}/r2-sql/query/${env.R2_BUCKET}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${env.R2_SQL_TOKEN}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          warehouse: env.R2_WAREHOUSE,
+          // DISTINCT id: Cloudflare Pipelines delivery is at-least-once — the same record (same
+          // worker-generated UUID) has been observed landing in the Iceberg table twice. id is
+          // the idempotency key, so duplicates collapse here instead of inflating counts.
+          query: `SELECT tenant_id, flow_id, node_id, direction, COUNT(DISTINCT id) as cnt FROM ${table} GROUP BY tenant_id, flow_id, node_id, direction`,
+        }),
+      }
+    );
+    // .clone() before .json(): under test mocks a single Response instance may be shared across
+    // multiple fetch() callers within one scheduled() tick; reading via a clone avoids consuming
+    // that shared body. No behavior change against real fetch() responses (always distinct objects).
+    const data = await res.clone().json() as { result?: { rows: CountRow[] }; success: boolean; errors?: unknown };
+    if (!data.success) {
+      console.error(JSON.stringify({ event: "flow_counts_query_failed", table, status: res.status, errors: data.errors }));
+      return null;
     }
-  );
-  // .clone() before .json(): under test mocks a single Response instance may be shared across
-  // multiple fetch() callers within one scheduled() tick; reading via a clone avoids consuming
-  // that shared body. No behavior change against real fetch() responses (always distinct objects).
-  const data = await res.clone().json() as { result?: { rows: CountRow[] }; success: boolean; errors?: unknown };
-  if (!data.success) {
-    console.error(JSON.stringify({ event: "flow_counts_query_failed", table, status: res.status, errors: data.errors }));
-    return [];
+    return data.result?.rows || [];
+  } catch (e) {
+    console.error(JSON.stringify({ event: "flow_counts_query_failed", table, error: String(e) }));
+    return null;
   }
-  return data.result?.rows || [];
 }
 
 export interface NodeLogRow {
@@ -158,28 +168,38 @@ export async function recomputeFlowCounts(env: Env): Promise<void> {
   ]);
 
   const now = new Date().toISOString();
-  const allRows = [...flowRows, ...contentFlowRows];
 
-  for (const r of flowRows) {
-    try {
-      await env.FLOW_DB.prepare(
-        `INSERT INTO flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(flow_id, node_id, direction) DO UPDATE SET tenant_id = excluded.tenant_id, count = excluded.count, updated_at = excluded.updated_at`
-      ).bind(r.tenant_id, r.flow_id, r.node_id, r.direction, r.cnt, now).run();
-    } catch (e) {
-      console.error(JSON.stringify({ event: "flow_counts_upsert_error", tenantId: r.tenant_id, flowId: r.flow_id, nodeId: r.node_id, direction: r.direction, error: String(e) }));
+  // Full replace, not upsert: the R2 aggregate above is the complete source of truth, and the
+  // log tables can be rebuilt (schema changes archive/drop them) — upsert-only left ghost
+  // counts behind for combos that no longer exist in R2. DELETE + INSERT run in one D1 batch
+  // (a transaction), so a failure keeps the previous counts intact rather than leaving a
+  // half-wiped table.
+  const replaceCounts = async (table: "flow_counts" | "content_flow_counts", rows: CountRow[] | null) => {
+    if (rows === null) return; // query failed — last good counts beat a wipe
+    const stmts = [env.FLOW_DB.prepare(`DELETE FROM ${table}`)];
+    for (const r of rows) {
+      stmts.push(
+        env.FLOW_DB.prepare(
+          `INSERT INTO ${table} (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+        ).bind(r.tenant_id, r.flow_id, r.node_id, r.direction, r.cnt, now)
+      );
     }
-  }
-  for (const r of contentFlowRows) {
     try {
-      await env.FLOW_DB.prepare(
-        `INSERT INTO content_flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(flow_id, node_id, direction) DO UPDATE SET tenant_id = excluded.tenant_id, count = excluded.count, updated_at = excluded.updated_at`
-      ).bind(r.tenant_id, r.flow_id, r.node_id, r.direction, r.cnt, now).run();
+      await env.FLOW_DB.batch(stmts);
     } catch (e) {
-      console.error(JSON.stringify({ event: "content_flow_counts_upsert_error", tenantId: r.tenant_id, flowId: r.flow_id, nodeId: r.node_id, direction: r.direction, error: String(e) }));
+      console.error(JSON.stringify({ event: `${table}_replace_error`, rows: rows.length, error: String(e) }));
     }
+  };
+  await replaceCounts("flow_counts", flowRows);
+  await replaceCounts("content_flow_counts", contentFlowRows);
+
+  // trigger_count needs BOTH aggregates (a content flow's count would be zeroed by a view that
+  // only includes flow_log) — skip the pass entirely if either query failed.
+  if (flowRows === null || contentFlowRows === null) {
+    console.log(JSON.stringify({ event: "flow_counts_recomputed_partial", flowOk: flowRows !== null, contentOk: contentFlowRows !== null }));
+    return;
   }
+  const allRows = [...flowRows, ...contentFlowRows];
 
   // Cache each flow's trigger-node "entered" count directly on flows.trigger_count, so the list
   // page's GET /api/flows can read it as a plain column with no per-request join, R2 call, or
@@ -200,8 +220,10 @@ export async function recomputeFlowCounts(env: Env): Promise<void> {
       continue;
     }
     if (!triggerNodeId) continue;
-    const count = enterCountByFlowNode.get(`${flow.id}:${triggerNodeId}`);
-    if (count === undefined) continue;
+    // Absent from R2 → NULL, always written: after a log-table rebuild, a trigger that lost its
+    // rows must not keep its pre-rebuild count forever. NULL (not 0) keeps "no data yet" and
+    // "never counted" identical, which is what the list page already renders.
+    const count = enterCountByFlowNode.get(`${flow.id}:${triggerNodeId}`) ?? null;
     try {
       await env.FLOW_DB.prepare(`UPDATE flows SET trigger_count = ? WHERE id = ?`).bind(count, flow.id).run();
     } catch (e) {

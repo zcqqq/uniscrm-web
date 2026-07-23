@@ -185,13 +185,13 @@ export default function Sidebar() {
     <TooltipProvider>
       <aside className="w-60 border-r border-border bg-background p-4 overflow-y-auto">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Triggers</h3>
-        <div className="grid grid-cols-2 gap-2 mb-6">{sortByOrder(triggerItems, sidebarOrder)}</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-6">{sortByOrder(triggerItems, sidebarOrder)}</div>
 
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Actions</h3>
-        <div className="grid grid-cols-2 gap-2 mb-6">{sortByOrder(actionItems, sidebarOrder)}</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-6">{sortByOrder(actionItems, sidebarOrder)}</div>
 
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Flow Control</h3>
-        <div className="grid grid-cols-2 gap-2">{sortByOrder(flowControlItems, sidebarOrder)}</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">{sortByOrder(flowControlItems, sidebarOrder)}</div>
       </aside>
     </TooltipProvider>
   );

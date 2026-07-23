@@ -109,4 +109,13 @@ describe("buildEntityColumns", () => {
     expect(keys).toContain("c");
     expect(keys).toContain("d");
   });
+
+  it("marks the internal record-linkage props isList: false in the real PROPS registry", () => {
+    const userIdProp = PROPS.find((p) => p.propId === "user_id")!;
+    const sourceUserIdProp = PROPS.find((p) => p.propId === "source_user_id")!;
+    const sourceContentIdProp = PROPS.find((p) => p.propId === "source_content_id")!;
+    expect(userIdProp.isList).toBe(false);
+    expect(sourceUserIdProp.isList).toBe(false);
+    expect(sourceContentIdProp.isList).toBe(false);
+  });
 });

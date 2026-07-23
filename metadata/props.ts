@@ -6,11 +6,13 @@ export const PROPS = definePropDefinitions([
   {
     propId: "user_id", //用于content commerce等与USER表关联
     dataType: "TEXT",
+    isList: false,
     label: { en: "user id", zh: "user id" },
   },
   {
     propId: "source_user_id",
     dataType: "TEXT",
+    isList: false,
     label: { en: "source user id", zh: "源 user id" },
   },
   {
@@ -138,6 +140,7 @@ export const PROPS = definePropDefinitions([
   {
     propId: "source_content_id",
     dataType: "TEXT",
+    isList: false,
     label: { en: "Source Content ID", zh: "源 Content ID" },
   },
   {

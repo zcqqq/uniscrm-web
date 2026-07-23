@@ -15,19 +15,9 @@ Reuse the project's existing mobile breakpoint convention: Tailwind `md:` (768px
 
 ## 1. Layout: single column below 768px
 
-In `Sidebar.tsx`, the three item grids change from:
+In `Sidebar.tsx`, the three item grids change from `grid grid-cols-2 gap-2` to `grid grid-cols-1 md:grid-cols-2 gap-2`, for all three sections (Triggers, Actions, Flow Control).
 
-```
-<div className="grid grid-cols-2 gap-2 mb-6">
-```
-
-to:
-
-```
-<div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-6">
-```
-
-for all three sections (Triggers, Actions, Flow Control). The `DraggableItem` tile's internal layout (icon on top, label below) is unchanged — it simply renders full-width instead of in a 2-up grid.
+**Correction (2026-07-24):** the first pass of this change kept the `<aside>` panel at its desktop width (`w-60`, 240px) and let the single column stretch each tile to fill it — full-width tiles, same panel width. That was a misreading of the intent: the panel itself should narrow to roughly one tile's width, with tiles keeping their natural (unstretched) size, so mobile gains canvas space rather than losing it to a wide palette. Fixed by also making the `<aside>`'s width responsive: `w-32 md:w-60` (128px below 768px, unchanged 240px at/above it). `grid-cols-1` on a narrower container naturally yields node-sized tiles — no tile-level styling changed, only the two container widths (`aside`, and the grid columns already described above).
 
 ## 2. Interaction: tap-to-add (mobile only)
 

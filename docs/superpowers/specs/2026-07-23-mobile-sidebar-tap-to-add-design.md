@@ -7,7 +7,9 @@ The flow editor (`flow/frontend/pages/EditorPage.tsx`) lays out `Sidebar` (node 
 - `Sidebar.tsx` renders its three sections (Triggers / Actions / Flow Control) as `grid-cols-2` tiles.
 - Adding a node to the canvas is HTML5 `draggable`/`dataTransfer` drag-and-drop (`Sidebar.tsx` `DraggableItem` + `Canvas.tsx` `onDrop`). HTML5 drag does not fire on touch devices at all, so on a phone, dragging a node from the palette onto the canvas currently does nothing.
 
-**Scope for this change:** only `Sidebar.tsx`'s internal layout and node-adding interaction. The overall 3-panel layout (Sidebar + Canvas + Inspector all fixed-width, side by side) and `Inspector.tsx` are explicitly out of scope for this round — they don't fit a phone viewport either, but that's a separate future task.
+**Scope for this change:** only `Sidebar.tsx`'s internal layout and node-adding interaction. The overall 3-panel layout (Sidebar + Canvas + Inspector all fixed-width, side by side) and `Inspector.tsx`'s internals are out of scope — they don't fit a phone viewport either, but redesigning them is a separate future task.
+
+**Scope amendment (2026-07-24):** `Inspector.tsx` only mounts (`if (!selectedNodeId) return null`) once a node is selected, at a fixed `w-72` (288px). Once Sidebar narrowed for mobile, selecting a node revealed a real bug this scoping missed: `w-24` (sidebar) + `w-72` (inspector) already exceeds a phone viewport width on their own, squeezing `Canvas` (the `flex-1` middle child) to nothing — no visible canvas left to tap and deselect the node. Fixed minimally, in scope: `Inspector.tsx`'s `<aside>` gets the same `w-24 md:w-72` responsive-width treatment as Sidebar's `<aside>` (`w-24 md:w-60`) — matching narrow width on mobile, unchanged desktop width. This is a width-only fix; `Inspector`'s internal field-editing UX at 96px width is cramped and NOT redesigned here — still explicitly out of scope.
 
 ## Breakpoint
 

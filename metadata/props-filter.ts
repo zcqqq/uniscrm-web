@@ -11,6 +11,8 @@ export function passesPropsFilter(
     const actual = props[f.propId];
     if (f.operator === "==") return actual === f.value;
     if (f.operator === "!=") return actual !== f.value;
+    // Fail closed: null and "" coerce to 0 via Number(), not NaN, so guard explicitly.
+    if (actual === null || actual === "") return false;
     const a = Number(actual);
     const b = Number(f.value);
     if (Number.isNaN(a) || Number.isNaN(b)) return false;

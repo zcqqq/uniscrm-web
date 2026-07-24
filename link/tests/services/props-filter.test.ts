@@ -46,6 +46,8 @@ describe("passesPropsFilter", () => {
     expect(passesPropsFilter(f, {})).toBe(false);
     expect(passesPropsFilter(f, { duration: undefined })).toBe(false);
     expect(passesPropsFilter(f, { duration: "abc" })).toBe(false);
+    expect(passesPropsFilter(f, { duration: null })).toBe(false);
+    expect(passesPropsFilter(f, { duration: "" })).toBe(false);
   });
 
   it("multiple filters are AND", () => {

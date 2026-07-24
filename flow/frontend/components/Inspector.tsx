@@ -878,6 +878,10 @@ function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Recor
   const { updateNodeData } = useFlowEditor();
   const operation = data.operation || "check-face";
   const isOrientation = operation === "check-orientation";
+  // Guards a hand-edited/corrupt graph carrying an unrecognized operation id -- mirrors
+  // VideoConditionNode.tsx's identical fallback so the inspector never throws on `.operator`
+  // of undefined where the canvas node would render fine.
+  const operationDefaults = VIDEO_CONDITION_OPERATION_DEFAULTS[operation] || VIDEO_CONDITION_OPERATION_DEFAULTS["check-face"];
 
   const handleOperationChange = (v: string) => {
     const defaults = VIDEO_CONDITION_OPERATION_DEFAULTS[v] || VIDEO_CONDITION_OPERATION_DEFAULTS["check-face"];
@@ -900,7 +904,7 @@ function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Recor
           <Label className="text-xs block mb-1">{VIDEO_CONDITION_FIELD_LABEL[operation]}</Label>
           <div className="flex items-center gap-2">
             <Select
-              value={data.operator || VIDEO_CONDITION_OPERATION_DEFAULTS[operation].operator}
+              value={data.operator || operationDefaults.operator}
               onChange={(e: SelectChange) => updateNodeData(nodeId, { operator: e.target.value })}
               className="w-20 text-sm"
             >
@@ -911,7 +915,7 @@ function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Recor
             <Input
               type="number"
               {...(isOrientation ? {} : { min: 0, max: 1, step: 0.05 })}
-              value={data.threshold ?? VIDEO_CONDITION_OPERATION_DEFAULTS[operation].threshold}
+              value={data.threshold ?? operationDefaults.threshold}
               onChange={(e: InputChange) => {
                 const parsed = parseFloat(e.target.value);
                 const value = isOrientation

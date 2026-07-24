@@ -3,7 +3,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from video_action_lib import compute_keep_segments, needs_rotation, is_too_short, sample_timestamps, face_ratio
+from video_action_lib import compute_keep_segments, needs_rotation, is_too_short, sample_timestamps, face_ratio, aspect_ratio
 
 
 def test_compute_keep_segments_no_faces_keeps_whole_video():
@@ -86,3 +86,14 @@ def test_face_ratio_basic():
 def test_face_ratio_is_none_when_nothing_was_decodable():
     # Distinct from 0.0: "no frame could be read" must fail the node, not report "no faces".
     assert face_ratio(0, 0) is None
+
+
+def test_aspect_ratio_basic():
+    assert aspect_ratio(1920, 1080) == 1920 / 1080
+    assert aspect_ratio(1080, 1920) == 1080 / 1920
+    assert aspect_ratio(1000, 1000) == 1.0
+
+
+def test_aspect_ratio_none_when_height_is_zero():
+    # Distinct from raising ZeroDivisionError: unmeasurable dimensions must fail the node, not crash it.
+    assert aspect_ratio(1920, 0) is None

@@ -66,3 +66,11 @@ def face_ratio(detected, sampled):
     if sampled <= 0:
         return None
     return detected / sampled
+
+
+def aspect_ratio(width, height):
+    """width / height, or None if height is falsy (unmeasurable dimensions) -- mirrors
+    face_ratio's None-for-unmeasurable convention rather than raising ZeroDivisionError."""
+    if not height:
+        return None
+    return width / height

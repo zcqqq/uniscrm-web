@@ -8,7 +8,7 @@ import boto3
 from botocore.config import Config
 import cv2
 from flask import Flask, request, jsonify
-from video_action_lib import compute_keep_segments, needs_rotation, is_too_short, sample_timestamps, face_ratio
+from video_action_lib import compute_keep_segments, needs_rotation, is_too_short, sample_timestamps, face_ratio, aspect_ratio
 
 app = Flask(__name__)
 
@@ -271,6 +271,41 @@ def rotate_to_vertical():
     final_key = f"{uuid.uuid4()}.mp4"
     client.upload_file(output_path, bucket, final_key, ExtraArgs={"ContentType": "video/mp4"})
     return jsonify({"final_key": final_key})
+
+
+@app.route("/probe-dimensions", methods=["POST"])
+def probe_dimensions_route():
+    """Reports the source video's real pixel width/height/aspect-ratio for the videoCondition
+    node's check-orientation operation. Downloads the already-uploaded video from R2 (uploaded
+    by a prior /download call) rather than re-downloading via yt-dlp -- same pattern as
+    /rotate-to-vertical and /face-ratio."""
+    body = request.get_json()
+    job_id = body["job_id"]
+    video_key = body["video_key"]
+
+    work_dir = f"/tmp/{job_id}-dims"
+    video_path = f"{work_dir}/source.mp4"
+
+    try:
+        os.makedirs(work_dir, exist_ok=True)
+
+        bucket = os.environ["R2_BUCKET_NAME"]
+        client = r2_client()
+        client.download_file(bucket, video_key, video_path)
+
+        width, height, error = _probe_dimensions(video_path)
+        if error:
+            return jsonify({"error": error}), 200
+
+        ratio = aspect_ratio(width, height)
+        if ratio is None:
+            return jsonify({"error": f"unusable dimensions: {width}x{height}"}), 200
+
+        return jsonify({"width": width, "height": height, "ratio": ratio})
+    except Exception as e:
+        return jsonify({"error": f"probe-dimensions unexpected error ({type(e).__name__}): {e}"}), 200
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 @app.route("/remove-face", methods=["POST"])

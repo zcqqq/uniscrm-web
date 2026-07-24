@@ -46,11 +46,19 @@ sequenceDiagram
         Container->>Container: seek to 20 evenly spaced timestamps, run local YuNet face detector on each
         Container-->>Content: {ratio, sampled, detected}
         Note over Content: no output video — branch=success means "ratio measured", props={face_ratio}
+    else operation = check-orientation (the videoCondition node, not a videoAction)
+        Content->>Container: POST /download
+        Container->>R2: upload source.mp4
+        Container-->>Content: {videoKey}
+        Content->>Container: POST /probe-dimensions {videoKey}
+        Container->>Container: ffprobe real pixel width/height, compute ratio = width/height
+        Container-->>Content: {width, height, ratio}
+        Note over Content: no output video — branch=success means "ratio measured", props={aspect_ratio}
     end
     Content->>R2: delete video-action-jobs/{jobId}/* (scratch cleanup)
     Content->>Flow: POST /internal/video-action/resume {pendingId, branch, props}
 ```
 
-`check-face` never compares the ratio against anything: the operator/threshold live on the
-flow node, so `flow`'s resume route does that comparison and derives the `true`/`false`
-branch. This module only measures.
+`check-face`/`check-orientation` never compare their measured value against anything: the
+operator/threshold live on the flow node, so `flow`'s resume route does that comparison and
+derives the `true`/`false` branch. This module only measures.

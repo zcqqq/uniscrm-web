@@ -1,6 +1,6 @@
 import type { Env } from "./types";
 import { createJob, updateJobStatus } from "./services/video-action/job-store";
-import { downloadAndExtract, downloadVideo, burnSubtitles, rotateToVertical, removeFace, faceRatio } from "./services/video-action/container-client";
+import { downloadAndExtract, downloadVideo, burnSubtitles, rotateToVertical, removeFace, faceRatio, probeDimensions } from "./services/video-action/container-client";
 import { transcribeAudio } from "./services/video-action/transcribe";
 import { translateCues, cuesToSrt } from "./services/video-action/translate";
 
@@ -9,10 +9,11 @@ export interface VideoActionQueueMessage {
   contentId: string;
   tenantId: number;
   videoUrl: string;
-  // "check-face" is the videoCondition node, not a videoAction — it shares this queue, job
-  // table and resume callback rather than duplicating the whole async pipeline. It produces no
-  // output video: it reports a face ratio and flow turns that into a true/false branch.
-  operation: "add-subtitle" | "rotate-to-vertical" | "remove-face" | "check-face";
+  // "check-face"/"check-orientation" are the videoCondition node, not a videoAction -- they
+  // share this queue, job table and resume callback rather than duplicating the whole async
+  // pipeline. Neither produces an output video: each reports a raw measured value and flow
+  // turns that into a true/false branch.
+  operation: "add-subtitle" | "rotate-to-vertical" | "remove-face" | "check-face" | "check-orientation";
   targetLanguage: string;
   flowId: string;
   nodeId: string;
@@ -168,6 +169,32 @@ async function processCheckFace(env: Env, jobId: string, message: VideoActionQue
   await resumeFlow(env, message.pendingId, "success", { face_ratio: sampled.ratio });
 }
 
+async function processCheckOrientation(env: Env, jobId: string, message: VideoActionQueueMessage): Promise<void> {
+  const downloaded = await downloadVideo(env, jobId, message.videoUrl);
+  if (downloaded.error || !downloaded.videoKey) {
+    await updateJobStatus(env, jobId, "failed", "downloading", downloaded.error || "unknown download error");
+    await cleanupScratch(env, jobId);
+    await resumeFlow(env, message.pendingId, "failed", {}, `video_action_failed: downloading — ${downloaded.error || "unknown download error"}`);
+    return;
+  }
+
+  await updateJobStatus(env, jobId, "probing_dimensions");
+  const probed = await probeDimensions(env, jobId, downloaded.videoKey);
+  if (probed.error || typeof probed.ratio !== "number") {
+    await updateJobStatus(env, jobId, "failed", "probing_dimensions", probed.error || "unknown dimension-probe error");
+    await cleanupScratch(env, jobId);
+    await resumeFlow(env, message.pendingId, "failed", {}, `video_action_failed: probing_dimensions — ${probed.error || "unknown dimension-probe error"}`);
+    return;
+  }
+
+  await updateJobStatus(env, jobId, "success");
+  await cleanupScratch(env, jobId);
+  // "success" here means "the ratio was measured", not "the condition passed". Comparing the
+  // ratio against the node's operator/threshold happens in flow's resume route, which reads
+  // them from the graph — this module never learns that a threshold exists.
+  await resumeFlow(env, message.pendingId, "success", { aspect_ratio: probed.ratio });
+}
+
 export async function processVideoActionJob(env: Env, message: VideoActionQueueMessage): Promise<void> {
   let jobId: string;
   try {
@@ -188,6 +215,8 @@ export async function processVideoActionJob(env: Env, message: VideoActionQueueM
       await processRemoveFace(env, jobId, message);
     } else if (message.operation === "check-face") {
       await processCheckFace(env, jobId, message);
+    } else if (message.operation === "check-orientation") {
+      await processCheckOrientation(env, jobId, message);
     } else {
       await processAddSubtitle(env, jobId, message);
     }

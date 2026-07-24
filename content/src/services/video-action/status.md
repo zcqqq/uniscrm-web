@@ -13,6 +13,8 @@ stateDiagram-v2
     detecting_faces --> success
     downloading --> sampling_faces: check-face
     sampling_faces --> success
+    downloading --> probing_dimensions: check-orientation
+    probing_dimensions --> success
     downloading --> failed
     transcribing --> failed
     translating --> failed
@@ -20,9 +22,11 @@ stateDiagram-v2
     rotating --> failed
     detecting_faces --> failed
     sampling_faces --> failed
+    probing_dimensions --> failed
     success --> [*]
     failed --> [*]
 ```
 
-For `check-face` (the `videoCondition` node), `success` means "the face ratio was measured" —
-not "the condition passed". The `true`/`false` decision is made by `flow`'s resume route.
+For `check-face`/`check-orientation` (the `videoCondition` node), `success` means "the measured
+value (face ratio / aspect ratio) was obtained" — not "the condition passed". The `true`/`false`
+decision is made by `flow`'s resume route.

@@ -207,4 +207,45 @@ describe("processVideoActionJob", () => {
     expect(rotateSpy).not.toHaveBeenCalled();
     expect(jobStore.updateJobStatus).toHaveBeenCalledWith(expect.anything(), "job1", "failed", "downloading", "yt-dlp failed");
   });
+
+  it("check-orientation: posts the measured aspect ratio and leaves the true/false decision to flow", async () => {
+    vi.spyOn(containerClient, "downloadVideo").mockResolvedValue({ videoKey: "v1" });
+    vi.spyOn(containerClient, "probeDimensions").mockResolvedValue({ width: 1920, height: 1080, ratio: 1.7778 });
+
+    await processVideoActionJob(makeEnv(), { ...message, operation: "check-orientation" });
+
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(expect.anything(), "job1", "probing_dimensions");
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(expect.anything(), "job1", "success");
+    const resumeCall = (fetch as any).mock.calls.find((c: any[]) => c[0].includes("/internal/video-action/resume"));
+    const body = JSON.parse(resumeCall[1].body);
+    // "success" means "the ratio was measured", not "the condition passed" -- no threshold
+    // comparison happens in this module at all.
+    expect(body.branch).toBe("success");
+    expect(body.props).toEqual({ aspect_ratio: 1.7778 });
+  });
+
+  it("check-orientation: resolves failed when the container could not probe dimensions", async () => {
+    vi.spyOn(containerClient, "downloadVideo").mockResolvedValue({ videoKey: "v1" });
+    vi.spyOn(containerClient, "probeDimensions").mockResolvedValue({ error: "dimension probe failed: ffprobe exited 1" });
+
+    await processVideoActionJob(makeEnv(), { ...message, operation: "check-orientation" });
+
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(
+      expect.anything(), "job1", "failed", "probing_dimensions", "dimension probe failed: ffprobe exited 1"
+    );
+    const resumeCall = (fetch as any).mock.calls.find((c: any[]) => c[0].includes("/internal/video-action/resume"));
+    const body = JSON.parse(resumeCall[1].body);
+    expect(body.branch).toBe("failed");
+    expect(body.props).toEqual({});
+  });
+
+  it("check-orientation: resolves failed when download fails, without calling probeDimensions", async () => {
+    vi.spyOn(containerClient, "downloadVideo").mockResolvedValue({ error: "yt-dlp failed" });
+    const probeSpy = vi.spyOn(containerClient, "probeDimensions");
+
+    await processVideoActionJob(makeEnv(), { ...message, operation: "check-orientation" });
+
+    expect(probeSpy).not.toHaveBeenCalled();
+    expect(jobStore.updateJobStatus).toHaveBeenCalledWith(expect.anything(), "job1", "failed", "downloading", "yt-dlp failed");
+  });
 });

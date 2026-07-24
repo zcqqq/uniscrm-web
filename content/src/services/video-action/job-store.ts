@@ -8,6 +8,7 @@ export type JobStatus =
   | "rotating"
   | "detecting_faces"
   | "sampling_faces"
+  | "probing_dimensions"
   | "success"
   | "failed";
 

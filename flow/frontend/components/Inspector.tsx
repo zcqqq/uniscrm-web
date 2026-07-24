@@ -15,6 +15,8 @@ import { t as localizeLabel } from "../../../metadata/locale";
 import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
 import { NODE_TYPE_REGISTRY, CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../../nodeTypeRegistry";
 import { EventMetadata_X } from "../../../metadata/x";
+import type { PropFilter } from "../../../metadata/dataTypes";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
 import { OperationSelect } from "./OperationSelect";
 
 type SelectChange = React.ChangeEvent<HTMLSelectElement>;
@@ -82,11 +84,15 @@ function ConditionsEditor({
   fields,
   onChange,
   label = "Conditions",
+  systemFilters,
 }: {
   conditions: Condition[];
   fields: TriggerFieldDefinition[];
   onChange: (conditions: Condition[]) => void;
   label?: string;
+  // 系统级 contentPropsFilter（metadata 声明、link 端入队前强制执行）。这里只做展示——
+  // 不进 data.conditions（避免 graph_json 快照过期阈值、污染用户可编辑数组），值实时读 metadata。
+  systemFilters?: PropFilter[];
 }) {
   const addCondition = () => onChange([...conditions, { field: "", operator: "==", value: "" }]);
   const updateCondition = (idx: number, patch: Partial<Condition>) => {
@@ -102,7 +108,33 @@ function ConditionsEditor({
         <Label className="text-xs">{label}</Label>
         <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={addCondition}>+ Add</Button>
       </div>
-      {conditions.length === 0 && (
+      {systemFilters?.map((f, idx) => {
+        const fieldDef = fields.find((fd) => fd.id === f.propId);
+        return (
+          <div key={`sys-${idx}`} className="flex gap-1 items-start mb-2">
+            <div className="flex-1 space-y-1">
+              <Select value={f.propId} disabled className="w-full h-7 text-xs">
+                <option value={f.propId}>{fieldDef?.label || f.propId}</option>
+              </Select>
+              <div className="flex gap-1">
+                <Select value={f.operator} disabled className="h-7 text-xs w-auto">
+                  <option value={f.operator}>{f.operator}</option>
+                </Select>
+                <Input value={String(f.value)} disabled className="flex-1 h-7 text-xs" />
+              </div>
+            </div>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="h-6 w-6 flex items-center justify-center text-xs cursor-default">🔒</span>
+                </TooltipTrigger>
+                <TooltipContent>System limit — cannot be edited or removed</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        );
+      })}
+      {conditions.length === 0 && !systemFilters?.length && (
         <p className="text-xs text-muted-foreground italic">No filters — all matching events pass.</p>
       )}
       {conditions.map((cond, idx) => {
@@ -411,6 +443,7 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
           fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos")}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
           label="Content Props"
+          systemFilters={YOUTUBE_TRIGGER_META.contentPropsFilter}
         />
       </div>
     </div>

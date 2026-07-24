@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Env, FlowQueueMessage } from "./types";
-import { executeFlow, resumeFromNode, evaluateCondition, evaluateFaceRatioBranch, type FlowGraph, type ActionResult, type NodeLog } from "./engine";
+import { executeFlow, resumeFromNode, evaluateCondition, evaluateFaceRatioBranch, evaluateOrientationBranch, type FlowGraph, type ActionResult, type NodeLog } from "./engine";
 import { EventMetadata_X } from "../../metadata/x";
 import { passesPropsFilter } from "../../metadata/props-filter";
 import { TenantDataDB } from "../../shared/tenant-data-db";
@@ -842,7 +842,7 @@ async function executeContentActions(
       await env.VIDEO_ACTION_QUEUE.send({
         pendingId, contentId, tenantId: Number(tenantId),
         videoUrl,
-        operation: isCondition ? "check-face" : ((action.operation as string) || "add-subtitle"),
+        operation: (action.operation as string) || (isCondition ? "check-face" : "add-subtitle"),
         targetLanguage: (action.targetLanguage as string) || "zh",
         flowId: flowId || "", nodeId, payload,
       });
@@ -944,15 +944,26 @@ app.post("/internal/video-action/resume", async (c) => {
   // threshold exists. The comparison happens here, against the node's CURRENT operator and
   // threshold in the graph, so re-tuning the threshold is pure config with no re-detection.
   const resumedNode = graph.nodes.find((n) => n.id === row.node_id);
+  const nodeOperation = resumedNode?.data?.operation as string | undefined;
   const effectiveBranch = resumedNode?.type === "videoCondition"
-    ? (branch === "success" ? evaluateFaceRatioBranch(resumedNode.data || {}, payload.face_ratio) : "failed")
+    ? (branch === "success"
+        ? (nodeOperation === "check-orientation"
+            ? evaluateOrientationBranch(resumedNode.data || {}, payload.aspect_ratio)
+            : evaluateFaceRatioBranch(resumedNode.data || {}, payload.face_ratio))
+        : "failed")
     : branch;
 
-  // The measured ratio is deliberately not persisted to any table (it rides the payload into
+  // The measured value is deliberately not persisted to any table (it rides the payload into
   // the node log), so without this line the one number the whole node turns on is invisible in
   // production — the container's own stdout is not queryable, and the node log reaches R2 with
   // a lag. Logs the decision, not just the measurement, so a wrong threshold is diagnosable.
-  if (resumedNode?.type === "videoCondition") {
+  if (resumedNode?.type === "videoCondition" && nodeOperation === "check-orientation") {
+    console.log(JSON.stringify({
+      event: "video_condition_orientation", contentId: row.content_id, nodeId: row.node_id,
+      aspectRatio: payload.aspect_ratio, operator: resumedNode.data?.operator, threshold: resumedNode.data?.threshold,
+      reportedBranch: branch, branch: effectiveBranch,
+    }));
+  } else if (resumedNode?.type === "videoCondition") {
     console.log(JSON.stringify({
       event: "video_condition_face_ratio", contentId: row.content_id, nodeId: row.node_id,
       faceRatio: payload.face_ratio, operator: resumedNode.data?.operator, threshold: resumedNode.data?.threshold,

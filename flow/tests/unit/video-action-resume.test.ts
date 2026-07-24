@@ -56,6 +56,25 @@ const graphWithVideoCondition = JSON.stringify({
   ],
 });
 
+// Same shape as graphWithVideoCondition but with operation: "check-orientation" -- the resume
+// route reads data.operation to decide which measured field (aspect_ratio vs face_ratio) and
+// which evaluator (evaluateOrientationBranch vs evaluateFaceRatioBranch) apply.
+const graphWithOrientationCondition = JSON.stringify({
+  nodes: [
+    { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+    { id: "a1", type: "videoCondition", data: { operation: "check-orientation", operator: ">", threshold: 1 }, position: { x: 200, y: 0 } },
+    { id: "a2", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 0 } },
+    { id: "a3", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 100 } },
+    { id: "a4", type: "action", data: { actionType: "noopLeaf" }, position: { x: 400, y: 200 } },
+  ],
+  edges: [
+    { id: "e1", source: "t1", target: "a1" },
+    { id: "e2", source: "a1", target: "a2", sourceHandle: "true" },
+    { id: "e3", source: "a1", target: "a3", sourceHandle: "false" },
+    { id: "e4", source: "a1", target: "a4", sourceHandle: "failed" },
+  ],
+});
+
 async function setupSchema() {
   await env.FLOW_DB.prepare(
     `CREATE TABLE IF NOT EXISTS flows (
@@ -203,12 +222,12 @@ describe("POST /internal/video-action/resume", () => {
     expect(body).toMatchObject({ ok: true, alreadyResolved: true });
   });
 
-  async function resumeVideoCondition(pendingId: string, contentId: string, body: Record<string, unknown>) {
+  async function resumeVideoCondition(pendingId: string, contentId: string, body: Record<string, unknown>, graph: string = graphWithVideoCondition) {
     await setupSchema();
     await env.FLOW_DB.prepare(
       `INSERT OR REPLACE INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
        VALUES ('flow-vc', 1, 'video condition flow', ?, 'published', datetime('now'), datetime('now'))`
-    ).bind(graphWithVideoCondition).run();
+    ).bind(graph).run();
 
     const past = new Date(Date.now() - 1000).toISOString();
     await env.FLOW_DB.prepare(
@@ -262,6 +281,38 @@ describe("POST /internal/video-action/resume", () => {
     const { outcome, reached } = await resumeVideoCondition("pend-vc-5", "content-vc-5", {
       branch: "success", props: {},
     });
+    expect(outcome).toBe("failed");
+    expect(reached).toContain("a4");
+  });
+
+  it("videoCondition (check-orientation): a landscape ratio above the threshold resolves the true branch", async () => {
+    const { outcome, reached } = await resumeVideoCondition("pend-vc-6", "content-vc-6", {
+      branch: "success", props: { aspect_ratio: 1.7778 },
+    }, graphWithOrientationCondition);
+    expect(outcome).toBe("true");
+    expect(reached).toContain("a2");
+  });
+
+  it("videoCondition (check-orientation): a portrait ratio at or under the threshold resolves the false branch", async () => {
+    const { outcome, reached } = await resumeVideoCondition("pend-vc-7", "content-vc-7", {
+      branch: "success", props: { aspect_ratio: 0.5625 },
+    }, graphWithOrientationCondition);
+    expect(outcome).toBe("false");
+    expect(reached).toContain("a3");
+  });
+
+  it("videoCondition (check-orientation): a square ratio of exactly 1 resolves false (Portrait), not true", async () => {
+    const { outcome, reached } = await resumeVideoCondition("pend-vc-8", "content-vc-8", {
+      branch: "success", props: { aspect_ratio: 1 },
+    }, graphWithOrientationCondition);
+    expect(outcome).toBe("false");
+    expect(reached).toContain("a3");
+  });
+
+  it("videoCondition (check-orientation): a success callback with no measurable ratio resolves failed, not a guess", async () => {
+    const { outcome, reached } = await resumeVideoCondition("pend-vc-9", "content-vc-9", {
+      branch: "success", props: {},
+    }, graphWithOrientationCondition);
     expect(outcome).toBe("failed");
     expect(reached).toContain("a4");
   });

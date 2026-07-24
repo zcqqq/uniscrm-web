@@ -1,5 +1,6 @@
 const http = require("http");
-const { execSync } = require("child_process");
+const { spawnSync } = require("child_process");
+const { detectQueryError, parseWranglerOutput, stripAnsi } = require("./server-parse.cjs");
 
 const PORT = 8080;
 
@@ -22,12 +23,23 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const output = execSync(
-        `wrangler r2 sql query "${warehouse}" "${sql.replace(/"/g, '\\"')}"`,
-        { encoding: "utf-8", timeout: 30000, env: { ...process.env, NO_COLOR: "1", CLOUDFLARE_API_TOKEN: token } }
-      );
+      const proc = spawnSync("wrangler", ["r2", "sql", "query", warehouse, sql], {
+        encoding: "utf-8",
+        timeout: 30000,
+        env: { ...process.env, NO_COLOR: "1", CLOUDFLARE_API_TOKEN: token },
+      });
+      if (proc.error) throw proc.error;
 
-      const rows = parseWranglerOutput(output);
+      const combined = `${proc.stdout || ""}\n${proc.stderr || ""}`;
+      const queryError =
+        proc.status !== 0 ? stripAnsi(combined).trim() : detectQueryError(combined);
+      if (queryError) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: queryError }));
+        return;
+      }
+
+      const rows = parseWranglerOutput(proc.stdout || "");
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ data: rows }));
     } catch (err) {
@@ -40,33 +52,6 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(404, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ error: "not found" }));
 });
-
-function parseWranglerOutput(output) {
-  const lines = output.trim().split("\n");
-  // Table rows have │ on both sides: "│ value │"
-  const tableLines = lines.filter((l) => {
-    const stripped = l.replace(/\x1b\[[0-9;]*m/g, "").trim();
-    return stripped.startsWith("│") && stripped.endsWith("│") && stripped.split("│").length >= 3;
-  });
-  if (tableLines.length < 2) return [];
-
-  const parse = (line) => line.replace(/\x1b\[[0-9;]*m/g, "").split("│").slice(1, -1).map((c) => c.trim());
-
-  const headers = parse(tableLines[0]);
-  const rows = [];
-  for (let i = 1; i < tableLines.length; i++) {
-    const cells = parse(tableLines[i]);
-    if (cells.length === headers.length) {
-      const row = {};
-      headers.forEach((h, idx) => {
-        const val = cells[idx];
-        row[h] = val === "" || val === "null" ? null : isNaN(val) ? val : Number(val);
-      });
-      rows.push(row);
-    }
-  }
-  return rows;
-}
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Analytics container listening on port ${PORT}`);

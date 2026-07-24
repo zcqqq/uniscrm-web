@@ -2,11 +2,17 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
 import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 
+const OPERATION_DEFAULTS: Record<string, { operator: string; threshold: number; label: string }> = {
+  "check-face": { operator: "<=", threshold: 0.2, label: "Face ratio" },
+  "check-orientation": { operator: ">", threshold: 1, label: "Aspect ratio" },
+};
+
 export default function VideoConditionNode({ data, selected }: NodeProps) {
   const operation = (data.operation as string) || "check-face";
-  const operator = (data.operator as string) || "<=";
-  const threshold = data.threshold === undefined || data.threshold === "" ? 0.2 : data.threshold;
-  const summary = operation === "check-face" ? `Face ratio ${operator} ${threshold}` : operation;
+  const defaults = OPERATION_DEFAULTS[operation] || OPERATION_DEFAULTS["check-face"];
+  const operator = (data.operator as string) || defaults.operator;
+  const threshold = data.threshold === undefined || data.threshold === "" ? defaults.threshold : data.threshold;
+  const summary = `${defaults.label} ${operator} ${threshold}`;
 
   return (
     <div className={`px-4 py-3 rounded-lg border-2 bg-white min-w-[170px] ${selected ? "border-blue-500 shadow-md" : "border-purple-300"}`}>

@@ -846,14 +846,43 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
   );
 }
 
-const VIDEO_CONDITION_OPERATIONS = [{ value: "check-face", label: "Check Face" }];
+const VIDEO_CONDITION_OPERATIONS = [
+  { value: "check-face", label: "Check Face" },
+  { value: "check-orientation", label: "Check Orientation" },
+];
 
-// Equality is deliberately absent: the ratio is a float measured from a sample of frames, so
-// "== 0.2" would break on a single missed or spurious detection and read as "always False".
-const FACE_RATIO_OPERATORS = ["<=", "<", ">=", ">"];
+// Equality is deliberately absent: both ratios are floats measured/computed from the video, so
+// "== 0.2" or "== 1" would break on the tiniest floating-point wobble and read as "always False".
+const RATIO_OPERATORS = ["<=", "<", ">=", ">"];
+
+const VIDEO_CONDITION_FIELD_LABEL: Record<string, string> = {
+  "check-face": "Face Ratio",
+  "check-orientation": "Aspect Ratio (width / height)",
+};
+
+const VIDEO_CONDITION_HELP_TEXT: Record<string, string> = {
+  "check-face": "Share of 20 sampled frames containing a face, 0 to 1. True when the measured ratio satisfies this comparison.",
+  "check-orientation": "Video width divided by height (e.g. 16:9 ≈ 1.78, 9:16 ≈ 0.56, square = 1). True when the measured ratio satisfies this comparison.",
+};
+
+// Each operation's ratio has a different natural comparison boundary -- face ratio's "mostly no
+// faces" default is <= 0.2, orientation's landscape/portrait split is > 1 -- so switching the
+// Operation dropdown resets operator/threshold to that operation's own default rather than
+// carrying over a value that made sense for the other operation.
+const VIDEO_CONDITION_OPERATION_DEFAULTS: Record<string, { operator: string; threshold: number }> = {
+  "check-face": { operator: "<=", threshold: 0.2 },
+  "check-orientation": { operator: ">", threshold: 1 },
+};
 
 function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
+  const operation = data.operation || "check-face";
+  const isOrientation = operation === "check-orientation";
+
+  const handleOperationChange = (v: string) => {
+    const defaults = VIDEO_CONDITION_OPERATION_DEFAULTS[v] || VIDEO_CONDITION_OPERATION_DEFAULTS["check-face"];
+    updateNodeData(nodeId, { operation: v, operator: defaults.operator, threshold: defaults.threshold });
+  };
 
   return (
     <div>
@@ -862,35 +891,39 @@ function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Recor
         <div>
           <Label className="text-xs block mb-1">Operation</Label>
           <OperationSelect
-            value={data.operation || "check-face"}
-            onChange={(v) => updateNodeData(nodeId, { operation: v })}
+            value={operation}
+            onChange={handleOperationChange}
             options={VIDEO_CONDITION_OPERATIONS}
           />
         </div>
         <div>
-          <Label className="text-xs block mb-1">Face Ratio</Label>
+          <Label className="text-xs block mb-1">{VIDEO_CONDITION_FIELD_LABEL[operation]}</Label>
           <div className="flex items-center gap-2">
             <Select
-              value={data.operator || "<="}
+              value={data.operator || VIDEO_CONDITION_OPERATION_DEFAULTS[operation].operator}
               onChange={(e: SelectChange) => updateNodeData(nodeId, { operator: e.target.value })}
               className="w-20 text-sm"
             >
-              {FACE_RATIO_OPERATORS.map((op) => (
+              {RATIO_OPERATORS.map((op) => (
                 <option key={op} value={op}>{op}</option>
               ))}
             </Select>
             <Input
               type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              value={data.threshold ?? 0.2}
-              onChange={(e: InputChange) => updateNodeData(nodeId, { threshold: Math.max(0, Math.min(1, parseFloat(e.target.value) || 0)) })}
+              {...(isOrientation ? {} : { min: 0, max: 1, step: 0.05 })}
+              value={data.threshold ?? VIDEO_CONDITION_OPERATION_DEFAULTS[operation].threshold}
+              onChange={(e: InputChange) => {
+                const parsed = parseFloat(e.target.value);
+                const value = isOrientation
+                  ? (Number.isFinite(parsed) ? parsed : 0)
+                  : Math.max(0, Math.min(1, parsed || 0));
+                updateNodeData(nodeId, { threshold: value });
+              }}
               className="w-24 text-sm"
             />
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            Share of 20 sampled frames containing a face, 0 to 1. True when the measured ratio satisfies this comparison.
+            {VIDEO_CONDITION_HELP_TEXT[operation]}
           </p>
         </div>
       </div>

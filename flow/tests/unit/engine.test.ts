@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { executeFlow, resumeFromNode, evaluateFaceRatioBranch, type FlowGraph } from "../../src/engine";
+import { executeFlow, resumeFromNode, evaluateFaceRatioBranch, evaluateOrientationBranch, type FlowGraph } from "../../src/engine";
 
 describe("executeFlow: xContentTrigger", () => {
   function graphWithXContentTrigger(
@@ -483,6 +483,41 @@ describe("evaluateFaceRatioBranch", () => {
   it("falls back to the default threshold when the stored one is unusable", () => {
     expect(evaluateFaceRatioBranch({ operator: "<=", threshold: "abc" }, 0.15)).toBe("true");
     expect(evaluateFaceRatioBranch({ operator: "<=", threshold: 0.15 }, 0.2)).toBe("false");
+  });
+});
+
+describe("evaluateOrientationBranch", () => {
+  it("defaults to '> 1' when the node carries no operator/threshold", () => {
+    expect(evaluateOrientationBranch({}, 1.78)).toBe("true");
+    expect(evaluateOrientationBranch({}, 0.56)).toBe("false");
+  });
+
+  it("treats a square ratio of exactly 1 as Portrait (false) under the default operator", () => {
+    expect(evaluateOrientationBranch({}, 1)).toBe("false");
+  });
+
+  it("applies each supported operator", () => {
+    expect(evaluateOrientationBranch({ operator: "<=", threshold: 1 }, 1)).toBe("true");
+    expect(evaluateOrientationBranch({ operator: "<", threshold: 1 }, 1)).toBe("false");
+    expect(evaluateOrientationBranch({ operator: ">=", threshold: 1 }, 1)).toBe("true");
+    expect(evaluateOrientationBranch({ operator: ">", threshold: 1 }, 1)).toBe("false");
+    expect(evaluateOrientationBranch({ operator: ">", threshold: 1 }, 1.78)).toBe("true");
+  });
+
+  it("returns 'failed' rather than guessing when the ratio is missing or not a number", () => {
+    expect(evaluateOrientationBranch({}, undefined)).toBe("failed");
+    expect(evaluateOrientationBranch({}, null)).toBe("failed");
+    expect(evaluateOrientationBranch({}, "1.78")).toBe("failed");
+    expect(evaluateOrientationBranch({}, NaN)).toBe("failed");
+  });
+
+  it("returns 'failed' on an unrecognised operator instead of silently falling through", () => {
+    expect(evaluateOrientationBranch({ operator: "==", threshold: 1 }, 1)).toBe("failed");
+  });
+
+  it("falls back to the default threshold when the stored one is unusable", () => {
+    expect(evaluateOrientationBranch({ operator: ">", threshold: "abc" }, 1.78)).toBe("true");
+    expect(evaluateOrientationBranch({ operator: ">", threshold: 1.9 }, 1.78)).toBe("false");
   });
 });
 

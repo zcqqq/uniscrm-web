@@ -259,20 +259,26 @@ function durationToMs(duration: number, unit: string): number {
 
 export const FACE_RATIO_DEFAULT_OPERATOR = "<=";
 export const FACE_RATIO_DEFAULT_THRESHOLD = 0.2;
+export const ORIENTATION_DEFAULT_OPERATOR = ">";
+export const ORIENTATION_DEFAULT_THRESHOLD = 1;
 
-// Turns a videoCondition node's measured face ratio into its branch. The ratio is measured
-// once by content's container; the threshold lives only in the graph, so re-tuning it is pure
-// config with no re-detection. A ratio of 0 is a real answer ("no faces") and must not be
-// confused with a missing one — anything unmeasurable resolves to "failed", never a guess.
-export function evaluateFaceRatioBranch(
+// Shared by evaluateFaceRatioBranch and evaluateOrientationBranch: both turn a videoCondition
+// node's single measured number into a branch by comparing it against the node's own
+// operator/threshold. The value is measured once by content's container; the threshold lives
+// only in the graph, so re-tuning it is pure config with no re-detection. A value of 0 is a
+// real answer (e.g. "no faces") and must not be confused with a missing one — anything
+// unmeasurable resolves to "failed", never a guess.
+function evaluateRatioBranch(
   data: Record<string, unknown>,
-  ratio: unknown
+  ratio: unknown,
+  defaultOperator: string,
+  defaultThreshold: number
 ): "true" | "false" | "failed" {
   if (typeof ratio !== "number" || !Number.isFinite(ratio)) return "failed";
 
-  const operator = (data.operator as string) || FACE_RATIO_DEFAULT_OPERATOR;
+  const operator = (data.operator as string) || defaultOperator;
   const rawThreshold = Number(data.threshold);
-  const threshold = Number.isFinite(rawThreshold) ? rawThreshold : FACE_RATIO_DEFAULT_THRESHOLD;
+  const threshold = Number.isFinite(rawThreshold) ? rawThreshold : defaultThreshold;
 
   switch (operator) {
     case "<=": return ratio <= threshold ? "true" : "false";
@@ -281,6 +287,17 @@ export function evaluateFaceRatioBranch(
     case ">": return ratio > threshold ? "true" : "false";
     default: return "failed";
   }
+}
+
+export function evaluateFaceRatioBranch(data: Record<string, unknown>, ratio: unknown): "true" | "false" | "failed" {
+  return evaluateRatioBranch(data, ratio, FACE_RATIO_DEFAULT_OPERATOR, FACE_RATIO_DEFAULT_THRESHOLD);
+}
+
+// Turns a videoCondition node's measured width/height ratio into its branch. A square video
+// (ratio exactly 1) is Portrait under the default operator ">" — Landscape requires strictly
+// greater than 1.
+export function evaluateOrientationBranch(data: Record<string, unknown>, ratio: unknown): "true" | "false" | "failed" {
+  return evaluateRatioBranch(data, ratio, ORIENTATION_DEFAULT_OPERATOR, ORIENTATION_DEFAULT_THRESHOLD);
 }
 
 export function buildActionData(targetNode: FlowNode): ActionResult {

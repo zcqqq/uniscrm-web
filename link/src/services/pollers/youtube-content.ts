@@ -4,6 +4,7 @@ import { ContentService } from "../content";
 import { fetchVideoDetails, parseISO8601Duration } from "../youtube-api";
 import { resolveProps } from "./resolve-props";
 import { ContentMetadata_YouTube } from "../../../../metadata/youtube";
+import { passesPropsFilter } from "../../../../metadata/props-filter";
 
 const YOUTUBE_METADATA = ContentMetadata_YouTube.find((m) => m.sourceContentType === "watch:get-videos")!;
 
@@ -39,7 +40,11 @@ export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: str
   const sourceContentId = String(props.source_content_id ?? "");
   const isNew = await contentService.recordTriggerContentSeen(ctx.accountChannelId, ctx.subscriptionChannelId, sourceContentId);
   if (isNew) {
-    await contentService.emitContentTriggerEvent(ctx.accountChannelId, "YOUTUBE", "subscriptionChannelId", ctx.subscriptionChannelId, props);
+    if (passesPropsFilter(YOUTUBE_METADATA.contentPropsFilter, props)) {
+      await contentService.emitContentTriggerEvent(ctx.accountChannelId, "YOUTUBE", "subscriptionChannelId", ctx.subscriptionChannelId, props);
+    } else {
+      console.log(JSON.stringify({ event: "youtube_content_skipped_filter", account_channel_id: ctx.accountChannelId, subscription_channel_id: ctx.subscriptionChannelId, video_id: videoId, duration: props.duration }));
+    }
   }
   console.log(JSON.stringify({ event: "youtube_video_ingested", account_channel_id: ctx.accountChannelId, subscription_channel_id: ctx.subscriptionChannelId, video_id: videoId, isNew }));
 }

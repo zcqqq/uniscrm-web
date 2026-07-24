@@ -112,4 +112,45 @@ describe("ingestYouTubeVideo", () => {
 
     expect(flowQueue.send).not.toHaveBeenCalled();
   });
+
+  it("does not emit content.created when duration exceeds 120s, but still records dedup seen", async () => {
+    vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
+      id: "vid-long",
+      snippet: { title: "Long", publishedAt: "2026-07-18T00:00:00Z", thumbnails: { default: { url: "https://img/t.jpg" } } },
+      contentDetails: { duration: "PT2M1S" },
+    });
+
+    const tenantDb = createMockTenantDb();
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+    const logSpy = vi.spyOn(console, "log");
+    const ctx = baseCtx({ tenantDb, flowQueue });
+    await ingestYouTubeVideo(ctx, "vid-long");
+
+    const dedupCall = tenantDb.run.mock.calls.find((c: unknown[]) => (c[0] as string).includes("content_trigger_dedup"));
+    expect(dedupCall).toBeTruthy();
+    expect(flowQueue.send).not.toHaveBeenCalled();
+    const skipLog = logSpy.mock.calls.map((c) => String(c[0])).find((s) => s.includes("youtube_content_skipped_filter"));
+    expect(skipLog).toBeTruthy();
+    expect(JSON.parse(skipLog!)).toMatchObject({
+      event: "youtube_content_skipped_filter",
+      account_channel_id: "chan-acc",
+      subscription_channel_id: "chan-sub",
+      video_id: "vid-long",
+      duration: 121,
+    });
+  });
+
+  it("emits content.created at exactly 120s (boundary inclusive)", async () => {
+    vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
+      id: "vid-2m",
+      snippet: { title: "Exactly 2m", publishedAt: "2026-07-18T00:00:00Z", thumbnails: { default: { url: "https://img/t.jpg" } } },
+      contentDetails: { duration: "PT2M" },
+    });
+
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+    const ctx = baseCtx({ flowQueue });
+    await ingestYouTubeVideo(ctx, "vid-2m");
+
+    expect(flowQueue.send).toHaveBeenCalledTimes(1);
+  });
 });

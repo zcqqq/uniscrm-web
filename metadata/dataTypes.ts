@@ -73,6 +73,7 @@ export interface ContentMetadata {
   label?: LocalizedString;
   description?: LocalizedString;
   contentProps: PropMapping[];
+  contentPropsFilter?: PropFilter[]; // 全部通过才发content trigger事件（link端入队前评估，被拦内容不计flow entered）
 }
 
 export interface EventMetadata {

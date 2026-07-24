@@ -22,6 +22,10 @@ export const ContentMetadata_YouTube: ContentMetadata[] = [
       // `dataId`, so this is a safe no-op during ingestion mapping.
       { propId: "duration" },
     ],
+    // 系统级限制：只有 <=120 秒的视频才触发 content flow（link 端入队前拦截）。
+    contentPropsFilter: [
+      { propId: "duration", operator: "<=", value: 120 },
+    ],
   },
   {
     sourceContentType: "save-to-playlist", // https://developers.google.com/youtube/v3/docs/playlistItems/insert

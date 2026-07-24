@@ -48,10 +48,10 @@ export const api = {
       request<{ flows: FlowSummary[]; total: number; page: number; totalPages: number }>(
         `/api/flows?page=${page}&domain=${domain}`
       ),
-    create: (name?: string, graph_json?: string, domain: "user" | "content" = "user") =>
+    create: (name?: string, graph_json?: string, domain: "user" | "content" = "user", description?: string) =>
       request<{ flow: { id: string; name: string; domain: "user" | "content" } }>("/api/flows", {
         method: "POST",
-        body: JSON.stringify({ name, graph_json, domain }),
+        body: JSON.stringify({ name, graph_json, domain, description }),
       }),
     get: (id: string) => request<{ flow: FlowDetail }>(`/api/flows/${id}`),
     update: (id: string, data: { name?: string; description?: string; graph_json?: string; enabled?: boolean }) =>

@@ -2,8 +2,6 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFlows } from "../hooks/useFlows";
 import { api } from "../lib/api";
-import { validateFlowGraph } from "../lib/validate-flow-graph";
-import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { FLOW_TEMPLATES, type FlowTemplate } from "../config/templates";
 import { Nav } from "../components/Nav";
 import { DateCell } from "../../../shared/frontend/components/CellDate";
@@ -59,9 +57,19 @@ export default function FlowsPage({ domain }: FlowsPageProps) {
   const { flows, loading, page, total, totalPages, setPage, createFlow, deleteFlow, refresh } = useFlows(domain);
   const { timezone } = useLocale();
   const navigate = useNavigate();
-  const { toast } = useToast();
   const [sortKey, setSortKey] = useState<SortKey>("updated_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const handleDuplicate = async (flowId: string) => {
+    const { flow: detail } = await api.flows.get(flowId);
+    const { flow: created } = await api.flows.create(
+      `${detail.name} (Copy)`,
+      detail.graph_json || '{"nodes":[],"edges":[]}',
+      domain,
+      detail.description || ""
+    );
+    navigate(`/flows/${created.id}`);
+  };
 
   const handleCreate = (template?: FlowTemplate) => {
     if (template) {
@@ -188,27 +196,13 @@ export default function FlowsPage({ domain }: FlowsPageProps) {
                             status={flow.status}
                             operations={{
                               published: {
-                                primary: { icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg>, title: "Duplicate", onClick: () => {} },
+                                primary: { icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg>, title: "Duplicate", onClick: () => handleDuplicate(flow.id) },
                                 menu: [{ label: "Stop", onClick: () => api.flows.unpublish(flow.id).then(() => refresh()), destructive: true }],
                               },
                               draft: {
                                 primary: { icon: <EditIcon className="w-5 h-5" />, title: "Edit", onClick: () => navigate(`/flows/${flow.id}`) },
                                 menu: [
-                                  {
-                                    label: "Publish",
-                                    onClick: async () => {
-                                      const { flow: detail } = await api.flows.get(flow.id);
-                                      const graph = JSON.parse(detail.graph_json || '{"nodes":[],"edges":[]}');
-                                      const { valid, orphanNodeIds } = validateFlowGraph(graph.nodes || [], graph.edges || []);
-                                      if (!valid) {
-                                        toast({ title: `${orphanNodeIds.length} 个节点未连接，无法发布`, variant: "destructive" });
-                                        navigate(`/flows/${flow.id}`);
-                                        return;
-                                      }
-                                      await api.flows.publish(flow.id);
-                                      refresh();
-                                    },
-                                  },
+                                  { label: "Duplicate", onClick: () => handleDuplicate(flow.id) },
                                   { label: "Delete", onClick: () => { if (confirm("Delete this flow?")) deleteFlow(flow.id); }, destructive: true },
                                 ],
                               },

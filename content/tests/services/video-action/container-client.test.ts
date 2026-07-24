@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { downloadAndExtract, burnSubtitles, downloadVideo, rotateToVertical, removeFace } from "../../../src/services/video-action/container-client";
+import { downloadAndExtract, burnSubtitles, downloadVideo, rotateToVertical, removeFace, probeDimensions } from "../../../src/services/video-action/container-client";
 
 function makeEnv(fetchResponse: unknown) {
   const container = {
@@ -64,5 +64,17 @@ describe("container-client", () => {
     const env = makeEnv({ error: "video too short after face removal" });
     const result = await removeFace(env, "job1", "video-action-jobs/job1/source.mp4");
     expect(result.error).toBe("video too short after face removal");
+  });
+
+  it("probeDimensions returns width/height/ratio on success", async () => {
+    const env = makeEnv({ width: 1080, height: 1920, ratio: 0.5625 });
+    const result = await probeDimensions(env, "job1", "video-action-jobs/job1/source.mp4");
+    expect(result).toEqual({ width: 1080, height: 1920, ratio: 0.5625 });
+  });
+
+  it("probeDimensions surfaces an error", async () => {
+    const env = makeEnv({ error: "dimension probe failed: ffprobe exited 1" });
+    const result = await probeDimensions(env, "job1", "video-action-jobs/job1/source.mp4");
+    expect(result.error).toBe("dimension probe failed: ffprobe exited 1");
   });
 });

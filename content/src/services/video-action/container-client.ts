@@ -100,3 +100,23 @@ export async function removeFace(env: Env, jobId: string, videoKey: string): Pro
   if (body.error) return { error: body.error };
   return { finalKey: body.final_key };
 }
+
+export interface DimensionsResult {
+  width?: number;
+  height?: number;
+  ratio?: number;
+  error?: string;
+}
+
+export async function probeDimensions(env: Env, jobId: string, videoKey: string): Promise<DimensionsResult> {
+  const container = env.SUBTITLE_CONTAINER.getByName("subtitle-singleton");
+  await container.startAndWaitForPorts();
+  const res = await container.fetch("http://container/probe-dimensions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job_id: jobId, video_key: videoKey }),
+  });
+  const body = await res.json() as { width?: number; height?: number; ratio?: number; error?: string };
+  if (body.error) return { error: body.error };
+  return { width: body.width, height: body.height, ratio: body.ratio };
+}

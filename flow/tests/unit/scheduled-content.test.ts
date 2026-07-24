@@ -381,7 +381,7 @@ describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
        VALUES ('pend-vpoll-2', 'flow-vpoll1', 'a1', 'content-vpoll-2', 1, ?, ?, datetime('now'), ?, 0)`
     ).bind(JSON.stringify({ channel_id: "src-chan" }), past, JSON.stringify(pollAction)).run();
 
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false }), { status: 200 })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, reason: "x_api_error: create post rejected" }), { status: 200 })));
 
     const pipelineSend = vi.fn().mockResolvedValue(undefined);
     const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
@@ -395,6 +395,64 @@ describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
     const [records] = pipelineSend.mock.calls[0];
     expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
     expect(records[0].outcome).toBe("failed");
+    // link's reason must survive into the node log — dropping it here is what made every
+    // video-post failure show a blank reason in the analytics drawer.
+    expect(records[0].failure_reason).toBe("x_api_error: create post rejected");
+  });
+
+  it("resolves the failed branch with an unreachable reason when x-video-status returns a non-JSON 500", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-vpoll1', 1, 'vpoll flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBranches).run();
+
+    const pollAction = { type: "xVideoStatusPoll", channelId: "src-chan", mediaId: "media-5", text: "caption", nodeId: "a1" };
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+       VALUES ('pend-vpoll-5', 'flow-vpoll1', 'a1', 'content-vpoll-5', 1, ?, ?, datetime('now'), ?, 0)`
+    ).bind(JSON.stringify({ channel_id: "src-chan" }), past, JSON.stringify(pollAction)).run();
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Internal Server Error", { status: 500 })));
+
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+    await worker.scheduled({} as any, testEnv as any);
+
+    expect(pipelineSend).toHaveBeenCalledTimes(1);
+    const [records] = pipelineSend.mock.calls[0];
+    expect(records[0].outcome).toBe("failed");
+    expect(records[0].failure_reason).toMatch(/^x_video_status_unreachable(:|$)/);
+  });
+
+  it("reschedules instead of failing when x-video-status reports rateLimited", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-vpoll1', 1, 'vpoll flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBranches).run();
+
+    const pollAction = { type: "xVideoStatusPoll", channelId: "src-chan", mediaId: "media-6", text: "caption", nodeId: "a1" };
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+       VALUES ('pend-vpoll-6', 'flow-vpoll1', 'a1', 'content-vpoll-6', 1, ?, ?, datetime('now'), ?, 1)`
+    ).bind(JSON.stringify({ channel_id: "src-chan" }), past, JSON.stringify(pollAction)).run();
+
+    const reset = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: false, rateLimited: true, rateLimitReset: reset }), { status: 200 })
+    ));
+
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+    await worker.scheduled({} as any, testEnv as any);
+
+    // Rate limit is transient: the row survives with retry_count+1, no branch is resolved
+    // ("Rate limit重试耗尽后才走failed分支").
+    const row = await env.FLOW_DB.prepare(`SELECT retry_count, execute_at FROM content_flow_pending WHERE id = 'pend-vpoll-6'`).first<{ retry_count: number; execute_at: string }>();
+    expect(row?.retry_count).toBe(2);
+    expect(new Date(row!.execute_at).getTime()).toBeGreaterThan(Date.now());
+    expect(pipelineSend).not.toHaveBeenCalled();
   });
 
   it("reschedules (retry_count+1) when still pending and under the 5-attempt ceiling", async () => {
@@ -447,5 +505,6 @@ describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
     const [records] = pipelineSend.mock.calls[0];
     expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
     expect(records[0].outcome).toBe("failed");
+    expect(records[0].failure_reason).toMatch(/^video_processing_timeout(:|$)/);
   });
 });

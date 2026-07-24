@@ -47,20 +47,22 @@ export async function initPhotoPost(
   return { ok: true, publishId: body?.data?.publish_id };
 }
 
+// Inbox (draft) upload, not direct post: both TikTok actions deliver to the creator's
+// in-app inbox and the creator finishes the post there. Direct post
+// (/v2/post/publish/video/init/) additionally requires a TikTok-audited API client
+// (unaudited_client_can_only_post_to_private_accounts) and a required privacy_level.
+// The inbox endpoint accepts no post_info — title/caption are typed in-app.
 export async function initVideoPost(
   accessToken: string,
-  videoUrl: string,
-  title: string,
-  description: string
+  videoUrl: string
 ): Promise<{ ok: boolean; publishId?: string; rateLimited?: boolean; reason?: string }> {
-  const res = await fetch("https://open.tiktokapis.com/v2/post/publish/video/init/", {
+  const res = await fetch("https://open.tiktokapis.com/v2/post/publish/inbox/video/init/", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      post_info: { title, description },
       source_info: {
         source: "PULL_FROM_URL",
         video_url: videoUrl,

@@ -29,10 +29,16 @@ async function uploadVideoToX(
   videoUrl: string
 ): Promise<{ ok: true; mediaId: string; state: string; checkAfterSecs?: number } | { ok: false }> {
   const videoRes = await fetch(videoUrl);
-  if (!videoRes.ok || !videoRes.body) return { ok: false };
+  if (!videoRes.ok || !videoRes.body) {
+    console.error(JSON.stringify({ event: "x_video_fetch_failed", videoUrl, status: videoRes.status, hasBody: !!videoRes.body }));
+    return { ok: false };
+  }
 
   const contentLength = Number(videoRes.headers.get("Content-Length") || "0");
-  if (contentLength > MAX_VIDEO_BYTES) return { ok: false };
+  if (contentLength > MAX_VIDEO_BYTES) {
+    console.error(JSON.stringify({ event: "x_video_too_large", videoUrl, contentLength }));
+    return { ok: false };
+  }
 
   const contentType = videoRes.headers.get("Content-Type") || "video/mp4";
   const init = await initMediaUpload(accessToken, contentLength, contentType);
@@ -457,7 +463,16 @@ export function internalRoutes() {
     if (!tenantRow?.d1_database_id) return c.json({ ok: false, reason: "tenant_db_not_provisioned" }, 200);
 
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
-    const accessToken = await tokenService.getValidToken(channelId);
+    // getValidToken throws when the proactive refresh fails (X oauth hiccup, revoked grant).
+    // Uncaught, that throw becomes a plain-text 500 the flow worker can't parse — the node then
+    // fails with a blank failure_reason. Same guard the YouTube routes above use.
+    let accessToken: string;
+    try {
+      accessToken = await tokenService.getValidToken(channelId);
+    } catch (e) {
+      console.error(JSON.stringify({ event: "create_post_no_token", contentId, channelId, error: String(e) }));
+      return c.json({ ok: false, reason: "channel_not_authorized: X token refresh failed" }, 200);
+    }
 
     let mediaId: string | undefined;
     if (videoUrl) {
@@ -514,7 +529,15 @@ export function internalRoutes() {
     if (!channel || channel.channel_type !== "X") return c.json({ ok: false, reason: "unsupported_channel_type: expected X" }, 200);
 
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
-    const accessToken = await tokenService.getValidToken(channelId);
+    // Same guard as /content/create-post: an uncaught refresh throw would surface to the flow
+    // worker as a non-JSON 500 and a blank failure_reason on the node.
+    let accessToken: string;
+    try {
+      accessToken = await tokenService.getValidToken(channelId);
+    } catch (e) {
+      console.error(JSON.stringify({ event: "x_video_status_no_token", contentId, channelId, error: String(e) }));
+      return c.json({ ok: false, reason: "channel_not_authorized: X token refresh failed" }, 200);
+    }
     const status = await getMediaUploadStatus(accessToken, mediaId);
 
     if (!status.ok) {
@@ -533,7 +556,12 @@ export function internalRoutes() {
     }
 
     const postResult = await createPost(accessToken, text, mediaId);
-    console.log(JSON.stringify({ event: "x_video_status_post", contentId, channelId, ok: postResult.ok }));
+    console.log(JSON.stringify({ event: "x_video_status_post", contentId, channelId, ok: postResult.ok, rateLimited: !!postResult.rateLimited }));
+    if (postResult.rateLimited) {
+      // Transient — the media is uploaded and processed; only the final post hit a 429. The flow
+      // worker reschedules on rateLimited instead of resolving the failed branch.
+      return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+    }
     if (!postResult.ok || !postResult.id) {
       return c.json({ ok: false, reason: "x_api_error: create post rejected" }, 200);
     }
@@ -718,18 +746,20 @@ export function internalRoutes() {
       return body.text;
     };
 
-    const [title, description] = await Promise.all([generateText(prompts.title), generateText(prompts.description)]);
-    if (title === null || description === null) {
+    // Inbox upload carries no text — the creator writes the caption in-app. The generated
+    // description is kept only for the published-content record.
+    const description = await generateText(prompts.description);
+    if (description === null) {
       console.error(JSON.stringify({ event: "tiktok_video_post_text_failed", contentId, channelId }));
       return c.json({ ok: false, reason: "text_generation_failed: content/internal/generate returned no text" }, 200);
     }
 
     const tokenService = new TikTokTokenService(c.env.LINK_DB, c.env.TIKTOK_CLIENT_KEY, c.env.TIKTOK_CLIENT_SECRET);
     const accessToken = await tokenService.getValidToken(channelId);
-    const publishResult = await initVideoPost(accessToken, videoUrl, title, description);
+    const publishResult = await initVideoPost(accessToken, videoUrl);
 
     console.log(JSON.stringify({
-      event: "tiktok_video_post", contentId, channelId,
+      event: "tiktok_video_post", contentId, channelId, publishId: publishResult.publishId,
       ok: publishResult.ok, rateLimited: !!publishResult.rateLimited,
     }));
 

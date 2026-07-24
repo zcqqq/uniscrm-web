@@ -364,11 +364,13 @@ describe("stub content-flow action endpoints", () => {
       if (u === "https://content-dev.uni-scrm.com/public/media/vid-1") {
         return new Response(videoBytes, { status: 200, headers: { "Content-Length": String(videoBytes.length), "Content-Type": "video/mp4" } });
       }
-      if (u === "https://api.x.com/2/media/upload" && init?.method === "POST") {
-        const body = typeof init.body === "string" ? JSON.parse(init.body) : null;
-        if (body?.command === "INIT") return new Response(JSON.stringify({ data: { id: "media-1" } }), { status: 200 });
-        if (body?.command === "FINALIZE") return new Response(JSON.stringify({ data: { id: "media-1" } }), { status: 200 }); // no processing_info -> succeeded
-        // APPEND (FormData body)
+      if (u === "https://api.x.com/2/media/upload/initialize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-1" } }), { status: 200 });
+      }
+      if (u === "https://api.x.com/2/media/upload/media-1/finalize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-1" } }), { status: 200 }); // no processing_info -> succeeded
+      }
+      if (u === "https://api.x.com/2/media/upload/media-1/append" && init?.method === "POST") {
         return new Response(null, { status: 204 });
       }
       if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-vid-1", text: "caption text" } }), { status: 201 });
@@ -409,10 +411,13 @@ describe("stub content-flow action endpoints", () => {
       if (u === "https://content-dev.uni-scrm.com/public/media/vid-2") {
         return new Response(videoBytes, { status: 200, headers: { "Content-Length": String(videoBytes.length) } });
       }
-      if (u === "https://api.x.com/2/media/upload" && init?.method === "POST") {
-        const body = typeof init.body === "string" ? JSON.parse(init.body) : null;
-        if (body?.command === "INIT") return new Response(JSON.stringify({ data: { id: "media-2" } }), { status: 200 });
-        if (body?.command === "FINALIZE") return new Response(JSON.stringify({ data: { id: "media-2", processing_info: { state: "pending", check_after_secs: 5 } } }), { status: 200 });
+      if (u === "https://api.x.com/2/media/upload/initialize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-2" } }), { status: 200 });
+      }
+      if (u === "https://api.x.com/2/media/upload/media-2/finalize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-2", processing_info: { state: "pending", check_after_secs: 5 } } }), { status: 200 });
+      }
+      if (u === "https://api.x.com/2/media/upload/media-2/append" && init?.method === "POST") {
         return new Response(null, { status: 204 });
       }
       throw new Error(`Unexpected fetch: ${u}`);
@@ -448,12 +453,15 @@ describe("stub content-flow action endpoints", () => {
       if (u === "https://content-dev.uni-scrm.com/public/media/vid-failed") {
         return new Response(videoBytes, { status: 200, headers: { "Content-Length": String(videoBytes.length) } });
       }
-      if (u === "https://api.x.com/2/media/upload" && init?.method === "POST") {
-        const body = typeof init.body === "string" ? JSON.parse(init.body) : null;
-        if (body?.command === "INIT") return new Response(JSON.stringify({ data: { id: "media-failed-1" } }), { status: 200 });
-        // X's real API reports the video processing itself failed, not just an HTTP error.
-        if (body?.command === "FINALIZE") return new Response(JSON.stringify({ data: { id: "media-failed-1", processing_info: { state: "failed" } } }), { status: 200 });
-        return new Response(null, { status: 204 }); // APPEND
+      if (u === "https://api.x.com/2/media/upload/initialize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-failed-1" } }), { status: 200 });
+      }
+      // X's real API reports the video processing itself failed, not just an HTTP error.
+      if (u === "https://api.x.com/2/media/upload/media-failed-1/finalize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-failed-1", processing_info: { state: "failed" } } }), { status: 200 });
+      }
+      if (u === "https://api.x.com/2/media/upload/media-failed-1/append" && init?.method === "POST") {
+        return new Response(null, { status: 204 });
       }
       throw new Error(`Unexpected fetch: ${u}`);
     });
@@ -492,13 +500,14 @@ describe("stub content-flow action endpoints", () => {
       if (u === "https://content-dev.uni-scrm.com/public/media/vid-chunk") {
         return new Response(videoBytes, { status: 200, headers: { "Content-Length": String(videoBytes.length), "Content-Type": "video/mp4" } });
       }
-      if (u === "https://api.x.com/2/media/upload" && init?.method === "POST") {
-        if (typeof init.body === "string") {
-          const body = JSON.parse(init.body);
-          if (body.command === "INIT") return new Response(JSON.stringify({ data: { id: "media-chunk-1" } }), { status: 200 });
-          if (body.command === "FINALIZE") return new Response(JSON.stringify({ data: { id: "media-chunk-1" } }), { status: 200 }); // no processing_info -> succeeded
-        }
-        return new Response(null, { status: 204 }); // APPEND (FormData body)
+      if (u === "https://api.x.com/2/media/upload/initialize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-chunk-1" } }), { status: 200 });
+      }
+      if (u === "https://api.x.com/2/media/upload/media-chunk-1/finalize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-chunk-1" } }), { status: 200 }); // no processing_info -> succeeded
+      }
+      if (u === "https://api.x.com/2/media/upload/media-chunk-1/append" && init?.method === "POST") {
+        return new Response(null, { status: 204 });
       }
       if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-chunk-1", text: "caption text" } }), { status: 201 });
       throw new Error(`Unexpected fetch: ${u}`);
@@ -523,7 +532,7 @@ describe("stub content-flow action endpoints", () => {
     expect(body).toEqual({ ok: true, id: "tweet-chunk-1" });
 
     const appendCalls = fetchMock.mock.calls.filter(
-      ([u, i]: [string, RequestInit]) => String(u) === "https://api.x.com/2/media/upload" && i?.body instanceof FormData
+      ([u]: [string, RequestInit]) => String(u) === "https://api.x.com/2/media/upload/media-chunk-1/append"
     ) as [string, RequestInit][];
     // 12MB / 5MB-per-chunk => 3 APPEND calls (5MB, 5MB, 2MB remainder) proves real chunking,
     // not one giant blob.
@@ -531,7 +540,6 @@ describe("stub content-flow action endpoints", () => {
     let totalAppended = 0;
     appendCalls.forEach(([, init], idx) => {
       const form = init.body as FormData;
-      expect(form.get("command")).toBe("APPEND");
       expect(Number(form.get("segment_index"))).toBe(idx); // sequential, 0-based
       const media = form.get("media") as Blob;
       expect(media.size).toBeLessThanOrEqual(5 * 1024 * 1024);
@@ -569,13 +577,14 @@ describe("stub content-flow action endpoints", () => {
         // running totalRead byte-count guard in the streaming loop, not the header short-circuit.
         return new Response(makeOversizeStream(), { status: 200 });
       }
-      if (u === "https://api.x.com/2/media/upload" && init?.method === "POST") {
-        if (typeof init.body === "string") {
-          const body = JSON.parse(init.body);
-          if (body.command === "INIT") return new Response(JSON.stringify({ data: { id: "media-oversize-1" } }), { status: 200 });
-          if (body.command === "FINALIZE") return new Response(JSON.stringify({ data: { id: "media-oversize-1" } }), { status: 200 });
-        }
-        return new Response(null, { status: 204 }); // APPEND
+      if (u === "https://api.x.com/2/media/upload/initialize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-oversize-1" } }), { status: 200 });
+      }
+      if (u === "https://api.x.com/2/media/upload/media-oversize-1/finalize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-oversize-1" } }), { status: 200 });
+      }
+      if (u === "https://api.x.com/2/media/upload/media-oversize-1/append" && init?.method === "POST") {
+        return new Response(null, { status: 204 });
       }
       throw new Error(`Unexpected fetch: ${u}`);
     });
@@ -601,12 +610,12 @@ describe("stub content-flow action endpoints", () => {
     // (and therefore at least one APPEND) must have fired, since the header guard would have
     // returned before ever calling initMediaUpload.
     const initCalled = fetchMock.mock.calls.some(
-      ([u, i]: [string, RequestInit]) => String(u) === "https://api.x.com/2/media/upload" && typeof i?.body === "string" && JSON.parse(i.body as string).command === "INIT"
+      ([u]: [string, RequestInit]) => String(u) === "https://api.x.com/2/media/upload/initialize"
     );
     expect(initCalled).toBe(true);
     // The abort happens mid-stream, before finalize.
     const finalizeCalled = fetchMock.mock.calls.some(
-      ([u, i]: [string, RequestInit]) => String(u) === "https://api.x.com/2/media/upload" && typeof i?.body === "string" && JSON.parse(i.body as string).command === "FINALIZE"
+      ([u]: [string, RequestInit]) => String(u) === "https://api.x.com/2/media/upload/media-oversize-1/finalize"
     );
     expect(finalizeCalled).toBe(false);
     expect(tenantDataDbRunMock).not.toHaveBeenCalled();
@@ -731,6 +740,36 @@ describe("stub content-flow action endpoints", () => {
     vi.unstubAllGlobals();
   });
 
+  it("POST /internal/content/create-post returns channel_not_authorized instead of a 500 when the token refresh fails", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: "rt", expires_at: new Date(Date.now() - 1000).toISOString() }),
+      channel_type: "X",
+      tenant_id: 1,
+    };
+    const linkDb = {
+      prepare: vi.fn().mockReturnValue({
+        bind: vi.fn().mockReturnValue({
+          first: vi.fn().mockResolvedValue(channelRow),
+          run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
+        }),
+      }),
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("oauth unavailable", { status: 503 })));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "literal text", provider: "none", channelId: "tgt-chan", flowId: "flow-1", skillId: "none" }),
+      }),
+      { ...testEnv, LINK_DB: linkDb, WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^channel_not_authorized(:|$)/) });
+    vi.unstubAllGlobals();
+  });
+
   it("rejects requests missing the internal secret", async () => {
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/x/repost", {
@@ -808,6 +847,69 @@ describe("stub content-flow action endpoints", () => {
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^video_upload_failed(:|$)/) });
+      vi.unstubAllGlobals();
+    });
+
+    it("returns rateLimited:true when the final post after processing is rate-limited", async () => {
+      const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+      const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+        const u = String(url);
+        if (u.includes("command=STATUS")) return new Response(JSON.stringify({ data: { id: "media-1", processing_info: { state: "succeeded" } } }), { status: 200 });
+        if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ title: "Too Many Requests" }), { status: 429 });
+        throw new Error(`Unexpected fetch: ${u}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await worker.fetch(
+        new Request("https://link-dev.uni-scrm.com/internal/content/x-video-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+          body: JSON.stringify({ channelId: "tgt-chan", mediaId: "media-1", text: "caption text", contentId: "content-1", flowId: "flow-1" }),
+        }),
+        { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string };
+      // A 429 on the final post is transient — reporting it as a plain failure would send the
+      // flow down the failed branch permanently, violating "Rate limit重试耗尽后才走failed分支".
+      expect(body.ok).toBe(false);
+      expect(body.rateLimited).toBe(true);
+      expect(typeof body.rateLimitReset).toBe("string");
+      vi.unstubAllGlobals();
+    });
+
+    it("returns channel_not_authorized instead of a 500 when the token refresh fails", async () => {
+      // Expired token forces getValidToken -> refreshAccessToken; the refresh call fails.
+      const channelRow = {
+        config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: "rt", expires_at: new Date(Date.now() - 1000).toISOString() }),
+        channel_type: "X",
+        tenant_id: 1,
+      };
+      const linkDb = {
+        prepare: vi.fn().mockReturnValue({
+          bind: vi.fn().mockReturnValue({
+            first: vi.fn().mockResolvedValue(channelRow),
+            run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
+          }),
+        }),
+      };
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("oauth unavailable", { status: 503 })));
+
+      const res = await worker.fetch(
+        new Request("https://link-dev.uni-scrm.com/internal/content/x-video-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+          body: JSON.stringify({ channelId: "tgt-chan", mediaId: "media-1", text: "caption text", contentId: "content-1", flowId: "flow-1" }),
+        }),
+        { ...testEnv, LINK_DB: linkDb, WEB_DB: mockWebDb("tenant-db-1") }
+      );
+
+      // An uncaught throw here becomes a 500 whose body isn't JSON — the flow worker then
+      // records a failed branch with NO failure_reason, which is exactly the "null reason"
+      // failure this test pins down.
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^channel_not_authorized(:|$)/) });
       vi.unstubAllGlobals();
     });
 

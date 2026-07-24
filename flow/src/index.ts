@@ -1742,7 +1742,13 @@ export default {
               headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
               body: JSON.stringify({ channelId: action.channelId, mediaId: action.mediaId, text: action.text, contentId: row.content_id, flowId: row.flow_id }),
             });
-            const statusBody = await statusRes.json().catch(() => ({ ok: false })) as { ok?: boolean; pending?: boolean; checkAfterSecs?: number };
+            // A non-JSON body here is link crashing mid-request (e.g. an uncaught token-refresh
+            // throw becoming a plain-text 500) — synthesize a reason so the node log never shows
+            // a failed outcome with a blank failure_reason again.
+            const statusBody = await statusRes.json().catch(() => ({
+              ok: false,
+              reason: `x_video_status_unreachable: HTTP ${statusRes.status} non-JSON response from link`,
+            })) as { ok?: boolean; pending?: boolean; checkAfterSecs?: number; rateLimited?: boolean; rateLimitReset?: string; reason?: string };
 
             if (statusBody.pending && row.retry_count < 5) {
               const nextAt = new Date(Date.now() + Math.max(statusBody.checkAfterSecs || 60, 60) * 1000).toISOString();
@@ -1753,8 +1759,23 @@ export default {
               continue;
             }
 
-            const branch = !statusBody.pending && statusBody.ok ? "success" : "failed";
-            const resolved = resumeFromNode(graph, action.nodeId as string, payload, branch);
+            // A 429 on the final createPost is transient, not a video failure — reschedule like
+            // pending does ("Rate limit重试耗尽后才走failed分支").
+            if (statusBody.rateLimited && row.retry_count < 5) {
+              const nextAt = statusBody.rateLimitReset || new Date(Date.now() + 15 * 60 * 1000).toISOString();
+              await env.FLOW_DB.prepare(
+                `UPDATE content_flow_pending SET execute_at = ?, retry_count = ? WHERE id = ?`
+              ).bind(nextAt, row.retry_count + 1, row.id).run();
+              console.log(JSON.stringify({ event: "x_video_poll_rate_limited", id: row.id, retryCount: row.retry_count + 1 }));
+              continue;
+            }
+
+            const branch = !statusBody.pending && !statusBody.rateLimited && statusBody.ok ? "success" : "failed";
+            const failureReason = branch === "success" ? undefined
+              : statusBody.pending ? `video_processing_timeout: X still processing after ${row.retry_count + 1} polls`
+              : statusBody.rateLimited ? `rate_limit_exhausted: still rate limited after ${row.retry_count + 1} retries`
+              : statusBody.reason;
+            const resolved = resumeFromNode(graph, action.nodeId as string, payload, branch, failureReason);
             if (resolved.nodeLogs.length > 0) await emitContentNodeLogs(resolved.nodeLogs, row.flow_id, row.content_id, row.tenant_id, env, payload);
             if (resolved.actions.length > 0) {
               const { rateLimited: nestedRateLimited } = await executeContentActions(graph, resolved.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);

@@ -36,10 +36,10 @@ describe("POST /internal/tiktok/video-post", () => {
   };
   const channelRow = { config: JSON.stringify({ access_token: "tok-1" }), channel_type: "TIKTOK", tenant_id: 1 };
 
-  it("publishes the video and records content on success", async () => {
+  it("uploads the video to the creator's inbox and records content on success", async () => {
     tenantDataDbRunMock.mockClear();
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
-      if (String(url).includes("/v2/post/publish/video/init/")) {
+      if (String(url).includes("/v2/post/publish/inbox/video/init/")) {
         return new Response(JSON.stringify({ data: { publish_id: "pub-vid-1" }, error: { code: "ok", message: "" } }), { status: 200 });
       }
       throw new Error(`Unexpected fetch: ${url}`);
@@ -58,9 +58,9 @@ describe("POST /internal/tiktok/video-post", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
 
-    const publishCall = fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/v2/post/publish/video/init/"));
+    const publishCall = fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/v2/post/publish/inbox/video/init/"));
     const publishBody = JSON.parse(publishCall![1].body as string);
-    expect(publishBody.source_info).toEqual({ source: "PULL_FROM_URL", video_url: baseBody.videoUrl });
+    expect(publishBody).toEqual({ source_info: { source: "PULL_FROM_URL", video_url: baseBody.videoUrl } });
     expect(tenantDataDbRunMock).toHaveBeenCalledTimes(1);
     const [insertSql, insertParams] = tenantDataDbRunMock.mock.calls[0] as [string, unknown[]];
     expect(insertSql).toMatch(/INSERT INTO content/);

@@ -173,7 +173,10 @@ describe("fetchListPostsPage", () => {
 });
 
 describe("initMediaUpload", () => {
-  it("posts command=INIT with total_bytes/media_type/media_category and returns the media_id", async () => {
+  // X's chunked upload is three separate per-command endpoints (OpenAPI v2.166), not the older
+  // unified POST /2/media/upload?command=INIT the "quickstart" tutorial still documents — that
+  // unified path 400s on every call with "Missing media field in JSON".
+  it("posts JSON to /2/media/upload/initialize with total_bytes/media_type/media_category and returns the media_id", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ data: { id: "media-1", media_key: "mk-1", expires_after_secs: 86400 } }), { status: 200 })
     );
@@ -183,10 +186,10 @@ describe("initMediaUpload", () => {
 
     expect(result).toEqual({ ok: true, mediaId: "media-1" });
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://api.x.com/2/media/upload");
+    expect(url).toBe("https://api.x.com/2/media/upload/initialize");
     expect(init.headers.Authorization).toBe("Bearer access-token-1");
     const body = JSON.parse(init.body);
-    expect(body).toEqual({ command: "INIT", media_type: "video/mp4", total_bytes: 1048576, media_category: "tweet_video" });
+    expect(body).toEqual({ media_type: "video/mp4", total_bytes: 1048576, media_category: "tweet_video" });
     vi.unstubAllGlobals();
   });
 
@@ -199,7 +202,7 @@ describe("initMediaUpload", () => {
 });
 
 describe("appendMediaChunk", () => {
-  it("posts command=APPEND with the media_id/segment_index/chunk and returns ok: true on 2xx", async () => {
+  it("posts to /2/media/upload/:id/append with segment_index/chunk and returns ok: true on 2xx", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -208,11 +211,9 @@ describe("appendMediaChunk", () => {
 
     expect(result).toEqual({ ok: true });
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://api.x.com/2/media/upload");
+    expect(url).toBe("https://api.x.com/2/media/upload/media-1/append");
     expect(init.method).toBe("POST");
     const formData = init.body as FormData;
-    expect(formData.get("command")).toBe("APPEND");
-    expect(formData.get("media_id")).toBe("media-1");
     expect(formData.get("segment_index")).toBe("0");
     expect(formData.get("media")).toBeInstanceOf(Blob);
     vi.unstubAllGlobals();
@@ -227,7 +228,7 @@ describe("appendMediaChunk", () => {
 });
 
 describe("finalizeMediaUpload", () => {
-  it("posts command=FINALIZE and returns the processing state", async () => {
+  it("posts to /2/media/upload/:id/finalize with an empty body and returns the processing state", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ data: { id: "media-1", processing_info: { state: "pending", check_after_secs: 5 } } }), { status: 200 })
     );
@@ -236,8 +237,9 @@ describe("finalizeMediaUpload", () => {
     const result = await finalizeMediaUpload("access-token-1", "media-1");
 
     expect(result).toEqual({ ok: true, state: "pending", checkAfterSecs: 5 });
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body).toEqual({ command: "FINALIZE", media_id: "media-1" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.x.com/2/media/upload/media-1/finalize");
+    expect(init.headers.Authorization).toBe("Bearer access-token-1");
     vi.unstubAllGlobals();
   });
 

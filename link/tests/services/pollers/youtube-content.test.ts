@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ingestYouTubeVideo } from "../../../src/services/pollers/youtube-content";
 import * as youtubeApi from "../../../src/services/youtube-api";
+import { ContentMetadata_YouTube } from "../../../../metadata/youtube";
+
+// 阈值从 metadata 取，改 metadata/youtube.ts 里的 value 时测试自动跟随，不用同步改这里。
+const DURATION_LIMIT = Number(
+  ContentMetadata_YouTube.find((m) => m.sourceContentType === "watch:get-videos")!
+    .contentPropsFilter!.find((f) => f.propId === "duration")!.value
+);
 
 function createMockTenantDb() {
   return {
@@ -113,11 +120,11 @@ describe("ingestYouTubeVideo", () => {
     expect(flowQueue.send).not.toHaveBeenCalled();
   });
 
-  it("does not emit content.created when duration exceeds 120s, but still records dedup seen", async () => {
+  it("does not emit content.created when duration exceeds the metadata limit, but still records dedup seen", async () => {
     vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
       id: "vid-long",
       snippet: { title: "Long", publishedAt: "2026-07-18T00:00:00Z", thumbnails: { default: { url: "https://img/t.jpg" } } },
-      contentDetails: { duration: "PT2M1S" },
+      contentDetails: { duration: `PT${DURATION_LIMIT + 1}S` },
     });
 
     const tenantDb = createMockTenantDb();
@@ -136,7 +143,7 @@ describe("ingestYouTubeVideo", () => {
       account_channel_id: "chan-acc",
       subscription_channel_id: "chan-sub",
       video_id: "vid-long",
-      duration: 121,
+      duration: DURATION_LIMIT + 1,
     });
   });
 
@@ -166,16 +173,16 @@ describe("ingestYouTubeVideo", () => {
     });
   });
 
-  it("emits content.created at exactly 120s (boundary inclusive)", async () => {
+  it("emits content.created at exactly the metadata limit (boundary inclusive)", async () => {
     vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
-      id: "vid-2m",
-      snippet: { title: "Exactly 2m", publishedAt: "2026-07-18T00:00:00Z", thumbnails: { default: { url: "https://img/t.jpg" } } },
-      contentDetails: { duration: "PT2M" },
+      id: "vid-boundary",
+      snippet: { title: "At limit", publishedAt: "2026-07-18T00:00:00Z", thumbnails: { default: { url: "https://img/t.jpg" } } },
+      contentDetails: { duration: `PT${DURATION_LIMIT}S` },
     });
 
     const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
     const ctx = baseCtx({ flowQueue });
-    await ingestYouTubeVideo(ctx, "vid-2m");
+    await ingestYouTubeVideo(ctx, "vid-boundary");
 
     expect(flowQueue.send).toHaveBeenCalledTimes(1);
   });

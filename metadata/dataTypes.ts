@@ -49,6 +49,16 @@ export interface PropMapping {
   aiType?: "TEXT" | "IMAGE" | "VIDEO";
 }
 
+// 系统级过滤条件（非用户可编辑）。用于 EventMetadata.userPropsFilter 和
+// ContentMetadata.contentPropsFilter，由 metadata/props-filter.ts 的
+// passesPropsFilter 统一评估：==/!= 严格比较原始值；<=/</>=/> 两侧 Number()
+// 后比较，任一侧 NaN（含缺字段）视为不通过（fail-closed）。
+export interface PropFilter {
+  propId: string;
+  operator: "==" | "!=" | "<=" | "<" | ">=" | ">";
+  value: string | number;
+}
+
 export interface UserMetadata {
   sourceUserType: string;
   linkPrefix?: string; //返回body嵌套太复杂时使用，少点代码

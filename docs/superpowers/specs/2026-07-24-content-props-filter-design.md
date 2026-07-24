@@ -47,6 +47,7 @@ Semantics:
 - All filters must pass (AND).
 - `==` / `!=`: strict `===` / `!==` on the raw values — preserves current `userPropsFilter` behavior exactly (`is_follow` is number 0/1 in both D1 rows and metadata).
 - `<=` / `<` / `>=` / `>`: both sides through `Number()`; if either side is `NaN` (including a missing prop, `Number(undefined)` = NaN), the filter does **not** pass (fail-closed).
+- **Amendment (2026-07-24, task-1 review finding):** `null` and `""` must also fail ordering operators — `Number(null)` and `Number("")` coerce to `0`, not `NaN`, which would silently pass a `<= 120` check for a null-valued prop (D1 rows surface missing fields as `null`). The evaluator guards `actual === null || actual === ""` before the `Number()` coercion.
 
 ## 3. Declaration (`metadata/youtube.ts`)
 

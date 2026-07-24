@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import type { Env, FlowQueueMessage } from "./types";
 import { executeFlow, resumeFromNode, evaluateCondition, evaluateFaceRatioBranch, type FlowGraph, type ActionResult, type NodeLog } from "./engine";
 import { EventMetadata_X } from "../../metadata/x";
+import { passesPropsFilter } from "../../metadata/props-filter";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY } from "../nodeTypeRegistry";
@@ -304,7 +305,7 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
           const fields = meta.userPropsFilter.map(f => f.propId).join(", ");
           const rows = await tdb.query<Record<string, unknown>>(`SELECT ${fields} FROM user WHERE id = ?`, [userId]);
           const row = rows[0];
-          const pass = meta.userPropsFilter.every(f => row?.[f.propId] === f.value);
+          const pass = passesPropsFilter(meta.userPropsFilter, row ?? {});
           if (!pass) {
             console.log(JSON.stringify({ event: "flow_action_skipped_filter", xEvent: action.xEvent, userId, filter: meta.userPropsFilter, actual: row }));
             continue;

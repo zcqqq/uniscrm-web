@@ -84,6 +84,6 @@ export interface EventMetadata {
   label: LocalizedString;
   description?: LocalizedString;
   userProps: PropMapping[];
-  userPropsFilter?: PropMapping[]; // action满足条件时才调用外部API
+  userPropsFilter?: PropFilter[]; // action满足条件时才调用外部API（passesPropsFilter评估）
   eventProps: PropMapping[]; // link-social 存表时存所有字段到raw_data列，这里只控制flow模块
 }

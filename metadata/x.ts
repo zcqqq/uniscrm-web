@@ -151,7 +151,7 @@ export const EventMetadata_X: EventMetadata[] = [
     label: { en: "Follow", zh: "关注" },
     userProps: [],
     userPropsFilter: [
-      { propId: "is_follow", value: 0 },
+      { propId: "is_follow", operator: "==", value: 0 },
     ],
     eventProps: [],
   },
@@ -163,7 +163,7 @@ export const EventMetadata_X: EventMetadata[] = [
     label: { en: "Unfollow", zh: "取关" },
     userProps: [],
     userPropsFilter: [
-      { propId: "is_follow", value: 1 },
+      { propId: "is_follow", operator: "==", value: 1 },
     ],
     eventProps: [],
   },

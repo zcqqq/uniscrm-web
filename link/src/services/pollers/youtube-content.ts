@@ -34,7 +34,12 @@ export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: str
 
   const contentDetails = item.contentDetails as Record<string, unknown> | undefined;
   const durationIso = contentDetails?.duration as string | undefined;
-  props.duration = durationIso ? parseISO8601Duration(durationIso) : 0;
+  // Leave props.duration unset (not a fake 0) when we can't parse it — e.g. live/upcoming
+  // broadcasts ("P0D") or videos over 24h. passesPropsFilter fails closed on a missing prop.
+  const parsedDuration = durationIso ? parseISO8601Duration(durationIso) : null;
+  if (parsedDuration !== null) {
+    props.duration = parsedDuration;
+  }
 
   const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue);
   const sourceContentId = String(props.source_content_id ?? "");

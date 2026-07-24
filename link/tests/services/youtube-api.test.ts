@@ -17,8 +17,17 @@ describe("parseISO8601Duration", () => {
   it("parses seconds-only", () => {
     expect(parseISO8601Duration("PT45S")).toBe(45);
   });
-  it("returns 0 for unparseable input", () => {
-    expect(parseISO8601Duration("garbage")).toBe(0);
+  it("returns null for unparseable input", () => {
+    expect(parseISO8601Duration("garbage")).toBeNull();
+  });
+  it("parses minutes-only via PT2M", () => {
+    expect(parseISO8601Duration("PT2M")).toBe(120);
+  });
+  it("parses days and hours via P1DT2H", () => {
+    expect(parseISO8601Duration("P1DT2H")).toBe(93600);
+  });
+  it("returns null for P0D (live/upcoming broadcasts, no T part)", () => {
+    expect(parseISO8601Duration("P0D")).toBeNull();
   });
 });
 

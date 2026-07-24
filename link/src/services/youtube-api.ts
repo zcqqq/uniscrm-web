@@ -1,11 +1,19 @@
 const DATA_API_BASE = "https://www.googleapis.com/youtube/v3";
 const HUB_URL = "https://pubsubhubbub.appspot.com/subscribe";
 
-export function parseISO8601Duration(iso: string): number {
-  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso);
-  if (!match) return 0;
-  const [, h, m, s] = match;
-  return parseInt(h || "0", 10) * 3600 + parseInt(m || "0", 10) * 60 + parseInt(s || "0", 10);
+// Returns null (not 0) when the ISO 8601 duration doesn't match — callers must not
+// substitute a fake 0 for a value we failed to parse. YouTube uses "P0D" (no "T" part,
+// so it doesn't match here) for live/upcoming broadcasts with no known duration yet.
+export function parseISO8601Duration(iso: string): number | null {
+  const match = /^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso);
+  if (!match) return null;
+  const [, d, h, m, s] = match;
+  return (
+    parseInt(d || "0", 10) * 86400 +
+    parseInt(h || "0", 10) * 3600 +
+    parseInt(m || "0", 10) * 60 +
+    parseInt(s || "0", 10)
+  );
 }
 
 export async function fetchVideoDetails(apiKey: string, videoId: string): Promise<Record<string, unknown> | null> {

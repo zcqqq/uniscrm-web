@@ -21,6 +21,7 @@ interface DateParts {
 function getParts(iso: string, timezone: string): DateParts | null {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return null;
+  // time-format-ok: chart-axis labels use granularity-dependent compact formats, not full timestamps
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
     year: "numeric",
@@ -44,6 +45,7 @@ function getParts(iso: string, timezone: string): DateParts | null {
 }
 
 function currentYearInTimezone(timezone: string, now: Date): number {
+  // time-format-ok: extracts the year number for axis-label logic, no timestamp is displayed
   return Number(new Intl.DateTimeFormat("en-US", { timeZone: timezone, year: "numeric" }).format(now)) % 100;
 }
 

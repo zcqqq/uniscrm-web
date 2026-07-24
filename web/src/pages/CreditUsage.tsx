@@ -1,5 +1,8 @@
 import { useEffect } from "react";
 import { useCreditUsage } from "../hooks/useCreditUsage";
+import { useAuth } from "../hooks/useAuth";
+import { DateCell } from "../../../shared/frontend/components/CellDate";
+import { formatDate } from "../../../shared/frontend/lib/format-time";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
 import { Button } from "../../../shared/frontend/ui/button";
 import { PageHeader } from "../../../shared/frontend/components/PageHeader";
@@ -19,6 +22,8 @@ function formatUsd(micros: number): string {
 export function CreditUsage() {
   useEffect(() => { document.title = "Credit Usage — UniSCRM" }, []);
   const { usage, loading, page, setPage, pageSize } = useCreditUsage();
+  const { member } = useAuth();
+  const timezone = member?.timezone || "UTC";
 
   return (
     <div className="max-w-4xl mx-auto p-8">
@@ -57,7 +62,7 @@ export function CreditUsage() {
               </div>
               {usage.periodStart && usage.periodEnd && (
                 <p className="text-xs text-muted-foreground mt-4">
-                  Current period: {new Date(usage.periodStart).toLocaleDateString()} – {new Date(usage.periodEnd).toLocaleDateString()}
+                  Current period: {formatDate(usage.periodStart, timezone)} – {formatDate(usage.periodEnd, timezone)}
                 </p>
               )}
               {usage.balanceMicros <= 0 && (
@@ -89,7 +94,7 @@ export function CreditUsage() {
                   ) : (
                     usage.entries.map((e) => (
                       <TableRow key={e.id}>
-                        <TableCell className="text-sm">{new Date(e.created_at).toLocaleString()}</TableCell>
+                        <TableCell className="text-sm"><DateCell iso={e.created_at} timezone={timezone} /></TableCell>
                         <TableCell className="text-sm">{actionLabel(e.action_event_type)}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">{e.flow_id ?? "—"}</TableCell>
                         <TableCell className="text-sm text-right">{formatUsd(e.credit_micros)}</TableCell>

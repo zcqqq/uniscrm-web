@@ -17,6 +17,7 @@ import { Tooltip as UiTooltip, TooltipTrigger as UiTooltipTrigger, TooltipConten
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
 import { DIMENSION_COLORS } from "../../../shared/frontend/lib/colors";
 import { ResultsTable } from "../../../shared/frontend/components/ResultsTable";
+import { DateCell } from "../../../shared/frontend/components/CellDate";
 import { compareRows } from "../../../shared/frontend/components/DataTable";
 import { PROPS } from "../../../metadata/props";
 import { ChartTypeToggle } from "../../../shared/frontend/components/ChartTypeToggle";
@@ -381,21 +382,6 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     }
   };
 
-  const formatComputedAt = (iso: string | null) => {
-    if (!iso) return t.notComputedYet;
-    const d = new Date(iso.includes("T") || iso.endsWith("Z") ? iso : `${iso.replace(" ", "T")}Z`);
-    if (isNaN(d.getTime())) return iso;
-    return d.toLocaleString(locale === "zh" ? "zh-CN" : "en-US", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-  };
-
   const formatPeriod = (p: unknown) => sharedFormatPeriod(p, config.granularity, timezone);
 
   // ResultsTable is controlled: sort state lives here (not inside
@@ -495,7 +481,8 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               </Button>
             </UiTooltipTrigger>
             <UiTooltipContent>
-              {t.dataUpdated}{formatComputedAt(computedAt)}
+              <div>{t.dataUpdated}</div>
+              {computedAt ? <DateCell iso={computedAt} timezone={timezone} /> : t.notComputedYet}
             </UiTooltipContent>
           </UiTooltip>
         </UiTooltipProvider>

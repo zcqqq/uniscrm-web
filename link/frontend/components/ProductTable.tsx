@@ -3,6 +3,8 @@ import { Button } from "../../../shared/frontend/ui/button";
 import { Badge } from "../../../shared/frontend/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../../../shared/frontend/ui/table";
 import { EmptyState } from "../../../shared/frontend/components/EmptyState";
+import { formatDate } from "../../../shared/frontend/lib/format-time";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 
 interface Props {
   items: ProductItem[];
@@ -10,6 +12,7 @@ interface Props {
 }
 
 export function ProductTable({ items, onDelete }: Props) {
+  const { timezone } = useLocale();
   if (items.length === 0) {
     return (
       <EmptyState
@@ -57,7 +60,7 @@ export function ProductTable({ items, onDelete }: Props) {
             </TableCell>
             <TableCell className="text-muted-foreground">
               {item.source_modified_at
-                ? new Date(item.source_modified_at).toLocaleDateString()
+                ? formatDate(item.source_modified_at, timezone)
                 : "—"}
             </TableCell>
             <TableCell>

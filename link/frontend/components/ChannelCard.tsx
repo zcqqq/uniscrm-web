@@ -1,5 +1,7 @@
 import { ExternalLink } from "lucide-react";
 import { cn } from "../../../shared/frontend/lib/utils";
+import { formatDate } from "../../../shared/frontend/lib/format-time";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import type { LocalizedString } from "../../../metadata/dataTypes";
 import { t, type Locale } from "../../../metadata/locale";
 
@@ -59,6 +61,7 @@ export function ChannelCard({
   extra,
   className,
 }: ChannelCardProps) {
+  const { timezone } = useLocale();
   const taglineText = typeof tagline === "string" ? tagline : t(tagline, locale);
   return (
     <div
@@ -112,7 +115,7 @@ export function ChannelCard({
 
         {createdAt && (
           <p className="text-[11px] text-muted-foreground/60 -mt-1.5">
-            Connected {new Date(createdAt).toLocaleDateString()}
+            Connected {formatDate(createdAt, timezone)}
           </p>
         )}
 

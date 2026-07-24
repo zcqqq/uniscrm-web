@@ -9,6 +9,8 @@ import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 import { TooltipProvider } from "../../../shared/frontend/ui/tooltip";
 import { FailureReasonDialog } from "../components/FailureReasonDialog";
 import { ContentLogLink } from "../components/ContentLogLink";
+import { DateCell } from "../../../shared/frontend/components/CellDate";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 
 interface NodeLogEntry {
   user_id?: string;
@@ -25,6 +27,7 @@ interface NodeLogEntry {
 export default function AnalyticsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { timezone } = useLocale();
   const [flow, setFlow] = useState<FlowDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [counts, setCounts] = useState<Record<string, { enter: number; exit: number }>>({});
@@ -144,7 +147,7 @@ export default function AnalyticsPage() {
                           <ContentLogLink title={log.title} contentText={log.content_text} contentUrl={log.content_url} />
                         </div>
                         <div className="text-right shrink-0">
-                          <p className="text-muted-foreground whitespace-nowrap">{new Date(log.created_at).toLocaleString()}</p>
+                          <DateCell iso={log.created_at} timezone={timezone} />
                           {log.outcome === "failed" && (
                             <FailureReasonDialog
                               reason={log.failure_reason}
@@ -162,7 +165,7 @@ export default function AnalyticsPage() {
                       <li key={i} className="flex items-start justify-between gap-3 text-xs">
                         <span className="text-foreground min-w-0 truncate">{log.name || log.user_id}</span>
                         <div className="text-right shrink-0">
-                          <p className="text-muted-foreground whitespace-nowrap">{new Date(log.created_at).toLocaleString()}</p>
+                          <DateCell iso={log.created_at} timezone={timezone} />
                           {log.outcome === "failed" && (
                             <FailureReasonDialog
                               reason={log.failure_reason}

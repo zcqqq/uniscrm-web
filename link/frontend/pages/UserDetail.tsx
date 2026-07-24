@@ -6,6 +6,8 @@ import { Badge } from "../../../shared/frontend/ui/badge";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 import { Avatar, AvatarImage, AvatarFallback } from "../../../shared/frontend/ui/avatar";
 import { EmptyState } from "../../../shared/frontend/components/EmptyState";
+import { DateCell } from "../../../shared/frontend/components/CellDate";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 
 const EVENT_LABELS: Record<string, string> = {
   follower: "Follower",
@@ -16,6 +18,7 @@ const EVENT_LABELS: Record<string, string> = {
 export function UserDetail() {
   useEffect(() => { document.title = "Users — UniSCRM" }, []);
   const { id } = useParams<{ id: string }>();
+  const { timezone } = useLocale();
   const [user, setUser] = useState<XUser | null>(null);
   const [events, setEvents] = useState<XEvent[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -111,7 +114,7 @@ export function UserDetail() {
                 {EVENT_LABELS[event.event_type] || event.event_type}
               </Badge>
               <span className="text-xs text-muted-foreground flex-1">
-                {event.event_time ? new Date(event.event_time).toLocaleString() : "—"}
+                {event.event_time ? <DateCell iso={event.event_time} timezone={timezone} /> : "—"}
               </span>
             </div>
           ))}

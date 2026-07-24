@@ -2,6 +2,8 @@ import { useState, useRef } from "react";
 import { readMdFiles, type ParsedMd } from "../lib/markdown";
 import { Button } from "../../../shared/frontend/ui/button";
 import { ChannelCard } from "./ChannelCard";
+import { formatDate } from "../../../shared/frontend/lib/format-time";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { LocalLogo } from "../lib/channelLogos";
 
 interface Props {
@@ -9,6 +11,7 @@ interface Props {
 }
 
 export function LocalImport({ onImport }: Props) {
+  const { timezone } = useLocale();
   const [previewing, setPreviewing] = useState<ParsedMd[]>([]);
   const [dragging, setDragging] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -74,7 +77,7 @@ export function LocalImport({ onImport }: Props) {
               <div key={f.filename} className="flex justify-between px-2 py-1.5 text-xs border-b border-border last:border-b-0">
                 <span className="truncate">{f.title}</span>
                 <span className="text-muted-foreground ml-2 shrink-0">
-                  {f.fileModifiedAt ? new Date(f.fileModifiedAt).toLocaleDateString() : "—"}
+                  {f.fileModifiedAt ? formatDate(f.fileModifiedAt, timezone) : "—"}
                 </span>
               </div>
             ))}

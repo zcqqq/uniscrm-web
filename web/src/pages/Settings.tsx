@@ -34,6 +34,7 @@ const COMMON_TIMEZONES = [
 
 function getTimezoneLabel(tz: string): string {
   try {
+    // time-format-ok: renders the timezone picker label ("Asia/Shanghai (UTC+8)"), not a timestamp
     const formatter = new Intl.DateTimeFormat("en", { timeZone: tz, timeZoneName: "shortOffset" });
     const parts = formatter.formatToParts(new Date());
     const offset = parts.find((p) => p.type === "timeZoneName")?.value || "";

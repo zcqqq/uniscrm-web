@@ -7,7 +7,7 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test \"scripts/*.test.mjs\" && node scripts/tenant-scope-audit.mjs --check && node scripts/time-format-audit.mjs --check"
   },
   "repository": {
     "type": "git",

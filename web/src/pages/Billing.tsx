@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useBilling } from "../hooks/useBilling";
+import { useAuth } from "../hooks/useAuth";
+import { formatDate } from "../../../shared/frontend/lib/format-time";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "../../../shared/frontend/ui/card";
 import { Badge } from "../../../shared/frontend/ui/badge";
@@ -13,6 +15,8 @@ import type { SubStatus } from "../../../shared/plans";
 export function Billing() {
   useEffect(() => { document.title = "Billing — UniSCRM" }, []);
   const { plans, subscription, loading, subscribe, cancel, manageSubscription, refresh } = useBilling();
+  const { member } = useAuth();
+  const timezone = member?.timezone || "UTC";
   const [searchParams] = useSearchParams();
   const success = searchParams.get("success");
   const cancelled = searchParams.get("cancelled");
@@ -128,7 +132,7 @@ export function Billing() {
               {subscription?.subscription?.current_period_end && (
                 <p className="text-sm text-muted-foreground">
                   {status === "trialing" ? "Trial expires" : "Next billing date"}:{" "}
-                  {new Date(subscription.subscription.current_period_end).toLocaleDateString()}
+                  {formatDate(subscription.subscription.current_period_end, timezone)}
                 </p>
               )}
             </div>
@@ -175,7 +179,7 @@ export function Billing() {
                     </Badge>
                     {status === "trialing" && subscription?.subscription?.current_period_end && (
                       <p className="text-xs text-muted-foreground">
-                        Expires: {new Date(subscription.subscription.current_period_end).toLocaleDateString()}
+                        Expires: {formatDate(subscription.subscription.current_period_end, timezone)}
                       </p>
                     )}
                     {status === "trialing" && (

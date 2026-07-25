@@ -40,6 +40,40 @@ async function segmentAuth(c: any, next: any) {
 app.use("/api/segments", segmentAuth);
 app.use("/api/segments/*", segmentAuth);
 
+// R2_SQL_TOKEN is a hand-set secret, not CI-managed yet (unlike every other var this worker
+// reads — see .superpowers/sdd/2026-07-25-tenant-db-removal/progress.md's "R2_SQL_TOKEN is not
+// CI-managed" note: link and flow bind the same secret and deliberately keep it out of
+// .secrets.json too, because scripts/secrets-sync.test.mjs requires every declared secret to be
+// exported into both deploy workflows' sync-secrets env, and neither workflow does that for this
+// name yet). A worker deployed without `wrangler secret put R2_SQL_TOKEN --env <env>` would
+// otherwise send `Authorization: Bearer undefined` on every r2Query call and get back a generic
+// 401 — indistinguishable at the call site from a real auth failure. This guard runs before any
+// of the three routes that call r2Query (preview/compute/users) ever reach it, naming the actual
+// cause instead. A per-request middleware, not a module-scope check, because `env` (and thus the
+// secret) is only available once fetch() is called — Workers have no module-level "startup" with
+// bindings attached.
+export function checkR2SqlToken(env: Env): { ok: true } | { ok: false; message: string } {
+  if (!env.R2_SQL_TOKEN) {
+    return {
+      ok: false,
+      message: "R2_SQL_TOKEN is not configured on this worker — set it with `wrangler secret put R2_SQL_TOKEN --env <env>`",
+    };
+  }
+  return { ok: true };
+}
+
+async function requireR2SqlToken(c: any, next: any) {
+  const check = checkR2SqlToken(c.env);
+  if (!check.ok) {
+    console.error(JSON.stringify({ event: "r2_sql_token_missing", path: c.req.path }));
+    return c.json({ error: check.message }, 500);
+  }
+  await next();
+}
+app.use("/api/segments/preview", requireR2SqlToken);
+app.use("/api/segments/:id/compute", requireR2SqlToken);
+app.use("/api/segments/:id/users", requireR2SqlToken);
+
 app.get("/health", (c) => c.json({ status: "ok" }));
 
 // Auth proxy

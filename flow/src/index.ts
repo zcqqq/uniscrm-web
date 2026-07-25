@@ -184,27 +184,38 @@ export async function queryNodeLogRows(
   }));
 }
 
-// Mirrors link/src/services/r2-entities.ts's getUserDisplayNames column-for-column (id, name,
+// Mirrors link/src/services/r2-entities.ts's getUserDisplayNames column-for-column (name,
 // username, is_deleted; same partition; is_deleted in outerWhere per latestRowsSql's doc comment
 // on why a pre-QUALIFY is_deleted filter resurrects deleted rows) without importing across the
 // module boundary — 各模块间尽量减少逻辑耦合，通过数据（Cloudflare 各组件）耦合. flow's node-log
 // drawer only renders `name`, but keeping the same column list as link's query means the two
 // can't silently diverge in behavior (e.g. a future is_deleted fix) without someone noticing the
 // duplication and porting it — a leaner projection here would hide that.
-async function getUserNames(env: Env, tenantId: number, ids: string[]): Promise<Map<string, string | null>> {
-  if (ids.length === 0) return new Map();
-  const list = ids.map(sqlStr).join(", ");
-  const rows = await r2Query<{ id: string; name: string | null; username: string | null }>(
+//
+// Looked up by `source_user_id`, NOT `id`: the `ids` this is called with are flow_log.user_id
+// values, which are flow's own user identity — the EXTERNAL platform id (X's numeric user id),
+// never entity_state's/uniscrm.user's minted uuid `id` (see resolveUserPropsForFilter's comment
+// above and docs/adr/0005). Filtering `id IN (...)` against an X id population always misses,
+// which is how the node-log drawer used to render every row nameless (final review I3). Unlike
+// link/src/routes-lists.ts's list_users (a genuinely MIXED uuid/X-id population — see
+// getUserDisplayNamesMixed in link/src/services/r2-entities.ts), flow_log.user_id is always an
+// X id (the only FLOW_QUEUE sender for the user domain is link/src/webhook.ts, which always
+// sends `userId: userData.id`) — a single source_user_id lookup is correct here, no uuid branch
+// needed.
+async function getUserNames(env: Env, tenantId: number, sourceUserIds: string[]): Promise<Map<string, string | null>> {
+  if (sourceUserIds.length === 0) return new Map();
+  const list = sourceUserIds.map(sqlStr).join(", ");
+  const rows = await r2Query<{ source_user_id: string; name: string | null; username: string | null }>(
     env,
     latestRowsSql({
       table: "uniscrm.user",
-      columns: ["id", "name", "username", "is_deleted"],
+      columns: ["source_user_id", "name", "username", "is_deleted"],
       partitionBy: ["channel_id", "source_user_id"],
-      where: [`tenant_id = ${sqlInt(tenantId)}`, `id IN (${list})`],
+      where: [`tenant_id = ${sqlInt(tenantId)}`, `source_user_id IN (${list})`],
       outerWhere: ["is_deleted = 0"],
     })
   );
-  return new Map(rows.map((r) => [r.id, r.name ?? null]));
+  return new Map(rows.map((r) => [r.source_user_id, r.name ?? null]));
 }
 
 export async function recomputeFlowCounts(env: Env): Promise<void> {
@@ -318,15 +329,29 @@ interface ActionExecResult {
 
 // flow 唯一的 user props 热读是 metadata/x.ts 的 userPropsFilter,而它只用到 is_follow(/is_followed)。
 // 这两列常驻 entity_state(link 的 D1 index table,毫秒级),不走 R2 —— R2 单次查询 1-3s,
-// 会把每次 xAction 都拖慢。entity_id 是 entity_state 的二级索引,直接按 userId 查。
+// 会把每次 xAction 都拖慢。
+//
+// `userId` here is flow's own user identity, which — unlike `uniscrm.user.id`/entity_state's
+// `entity_id` — is the EXTERNAL platform id (X's numeric user id), never the uuid entity_state
+// mints in EntityStateStore.claim(). webhook.ts sends `userId: userData.id` into FLOW_QUEUE, and
+// routes-internal.ts posts that same value straight to api.x.com/2/users/{sourceUserId}/... — so
+// it must keep meaning "X id" everywhere in flow. Looking it up against entity_id (as this used
+// to) always misses, silently skipping every userPropsFilter-gated action (see final review C1).
+// The correct key mirrors EntityStateStore's own shape exactly (link/src/services/entity-state.ts):
+// entity='user', channel_id=action's channelId, secondary_id='' (EntityStateStore.sec()'s
+// default for an omitted secondaryId), source_id=the X user id.
 export async function resolveUserPropsForFilter(
   env: Env,
   tenantId: number,
+  channelId: string,
   userId: string
 ): Promise<Record<string, unknown>> {
   const row = await env.LINK_DB
-    .prepare(`SELECT is_follow, is_followed FROM entity_state WHERE tenant_id = ? AND entity_id = ?`)
-    .bind(tenantId, userId)
+    .prepare(
+      `SELECT is_follow, is_followed FROM entity_state
+       WHERE tenant_id = ? AND entity = 'user' AND channel_id = ? AND secondary_id = '' AND source_id = ?`
+    )
+    .bind(tenantId, channelId, userId)
     .first<{ is_follow: number | null; is_followed: number | null }>();
   // Unknown user → empty props object → passesPropsFilter's every-condition-must-match semantics
   // fail closed (no matching props means no condition can pass), so the action is skipped rather
@@ -362,7 +387,7 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
       // Check userPropsFilter before executing action
       const meta = EventMetadata_X.find(m => m.eventType === action.xEvent);
       if (meta?.userPropsFilter?.length) {
-        const row = await resolveUserPropsForFilter(env, Number(tenantId), userId);
+        const row = await resolveUserPropsForFilter(env, Number(tenantId), action.channelId as string, userId);
         const pass = passesPropsFilter(meta.userPropsFilter, row);
         if (!pass) {
           console.log(JSON.stringify({ event: "flow_action_skipped_filter", xEvent: action.xEvent, userId, filter: meta.userPropsFilter, actual: row }));

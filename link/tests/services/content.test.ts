@@ -17,6 +17,7 @@ function createMockEntityState(overrides: Partial<{ entityId: string; isNew: boo
     get: vi.fn().mockResolvedValue(null),
     setFollow: vi.fn(),
     getFollowByEntityId: vi.fn(),
+    rollbackFingerprint: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -1029,5 +1030,140 @@ describe("ContentService.delete", () => {
     const [[record]] = pipeline.send.mock.calls[0];
     expect(record.is_deleted).toBe(1);
     vi.unstubAllGlobals();
+  });
+});
+
+// Final review I4: claim() commits the new fingerprint durably BEFORE the R2 pipeline send is
+// even attempted. If that send fails transiently, the old code (sendContentRecord's internal
+// .catch()) just logged and returned — leaving the fingerprint claiming success while the row
+// never reached R2. The next poll/webhook computes the SAME fingerprint, sees it already
+// matches, and skips resending forever (content.ts's `unchanged` early return at the top of
+// upsertContentFromMetadata). The fix rolls the fingerprint back to NULL on a failed send, so the
+// NEXT claim() call for that key is guaranteed to report unchanged: false.
+describe("pipeline send failure rolls back the entity_state fingerprint (final review I4)", () => {
+  it("upsertContentFromMetadata: rolls back the exact claimed key when the pipeline send rejects", async () => {
+    const entityState = createMockEntityState({ entityId: "c-uuid", isNew: true, unchanged: false });
+    const pipeline = { send: vi.fn().mockRejectedValue(new Error("transient R2 error")) };
+    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+
+    await service.upsertContentFromMetadata(
+      { id: "t1", text: "hi" },
+      { source_content_id: "t1", content_text: "hi" },
+      "chan1", "X", false, "list1"
+    );
+
+    expect(pipeline.send).toHaveBeenCalledTimes(1);
+    expect(entityState.rollbackFingerprint).toHaveBeenCalledWith(
+      { entity: "content", channelId: "chan1", secondaryId: "list1", sourceId: "t1" }
+    );
+  });
+
+  it("upsertContentFromMetadata: does NOT roll back when the send succeeds", async () => {
+    const entityState = createMockEntityState({ entityId: "c-uuid", isNew: true, unchanged: false });
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+
+    await service.upsertContentFromMetadata(
+      { id: "t1" }, { source_content_id: "t1" }, "chan1", "X", false
+    );
+
+    expect(entityState.rollbackFingerprint).not.toHaveBeenCalled();
+  });
+
+  it("syncBatch: rolls back the claimed key when the pipeline send rejects", async () => {
+    const entityState = createMockEntityState({ entityId: "c-uuid", isNew: true, unchanged: false });
+    const pipeline = { send: vi.fn().mockRejectedValue(new Error("transient R2 error")) };
+    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+
+    await service.syncBatch("LOCAL", [{ source_content_id: "s1", title: "T", summary: null, source_url: null, source_updated_at: null }]);
+
+    expect(entityState.rollbackFingerprint).toHaveBeenCalledWith(
+      { entity: "content", channelId: "LOCAL", secondaryId: "", sourceId: "s1" }
+    );
+  });
+
+  it("recordPublishedContent: rolls back the claimed key when the pipeline send rejects", async () => {
+    const entityState = createMockEntityState({ entityId: "c-uuid" });
+    const pipeline = { send: vi.fn().mockRejectedValue(new Error("transient R2 error")) };
+    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+
+    await service.recordPublishedContent("chan1", "X", "t1", "hello", { generatedFromContentId: "src1", flowId: "flow1" });
+
+    expect(entityState.rollbackFingerprint).toHaveBeenCalledWith(
+      { entity: "content", channelId: "chan1", secondaryId: "", sourceId: "t1" }
+    );
+  });
+
+  // Integration-level proof (real EntityStateStore, not a mock that just echoes calls back):
+  // after a failed send, the SAME logical write retried later must report `unchanged: false` and
+  // actually reach the pipeline — the exact property the ledger's Definition of Done asks for.
+  it("a failed send leaves the next call for the same key reporting unchanged: false and resending", async () => {
+    // Minimal in-memory D1 stub covering exactly what ContentService's claim-then-send path
+    // uses: INSERT OR IGNORE (claim's first attempt), the two UPDATE forms claim()/
+    // rollbackFingerprint() issue, and the plain SELECT claim() falls back to on a PK conflict.
+    const rows = new Map<string, Record<string, unknown>>();
+    const keyOf = (p: unknown[]) => p.slice(0, 5).join("\x1f");
+    const fakeDb = {
+      prepare(sql: string) {
+        return {
+          bind(...params: unknown[]) {
+            return {
+              async run() {
+                if (sql.includes("INSERT OR IGNORE INTO entity_state")) {
+                  const k = keyOf(params);
+                  if (rows.has(k)) return { meta: { changes: 0 } };
+                  rows.set(k, {
+                    tenant_id: params[0], entity: params[1], channel_id: params[2],
+                    secondary_id: params[3], source_id: params[4],
+                    entity_id: params[5], fingerprint: params[6],
+                  });
+                  return { meta: { changes: 1 } };
+                }
+                if (sql.includes("SET fingerprint = NULL")) {
+                  // rollbackFingerprint: (updatedAt, tenantId, entity, channelId, secondaryId, sourceId)
+                  const k = [params[1], params[2], params[3], params[4], params[5]].join("\x1f");
+                  const row = rows.get(k);
+                  if (row) row.fingerprint = null;
+                  return { meta: { changes: row ? 1 : 0 } };
+                }
+                if (sql.includes("UPDATE entity_state SET fingerprint")) {
+                  // claim()'s changed-branch: (fingerprint, updatedAt, tenantId, entity, channelId, secondaryId, sourceId)
+                  const k = [params[2], params[3], params[4], params[5], params[6]].join("\x1f");
+                  const row = rows.get(k);
+                  if (row) row.fingerprint = params[0];
+                  return { meta: { changes: row ? 1 : 0 } };
+                }
+                throw new Error(`fake D1: unhandled run() for ${sql}`);
+              },
+              async first() {
+                return rows.get(keyOf(params)) ?? null;
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const { EntityStateStore } = await import("../../src/services/entity-state");
+    const entityState = new EntityStateStore(fakeDb as any, 42);
+
+    const pipeline = { send: vi.fn() };
+    pipeline.send.mockRejectedValueOnce(new Error("transient R2 error"));
+    pipeline.send.mockResolvedValueOnce(undefined);
+    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+
+    const rawItem = { id: "t1", text: "hi" };
+    const resolvedProps = { source_content_id: "t1", content_text: "hi" };
+
+    // First call: claim() commits fingerprint F, send fails, rollback sets fingerprint back to NULL.
+    await service.upsertContentFromMetadata(rawItem, resolvedProps, "chan1", "X", false);
+    expect(pipeline.send).toHaveBeenCalledTimes(1);
+
+    // Second call with the IDENTICAL data: without the rollback, claim() would see the same
+    // fingerprint F already stored and report unchanged: true, so the pipeline would never be
+    // called again — this is the bug the fix closes. With the rollback, fingerprint is NULL,
+    // so claim() reports unchanged: false and the send is retried.
+    await service.upsertContentFromMetadata(rawItem, resolvedProps, "chan1", "X", false);
+    expect(pipeline.send).toHaveBeenCalledTimes(2);
   });
 });

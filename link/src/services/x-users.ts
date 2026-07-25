@@ -169,11 +169,21 @@ export class XUsersService {
     return record;
   }
 
-  private async sendUserRecord(record: Record<string, unknown>): Promise<void> {
+  // Mirrors content.ts's sendContentRecordOrRollback (final review I4). Both upsertUser and
+  // upsertUserFromMetadata call entityState.claim() before building/sending this record — claim()
+  // commits the new fingerprint durably up front, so a send that fails here would otherwise leave
+  // the fingerprint claiming success while the row never reached R2, and the next poll/webhook
+  // touch (computing the same fingerprint) would silently skip resending it forever. Rolling the
+  // fingerprint back to NULL on failure forces the next claim() for this key to report
+  // `unchanged: false`, so a transient send failure gets retried instead of stranding the row.
+  private async sendUserRecordOrRollback(record: Record<string, unknown>, key: EntityStateKey): Promise<void> {
     if (!this.pipelineUser) return;
-    await this.pipelineUser.send([record]).catch((err) => {
-      console.error(JSON.stringify({ event: "pipeline_user_error", userId: record.id, error: String(err) }));
-    });
+    try {
+      await this.pipelineUser.send([record]);
+    } catch (err) {
+      console.error(JSON.stringify({ event: "pipeline_user_error", userId: record.id, error: String(err), rolledBackFingerprint: true }));
+      await this.entityState.rollbackFingerprint(key);
+    }
   }
 
   // Only used by upsertUserFromMetadata, which never reads entity_state up front (unlike
@@ -301,7 +311,7 @@ export class XUsersService {
       { id: entityId, channelId, channelType, sourceUserId: user.id, isFollow, isFollowed, rawData, createdAt: now, updatedAt: now },
       mergedValues
     );
-    await this.sendUserRecord(record);
+    await this.sendUserRecordOrRollback(record, key);
     return entityId;
   }
 
@@ -364,7 +374,7 @@ export class XUsersService {
       { id, channelId, channelType, sourceUserId, isFollow, isFollowed, rawData, createdAt: now, updatedAt: now },
       trackedValues
     );
-    await this.sendUserRecord(record);
+    await this.sendUserRecordOrRollback(record, key);
 
     return isNew;
   }

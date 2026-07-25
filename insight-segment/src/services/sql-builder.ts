@@ -29,12 +29,22 @@ function literalFor(field: InsightField, v: string | number): string {
 //
 // Event rows are different: each is a discrete occurrence, not an entity with mutable "current
 // state", so an event condition is existence, not currency, and is safe to filter directly on
-// the joined row. The join targets `u.id` — the deduped subquery's id, which is stable across
-// all of a user's historical row versions (see link/src/services/entity-state.ts's claim()) —
-// so joining after dedup, rather than against the raw table, avoids re-introducing the
-// multiplicities QUALIFY just collapsed. LEFT JOIN (not INNER): an OR-logic segment must still
-// match a user with no qualifying event via the user-side clauses alone, and for AND-logic a
-// LEFT JOIN's NULL columns fail the AND clause just as an INNER JOIN's absence would.
+// the joined row. LEFT JOIN (not INNER): an OR-logic segment must still match a user with no
+// qualifying event via the user-side clauses alone, and for AND-logic a LEFT JOIN's NULL columns
+// fail the AND clause just as an INNER JOIN's absence would.
+//
+// The join key is NOT `u.id` — `uniscrm.user.id` and `uniscrm.event.user_id` live in two
+// different id domains (see docs/adr/0005 and the final review's C2): `id` is the uuid
+// link/src/services/entity-state.ts's EntityStateStore.claim() mints, but every `event` row's
+// `user_id` is written from the external platform id (webhook.ts's flattenUserPayload ->
+// x-users.ts's insertEvents -> buildEventRecord's userId, sourced from the X numeric user id —
+// see webhook.ts:295). Joining on `u.id` therefore never matches a single event row, silently
+// zeroing every event-conditioned segment. The correct join key is the SOURCE identity:
+// `source_user_id` (already in USER_DEDUP_COLUMNS below) plus `channel_id`, since a bare X id is
+// only unique within one channel. `tenant_id` is repeated on the event side (not just carried in
+// from the user subquery) because R2 SQL's window functions are budget-gated on estimated scan
+// size, and a JOIN's ON clause doesn't inherit the other side's WHERE for pruning purposes —
+// both tables need their own tenant_id predicate.
 //
 // NOTE: combining a JOIN with QUALIFY is the least-exercised path in this codebase (R2 SQL
 // gained JOINs 2026-05, QUALIFY 2026-06) — needs live verification once the R2 token works
@@ -87,7 +97,7 @@ export function buildSegmentQuery(
   const conditionGroup = clauses.length > 0 ? ` AND (${clauses.join(joiner)})` : "";
 
   const join = needsEvent
-    ? `\nLEFT JOIN uniscrm.event e ON e.user_id = u.id AND e.tenant_id = ${sqlInt(tenantId)}`
+    ? `\nLEFT JOIN uniscrm.event e ON e.user_id = u.source_user_id AND e.channel_id = u.channel_id AND e.tenant_id = ${sqlInt(tenantId)}`
     : "";
 
   const sql = `SELECT DISTINCT u.id FROM (

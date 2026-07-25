@@ -30,6 +30,7 @@ function createMockEntityState(overrides: Partial<{ entityId: string; isNew: boo
     claim: vi.fn().mockResolvedValue({ entityId: "u-uuid", isNew: true, unchanged: false, ...overrides }),
     get: vi.fn().mockResolvedValue(null),
     setFollow: vi.fn().mockResolvedValue(undefined),
+    rollbackFingerprint: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -65,6 +66,10 @@ function createFakeEntityState() {
     setFollow: vi.fn(async (key: any, field: "is_follow" | "is_followed", value: 0 | 1) => {
       const existing = rows.get(k(key));
       if (existing) existing[field] = value;
+    }),
+    rollbackFingerprint: vi.fn(async (key: any) => {
+      const existing = rows.get(k(key));
+      if (existing) existing.fingerprint = null as any;
     }),
   };
 }
@@ -682,5 +687,117 @@ describe("XUsersService.insertEvents pipeline record", () => {
 
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+});
+
+// Final review I4: both upsertUser and upsertUserFromMetadata call entityState.claim() (which
+// commits the new fingerprint durably) BEFORE the pipelineUser send. The old sendUserRecord just
+// logged and swallowed a failed send — leaving the fingerprint claiming success while the row
+// never reached R2, so the next poll/webhook touch computes the same fingerprint, sees it already
+// matches, and never resends (content.ts's identical bug — see content.test.ts's mirror suite).
+// The fix rolls the fingerprint back to NULL on a failed send, so the next claim() for that key
+// is guaranteed to report unchanged: false.
+describe("pipeline send failure rolls back the entity_state fingerprint (final review I4)", () => {
+  it("upsertUser: rolls back the claimed key when the pipeline send rejects", async () => {
+    const entityState = createMockEntityState({ entityId: "u-uuid", isNew: true, unchanged: false });
+    const pipelineUser = { send: vi.fn().mockRejectedValue(new Error("transient R2 error")) };
+    const service = new XUsersService(entityState as any, { pipelineUser: pipelineUser as any, tenantId: 42 });
+
+    await service.upsertUser({ id: "u1", name: "Ada" } as any, "chan1", "X");
+
+    expect(pipelineUser.send).toHaveBeenCalledTimes(1);
+    expect(entityState.rollbackFingerprint).toHaveBeenCalledWith(
+      { entity: "user", channelId: "chan1", sourceId: "u1" }
+    );
+  });
+
+  it("upsertUser: does NOT roll back when the send succeeds", async () => {
+    const entityState = createMockEntityState({ entityId: "u-uuid", isNew: true, unchanged: false });
+    const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new XUsersService(entityState as any, { pipelineUser: pipelineUser as any, tenantId: 42 });
+
+    await service.upsertUser({ id: "u1", name: "Ada" } as any, "chan1", "X");
+
+    expect(entityState.rollbackFingerprint).not.toHaveBeenCalled();
+  });
+
+  it("upsertUserFromMetadata: rolls back the claimed key when the pipeline send rejects", async () => {
+    const entityState = createMockEntityState({ entityId: "u-uuid", isNew: true, unchanged: false });
+    const pipelineUser = { send: vi.fn().mockRejectedValue(new Error("transient R2 error")) };
+    const service = new XUsersService(entityState as any, { pipelineUser: pipelineUser as any, tenantId: 42 });
+
+    await service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1", followers_count: 10 }, "chan1", "X");
+
+    expect(entityState.rollbackFingerprint).toHaveBeenCalledWith(
+      { entity: "user", channelId: "chan1", sourceId: "u1" }
+    );
+  });
+
+  // Integration-level proof (real EntityStateStore, not a mock that just echoes calls back):
+  // after a failed send, the SAME logical write retried later must report unchanged: false and
+  // actually reach the pipeline again.
+  it("a failed send leaves the next call for the same key reporting unchanged: false and resending", async () => {
+    const rows = new Map<string, Record<string, unknown>>();
+    const keyOf = (p: unknown[]) => p.slice(0, 5).join("\x1f");
+    const fakeDb = {
+      prepare(sql: string) {
+        return {
+          bind(...params: unknown[]) {
+            return {
+              async run() {
+                if (sql.includes("INSERT OR IGNORE INTO entity_state")) {
+                  const k = keyOf(params);
+                  if (rows.has(k)) return { meta: { changes: 0 } };
+                  rows.set(k, {
+                    tenant_id: params[0], entity: params[1], channel_id: params[2],
+                    secondary_id: params[3], source_id: params[4],
+                    entity_id: params[5], fingerprint: params[6],
+                    is_follow: null, is_followed: null,
+                  });
+                  return { meta: { changes: 1 } };
+                }
+                if (sql.includes("SET fingerprint = NULL")) {
+                  const k = [params[1], params[2], params[3], params[4], params[5]].join("\x1f");
+                  const row = rows.get(k);
+                  if (row) row.fingerprint = null;
+                  return { meta: { changes: row ? 1 : 0 } };
+                }
+                if (sql.includes("UPDATE entity_state SET fingerprint")) {
+                  const k = [params[2], params[3], params[4], params[5], params[6]].join("\x1f");
+                  const row = rows.get(k);
+                  if (row) row.fingerprint = params[0];
+                  return { meta: { changes: row ? 1 : 0 } };
+                }
+                if (sql.includes("UPDATE entity_state SET is_follow") || sql.includes("UPDATE entity_state SET is_followed")) {
+                  return { meta: { changes: 1 } };
+                }
+                throw new Error(`fake D1: unhandled run() for ${sql}`);
+              },
+              async first() {
+                return rows.get(keyOf(params)) ?? null;
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const { EntityStateStore } = await import("../../src/services/entity-state");
+    const entityState = new EntityStateStore(fakeDb as any, 42);
+
+    const pipelineUser = { send: vi.fn() };
+    pipelineUser.send.mockRejectedValueOnce(new Error("transient R2 error"));
+    pipelineUser.send.mockResolvedValueOnce(undefined);
+    const service = new XUsersService(entityState as any, { pipelineUser: pipelineUser as any, tenantId: 42 });
+
+    const resolvedProps = { source_user_id: "u1", followers_count: 10 };
+
+    await service.upsertUserFromMetadata({ id: "u1" }, resolvedProps, "chan1", "X");
+    expect(pipelineUser.send).toHaveBeenCalledTimes(1);
+
+    // Without the rollback, claim() would see the same fingerprint already stored and report
+    // unchanged: true, so the pipeline would never be called again.
+    await service.upsertUserFromMetadata({ id: "u1" }, resolvedProps, "chan1", "X");
+    expect(pipelineUser.send).toHaveBeenCalledTimes(2);
   });
 });

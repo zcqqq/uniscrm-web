@@ -26,6 +26,16 @@ function createFakeD1() {
                 });
                 return { meta: { changes: 1 } };
               }
+              // Check the NULL-rollback form before the general "SET fingerprint = ?" branch:
+              // both contain the substring "UPDATE entity_state SET fingerprint", but their
+              // bound-param shapes differ (rollbackFingerprint has no leading fingerprint
+              // param, since the SQL hardcodes NULL rather than binding it).
+              if (sql.includes("SET fingerprint = NULL")) {
+                const k = [params[1], params[2], params[3], params[4], params[5]].join("\x1f");
+                const row = rows.get(k);
+                if (row) { row.fingerprint = null; row.updated_at = params[0]; }
+                return { meta: { changes: row ? 1 : 0 } };
+              }
               if (sql.includes("UPDATE entity_state SET fingerprint")) {
                 const k = [params[2], params[3], params[4], params[5], params[6]].join("\x1f");
                 const row = rows.get(k);
@@ -137,6 +147,51 @@ describe("EntityStateStore.claim", () => {
     const b = await other.claim(key, "fp");
     expect(b.isNew).toBe(true);
     expect(b.entityId).not.toBe(a.entityId);
+  });
+});
+
+// Final review I4: a caller (content.ts/x-users.ts) whose R2 pipeline send fails AFTER claim()
+// already committed the new fingerprint calls this to undo that commit, so the row isn't
+// permanently mistaken for "already sent, nothing changed" on the next attempt.
+describe("EntityStateStore.rollbackFingerprint", () => {
+  it("sets the stored fingerprint back to null without touching entity_id", async () => {
+    const db = createFakeD1();
+    const store = new EntityStateStore(db as any, 7);
+    const key = { entity: "user" as const, channelId: "c1", sourceId: "s1" };
+    const { entityId } = await store.claim(key, "fp1");
+
+    await store.rollbackFingerprint(key);
+
+    const row = await store.get(key);
+    expect(row?.fingerprint).toBeNull();
+    expect(row?.entity_id).toBe(entityId);
+  });
+
+  // The whole point: after a rollback, re-claiming with the SAME fingerprint that was just
+  // rolled back must report unchanged: false (a real hex digest never equals NULL), forcing a
+  // resend on retry instead of the row being silently skipped forever.
+  it("makes the next claim() with the SAME fingerprint report unchanged: false", async () => {
+    const db = createFakeD1();
+    const store = new EntityStateStore(db as any, 7);
+    const key = { entity: "content" as const, channelId: "c1", sourceId: "s1" };
+    await store.claim(key, "fp1");
+
+    await store.rollbackFingerprint(key);
+
+    const retried = await store.claim(key, "fp1");
+    expect(retried.unchanged).toBe(false);
+  });
+
+  it("does not affect is_follow/is_followed", async () => {
+    const db = createFakeD1();
+    const store = new EntityStateStore(db as any, 7);
+    const key = { entity: "user" as const, channelId: "c1", sourceId: "s1" };
+    const { entityId } = await store.claim(key, "fp1");
+    await store.setFollow(key, "is_follow", 1);
+
+    await store.rollbackFingerprint(key);
+
+    expect(await store.getFollowByEntityId(entityId)).toEqual({ is_follow: 1, is_followed: null });
   });
 });
 

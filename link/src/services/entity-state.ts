@@ -122,6 +122,27 @@ export class EntityStateStore {
       .run();
   }
 
+  // Undoes claim()'s fingerprint commit when the caller's R2 pipeline send failed AFTER claim()
+  // already recorded the new fingerprint as durable (final review I4). Without this, a transient
+  // pipeline error permanently strands the row: claim() commits fingerprint=F, the send to R2
+  // rejects, and the caller only logs — the next poll/webhook computes the SAME fingerprint F,
+  // sees it already matches, and skips resending forever (content.ts:306's `unchanged` early
+  // return, and the mirror in x-users.ts). Setting fingerprint back to NULL (rather than trying
+  // to restore the prior value) is deliberately simple and always correct: fingerprintOf's SHA-256
+  // output is never NULL, so the next claim() call — whatever fingerprint it computes — is
+  // guaranteed to mismatch NULL and take the "changed" branch (unchanged: false), forcing a
+  // resend. entity_id and every other column are untouched — this only ever un-claims the
+  // fingerprint, never the identity.
+  async rollbackFingerprint(key: EntityStateKey): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE entity_state SET fingerprint = NULL, updated_at = ?
+         WHERE tenant_id = ? AND entity = ? AND channel_id = ? AND secondary_id = ? AND source_id = ?`
+      )
+      .bind(new Date().toISOString(), this.tenantId, key.entity, key.channelId, this.sec(key), key.sourceId)
+      .run();
+  }
+
   async getFollowByEntityId(
     entityId: string
   ): Promise<{ is_follow: number | null; is_followed: number | null } | null> {

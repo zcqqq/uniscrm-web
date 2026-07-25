@@ -218,6 +218,84 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — content domain reads R2 only
   });
 });
 
+// I3 regression guard: flow_log.user_id is flow's own user identity — the EXTERNAL platform id
+// (X's numeric user id), never uniscrm.user's minted uuid `id` (see resolveUserPropsForFilter's
+// comment in src/index.ts and docs/adr/0005). getUserNames used to filter `id IN (...)` against
+// that X-id population, which never matches a real uniscrm.user row — every node-log drawer
+// rendered every row nameless. This test exercises the full route (not getUserNames directly) so
+// a regression is caught at the same boundary a real request hits it.
+describe("GET /api/flows/:id/nodes/:nodeId/logs — user domain name lookup keys on source_user_id", () => {
+  const TENANT_ID = 2002;
+  const FLOW_ID = "77777777-7777-7777-7777-777777777777";
+  const NODE_ID = "88888888-8888-8888-8888-888888888888";
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  function req(path: string) {
+    return new Request(`https://flow.test${path}`, { headers: { Cookie: "session=test" } });
+  }
+
+  beforeEach(async () => {
+    fetchMock = vi.fn(async (url: string, init?: any) => {
+      if (String(url).includes("/api/auth/me")) {
+        return new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: String(TENANT_ID) } }), { status: 200 });
+      }
+      const parsedBody = init?.body ? JSON.parse(init.body as string) : {};
+      if (typeof parsedBody.query === "string" && parsedBody.query.includes("FROM uniscrm.flow_log")) {
+        return mockR2Response([
+          { user_id: "x-42", created_at: "2026-01-01T00:00:00.000Z", direction: "enter", outcome: null, title: null, content_text: null, content_url: null },
+        ]);
+      }
+      // getUserNames' query against uniscrm.user — keyed by source_user_id, which is what a
+      // poller/webhook wrote for X user "x-42" (see link/src/services/x-users.ts's
+      // buildUserRecord). No `id` field on this row on purpose: a caller that regresses to
+      // reading `r.id` (instead of `r.source_user_id`) gets `undefined` back, and the name lookup
+      // below fails too — two independent ways this test catches that mutation.
+      return mockR2Response([{ source_user_id: "x-42", name: "Ann", username: "ann" }]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await env.FLOW_DB.prepare(
+      `CREATE TABLE IF NOT EXISTS flows (
+         id TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, member_id TEXT NOT NULL DEFAULT '',
+         name TEXT NOT NULL DEFAULT 'Untitled Flow', description TEXT DEFAULT '',
+         graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}', domain TEXT NOT NULL DEFAULT 'user',
+         status TEXT NOT NULL DEFAULT 'draft',
+         created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+       )`
+    ).run();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, graph_json, status, created_at, updated_at) VALUES (?, ?, '{"nodes":[],"edges":[]}', 'published', datetime('now'), datetime('now'))`
+    ).bind(FLOW_ID, TENANT_ID).run();
+  });
+
+  afterEach(async () => {
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE tenant_id = ?`).bind(TENANT_ID).run();
+    vi.unstubAllGlobals();
+  });
+
+  it("looks the node-log user_id up by source_user_id, not id, and renders the resolved name", async () => {
+    const res = await worker.fetch(req(`/api/flows/${FLOW_ID}/nodes/${NODE_ID}/logs`), env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { logs: any[] };
+    expect(body.logs).toEqual([{
+      user_id: "x-42", name: "Ann", created_at: "2026-01-01T00:00:00.000Z",
+      outcome: undefined, failure_reason: null,
+    }]);
+
+    const userQueryCall = fetchMock.mock.calls.find((c) => {
+      try {
+        return JSON.parse((c[1] as any)?.body as string)?.query?.includes("FROM uniscrm.user");
+      } catch {
+        return false;
+      }
+    });
+    expect(userQueryCall).toBeDefined();
+    const userQueryBody = JSON.parse((userQueryCall![1] as any).body as string);
+    expect(userQueryBody.query).toContain("source_user_id IN ('x-42')");
+    expect(userQueryBody.query).not.toMatch(/(?<!source_user_)\bid IN \(/);
+  });
+});
+
 // Regression: a YouTube-only content flow has no "xContentTrigger" substring anywhere in its
 // graph_json (only "youtubeContentTrigger"). Domain classification must still recognize it as
 // content-domain — querying uniscrm.content_flow_log by content_id — matching the frontend's

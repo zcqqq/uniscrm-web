@@ -1,7 +1,7 @@
 import type { ContentRow, ChannelType, Pipeline } from "../types";
 import type { ChannelItem } from "../channels/interface";
 import type { R2SqlEnv } from "../../../shared/r2-sql";
-import { EntityStateStore, fingerprintOf } from "./entity-state";
+import { EntityStateStore, fingerprintOf, type EntityStateKey } from "./entity-state";
 import { listContents, getContent } from "./r2-entities";
 
 const EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5";
@@ -171,6 +171,26 @@ export class ContentService {
     });
   }
 
+  // For call sites that just claim()'d a NEW fingerprint before sending (syncBatch,
+  // upsertContentFromMetadata, recordPublishedContent): claim() commits the fingerprint durably
+  // before this send even starts. Swallowing a failed send the way sendContentRecord does would
+  // permanently strand the row — the next call computes the SAME fingerprint, sees it already
+  // matches what claim() just committed, and reports `unchanged: true` forever (final review I4).
+  // Rolling the fingerprint back on failure keeps `entity_id` stable while making the NEXT claim()
+  // for this key report `unchanged: false`, so a transient failure gets retried on the next poll
+  // instead of silently losing the update. Every OTHER sendContentRecord call site
+  // (update/delete/deleteByKnownIdentity) does not call claim() immediately before sending, so
+  // this class of staleness doesn't apply there — swallow-and-log is unchanged for those.
+  private async sendContentRecordOrRollback(record: Record<string, unknown>, key: EntityStateKey): Promise<void> {
+    if (!this.pipelineContent) return;
+    try {
+      await this.pipelineContent.send([record]);
+    } catch (err) {
+      console.error(JSON.stringify({ event: "pipeline_content_error", contentId: record.id, error: String(err), rolledBackFingerprint: true }));
+      await this.entityState.rollbackFingerprint(key);
+    }
+  }
+
   async syncBatch(
     channelType: ChannelType,
     items: ChannelItem[]
@@ -226,7 +246,7 @@ export class ContentService {
         { id, channelId: channelType, channelType, sourceContentId: item.source_content_id, listId: null, rawData, createdAt: now, updatedAt: now },
         values
       );
-      await this.sendContentRecord(record);
+      await this.sendContentRecordOrRollback(record, key);
 
       if (isNew) added++;
       else updated++;
@@ -309,7 +329,7 @@ export class ContentService {
         { id, channelId, channelType, sourceContentId, listId, rawData, createdAt: now, updatedAt: now },
         columnValues
       );
-      await this.sendContentRecord(record);
+      await this.sendContentRecordOrRollback(record, key);
     }
 
     if (isNew && emitFlowEvent && this.flowQueue) {
@@ -346,10 +366,8 @@ export class ContentService {
     // flow logs / Vectorize / ref.generatedFromContentId all key off `id`. Route through
     // entityState.claim like every other writer so the id is stable per business key.
     const fingerprint = await fingerprintOf(values, ["content_type", "content_text"]);
-    const { entityId: id } = await this.entityState.claim(
-      { entity: "content", channelId, secondaryId: "", sourceId: sourceContentId },
-      fingerprint
-    );
+    const key: EntityStateKey = { entity: "content", channelId, secondaryId: "", sourceId: sourceContentId };
+    const { entityId: id } = await this.entityState.claim(key, fingerprint);
     const rawData = JSON.stringify(ref);
 
     // `status` no longer exists as an R2 column — the plan drops the concept entirely
@@ -358,7 +376,7 @@ export class ContentService {
       { id, channelId, channelType, sourceContentId, listId: null, rawData, createdAt: now, updatedAt: now },
       values
     );
-    await this.sendContentRecord(record);
+    await this.sendContentRecordOrRollback(record, key);
   }
 
   async recordTriggerContentSeen(

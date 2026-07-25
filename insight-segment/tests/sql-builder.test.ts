@@ -31,6 +31,25 @@ describe("buildSegmentQuery", () => {
     expect(noEvent).not.toContain("uniscrm.event");
   });
 
+  // C2 regression guard: `uniscrm.user.id` (the deduped subquery's `u.id`) is entity_state's
+  // minted uuid, while `uniscrm.event.user_id` is written from the external platform id (see
+  // link/src/services/x-users.ts's buildEventRecord and webhook.ts:295) — the two are different
+  // id domains (docs/adr/0005). Joining on `u.id` never matches a real event row, so every
+  // event-conditioned segment silently resolves to zero users. The join must key on the SOURCE
+  // identity instead: source_user_id + channel_id (source_user_id alone isn't unique across
+  // channels). tenant_id must appear on the event side too, for R2 SQL's window-function budget
+  // gate (see the sql-builder.ts comment above the join).
+  it("joins uniscrm.event on the source identity (source_user_id + channel_id), never on u.id", () => {
+    const { sql } = buildSegmentQuery(
+      { logic: "AND", conditions: [{ field: "event_type", operator: "=", value: "purchase" }] },
+      fields, 7
+    );
+    expect(sql).toContain(
+      "LEFT JOIN uniscrm.event e ON e.user_id = u.source_user_id AND e.channel_id = u.channel_id AND e.tenant_id = 7"
+    );
+    expect(sql).not.toContain("e.user_id = u.id");
+  });
+
   it("escapes string values instead of interpolating them raw", () => {
     const { sql } = buildSegmentQuery(
       { logic: "AND", conditions: [{ field: "name", operator: "=", value: "o'brien" }] },

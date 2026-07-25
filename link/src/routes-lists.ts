@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
-import { getUserDisplayNames } from "./services/r2-entities";
+import { getUserDisplayNamesMixed } from "./services/r2-entities";
 import { R2SqlError } from "../../shared/r2-sql";
 
 export function listsRoutes() {
@@ -66,11 +66,16 @@ export function listsRoutes() {
     // now that `user` rows only live in R2. A silent empty `users` array would look identical
     // to "list has no members", so an R2 failure must surface as an error rather than being
     // swallowed the way the old `tdb &&` guard did.
+    //
+    // getUserDisplayNamesMixed (not getUserDisplayNames): list_users.user_id is a MIXED
+    // population — a uuid for UI-added members, an X numeric id for members flow's addToList
+    // action added (see r2-entities.ts's doc comment on getUserDisplayNamesMixed for why a
+    // single `id IN (...)` lookup left every flow-added row blank, final review I3).
     let users: { id: string; name: string | null; username: string | null; added_at: string }[] = [];
     if (listUserRows.length > 0) {
       const ids = listUserRows.map((r) => r.user_id);
       try {
-        const names = await getUserDisplayNames(c.env, tenantId, ids);
+        const names = await getUserDisplayNamesMixed(c.env, tenantId, ids);
         users = listUserRows.map((r) => {
           const display = names.get(r.user_id);
           return {

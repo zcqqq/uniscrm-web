@@ -222,47 +222,64 @@ export class XUsersService {
       if (col in resolved) webhookValues[col] = resolved[col];
     }
 
-    // The webhook only ever knows name/username/profile_image_url — never follower counts,
-    // verified_type etc. Overlaying webhookValues onto the poller's last-known row (rather
-    // than sending webhookValues alone) is what keeps those columns from being nulled out by
-    // every DM/chat/follow touch (task-5 fix round, Important 2). Skipped for a brand-new
-    // user: there is nothing to merge with.
+    // A pipeline write is the only thing that can null out a column, so read-modify-write (and
+    // its r2Env requirement) only matters when a write is actually about to happen (task-5 fix
+    // round 2, Important). A tenant with no pipeline configured yet — or one configured without
+    // r2Env — still needs claim()/setFollow() below to run unconditionally: entity_state.
+    // is_follow/is_followed is what the workflow engine reads on every action and must never
+    // stop being maintained, mid-rollout or not. So a missing r2Env is remembered here and
+    // thrown only AFTER claim()/setFollow() run, never before.
+    const willWriteToR2 = Boolean(this.pipelineUser && this.tenantId);
+    const r2Env = this.r2Env;
+    const tenantId = this.tenantId;
+
     let mergedValues = webhookValues;
-    if (!isNew) {
-      const r2Env = this.r2Env;
-      const tenantId = this.tenantId;
-      if (!r2Env || !tenantId) {
-        throw new Error("XUsersService.upsertUser: existing user requires r2Env and tenantId for read-modify-write");
-      }
-      // No R2 read for a brand-new user (isNew above) — only existing users pay this cost,
-      // never the poller's per-tick, hundreds-of-followers loop (that's upsertUserFromMetadata,
-      // which never reads R2 at all — see its comment).
-      const priorRow = await getUserBySource(r2Env, tenantId, channelId, user.id);
-      if (priorRow) {
-        const priorValues: Record<string, unknown> = {};
-        for (const col of R2_USER_VALUE_COLUMNS) priorValues[col] = priorRow[col];
-        mergedValues = { ...priorValues, ...webhookValues };
+    let missingR2EnvForMerge = false;
+    if (willWriteToR2 && !isNew) {
+      if (!r2Env) {
+        // Deferred — see the comment above. A pipeline write without this merge would null
+        // out every metric column the poller last populated, the exact damage Important 2
+        // exists to prevent, so this is a real misconfiguration and must still fail loudly.
+        missingR2EnvForMerge = true;
+      } else {
+        // No R2 read for a brand-new user (isNew above), and none at all when no pipeline is
+        // configured — only an existing user with an active pipeline pays this cost, never
+        // the poller's per-tick, hundreds-of-followers loop (that's upsertUserFromMetadata,
+        // which never reads R2 — see its comment).
+        const priorRow = await getUserBySource(r2Env, tenantId!, channelId, user.id);
+        if (priorRow) {
+          const priorValues: Record<string, unknown> = {};
+          for (const col of R2_USER_VALUE_COLUMNS) priorValues[col] = priorRow[col];
+          mergedValues = { ...priorValues, ...webhookValues };
+        }
       }
     }
 
     // Fingerprint over the exact same field list upsertUserFromMetadata uses
-    // (R2_USER_VALUE_COLUMNS), computed over the MERGED row — this is what lets the two
-    // writers' fingerprints agree when nothing has actually changed (Important 2).
+    // (R2_USER_VALUE_COLUMNS), computed over the MERGED row when a merge happened — this is
+    // what lets the two writers' fingerprints agree when nothing has actually changed
+    // (Important 2).
     const fingerprint = await fingerprintOf(mergedValues, R2_USER_VALUE_COLUMNS);
     const { entityId, unchanged } = await this.entityState.claim(key, fingerprint);
 
-    // Written unconditionally (even when the R2 pipeline below ends up skipped) so a
-    // tenant with no pipeline configured still gets correct flow-trigger behavior — flow
-    // reads entity_state, never R2, for this.
+    // Written unconditionally — even ahead of the throw below — so a misconfigured or
+    // not-yet-fully-wired tenant still gets correct flow-trigger behavior; flow reads
+    // entity_state, never R2, for this.
     if (follow?.is_follow !== undefined) await this.entityState.setFollow(key, "is_follow", follow.is_follow);
     if (follow?.is_followed !== undefined) await this.entityState.setFollow(key, "is_followed", follow.is_followed);
+
+    if (missingR2EnvForMerge) {
+      throw new Error(
+        "XUsersService.upsertUser: existing user with a pipeline configured requires r2Env to merge the R2 row — without it, this write would null out every column the poller last populated"
+      );
+    }
 
     // A follow-state change must still produce an R2 row even if name/username/avatar are
     // byte-identical to the last snapshot — R2 has no column-wise update, so the D1 write
     // above would be invisible to R2 readers (Users list) otherwise.
     const changedFollow = follow !== undefined;
     if (unchanged && !changedFollow) return entityId;
-    if (!this.pipelineUser || !this.tenantId) return entityId;
+    if (!willWriteToR2) return entityId;
 
     // existingState already carries the currently-stored follow bits (fetched above) — no
     // extra D1 round trip needed here, unlike upsertUserFromMetadata's resolveFollow.

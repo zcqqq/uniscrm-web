@@ -229,6 +229,31 @@ describe("XUsersService.upsertUser", () => {
   // --- Important 2 (task-5 fix round): read-modify-write for existing users ---
 
   describe("read-modify-write for an existing user", () => {
+    // task-5 fix round 2: a caller with no pipeline at all (tenantId set, but no pipelineUser
+    // and no r2Env — e.g. it only wants the stable entity id / follow-state bookkeeping) must
+    // not be blocked by the r2Env requirement, which only exists to protect a pipeline WRITE.
+    // Regression the re-reviewer caught in round 1: the throw fired before claim()/setFollow()
+    // ever ran, so entity_state bookkeeping — which must never stop — stopped too.
+    it("does not throw and still runs claim/setFollow when no pipeline is configured at all", async () => {
+      const entityState = {
+        claim: vi.fn().mockResolvedValue({ entityId: "u-uuid", isNew: false, unchanged: false }),
+        get: vi.fn().mockResolvedValue({ entity_id: "u-uuid", fingerprint: "x", is_follow: 0, is_followed: 0 }),
+        setFollow: vi.fn().mockResolvedValue(undefined),
+      };
+      // tenantId set, but no pipelineUser and no r2Env.
+      const service = new XUsersService(entityState as any, { tenantId: 42 });
+
+      const id = await service.upsertUser({ id: "x1", name: "Ann" } as any, "chan1", "X", { is_follow: 1 });
+
+      expect(id).toBe("u-uuid");
+      expect(entityState.claim).toHaveBeenCalledTimes(1);
+      expect(entityState.setFollow).toHaveBeenCalledWith(
+        expect.objectContaining({ entity: "user", channelId: "chan1", sourceId: "x1" }),
+        "is_follow",
+        1
+      );
+    });
+
     it("merges the poller's last-known metric columns into the webhook's row instead of nulling them out", async () => {
       const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
       const entityState = {
@@ -250,18 +275,30 @@ describe("XUsersService.upsertUser", () => {
       expect(record.verified_type).toBe("blue");
     });
 
-    it("throws a clear error when r2Env is not configured", async () => {
+    // task-5 fix round 2: a pipeline write without the merge would null out every metric
+    // column the poller last populated — a real misconfiguration, so it must still throw.
+    // But claim()/setFollow() must run first (see the two tests in the next describe block):
+    // entity_state bookkeeping must never stop just because R2 wiring is incomplete.
+    it("throws when a pipeline is configured but r2Env is missing — after claim/setFollow still ran", async () => {
       const entityState = {
-        claim: vi.fn(),
+        claim: vi.fn().mockResolvedValue({ entityId: "u-uuid", isNew: false, unchanged: false }),
         get: vi.fn().mockResolvedValue({ entity_id: "u-uuid", fingerprint: "x", is_follow: 0, is_followed: 0 }),
-        setFollow: vi.fn(),
+        setFollow: vi.fn().mockResolvedValue(undefined),
       };
       // No third (r2Env) constructor argument.
       const service = new XUsersService(entityState as any, { pipelineUser: { send: vi.fn() } as any, tenantId: 42 });
 
-      await expect(
-        service.upsertUser({ id: "x1", name: "Ann" } as any, "chan1", "X")
-      ).rejects.toThrow(/r2Env/);
+      let error: Error | undefined;
+      try {
+        await service.upsertUser({ id: "x1", name: "Ann" } as any, "chan1", "X", { is_follow: 1 });
+      } catch (e) {
+        error = e as Error;
+      }
+
+      expect(error?.message).toMatch(/r2Env/);
+      expect(error?.message).toMatch(/merge/);
+      expect(entityState.claim).toHaveBeenCalledTimes(1);
+      expect(entityState.setFollow).toHaveBeenCalledWith(expect.anything(), "is_follow", 1);
     });
 
     it("falls back to the webhook's own fields (no throw) when the prior R2 row hasn't landed yet", async () => {

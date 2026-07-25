@@ -4,7 +4,7 @@ import { buildSQL, buildSnapshotSQL, buildDimensionRangeSQL } from "../../src/in
 describe("buildSnapshotSQL", () => {
   it("builds a plain count query with no dimension", () => {
     const sql = buildSnapshotSQL("uniscrm.user", { measure: "count" }, "1");
-    expect(sql).toContain("SELECT COUNT(*) as value");
+    expect(sql).toContain("SELECT COUNT(DISTINCT id) as value");
     expect(sql).toContain("FROM uniscrm.user");
     expect(sql).toContain("WHERE tenant_id = 1");
     expect(sql).not.toContain("GROUP BY");
@@ -182,6 +182,55 @@ describe("buildSQL interval filters", () => {
   it("omits filter clauses entirely when none are provided (regression check)", () => {
     const sql = buildSQL("interval", { event_type_a: "a", event_type_b: "b" }, "1");
     expect(sql.trim().endsWith("next_type = 'b'")).toBe(true);
+  });
+});
+
+// R2 Pipelines deliver at-least-once, so the same worker-generated row id can land in the
+// Iceberg table more than once (observed on uniscrm.event). Unlike user/content, the event
+// table has no compaction pass, so COUNT(*) silently over-counts. Every row-counting
+// aggregate must count distinct ids instead.
+describe("buildSQL at-least-once duplicate safety", () => {
+  it("counts distinct event ids in total mode", () => {
+    const sql = buildSQL("event", { event_type: "follow.follow", measure: "count", granularity: "total" }, "1");
+    expect(sql).toContain("COUNT(DISTINCT id) as value");
+    expect(sql).not.toContain("COUNT(*)");
+  });
+
+  it("counts distinct event ids in time-grouped mode", () => {
+    const sql = buildSQL("event", { event_type: "follow.follow", measure: "count", granularity: "day" }, "1");
+    expect(sql).toContain("COUNT(DISTINCT id) as value");
+    expect(sql).not.toContain("COUNT(*)");
+  });
+
+  it("uses distinct event ids as the numerator of the per-user average", () => {
+    const sql = buildSQL("event", { event_type: "follow.follow", measure: "avg", granularity: "day" }, "1");
+    expect(sql).toContain("COUNT(DISTINCT id) as total");
+    expect(sql).toContain("COUNT(DISTINCT user_id) as users");
+    expect(sql).not.toContain("COUNT(*)");
+  });
+
+  it("uses distinct ids for the total-mode per-user average", () => {
+    const sql = buildSQL("event", { event_type: "follow.follow", measure: "avg", granularity: "total" }, "1");
+    expect(sql).toContain("CAST(COUNT(DISTINCT id) AS DOUBLE) / NULLIF(COUNT(DISTINCT user_id), 0)");
+    expect(sql).not.toContain("COUNT(*)");
+  });
+
+  it("counts distinct ids in snapshot (user/content) mode", () => {
+    expect(buildSnapshotSQL("uniscrm.user", { measure: "count" }, "1")).toContain("COUNT(DISTINCT id) as value");
+    expect(buildSnapshotSQL("uniscrm.content", { measure: "count" }, "1")).not.toContain("COUNT(*)");
+  });
+
+  it("leaves the unique-users measure alone — already duplicate-safe", () => {
+    const sql = buildSQL("event", { event_type: "follow.follow", measure: "users", granularity: "day" }, "1");
+    expect(sql).toContain("COUNT(DISTINCT user_id) as value");
+  });
+
+  it("keeps COUNT(*) in funnel steps, which count rows of a user_id-grouped CTE", () => {
+    // Each stepN CTE is `GROUP BY user_id`, so its rows are already one-per-user —
+    // base-table duplicates cannot inflate it, and COUNT(DISTINCT) would be noise.
+    const sql = buildSQL("funnel", { steps: ["a", "b"], window_value: 7, window_unit: "day" }, "1");
+    expect(sql).toContain("COUNT(*) as count FROM step1");
+    expect(sql).toContain("COUNT(*) as count FROM step2");
   });
 });
 

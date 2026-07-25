@@ -503,7 +503,7 @@ export function buildSQL(type: string, params: Record<string, unknown>, tenantId
 
     // Total (aggregate) mode — no time grouping
     if (gran === "total") {
-      const agg = measure === "users" ? "COUNT(DISTINCT user_id)" : measure === "avg" ? "CAST(COUNT(*) AS DOUBLE) / NULLIF(COUNT(DISTINCT user_id), 0)" : "COUNT(*)";
+      const agg = measure === "users" ? "COUNT(DISTINCT user_id)" : measure === "avg" ? "CAST(COUNT(DISTINCT id) AS DOUBLE) / NULLIF(COUNT(DISTINCT user_id), 0)" : "COUNT(DISTINCT id)";
       return `${boundsCte}SELECT 'total' as period${dimCol}, ${agg} as value
 FROM uniscrm.event${fromExtra}
 WHERE tenant_id = ${tenantId} ${eventScopeFilter}${dimGroupCol ? ` GROUP BY ${dimGroupCol}` : ""}`;
@@ -517,14 +517,14 @@ WHERE tenant_id = ${tenantId} ${eventScopeFilter}${dimGroupCol ? ` GROUP BY ${di
 
     if (measure === "avg") {
       return `${boundsCte}SELECT period${dimCol ? ", dimension" : ""}, CAST(total AS DOUBLE) / NULLIF(users, 0) as value FROM (
-  SELECT ${periodExpr} as period${dimCol}, COUNT(*) as total, COUNT(DISTINCT user_id) as users
+  SELECT ${periodExpr} as period${dimCol}, COUNT(DISTINCT id) as total, COUNT(DISTINCT user_id) as users
   FROM uniscrm.event${fromExtra}
   WHERE tenant_id = ${tenantId} ${eventScopeFilter}
   GROUP BY period${dimGroupCol ? `, ${dimGroupCol}` : ""}
 ) ORDER BY period`;
     }
 
-    const agg = measure === "users" ? "COUNT(DISTINCT user_id)" : "COUNT(*)";
+    const agg = measure === "users" ? "COUNT(DISTINCT user_id)" : "COUNT(DISTINCT id)";
     return `${boundsCte}SELECT ${periodExpr} as period${dimCol}, ${agg} as value
 FROM uniscrm.event${fromExtra}
 WHERE tenant_id = ${tenantId} ${eventScopeFilter}
@@ -767,9 +767,13 @@ export function buildSnapshotSQL(tableName: string, params: Record<string, unkno
       : " GROUP BY dimension ORDER BY dimension";
   }
 
+  // Row counts must be distinct-by-id: pipelines deliver at-least-once, and compaction
+  // (which dedups user/content) only runs daily, so raw COUNT(*) over-counts in between.
+  // SUM/AVG over duplicated rows are skewed the same way but need a dedup subquery to
+  // fix — left as-is deliberately rather than half-solved here.
   const agg = measure === "avg" && measure_field ? `AVG(CAST(${measure_field} AS DOUBLE))`
     : measure === "sum" && measure_field ? `SUM(CAST(${measure_field} AS DOUBLE))`
-    : "COUNT(*)";
+    : "COUNT(DISTINCT id)";
 
   return `${boundsCte}SELECT ${agg} as value${dimExpr}
 FROM ${tableName}${fromExtra}

@@ -40,23 +40,31 @@ async function segmentAuth(c: any, next: any) {
 app.use("/api/segments", segmentAuth);
 app.use("/api/segments/*", segmentAuth);
 
-// R2_SQL_TOKEN is a hand-set secret, not CI-managed yet (unlike every other var this worker
-// reads — see .superpowers/sdd/2026-07-25-tenant-db-removal/progress.md's "R2_SQL_TOKEN is not
-// CI-managed" note: link and flow bind the same secret and deliberately keep it out of
-// .secrets.json too, because scripts/secrets-sync.test.mjs requires every declared secret to be
-// exported into both deploy workflows' sync-secrets env, and neither workflow does that for this
-// name yet). A worker deployed without `wrangler secret put R2_SQL_TOKEN --env <env>` would
-// otherwise send `Authorization: Bearer undefined` on every r2Query call and get back a generic
-// 401 — indistinguishable at the call site from a real auth failure. This guard runs before any
-// of the three routes that call r2Query (preview/compute/users) ever reach it, naming the actual
-// cause instead. A per-request middleware, not a module-scope check, because `env` (and thus the
-// secret) is only available once fetch() is called — Workers have no module-level "startup" with
-// bindings attached.
+// R2_CATALOG_TOKEN is the same repo-level R2 Data Catalog token analytics already uses for R2
+// SQL queries and PyIceberg compaction (see analytics/.secrets.json and both deploy workflows'
+// sync-secrets job) — link, flow and insight-segment now declare it in their own .secrets.json
+// too, so it is CI-managed like every other var this worker reads. A worker deployed before that
+// secret is set (or with a stale name) would otherwise send `Authorization: Bearer undefined` on
+// every r2Query call and get back a generic 401 — indistinguishable at the call site from a real
+// auth failure. This guard runs before any of the three routes that call r2Query
+// (preview/compute/users) ever reach it, naming the actual cause instead. A per-request
+// middleware, not a module-scope check, because `env` (and thus the secret) is only available
+// once fetch() is called — Workers have no module-level "startup" with bindings attached.
+//
+// Kept local to insight-segment rather than lifted into shared/r2-sql.ts's r2Query: link's three
+// r2-entities.ts call sites all go through r2Query, but flow/src/index.ts's queryR2Counts and
+// queryNodeLogRows build the R2 SQL request with a raw fetch() (not r2Query) for both of its
+// non-r2Query call sites, so a guard inside r2Query would still miss them — full three-module
+// coverage would need touching those two call sites anyway, not just r2Query, and r2Query is a
+// hot path (every one of link's and insight-segment's reads runs through it) that this
+// consolidation's "少改动" bias argues against touching without a full-coverage payoff. link and
+// flow are no worse off than before: neither had a guard for the previous token env var name
+// either.
 export function checkR2SqlToken(env: Env): { ok: true } | { ok: false; message: string } {
-  if (!env.R2_SQL_TOKEN) {
+  if (!env.R2_CATALOG_TOKEN) {
     return {
       ok: false,
-      message: "R2_SQL_TOKEN is not configured on this worker — set it with `wrangler secret put R2_SQL_TOKEN --env <env>`",
+      message: "R2_CATALOG_TOKEN is not configured on this worker — set it with `wrangler secret put R2_CATALOG_TOKEN --env <env>`",
     };
   }
   return { ok: true };

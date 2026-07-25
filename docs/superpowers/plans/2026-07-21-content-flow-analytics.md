@@ -744,7 +744,7 @@ export async function queryNodeLogRows(
     `https://api.sql.cloudflarestorage.com/api/v1/accounts/${env.CF_ACCOUNT_ID}/r2-sql/query/${env.R2_BUCKET}`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${env.R2_SQL_TOKEN}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${env.R2_CATALOG_TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         warehouse: env.R2_WAREHOUSE,
         query: `SELECT ${subjectColumn}, created_at FROM ${table}
@@ -784,7 +784,7 @@ export async function queryNodeLogRows(
     `https://api.sql.cloudflarestorage.com/api/v1/accounts/${env.CF_ACCOUNT_ID}/r2-sql/query/${env.R2_BUCKET}`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${env.R2_SQL_TOKEN}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${env.R2_CATALOG_TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         warehouse: env.R2_WAREHOUSE,
         query: `SELECT ${subjectColumn}, created_at, direction, outcome, title, content_text, content_url FROM ${table}

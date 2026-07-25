@@ -28,7 +28,7 @@
 - Modify (conditionally, see Step 6): `flow/.secrets.json`, `.github/workflows/deploy-dev.yml`, `.github/workflows/deploy-prod.yml`
 
 **Interfaces:**
-- Produces: `env.PIPELINE_FLOW_LOG` (repointed to a new stream), `env.PIPELINE_CONTENT_FLOW_LOG` (new), `env.CF_ACCOUNT_ID`/`env.R2_SQL_TOKEN`/`env.R2_BUCKET`/`env.R2_WAREHOUSE` on `flow`'s `Env` — consumed by every later task in this plan.
+- Produces: `env.PIPELINE_FLOW_LOG` (repointed to a new stream), `env.PIPELINE_CONTENT_FLOW_LOG` (new), `env.CF_ACCOUNT_ID`/`env.R2_CATALOG_TOKEN`/`env.R2_BUCKET`/`env.R2_WAREHOUSE` on `flow`'s `Env` — consumed by every later task in this plan.
 
 - [ ] **Step 1: Create the two stream schemas**
 
@@ -178,19 +178,19 @@ In `flow/src/types.ts`, add to the `Env` interface (alongside the existing `PIPE
 
 ```ts
   PIPELINE_CONTENT_FLOW_LOG?: Pipeline;
-  R2_SQL_TOKEN: string;
+  R2_CATALOG_TOKEN: string;
   R2_BUCKET: string;
   R2_WAREHOUSE: string;
 ```
 
-- [ ] **Step 6: Give `flow` access to the `R2_SQL_TOKEN` secret**
+- [ ] **Step 6: Give `flow` access to the `R2_CATALOG_TOKEN` secret**
 
-This repo's secret sync is data-driven: `scripts/sync-secrets.sh` reads each module's `<module>/.secrets.json` (a plain `{ "production": [...names], "dev": [...names] }` list of GitHub-repo-secret names required for that env) and bulk-pushes matching env vars via `wrangler secret bulk`. `link/.secrets.json` currently does NOT list `R2_SQL_TOKEN` — meaning `link`'s copy of this secret was set up as a one-off manual `wrangler secret put`, bypassing this CI mechanism, not something to copy literally.
+This repo's secret sync is data-driven: `scripts/sync-secrets.sh` reads each module's `<module>/.secrets.json` (a plain `{ "production": [...names], "dev": [...names] }` list of GitHub-repo-secret names required for that env) and bulk-pushes matching env vars via `wrangler secret bulk`. `link/.secrets.json` currently does NOT list `R2_CATALOG_TOKEN` — meaning `link`'s copy of this secret was set up as a one-off manual `wrangler secret put`, bypassing this CI mechanism, not something to copy literally.
 
-Check first whether a GitHub Actions repo secret literally named `R2_SQL_TOKEN` already exists (`gh secret list` if you have access, or ask the user) — since it's an account-level R2 SQL API token, not link-specific, the SAME value works for `flow`.
+Check first whether a GitHub Actions repo secret literally named `R2_CATALOG_TOKEN` already exists (`gh secret list` if you have access, or ask the user) — since it's an account-level R2 SQL API token, not link-specific, the SAME value works for `flow`.
 
-- If it exists: add `"R2_SQL_TOKEN"` to both the `"production"` and `"dev"` arrays in `flow/.secrets.json` (currently `{"production": ["CF_D1_API_TOKEN"], "dev": ["CF_D1_API_TOKEN"]}`), and add `R2_SQL_TOKEN: ${{ secrets.R2_SQL_TOKEN }}` to the `sync-secrets` job's `env:` block for the `flow` matrix entry in both `.github/workflows/deploy-dev.yml` and `.github/workflows/deploy-prod.yml` (this regularizes it onto the CI-managed path, an improvement over `link`'s current ad-hoc setup, not a requirement — just don't silently diverge from it without noting the inconsistency).
-- If it doesn't exist as a GitHub secret at all: set it directly via `wrangler secret put R2_SQL_TOKEN --env dev --config flow/wrangler.toml` and the `--env production` equivalent, using the exact same token value `link` already uses (retrieve it from wherever that value is stored — password manager, 1Password, etc. — never hardcode it in this repo). Do not add it to `flow/.secrets.json` in this case, matching `link`'s existing precedent.
+- If it exists: add `"R2_CATALOG_TOKEN"` to both the `"production"` and `"dev"` arrays in `flow/.secrets.json` (currently `{"production": ["CF_D1_API_TOKEN"], "dev": ["CF_D1_API_TOKEN"]}`), and add `R2_CATALOG_TOKEN: ${{ secrets.R2_CATALOG_TOKEN }}` to the `sync-secrets` job's `env:` block for the `flow` matrix entry in both `.github/workflows/deploy-dev.yml` and `.github/workflows/deploy-prod.yml` (this regularizes it onto the CI-managed path, an improvement over `link`'s current ad-hoc setup, not a requirement — just don't silently diverge from it without noting the inconsistency).
+- If it doesn't exist as a GitHub secret at all: set it directly via `wrangler secret put R2_CATALOG_TOKEN --env dev --config flow/wrangler.toml` and the `--env production` equivalent, using the exact same token value `link` already uses (retrieve it from wherever that value is stored — password manager, 1Password, etc. — never hardcode it in this repo). Do not add it to `flow/.secrets.json` in this case, matching `link`'s existing precedent.
 
 - [ ] **Step 7: Verify both new R2 tables are reachable and empty**
 
@@ -206,7 +206,7 @@ Expected: `0` for both (fresh, empty tables).
 ```bash
 git add analytics/pipelines/flow-log-stream-schema.json analytics/pipelines/content-flow-log-stream-schema.json flow/wrangler.toml flow/src/types.ts
 # Also stage flow/.secrets.json and the two workflow files if Step 6 modified them (only if
-# R2_SQL_TOKEN needed to move onto the CI-managed secrets path — skip if you set it via a
+# R2_CATALOG_TOKEN needed to move onto the CI-managed secrets path — skip if you set it via a
 # one-off `wrangler secret put` instead, matching link's existing precedent).
 git commit -m "feat(flow): provision flow_log/content_flow_log R2 pipelines + bindings"
 ```
@@ -647,7 +647,7 @@ git commit -m "feat(flow): emitContentNodeLogs — content flows now write node-
 - Test: `flow/tests/unit/recompute-flow-counts.test.ts` (new file)
 
 **Interfaces:**
-- Consumes: Task 1's `env.R2_SQL_TOKEN`/`env.CF_ACCOUNT_ID`/`env.R2_WAREHOUSE`; Task 2's `flow_counts`/`content_flow_counts` tables.
+- Consumes: Task 1's `env.R2_CATALOG_TOKEN`/`env.CF_ACCOUNT_ID`/`env.R2_WAREHOUSE`; Task 2's `flow_counts`/`content_flow_counts` tables.
 - Produces: `recomputeFlowCounts(env: Env): Promise<void>`, called from `scheduled()` every tick.
 
 - [ ] **Step 1: Write the failing tests**
@@ -682,7 +682,7 @@ describe("recomputeFlowCounts", () => {
     };
     return {
       CF_ACCOUNT_ID: "acct-1",
-      R2_SQL_TOKEN: "tok-1",
+      R2_CATALOG_TOKEN: "tok-1",
       R2_BUCKET: "uniscrm-dev",
       R2_WAREHOUSE: "acct-1_uniscrm-dev",
       WEB_DB: webDbMock,
@@ -756,7 +756,7 @@ async function queryR2Counts(env: Env, table: string): Promise<CountRow[]> {
     `https://api.sql.cloudflarestorage.com/api/v1/accounts/${env.CF_ACCOUNT_ID}/r2-sql/query/${env.R2_BUCKET}`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${env.R2_SQL_TOKEN}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${env.R2_CATALOG_TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         warehouse: env.R2_WAREHOUSE,
         query: `SELECT tenant_id, flow_id, node_id, direction, COUNT(*) as cnt FROM ${table} GROUP BY tenant_id, flow_id, node_id, direction`,
@@ -1051,7 +1051,7 @@ describe("queryNodeLogRows", () => {
   });
 
   function baseEnv() {
-    return { CF_ACCOUNT_ID: "acct-1", R2_SQL_TOKEN: "tok-1", R2_BUCKET: "uniscrm-dev", R2_WAREHOUSE: "acct-1_uniscrm-dev" } as any;
+    return { CF_ACCOUNT_ID: "acct-1", R2_CATALOG_TOKEN: "tok-1", R2_BUCKET: "uniscrm-dev", R2_WAREHOUSE: "acct-1_uniscrm-dev" } as any;
   }
 
   it("queries uniscrm.flow_log filtered by tenant/flow/node/direction=enter, ordered and limited", async () => {
@@ -1112,7 +1112,7 @@ export async function queryNodeLogRows(
     `https://api.sql.cloudflarestorage.com/api/v1/accounts/${env.CF_ACCOUNT_ID}/r2-sql/query/${env.R2_BUCKET}`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${env.R2_SQL_TOKEN}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${env.R2_CATALOG_TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         warehouse: env.R2_WAREHOUSE,
         query: `SELECT ${subjectColumn}, created_at FROM ${table}

@@ -11,7 +11,7 @@ function appWithTenant(tenantId: number) {
   return app;
 }
 
-const ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+const ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_CATALOG_TOKEN: "t" };
 
 it("lists users from R2 scoped to the caller's tenant", async () => {
   const fetchMock = vi.fn().mockResolvedValue(

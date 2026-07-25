@@ -8,7 +8,7 @@ import { webhookRoutes } from "../src/webhook";
 // the real webhookRoutes() Hono app end-to-end, so a broken wiring shows up as a failing
 // assertion, not just a silent console.warn.
 
-const R2_ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+const R2_ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_CATALOG_TOKEN: "t" };
 
 // Real EntityStateStore runs against this fake LINK_DB — the same in-memory entity_state
 // implementation entity-state.test.ts uses (INSERT OR IGNORE / SELECT / UPDATE semantics),

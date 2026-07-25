@@ -9,5 +9,5 @@ export interface Env {
   CF_ACCOUNT_ID: string;
   R2_BUCKET: string;
   R2_WAREHOUSE: string;
-  R2_SQL_TOKEN: string;
+  R2_CATALOG_TOKEN: string;
 }

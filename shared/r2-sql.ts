@@ -5,7 +5,7 @@ export interface R2SqlEnv {
   CF_ACCOUNT_ID: string;
   R2_BUCKET: string;
   R2_WAREHOUSE: string;
-  R2_SQL_TOKEN: string;
+  R2_CATALOG_TOKEN: string;
 }
 
 export class R2SqlError extends Error {
@@ -87,7 +87,7 @@ export async function r2Query<T>(env: R2SqlEnv, sql: string): Promise<T[]> {
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${env.R2_SQL_TOKEN}`,
+      Authorization: `Bearer ${env.R2_CATALOG_TOKEN}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ warehouse: env.R2_WAREHOUSE, query: sql }),

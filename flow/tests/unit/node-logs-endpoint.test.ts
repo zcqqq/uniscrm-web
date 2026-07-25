@@ -15,7 +15,7 @@ describe("queryNodeLogRows", () => {
   });
 
   function baseEnv() {
-    return { CF_ACCOUNT_ID: "acct-1", R2_SQL_TOKEN: "tok-1", R2_BUCKET: "uniscrm-dev", R2_WAREHOUSE: "acct-1_uniscrm-dev" } as any;
+    return { CF_ACCOUNT_ID: "acct-1", R2_CATALOG_TOKEN: "tok-1", R2_BUCKET: "uniscrm-dev", R2_WAREHOUSE: "acct-1_uniscrm-dev" } as any;
   }
 
   it("queries uniscrm.flow_log filtered by tenant/flow/node/direction, ordered and limited", async () => {

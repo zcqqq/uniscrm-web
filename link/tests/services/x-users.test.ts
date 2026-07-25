@@ -10,7 +10,7 @@ const EVENT_SCHEMA_FIELD_NAMES = (eventSchema as { fields: { name: string }[] })
   .map((f) => f.name)
   .sort();
 
-const R2_ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+const R2_ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_CATALOG_TOKEN: "t" };
 
 // Stubs the global fetch getUserBySource (via shared/r2-sql.ts's r2Query) goes through, so
 // upsertUser's read-modify-write path (task-5 fix round, Important 2) can be exercised without

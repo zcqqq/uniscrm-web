@@ -27,7 +27,7 @@ function appWithTenant(tenantId: number) {
   return app;
 }
 
-const R2_ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+const R2_ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_CATALOG_TOKEN: "t" };
 
 describe("GET /api/lists/:id/users", () => {
   it("carries a real username for each member, not null (fix round 1, Important 2)", async () => {

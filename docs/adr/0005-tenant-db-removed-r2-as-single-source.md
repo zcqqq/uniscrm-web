@@ -39,7 +39,7 @@ sql-builder.ts` 的查询目标改为 `uniscrm.user`(必要时 LEFT JOIN `uniscr
 R2 三张表因为 sink schema 不可改而全部旁置重建,**历史数据不迁移** —— prod 当时只有
 355 user / 40 content / 6 event。
 
-最大的新风险:R2 从「分析用」变成产品主链路,`R2_SQL_TOKEN` 一挂整个产品白屏。
+最大的新风险:R2 从「分析用」变成产品主链路,`R2_CATALOG_TOKEN` 一挂整个产品白屏。
 所有 R2 读路径因此必须抛错并返回 502,绝不静默返回空列表
 (`shared/r2-sql.ts::r2Query` 区分「HTTP 200 但 body 里带 error」与真正的空结果)。
 

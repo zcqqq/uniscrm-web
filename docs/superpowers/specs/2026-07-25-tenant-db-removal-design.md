@@ -250,7 +250,7 @@ dev 全程用本地 `wrangler deploy --env dev`(**必须带 `--env dev`**,裸 `d
 `analytics-dev` 当前报 **`80011: Unauthenticated`**(R2 SQL token 失效)。
 本方案之后 R2 从「分析用」变成**产品主链路**,token 一挂整个产品白屏。上线前必须:
 
-1. 修复 dev/prod 的 `R2_SQL_TOKEN`
+1. 修复 dev/prod 的 `R2_CATALOG_TOKEN`
 2. 所有 R2 读路径给出明确错误态(HTTP 5xx + 前端错误提示),
    不得静默返回空列表 —— 「数据准确性 > 系统稳定性 > 功能 > UI 界面」
 

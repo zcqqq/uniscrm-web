@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { listContents, getContent, getUserDisplayNames, getUserDisplayNamesMixed, listUsers } from "../../src/services/r2-entities";
 
-const ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+const ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_CATALOG_TOKEN: "t" };
 
 function stubR2(rows: unknown[]) {
   const fetchMock = vi.fn().mockResolvedValue(

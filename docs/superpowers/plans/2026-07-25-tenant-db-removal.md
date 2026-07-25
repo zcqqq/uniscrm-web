@@ -57,15 +57,15 @@
 
 ---
 
-## Task 0: 修复 `R2_SQL_TOKEN`(前置阻塞项)
+## Task 0: 修复 `R2_CATALOG_TOKEN`(前置阻塞项)
 
 **Files:**
-- Modify: `scripts/sync-secrets.sh`(如缺 `R2_SQL_TOKEN` 条目)
+- Modify: `scripts/sync-secrets.sh`(如缺 `R2_CATALOG_TOKEN` 条目)
 - 无代码改动,以运维验证为主
 
 **Interfaces:**
 - Consumes: 无
-- Produces: dev 与 prod 的 `R2_SQL_TOKEN` 均可用 —— 后续所有任务的读路径都依赖它
+- Produces: dev 与 prod 的 `R2_CATALOG_TOKEN` 均可用 —— 后续所有任务的读路径都依赖它
 
 > 现状:`https://analytics-dev.uni-scrm.com/analytics/content/new` 报
 > `{"error":"... 80011: Unauthenticated."}`。本计划之后 R2 从「分析用」变成**产品主链路**,
@@ -107,11 +107,11 @@ Expected: 返回一个数字,无 error
 
 ```bash
 for m in link flow analytics insight-segment; do
-  echo "$NEW_TOKEN" | wrangler secret put R2_SQL_TOKEN --env dev --config $m/wrangler.toml
+  echo "$NEW_TOKEN" | wrangler secret put R2_CATALOG_TOKEN --env dev --config $m/wrangler.toml
 done
 ```
 
-确认 `scripts/sync-secrets.sh` 的 secret 列表里含 `R2_SQL_TOKEN` 且覆盖这 4 个模块;
+确认 `scripts/sync-secrets.sh` 的 secret 列表里含 `R2_CATALOG_TOKEN` 且覆盖这 4 个模块;
 缺则补上(prod 的 secret 由 GitHub Action 的 `sync-secrets` job 从仓库 secrets 注入,
 所以还要在 GitHub repo settings 里更新同名 secret)。
 
@@ -123,7 +123,7 @@ done
 
 ```bash
 git add scripts/sync-secrets.sh
-git commit -m "chore: ensure R2_SQL_TOKEN is synced to link/flow/analytics/insight-segment"
+git commit -m "chore: ensure R2_CATALOG_TOKEN is synced to link/flow/analytics/insight-segment"
 ```
 
 ---
@@ -137,7 +137,7 @@ git commit -m "chore: ensure R2_SQL_TOKEN is synced to link/flow/analytics/insig
 **Interfaces:**
 - Consumes: 无
 - Produces:
-  - `interface R2SqlEnv { CF_ACCOUNT_ID: string; R2_BUCKET: string; R2_WAREHOUSE: string; R2_SQL_TOKEN: string }`
+  - `interface R2SqlEnv { CF_ACCOUNT_ID: string; R2_BUCKET: string; R2_WAREHOUSE: string; R2_CATALOG_TOKEN: string }`
   - `class R2SqlError extends Error { readonly status: number }`
   - `function sqlStr(v: string): string`
   - `function sqlInt(v: number): string`
@@ -163,7 +163,7 @@ const ENV = {
   CF_ACCOUNT_ID: "acct1",
   R2_BUCKET: "uniscrm-dev",
   R2_WAREHOUSE: "wh_uniscrm-dev",
-  R2_SQL_TOKEN: "tok1",
+  R2_CATALOG_TOKEN: "tok1",
 };
 
 describe("sqlStr", () => {
@@ -268,7 +268,7 @@ export interface R2SqlEnv {
   CF_ACCOUNT_ID: string;
   R2_BUCKET: string;
   R2_WAREHOUSE: string;
-  R2_SQL_TOKEN: string;
+  R2_CATALOG_TOKEN: string;
 }
 
 export class R2SqlError extends Error {
@@ -323,7 +323,7 @@ export async function r2Query<T>(env: R2SqlEnv, sql: string): Promise<T[]> {
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${env.R2_SQL_TOKEN}`,
+      Authorization: `Bearer ${env.R2_CATALOG_TOKEN}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ warehouse: env.R2_WAREHOUSE, query: sql }),
@@ -896,7 +896,7 @@ git commit -m "feat(analytics): widen R2 user/content/event schemas, document ta
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { listContents, getContent, getUserNames } from "../../src/services/r2-entities";
 
-const ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+const ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_CATALOG_TOKEN: "t" };
 
 function stubR2(rows: unknown[]) {
   const fetchMock = vi.fn().mockResolvedValue(
@@ -1275,7 +1275,7 @@ it("delete() writes a full row with is_deleted = 1 instead of removing anything"
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
     new Response(JSON.stringify({ result: { rows: [{ id: "c1", channel_id: "chan1", title: "t" }] } }), { status: 200 })
   ));
-  const r2Env = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+  const r2Env = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_CATALOG_TOKEN: "t" };
   const service = new ContentService(
     createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any, undefined, r2Env
   );
@@ -1526,7 +1526,7 @@ function appWithTenant(tenantId: number) {
   return app;
 }
 
-const ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+const ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_CATALOG_TOKEN: "t" };
 
 it("lists users from R2 scoped to the caller's tenant", async () => {
   const fetchMock = vi.fn().mockResolvedValue(
@@ -2089,7 +2089,7 @@ LIMIT 10000`;
 再用 `latestRowsSql` 从 `uniscrm.user` 拉这批 id 的 `name`/`username` 合并返回。
 
 `insight-segment/wrangler.toml` 的 dev/production 各补 `R2_BUCKET` / `R2_WAREHOUSE` vars
-(值抄 `link/wrangler.toml`),`R2_SQL_TOKEN` 走 `scripts/sync-secrets.sh`。
+(值抄 `link/wrangler.toml`),`R2_CATALOG_TOKEN` 走 `scripts/sync-secrets.sh`。
 
 - [ ] **Step 7: 跑测试 + 应用迁移 + 部署自测**
 
@@ -2294,7 +2294,7 @@ R2 结构上做不到三件事:原子去重(append-only、无唯一索引)、变
 R2 三张表因为 sink schema 不可改而全部旁置重建,**历史数据不迁移** —— prod 当时只有
 355 user / 40 content / 6 event。
 
-最大的新风险:R2 从「分析用」变成产品主链路,`R2_SQL_TOKEN` 一挂整个产品白屏。
+最大的新风险:R2 从「分析用」变成产品主链路,`R2_CATALOG_TOKEN` 一挂整个产品白屏。
 所有 R2 读路径因此必须抛错并返回 502,绝不静默返回空列表。
 ```
 

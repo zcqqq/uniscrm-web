@@ -890,7 +890,7 @@ describe("ContentService.list / get (R2-backed reads)", () => {
   });
 });
 
-const R2_ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+const R2_ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_CATALOG_TOKEN: "t" };
 
 function stubR2Rows(rows: unknown[]) {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(

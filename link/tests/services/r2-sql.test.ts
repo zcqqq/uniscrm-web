@@ -5,7 +5,7 @@ const ENV = {
   CF_ACCOUNT_ID: "acct1",
   R2_BUCKET: "uniscrm-dev",
   R2_WAREHOUSE: "wh_uniscrm-dev",
-  R2_SQL_TOKEN: "tok1",
+  R2_CATALOG_TOKEN: "tok1",
 };
 
 describe("sqlStr", () => {

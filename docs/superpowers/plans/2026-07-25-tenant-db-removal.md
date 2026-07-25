@@ -22,7 +22,9 @@
   `tenantScopedTables()` 会从各模块 migrations 里自动发现带 `tenant_id` 的表,所以
   `entity_state` / `segment_users` **无需手工登记**就会被门禁覆盖 —— 但也意味着凡是查它们的
   `.prepare()` 语句都必须带 `tenant_id`,否则 `node scripts/tenant-scope-audit.mjs` 会失败。
-- dev 部署一律 `wrangler deploy --env dev`(全局 `wrangler`,不用 `npx wrangler`)。**裸 `wrangler deploy` 会打到 prod 并抹掉 bindings。**
+- dev 部署一律在**模块目录里**跑 `npm run deploy:dev`(= `vite build --mode development && wrangler deploy --env dev`)。
+  手写 `wrangler deploy --env dev` 会**跳过 vite build,把旧前端发上去**;裸 `wrangler deploy` 更糟 —— 会打到 prod 并抹掉 bindings。
+  用全局 `wrangler`,不要 `npx wrangler`(npx 会取到过时的本地 4.86)。
 - prod 部署只走手动触发的 GitHub Action;不主动 push 到 main,除非用户明确说「push to main」。
 - 提交时只 `git add` 本任务涉及的文件 —— 工作区有其它 session 的未提交改动,不得裹挟。
 - 每个任务结束前跑该模块的完整测试套件:`cd <module> && npx vitest run`。
@@ -847,7 +849,7 @@ sink 缺 `--catalog-token`、`pipelines create` 用了不存在的 flag、重建
 - `pipelines streams create --schema-file`、`sinks create ... --catalog-token`、
   `pipelines create <name> --sql "INSERT INTO <sink> SELECT * FROM <stream>"`
 - **重建 stream 会换新 ID**,`link/wrangler.toml` 的 `[[env.*.pipelines]]` 按 ID 绑定,
-  必须替换后 `wrangler deploy --env dev --config link/wrangler.toml`(裸 `deploy` 会打到 prod)
+  必须替换后在 `link/` 目录里 `npm run deploy:dev`(裸 `deploy` 会打到 prod;手写 `--env dev` 会漏掉 vite build)
 - 新 sink 懒创建表,首次写入前 `40010: iceberg table not found` 属正常
 - 验证查询用 `COUNT(DISTINCT id)`(Pipelines 是 at-least-once 投递)
 
@@ -1649,7 +1651,7 @@ Expected: 测试 PASS,构建无 TS 报错
 - [ ] **Step 6: 部署 dev 并浏览器自测**
 
 ```bash
-cd /Users/zc/Documents/UniSCRM/uniscrm-web && wrangler deploy --env dev --config link/wrangler.toml
+cd /Users/zc/Documents/UniSCRM/uniscrm-web && cd /Users/zc/Documents/UniSCRM/uniscrm-web/link && npm run deploy:dev
 ```
 
 在浏览器打开 `https://link-dev.uni-scrm.com/users` 与 `/content`:
@@ -1712,7 +1714,7 @@ Expected: PASS
 - [ ] **Step 5: 部署 dev 并触发一次真实抓取**
 
 ```bash
-cd /Users/zc/Documents/UniSCRM/uniscrm-web && wrangler deploy --env dev --config link/wrangler.toml
+cd /Users/zc/Documents/UniSCRM/uniscrm-web && cd /Users/zc/Documents/UniSCRM/uniscrm-web/link && npm run deploy:dev
 wrangler tail link-dev --env dev --config link/wrangler.toml --format pretty
 ```
 
@@ -1887,7 +1889,7 @@ Expected: PASS + 构建无 TS 报错
 - [ ] **Step 7: 部署 dev 并自测**
 
 ```bash
-cd /Users/zc/Documents/UniSCRM/uniscrm-web && wrangler deploy --env dev --config flow/wrangler.toml
+cd /Users/zc/Documents/UniSCRM/uniscrm-web/flow && npm run deploy:dev
 ```
 
 浏览器打开 `https://flow-dev.uni-scrm.com`:侧栏没有 Change User Props 节点;
@@ -2095,7 +2097,7 @@ LIMIT 10000`;
 cd /Users/zc/Documents/UniSCRM/uniscrm-web/insight-segment && npx vitest run
 cd /Users/zc/Documents/UniSCRM/uniscrm-web
 wrangler d1 migrations apply uniscrm-web-dev --env dev --config web/wrangler.toml --remote
-wrangler deploy --env dev --config insight-segment/wrangler.toml
+(cd insight-segment && npm run deploy:dev)
 ```
 
 浏览器建一个 `followers_count > 100` 的分群 → compute → 成员列表有人。
@@ -2225,7 +2227,7 @@ Expected: 全绿
 ```bash
 wrangler d1 migrations apply uniscrm-web-dev --env dev --config web/wrangler.toml --remote
 for m in link flow insight-segment admin analytics web; do
-  wrangler deploy --env dev --config $m/wrangler.toml
+  (cd $m && npm run deploy:dev)
 done
 ```
 

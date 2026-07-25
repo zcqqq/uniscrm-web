@@ -57,7 +57,7 @@ wrangler pipelines create uniscrm-user-dev \
 #    不换的话 worker 会继续往已删除的旧 stream 写,静默失败。
 #    改完部署(注意带 --env dev,裸 wrangler deploy 会打到 PRODUCTION 并且会
 #    抹掉那个 worker 的 bindings):
-wrangler deploy --env dev --config link/wrangler.toml
+(cd link && npm run deploy:dev)   # 手写 wrangler deploy --env dev 会跳过 vite build，发布旧前端
 ```
 
 新 sink 是**懒创建表**:第一次写入之前 `wrangler r2 sql query` 会报

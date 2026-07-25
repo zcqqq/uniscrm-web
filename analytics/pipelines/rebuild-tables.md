@@ -5,6 +5,17 @@ Pipeline sink 的 schema 不可修改,且拒绝写入已存在的 Iceberg 表。
 删除顺序必须是 pipeline 在先(pipeline 引用 sink,sink 引用不到就删不掉;同理 sink 要在
 stream 之前删)。旁置(而不是 drop)只是为了腾出表名,旁置副本不再被任何代码读取。
 
+实际资源命名(2026-07-25 现查,**不要照抄手册里编的名字,先 `list` 一遍**):
+
+| 表 | stream | sink | pipeline |
+|---|---|---|---|
+| user | `uniscrm_user_dev` / `uniscrm_user` | `user_sink_dev` / `user_sink` | `uniscrm_user_pipeline_dev` / `uniscrm_user_pipeline` |
+| content | `uniscrm_content_dev` / `uniscrm_content` | `content_sink_dev` / `content_sink` | `uniscrm_content_pipeline_dev` / `uniscrm_content_pipeline` |
+| event | `uniscrm_event_dev` / `uniscrm_event` | `event_sink_dev` / `event_sink` | `uniscrm_event_pipeline_dev` / `uniscrm_event_pipeline` |
+
+stream/pipeline 用**下划线**,sink 没有 `uniscrm_` 前缀。先跑
+`wrangler pipelines list` / `pipelines streams list` / `pipelines sinks list` 核对再动手。
+
 对 `user` / `content` / `event` 各做一遍。以 dev 的 `user` 为例
 (prod 把 `-dev` 后缀去掉、bucket/warehouse 换成 prod 的、account_id 不变):
 
@@ -29,26 +40,26 @@ python3 analytics/pipelines/rename-table.py \
 
 # 2. 删旧 pipeline → sink → stream(非交互 shell 必须加 -y,否则卡在确认提示;
 #    顺序反了会因为还有引用而删不掉)
-wrangler pipelines delete uniscrm-user-dev -y
-wrangler pipelines sinks delete uniscrm-user-sink-dev -y
-wrangler pipelines streams delete uniscrm-user-stream-dev -y
+wrangler pipelines delete uniscrm_user_pipeline_dev -y
+wrangler pipelines sinks delete user_sink_dev -y
+wrangler pipelines streams delete uniscrm_user_dev -y
 
 # 3. 用新 schema 建 stream —— 记下命令打印出的 stream ID,第 6 步要用
-wrangler pipelines streams create uniscrm-user-stream-dev \
+wrangler pipelines streams create uniscrm_user_dev \
   --schema-file analytics/pipelines/user-stream-schema.json
 
 # 4. 建 sink（指向 uniscrm.user)。
 #    刻意不传 --access-key-id / --secret-access-key,让 sink 自动生成一套新的
 #    R2 凭证 —— 传旧凭证会导致写入时报 signature mismatch。
-wrangler pipelines sinks create uniscrm-user-sink-dev \
+wrangler pipelines sinks create user_sink_dev \
   --type r2-data-catalog --bucket uniscrm-dev \
   --namespace uniscrm --table user \
   --catalog-token "$R2_CATALOG_TOKEN" --roll-interval 300
 
 # 5. 建 pipeline 串起来(create 只有一个 positional + --sql/--sql-file,
 #    没有 --stream/--sink 这两个 flag,SQL 里的表名就是 stream/sink 的名字)
-wrangler pipelines create uniscrm-user-dev \
-  --sql "INSERT INTO uniscrm-user-sink-dev SELECT * FROM uniscrm-user-stream-dev"
+wrangler pipelines create uniscrm_user_pipeline_dev \
+  --sql "INSERT INTO user_sink_dev SELECT * FROM uniscrm_user_dev"
 
 # 6. link/wrangler.toml 里的 pipelines binding 绑定的是 stream **ID**,不是名字
 #    (如 stream = "b2a9528928814147a6dfa742b8319d92")。第 3 步重建 stream 后

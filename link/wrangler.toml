@@ -143,7 +143,7 @@ queue = "uniscrm-event"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_EVENT"
-stream = "a236940ebf844ee39eeffbdd560da187"
+stream = "8a94ce74d7b9482d954beb03cd7719b5"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_USER"

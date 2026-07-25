@@ -885,10 +885,12 @@ wrangler r2 sql query b34f3ff4aec4c36584672d5bf1320757_uniscrm-dev \
 另注意它出错时仍可能 exit 0,务必肉眼看输出。
 ```
 
-- [ ] **Step 6: 在 dev 上按手册重建三张表**
+- [ ] **Step 6:(不在本任务执行)dev 重建挪到 Task 7**
 
-按 `rebuild-tables.md` 对 `user` / `content` / `event` 各执行一遍(dev)。
-每张表建完后确认 `wrangler pipelines list` 里三条 pipeline 都是 active。
+新 schema 把 `is_deleted` 标为 required。如果现在就重建 dev 的 pipeline,
+而 `link` 还在发旧记录形状,dev 的写入会在整个 Task 4-6 窗口里持续失败。
+所以实际重建放到 Task 7 部署 dev 之前一并做,本任务只交付 schema 文件、重建手册、
+compactor 修正与 schema 单测。
 
 - [ ] **Step 7: 提交**
 

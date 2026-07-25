@@ -63,8 +63,6 @@ jobs:
             config: flow/wrangler.toml
           - module: admin
             config: admin/wrangler.toml
-          - module: profile
-            config: profile/wrangler.toml
           - module: insight-segment
             config: insight-segment/wrangler.toml
           - module: trend-skill
@@ -121,8 +119,6 @@ jobs:
           - db: uniscrm-web-dev
             config: insight-segment/wrangler.toml
           - db: uniscrm-web-dev
-            config: profile/wrangler.toml
-          - db: uniscrm-web-dev
             config: trend-skill/wrangler.toml
           - db: uniscrm-content-dev
             config: content/wrangler.toml
@@ -170,7 +166,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [web, link, flow, admin, analytics, insight-segment, profile, trend-skill, content]
+        module: [web, link, flow, admin, analytics, insight-segment, trend-skill, content]
     steps:
       - uses: actions/checkout@v4
 

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const MODULES = ["admin","analytics","content","flow","insight-segment","link","profile","trend-skill","web"];
+const MODULES = ["admin","analytics","content","flow","insight-segment","link","trend-skill","web"];
 const SCOPE_RE = /\btenant_id\b|\bmember_id\b/;
 
 export function tenantScopedTables(migrationSql) {

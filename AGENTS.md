@@ -12,7 +12,6 @@ uniscrm-web库是多租户SaaS，分多个模块/worker：
 - link: 统一渠道模块。social/content/commerce/lists统一在一个Worker中。
 - metadata: event/user/flow等实体基于元数据配置。
 - operation: 生产环境运维相关，可以存储一些修复数据的临时脚本。
-- profile: maigret container做跨渠道查询。
 - shared: 不是模块/worker。包含UI组件等所有模块通用的组件。
 - web: 登录页及通用功能如设置等。
 

@@ -45,11 +45,6 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], baseURL: `https://insight-segment${SUFFIX}.uni-scrm.com` },
       testDir: "../insight-segment/tests/e2e",
     },
-    {
-      name: "profile",
-      use: { ...devices["Desktop Chrome"], baseURL: `https://profile${SUFFIX}.uni-scrm.com` },
-      testDir: "../profile/tests/e2e",
-    },
   ],
   globalSetup: "./global-setup.ts",
 });

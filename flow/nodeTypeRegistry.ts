@@ -17,7 +17,7 @@ export interface NodeTypeConfig {
    * - "action": grouped under one shared numbered "action" item (data.actionType-discriminated,
    *   reactFlowType "action" — same membership reactFlowType already identified, now explicit).
    * - "condition": everything else — gets its own individual numbered prompt item. Catch-all: not
-   *   every "condition" entry actually branches (wait/changeUserProps are linear; webhook has its
+   *   every "condition" entry actually branches (wait/timeCondition are linear; webhook has its
    *   own reactFlowType and a real side effect, not just a gate, but is grouped here rather than
    *   "action" to avoid implying its JSON shape is data.actionType-discriminated like real actions).
    */
@@ -140,17 +140,6 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
     promptFragment: `userPropsCondition - branches on the triggering user's profile fields, has "yes"/"no" branches
    data: { conditions: [{ field: string, operator: "=="|"!="|">"|"<", value: string }] }
    - All conditions must pass (AND) for the "yes" branch; otherwise "no".`,
-  },
-  changeUserProps: {
-    reactFlowType: "changeUserProps",
-    label: "Change User Props",
-    description: "Update user properties",
-    domain: "user",
-    role: "condition",
-    generatable: true,
-    promptFragment: `changeUserProps - updates fields on the triggering user's profile, single output (no branching)
-   data: { updates: [{ field: string, value: string }] }
-   - value supports $user.x / $event.x interpolation from the triggering payload.`,
   },
   // Declared before addToList: the user-domain prompt's action item lists X actions first
   // (see buildUserDomainPrompt in generate-prompt.ts, which composes fragments in this order).
@@ -319,7 +308,7 @@ export function generatableKeysForDomain(domain: FlowDomain): string[] {
 // promptFragment composition order) so user-flow and content-flow Sidebars can each be reordered
 // independently without touching the other, or the registry's identity data.
 export const USER_FLOW_SIDEBAR_ORDER: string[] = [
-  "xTrigger", "cronTrigger", "xAction", "addToList", "changeUserProps", "webhook", "waitForEvent", "userPropsCondition",
+  "xTrigger", "cronTrigger", "xAction", "addToList", "webhook", "waitForEvent", "userPropsCondition",
   "wait", "timeCondition", "abSplit",
 ];
 

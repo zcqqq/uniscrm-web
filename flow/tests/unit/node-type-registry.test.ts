@@ -14,7 +14,7 @@ describe("NODE_TYPE_REGISTRY", () => {
   it("tags every known node type/actionType with a domain", () => {
     const expectedKeys = [
       "xTrigger", "cronTrigger", "xContentTrigger", "waitForEvent", "wait",
-      "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps",
+      "timeCondition", "userPropsCondition", "abSplit", "webhook",
       "addToList", "xAction", "xContentAction", "tiktokContentAction",
     ];
     for (const key of expectedKeys) {
@@ -209,7 +209,7 @@ describe("generatableKeysForDomain", () => {
   it("user domain: every domain:'user'/'both' type/actionType, now that all of them are generatable", () => {
     expect(generatableKeysForDomain("user").sort()).toEqual(
       [
-        "xTrigger", "cronTrigger", "waitForEvent", "userPropsCondition", "changeUserProps",
+        "xTrigger", "cronTrigger", "waitForEvent", "userPropsCondition",
         "xAction", "addToList", "wait", "timeCondition", "abSplit", "webhook",
       ].sort()
     );

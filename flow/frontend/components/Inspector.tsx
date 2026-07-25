@@ -1347,35 +1347,6 @@ function WebhookInspector({ nodeId, data }: { nodeId: string; data: Record<strin
   );
 }
 
-function ChangeUserPropsInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
-  const { updateNodeData } = useFlowEditor();
-  const updates: { field: string; value: string }[] = data.updates || [];
-  const addUpdate = () => updateNodeData(nodeId, { updates: [...updates, { field: "", value: "" }] });
-  const updateItem = (idx: number, patch: Record<string, string>) => {
-    const next = updates.map((u, i) => i === idx ? { ...u, ...patch } : u);
-    updateNodeData(nodeId, { updates: next });
-  };
-  const removeItem = (idx: number) => updateNodeData(nodeId, { updates: updates.filter((_, i) => i !== idx) });
-
-  return (
-    <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.changeUserProps.label}</h4>
-      <div className="flex items-center justify-between mb-2">
-        <Label className="text-xs">Fields to update</Label>
-        <button type="button" onClick={addUpdate} className="text-xs text-primary hover:underline">+ Add</button>
-      </div>
-      {updates.map((u, idx) => (
-        <div key={idx} className="flex gap-1 items-center mb-2">
-          <Input value={u.field} onChange={(e: InputChange) => updateItem(idx, { field: e.target.value })} placeholder="field" className="flex-1 text-xs" />
-          <span className="text-xs text-muted-foreground">=</span>
-          <Input value={u.value} onChange={(e: InputChange) => updateItem(idx, { value: e.target.value })} placeholder="value" className="flex-1 text-xs" />
-          <button type="button" onClick={() => removeItem(idx)} className="text-xs text-destructive">×</button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export default function Inspector() {
   const { selectedNodeId, nodes, deleteSelectedNode } = useFlowEditor();
 
@@ -1433,9 +1404,6 @@ export default function Inspector() {
       )}
       {node.type === "videoCondition" && (
         <VideoConditionInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
-      {node.type === "changeUserProps" && (
-        <ChangeUserPropsInspector nodeId={node.id} data={node.data as Record<string, any>} />
       )}
     </aside>
   );

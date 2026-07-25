@@ -70,8 +70,8 @@ export function isValidConnection(source: Node | undefined, target: Node | undef
   const targetType = target.type;
   const sourceType = source.type;
   if (targetType === "xTrigger" || targetType === "cronTrigger" || targetType === "xContentTrigger" || targetType === "youtubeContentTrigger") return false;
-  const validTargets = ["action", "wait", "waitForEvent", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps", "videoCondition"];
-  const validSources = ["xTrigger", "cronTrigger", "xContentTrigger", "youtubeContentTrigger", "wait", "waitForEvent", "action", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps", "videoCondition"];
+  const validTargets = ["action", "wait", "waitForEvent", "timeCondition", "userPropsCondition", "abSplit", "webhook", "videoCondition"];
+  const validSources = ["xTrigger", "cronTrigger", "xContentTrigger", "youtubeContentTrigger", "wait", "waitForEvent", "action", "timeCondition", "userPropsCondition", "abSplit", "webhook", "videoCondition"];
   if (validSources.includes(sourceType!) && validTargets.includes(targetType!)) return true;
   return false;
 }
@@ -144,9 +144,6 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
     } else if (type === "videoCondition") {
       nodeType = "videoCondition";
       data = { operation: "check-face", operator: "<=", threshold: 0.2 };
-    } else if (type === "changeUserProps") {
-      nodeType = "changeUserProps";
-      data = { updates: [] };
     } else if (ACTION_TYPES.includes(type)) {
       nodeType = "action";
       if (type === "addToList") {

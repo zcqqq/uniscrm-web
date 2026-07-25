@@ -447,10 +447,4 @@ function processTargetNode(
     return;
   }
 
-  if (targetNode.type === "changeUserProps") {
-    actions.push({ type: "changeUserProps", nodeId: targetNode.id, updates: targetNode.data.updates });
-    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-    collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
-    return;
-  }
 }

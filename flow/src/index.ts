@@ -4,7 +4,7 @@ import type { Env, FlowQueueMessage } from "./types";
 import { executeFlow, resumeFromNode, evaluateCondition, evaluateFaceRatioBranch, evaluateOrientationBranch, type FlowGraph, type ActionResult, type NodeLog } from "./engine";
 import { EventMetadata_X } from "../../metadata/x";
 import { passesPropsFilter } from "../../metadata/props-filter";
-import { TenantDataDB } from "../../shared/tenant-data-db";
+import { r2Query, latestRowsSql, sqlStr, sqlInt } from "../../shared/r2-sql";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY } from "../nodeTypeRegistry";
 
@@ -184,6 +184,29 @@ export async function queryNodeLogRows(
   }));
 }
 
+// Mirrors link/src/services/r2-entities.ts's getUserDisplayNames column-for-column (id, name,
+// username, is_deleted; same partition; is_deleted in outerWhere per latestRowsSql's doc comment
+// on why a pre-QUALIFY is_deleted filter resurrects deleted rows) without importing across the
+// module boundary — 各模块间尽量减少逻辑耦合，通过数据（Cloudflare 各组件）耦合. flow's node-log
+// drawer only renders `name`, but keeping the same column list as link's query means the two
+// can't silently diverge in behavior (e.g. a future is_deleted fix) without someone noticing the
+// duplication and porting it — a leaner projection here would hide that.
+async function getUserNames(env: Env, tenantId: number, ids: string[]): Promise<Map<string, string | null>> {
+  if (ids.length === 0) return new Map();
+  const list = ids.map(sqlStr).join(", ");
+  const rows = await r2Query<{ id: string; name: string | null; username: string | null }>(
+    env,
+    latestRowsSql({
+      table: "uniscrm.user",
+      columns: ["id", "name", "username", "is_deleted"],
+      partitionBy: ["channel_id", "source_user_id"],
+      where: [`tenant_id = ${sqlInt(tenantId)}`, `id IN (${list})`],
+      outerWhere: ["is_deleted = 0"],
+    })
+  );
+  return new Map(rows.map((r) => [r.id, r.name ?? null]));
+}
+
 export async function recomputeFlowCounts(env: Env): Promise<void> {
   const [flowRows, contentFlowRows] = await Promise.all([
     queryR2Counts(env, "uniscrm.flow_log"),
@@ -293,6 +316,25 @@ interface ActionExecResult {
   outcomeLogs: NodeLog[];
 }
 
+// flow 唯一的 user props 热读是 metadata/x.ts 的 userPropsFilter,而它只用到 is_follow(/is_followed)。
+// 这两列常驻 entity_state(link 的 D1 index table,毫秒级),不走 R2 —— R2 单次查询 1-3s,
+// 会把每次 xAction 都拖慢。entity_id 是 entity_state 的二级索引,直接按 userId 查。
+export async function resolveUserPropsForFilter(
+  env: Env,
+  tenantId: number,
+  userId: string
+): Promise<Record<string, unknown>> {
+  const row = await env.LINK_DB
+    .prepare(`SELECT is_follow, is_followed FROM entity_state WHERE tenant_id = ? AND entity_id = ?`)
+    .bind(tenantId, userId)
+    .first<{ is_follow: number | null; is_followed: number | null }>();
+  // Unknown user → empty props object → passesPropsFilter's every-condition-must-match semantics
+  // fail closed (no matching props means no condition can pass), so the action is skipped rather
+  // than fired against stale/missing follow state.
+  if (!row) return {};
+  return { is_follow: row.is_follow, is_followed: row.is_followed };
+}
+
 async function executeActions(actions: ActionResult[], userId: string, tenantId: string, env: Env, payload?: Record<string, unknown>, flowId?: string): Promise<ActionExecResult> {
   const stmts: D1PreparedStatement[] = [];
   const rateLimited: { action: ActionResult; retryAt: string }[] = [];
@@ -320,18 +362,11 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
       // Check userPropsFilter before executing action
       const meta = EventMetadata_X.find(m => m.eventType === action.xEvent);
       if (meta?.userPropsFilter?.length) {
-        const tenantRow = await env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-          .bind(Number(tenantId)).first<{ d1_database_id: string }>();
-        if (tenantRow?.d1_database_id) {
-          const tdb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
-          const fields = meta.userPropsFilter.map(f => f.propId).join(", ");
-          const rows = await tdb.query<Record<string, unknown>>(`SELECT ${fields} FROM user WHERE id = ?`, [userId]);
-          const row = rows[0];
-          const pass = passesPropsFilter(meta.userPropsFilter, row ?? {});
-          if (!pass) {
-            console.log(JSON.stringify({ event: "flow_action_skipped_filter", xEvent: action.xEvent, userId, filter: meta.userPropsFilter, actual: row }));
-            continue;
-          }
+        const row = await resolveUserPropsForFilter(env, Number(tenantId), userId);
+        const pass = passesPropsFilter(meta.userPropsFilter, row);
+        if (!pass) {
+          console.log(JSON.stringify({ event: "flow_action_skipped_filter", xEvent: action.xEvent, userId, filter: meta.userPropsFilter, actual: row }));
+          continue;
         }
       }
 
@@ -399,17 +434,6 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
         (action as any).success = res.ok;
       } catch {
         (action as any).success = false;
-      }
-    } else if (action.type === "changeUserProps" && action.updates) {
-      const tenantRow = await env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-        .bind(Number(tenantId)).first<{ d1_database_id: string }>();
-      if (tenantRow?.d1_database_id) {
-        const tdb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
-        const updates = action.updates as { field: string; value: string }[];
-        for (const u of updates) {
-          const val = u.value.replace(/\$(user|event)\.(\w+)/g, (_, _p, field) => String(payload?.[field] ?? ""));
-          await tdb.run(`UPDATE user SET ${u.field} = ? WHERE id = ?`, [val, userId]);
-        }
       }
     }
   }
@@ -1448,23 +1472,15 @@ app.get("/api/flows/:id/nodes/:nodeId/logs", async (c) => {
       latest.push(r);
     }
 
-    const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-      .bind(tenantId).first<{ d1_database_id: string | null }>();
-
     // Display names are decorative — the row's user_id, timestamp and outcome are the payload.
-    // A tenant-DB failure (expired CF_D1_API_TOKEN, unprovisioned tenant) must degrade to
-    // "no names" rather than throwing into the catch below and blanking the entire drawer.
-    const nameMap = new Map<string, string | null>();
-    if (tenantRow?.d1_database_id) {
-      try {
-        const tdb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
-        const ids = latest.map((r) => r.subjectId);
-        const placeholders = ids.map(() => "?").join(",");
-        const nameRows = await tdb.query<{ id: string; name: string | null }>(`SELECT id, name FROM user WHERE id IN (${placeholders})`, ids);
-        for (const r of nameRows) nameMap.set(r.id, r.name);
-      } catch (e) {
-        console.error(JSON.stringify({ event: "node_logs_name_lookup_failed", tenantId, flowId, nodeId, error: String(e) }));
-      }
+    // getUserNames (via r2Query) throws on any R2 SQL failure rather than returning [] — that's
+    // the right default everywhere else, but here it must degrade to "no names" instead of
+    // blanking the entire drawer, so this one narrow spot deliberately catches it.
+    let nameMap = new Map<string, string | null>();
+    try {
+      nameMap = await getUserNames(c.env, Number(tenantId), latest.map((r) => r.subjectId));
+    } catch (e) {
+      console.error(JSON.stringify({ event: "node_logs_name_lookup_failed", tenantId, flowId, nodeId, error: String(e) }));
     }
 
     const logs = latest.map((r) => ({

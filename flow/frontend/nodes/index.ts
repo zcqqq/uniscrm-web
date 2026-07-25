@@ -9,7 +9,6 @@ import TimeConditionNode from "./TimeConditionNode";
 import UserPropsConditionNode from "./UserPropsConditionNode";
 import AbSplitNode from "./AbSplitNode";
 import WebhookNode from "./WebhookNode";
-import ChangeUserPropsNode from "./ChangeUserPropsNode";
 import VideoConditionNode from "./VideoConditionNode";
 
 export const nodeTypes = {
@@ -25,5 +24,4 @@ export const nodeTypes = {
   abSplit: AbSplitNode,
   webhook: WebhookNode,
   videoCondition: VideoConditionNode,
-  changeUserProps: ChangeUserPropsNode,
 };

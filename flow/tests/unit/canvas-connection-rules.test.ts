@@ -12,7 +12,7 @@ describe("isValidConnection (shared by Canvas.tsx and the store's onConnect)", (
   });
 
   it("allows xContentTrigger -> the other content/shared node types", () => {
-    for (const targetType of ["wait", "timeCondition", "userPropsCondition", "abSplit", "webhook", "changeUserProps"]) {
+    for (const targetType of ["wait", "timeCondition", "userPropsCondition", "abSplit", "webhook"]) {
       expect(isValidConnection(node("xContentTrigger"), node(targetType))).toBe(true);
     }
   });

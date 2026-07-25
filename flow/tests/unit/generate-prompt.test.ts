@@ -7,7 +7,7 @@ describe("buildFlowGenerateSystemPrompt", () => {
   it("user domain: documents every generatable user/both node type's fragment, rules, closing instructions", () => {
     const prompt = buildFlowGenerateSystemPrompt("user");
     expect(prompt).toContain("You are a workflow graph generator for a social CRM.");
-    for (const key of ["xTrigger", "cronTrigger", "waitForEvent", "userPropsCondition", "changeUserProps", "wait", "timeCondition", "abSplit", "webhook"]) {
+    for (const key of ["xTrigger", "cronTrigger", "waitForEvent", "userPropsCondition", "wait", "timeCondition", "abSplit", "webhook"]) {
       expect(prompt, `missing fragment for "${key}"`).toContain(NODE_TYPE_REGISTRY[key].promptFragment!);
     }
     expect(prompt).toContain('For X actions: data: { actionType: "xAction", xEvent: string }');
@@ -49,7 +49,7 @@ describe("buildFlowGenerateSystemPrompt", () => {
 
   it("content domain: forbids user-domain types and never documents their data shape", () => {
     const prompt = buildFlowGenerateSystemPrompt("content");
-    expect(prompt).toContain("Do NOT use xTrigger, cronTrigger, waitForEvent, userPropsCondition, changeUserProps");
+    expect(prompt).toContain("Do NOT use xTrigger, cronTrigger, waitForEvent, userPropsCondition");
     // The rules text is allowed to name addToList/xAction in a "do NOT use" sentence
     // (that's helpful, explicit LLM guidance) — what must never appear is their actual
     // data-shape declaration, which would let the LLM construct one.

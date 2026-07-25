@@ -153,12 +153,6 @@ export default function Sidebar() {
       el: <DraggableItem key="webhook" type="webhook" label={NODE_TYPE_REGISTRY.webhook.label!} description={NODE_TYPE_REGISTRY.webhook.description!} color="border-accent bg-accent/50" icon="🔗" />,
     });
   }
-  if (visible("changeUserProps")) {
-    actionItems.push({
-      key: "changeUserProps",
-      el: <DraggableItem key="changeUserProps" type="changeUserProps" label={NODE_TYPE_REGISTRY.changeUserProps.label!} description={NODE_TYPE_REGISTRY.changeUserProps.description!} color="border-accent bg-accent/50" icon="✏️" />,
-    });
-  }
   if (visible("xContentAction")) {
     actionItems.push({
       key: "xContentAction",

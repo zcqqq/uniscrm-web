@@ -6,6 +6,7 @@ export interface Env {
   WEB_DB: D1Database;   // uniscrm-db (tenants, sessions)
   FLOW_DB: D1Database;  // flow DB (flows, flow_pending, flow_counts, content_flow_counts, rate_limits)
   ADMIN_DB: D1Database; // admin DB (subscriptions)
+  LINK_DB: D1Database;  // link's entity_state index table (is_follow/is_followed, ms-latency reads)
   ASSETS: Fetcher;
   AI: Ai;
   WEB_URL: string;
@@ -20,7 +21,6 @@ export interface Env {
   CONTENT_URL: string;
   INTERNAL_SECRET: string;
   CF_ACCOUNT_ID: string;
-  CF_D1_API_TOKEN: string;
 }
 
 export interface FlowQueueMessage {

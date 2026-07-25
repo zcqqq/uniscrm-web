@@ -75,7 +75,7 @@ stream = "91aff39a029746b5b5f6f0e162063096"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_USER"
-stream = "8e45214807d640e9bdfea318fd1fb8d2"
+stream = "b2a9528928814147a6dfa742b8319d92"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_CONTENT"
@@ -147,7 +147,7 @@ stream = "8a94ce74d7b9482d954beb03cd7719b5"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_USER"
-stream = "8713643e4698423b8a333bcfe6d7ba54"
+stream = "87e8afbbef4c4ccf93cb4c8777e61da7"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_CONTENT"

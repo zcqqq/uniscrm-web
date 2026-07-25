@@ -17,7 +17,7 @@ export const TENANT_DB_INIT_SQL = [
     description TEXT,
     followers_count INTEGER,
     following_count INTEGER,
-    tweet_count INTEGER,
+    post_count INTEGER,
     listed_count INTEGER,
     like_count INTEGER,
     media_count INTEGER,

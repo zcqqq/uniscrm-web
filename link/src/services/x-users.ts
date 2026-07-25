@@ -1,14 +1,24 @@
 import { TenantDataDB } from "../../../shared/tenant-data-db";
 import { PROPS } from "../../../metadata/props";
+import { UserMetadata_X } from "../../../metadata/x-byok";
+import { resolveProps } from "./pollers/resolve-props";
 import type { Pipeline } from "../types";
 
 const INSIGHT_PROPS = PROPS.filter((p) => p.isInsight);
+
+// X nests the counts under public_metrics and names some fields differently from our
+// propIds (post_count -> tweet_count), so the propId -> payload path mapping has to come
+// from metadata, never from the propId itself. `value`-only mappings are excluded: they
+// describe a poller's fixed context (own:get-followers implies is_followed = 1) and must
+// not be asserted for a user arriving through some other path.
+const X_USER_META = UserMetadata_X.find((m) => m.sourceUserType === "own:get-followers");
+const X_USER_MAPPINGS = (X_USER_META?.userProps || []).filter((m) => m.dataId);
 
 // propIds that map 1:1 to a same-named column on `user`. A resolved prop not in this
 // list only ever lives in raw_data. Extend when a new column is added to the user table.
 const USER_TABLE_COLUMNS = [
   "name", "username", "profile_image_url", "description",
-  "followers_count", "following_count", "tweet_count", "listed_count", "like_count", "media_count",
+  "followers_count", "following_count", "post_count", "listed_count", "like_count", "media_count",
   "is_follow", "is_followed",
 ] as const;
 
@@ -96,11 +106,9 @@ export class XUsersService {
         created_at: now,
         updated_at: now,
       };
+      const resolved = resolveProps(user as Record<string, unknown>, X_USER_MAPPINGS, X_USER_META?.linkPrefix);
       for (const prop of INSIGHT_PROPS) {
-        const pm = (user as Record<string, unknown>).public_metrics as Record<string, unknown> | undefined;
-        const val = prop.propId.includes("_count")
-          ? pm?.[prop.propId]
-          : (user as Record<string, unknown>)[prop.propId];
+        const val = resolved[prop.propId];
         if (val !== undefined && val !== null) {
           record[prop.propId] = val;
         }

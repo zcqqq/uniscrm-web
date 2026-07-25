@@ -96,7 +96,9 @@ describe("XUsersService.upsertUserFromMetadata", () => {
       source_user_id: "u1",
       description: "bio text",
       followers_count: 123,
-      tweet_count: 456,
+      // resolveProps emits the metadata propId (post_count), never X's field name
+      // (tweet_count) — the D1 column has to match the propId or the value is dropped.
+      post_count: 456,
     };
 
     await service.upsertUserFromMetadata(rawItem, resolvedProps, "chan1", "X");
@@ -104,7 +106,7 @@ describe("XUsersService.upsertUserFromMetadata", () => {
     const [sql, params] = tenantDb.run.mock.calls[0];
     expect(sql).toContain("description");
     expect(sql).toContain("followers_count");
-    expect(sql).toContain("tweet_count");
+    expect(sql).toContain("post_count");
     expect(params).toEqual(expect.arrayContaining(["bio text", 123, 456]));
   });
 
@@ -158,6 +160,40 @@ describe("XUsersService.upsertUser (regression: no more zero-defaulting)", () =>
     const record = pipelineUser.send.mock.calls[0][0][0];
     expect(record.followers_count).toBe(500);
     expect(record).not.toHaveProperty("following_count");
+  });
+
+  // X names this field tweet_count; our propId is post_count. Resolving by propId alone
+  // (the old `propId.includes("_count") ? public_metrics[propId]` heuristic) silently
+  // dropped it, leaving the column null for every user.
+  it("maps post_count from X's public_metrics.tweet_count via metadata", async () => {
+    const tenantDb = createMockTenantDb();
+    tenantDb.query.mockResolvedValue([]);
+    const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new XUsersService(tenantDb as any, { pipelineUser: pipelineUser as any, tenantId: 42 });
+
+    await service.upsertUser(
+      { id: "u3", name: "Cy", public_metrics: { followers_count: 10, tweet_count: 1234, listed_count: 7 } } as any,
+      "chan1",
+      "X"
+    );
+
+    const record = pipelineUser.send.mock.calls[0][0][0];
+    expect(record.post_count).toBe(1234);
+    expect(record.listed_count).toBe(7);
+    expect(record).not.toHaveProperty("tweet_count");
+  });
+
+  // UserMetadata_X's own:get-followers entry carries `{ propId: "is_followed", value: 1 }`,
+  // which describes that poller's context. A webhook user must not inherit it.
+  it("does not assert is_followed from the poller's fixed-value mapping", async () => {
+    const tenantDb = createMockTenantDb();
+    tenantDb.query.mockResolvedValue([]);
+    const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new XUsersService(tenantDb as any, { pipelineUser: pipelineUser as any, tenantId: 42 });
+
+    await service.upsertUser({ id: "u4", name: "Dee" } as any, "chan1", "X");
+
+    expect(pipelineUser.send.mock.calls[0][0][0].is_followed).toBe(0);
   });
 });
 

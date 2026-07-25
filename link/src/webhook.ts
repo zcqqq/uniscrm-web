@@ -38,7 +38,9 @@ function flattenUserPayload(userData?: Record<string, unknown>): Record<string, 
     verified_type: String(userData.verified_type || (userData.verified ? "blue" : "none")),
     followers_count: Number(pm?.followers_count || 0),
     following_count: Number(pm?.following_count || 0),
-    tweet_count: Number(pm?.tweet_count || 0),
+    // propId is post_count; tweet_count is X's name for the same field. Flow evaluates
+    // conditions by propId, so emitting X's name here made "Posts" conditions never match.
+    post_count: Number(pm?.tweet_count || 0),
     listed_count: Number(pm?.listed_count || 0),
     like_count: Number(pm?.like_count || 0),
     media_count: Number(pm?.media_count || 0),

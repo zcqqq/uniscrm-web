@@ -51,6 +51,30 @@ const R2_CONTENT_VALUE_COLUMNS = [
   "quote_count", "reply_count", "repost_count", "share_count",
 ];
 
+// Deep-clones `payload` and deletes each dotted `path` (e.g. "public_metrics.impression_count")
+// from it — the complement of what resolveProps consumed, per consumedPaths in
+// pollers/resolve-props.ts. Tolerates a path that doesn't exist (nothing to delete). Leaves a
+// parent object in place even if removing its last child empties it — this strips consumed
+// leaves, it doesn't reshape the payload.
+function stripConsumedPaths(payload: Record<string, unknown>, paths: string[]): Record<string, unknown> {
+  const clone = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+  for (const path of paths) {
+    const parts = path.split(".");
+    let current: unknown = clone;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (current == null || typeof current !== "object") {
+        current = undefined;
+        break;
+      }
+      current = (current as Record<string, unknown>)[parts[i]];
+    }
+    if (current != null && typeof current === "object") {
+      delete (current as Record<string, unknown>)[parts[parts.length - 1]];
+    }
+  }
+  return clone;
+}
+
 export interface SyncResult {
   added: number;
   updated: number;
@@ -135,12 +159,19 @@ export class ContentService {
       };
       const fingerprint = await fingerprintOf(values, ["source_updated_at", "title", "summary", "source_url"]);
 
-      // LOCAL/NOTION/TIKTOK imports (the only callers of syncBatch) have no channel_id at
-      // sync time, so key on ("", "", source_content_id) — kept consistent with the R2
-      // record's channel_id, which is null for the same reason.
+      // LOCAL/NOTION/TIKTOK imports (the only callers of syncBatch) have no channel_id at sync
+      // time. Using "" here would key every import type on the same ("", "", source_content_id)
+      // — so syncing {LOCAL, id:"1"} then {NOTION, id:"1"} would collide: the second claim
+      // returns the first item's uuid, and the R2 partition key (channel_id, list_id,
+      // source_content_id) — which also has no channel_type dimension — would silently
+      // overwrite the LOCAL row with the NOTION one. For a channel-less import the channel
+      // *type* is the channel, so using it as channel_id is honest, not a workaround: it keeps
+      // the required `channel_id` column non-null (a genuine schema requirement — R2 Pipelines
+      // silently drops records with a null required field) and makes the partition key
+      // (channelType, null, source_content_id), which cannot collide across types.
       const key = {
         entity: "content" as const,
-        channelId: "",
+        channelId: channelType,
         secondaryId: "",
         sourceId: item.source_content_id,
       };
@@ -153,7 +184,7 @@ export class ContentService {
 
       needsEmbedding.push({
         id,
-        channel_id: null,
+        channel_id: channelType,
         channel_type: channelType,
         content_type: null,
         source_content_id: item.source_content_id,
@@ -170,7 +201,7 @@ export class ContentService {
       });
 
       const record = this.buildContentRecord(
-        { id, channelId: null, channelType, sourceContentId: item.source_content_id, listId: null, rawData, createdAt: now, updatedAt: now },
+        { id, channelId: channelType, channelType, sourceContentId: item.source_content_id, listId: null, rawData, createdAt: now, updatedAt: now },
         values
       );
       await this.sendContentRecord(record);
@@ -189,7 +220,14 @@ export class ContentService {
     channelId: string,
     channelType: ChannelType,
     emitFlowEvent: boolean,
-    listId?: string
+    listId?: string,
+    // Exactly the rawItem paths resolveProps consumed (see pollers/resolve-props.ts's
+    // consumedPaths) — i.e. the payload fields that landed in a named column. raw_data strips
+    // THESE, never propIds: a propId is not a payload field name (view_count ← rawItem's
+    // public_metrics.impression_count), so the old propId-keyed filter stripped nothing for X
+    // content at all and shipped full tweet payloads to R2. Omitting this parameter is loud
+    // (console.warn once) rather than silently over-storing.
+    consumedPaths?: string[]
   ): Promise<boolean> {
     const sourceContentId = String(resolvedProps.source_content_id ?? "");
     if (!sourceContentId) throw new Error("upsertContentFromMetadata: missing source_content_id");
@@ -212,14 +250,22 @@ export class ContentService {
     };
     const { entityId: id, isNew, unchanged } = await this.entityState.claim(key, fingerprint);
 
-    // raw_data 只保留没有映射到具名列的剩余字段 —— 全量 payload 进日志不进库
+    // raw_data 只保留没有被消费的字段 —— 全量 payload 进日志不进库
     // (uniscrm-web/CLAUDE.md「调用外部API返回的payload全量数据不要存在数据库中」)。
-    const mapped = new Set(Object.keys(CONTENT_COLUMN_MAP));
-    const leftover: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(rawItem)) {
-      if (!mapped.has(k)) leftover[k] = v;
+    // consumedPaths must be payload paths (resolve-props.ts's consumedPaths), never propIds —
+    // propId ≠ payload field name.
+    let rawData: string;
+    if (consumedPaths) {
+      rawData = JSON.stringify(stripConsumedPaths(rawItem, consumedPaths));
+    } else {
+      console.warn(JSON.stringify({
+        event: "upsertContentFromMetadata_raw_data_unfiltered",
+        message: "consumedPaths not provided — storing the entire payload in raw_data",
+        channelId,
+        sourceContentId,
+      }));
+      rawData = JSON.stringify(rawItem);
     }
-    const rawData = JSON.stringify(leftover);
 
     await this.embedContents([{
       id,
@@ -272,15 +318,27 @@ export class ContentService {
     ref: { generatedFromContentId: string; flowId: string },
     contentType: string = "TWEET"
   ): Promise<void> {
-    const id = crypto.randomUUID();
     const now = new Date().toISOString();
+    const values = { content_type: contentType, content_text: contentText };
+
+    // Under D1 a bare crypto.randomUUID() was harmless because `id` was the primary key. Under
+    // R2 the read-time business key is (channel_id, list_id, source_content_id) and this method
+    // writes into that same key space — minting a fresh uuid per call would let publishing the
+    // same sourceContentId twice produce two different `id`s in one partition, even though
+    // flow logs / Vectorize / ref.generatedFromContentId all key off `id`. Route through
+    // entityState.claim like every other writer so the id is stable per business key.
+    const fingerprint = await fingerprintOf(values, ["content_type", "content_text"]);
+    const { entityId: id } = await this.entityState.claim(
+      { entity: "content", channelId, secondaryId: "", sourceId: sourceContentId },
+      fingerprint
+    );
     const rawData = JSON.stringify(ref);
 
     // `status` no longer exists as an R2 column — the plan drops the concept entirely
     // rather than inventing a replacement (published-ness now lives only in `ref`/raw_data).
     const record = this.buildContentRecord(
       { id, channelId, channelType, sourceContentId, listId: null, rawData, createdAt: now, updatedAt: now },
-      { content_type: contentType, content_text: contentText }
+      values
     );
     await this.sendContentRecord(record);
   }
@@ -326,38 +384,92 @@ export class ContentService {
 
   // R2 是 append-only 且读路径按 QUALIFY 取整行最新,所以"改一个字段"必须
   // 读整行 → 覆盖 → 整行回写。只发 {id, title} 会把其余列全部写成 null。
+  // Routes through buildContentRecord (like every other writer) rather than spreading the read
+  // row directly, so the column set is guaranteed by the one builder instead of resting on
+  // CONTENT_COLUMNS and R2_CONTENT_VALUE_COLUMNS staying manually in sync (I4).
   async update(id: string, fields: { title?: string; summary?: string }): Promise<void> {
     if (!this.r2Env) throw new Error("ContentService.update: r2Env is required");
-    const row = await getContent(this.r2Env, this.tenantId, id);
+    // includeDeleted: true — update() must see a deleted row to tell "not found" apart from
+    // "found but deleted" below, rather than getContent's default filter silently reporting
+    // both as "not found".
+    const row = (await getContent(this.r2Env, this.tenantId, id, { includeDeleted: true })) as unknown as Record<string, unknown> | null;
     if (!row) throw new Error(`ContentService.update: content ${id} not found`);
+    // Editing a deleted item is a caller bug (stale UI, race with a concurrent delete), not
+    // something to silently repair by resurrecting the row — that was the I1 bug: forcing
+    // is_deleted = 0 here turned "PATCH a deleted item" into an accidental undelete.
+    if (row.is_deleted === 1) throw new Error(`ContentService.update: content ${id} is deleted`);
 
-    const next: Record<string, unknown> = { ...row };
-    if (fields.title !== undefined) next.title = fields.title;
-    if (fields.summary !== undefined) next.summary = fields.summary;
-    next.tenant_id = this.tenantId;
-    next.is_deleted = 0;
-    next.updated_at = new Date().toISOString();
+    const now = new Date().toISOString();
+    const values: Record<string, unknown> = { ...row };
+    if (fields.title !== undefined) values.title = fields.title;
+    if (fields.summary !== undefined) values.summary = fields.summary;
 
-    await this.pipelineContent?.send([next]).catch((err) => {
-      console.error(JSON.stringify({ event: "pipeline_content_error", contentId: id, error: String(err) }));
-    });
+    const record = this.buildContentRecord(
+      {
+        id,
+        channelId: (row.channel_id as string | null) ?? null,
+        channelType: row.channel_type as ChannelType,
+        sourceContentId: row.source_content_id as string,
+        listId: (row.list_id as string | null) ?? null,
+        rawData: row.raw_data as string,
+        createdAt: row.created_at as string,
+        updatedAt: now,
+        isDeleted: 0,
+      },
+      values
+    );
+    await this.sendContentRecord(record);
+
+    // Vectorize is still live (delete() below removes from it), so an edit that changes the
+    // searchable text must refresh the embedding — otherwise semantic search keeps ranking on
+    // text the user already replaced, with no path to ever catch up (7.3 fix).
+    const needsReEmbed = fields.title !== undefined || fields.summary !== undefined;
+    if (needsReEmbed) {
+      await this.embedContents([{
+        id,
+        channel_id: (row.channel_id as string | null) ?? null,
+        channel_type: row.channel_type as ChannelType,
+        content_type: (row.content_type as string | null) ?? null,
+        source_content_id: row.source_content_id as string,
+        title: (values.title as string | null) ?? null,
+        content_text: (row.content_text as string | null) ?? null,
+        summary: (values.summary as string | null) ?? null,
+        status: "new",
+        source_url: (row.source_url as string | null) ?? null,
+        source_updated_at: (row.source_updated_at as string | null) ?? null,
+        source_created_at: (row.source_created_at as string | null) ?? null,
+        raw_data: row.raw_data as string,
+        created_at: row.created_at as string,
+        updated_at: now,
+      }]);
+    }
   }
 
   // 逻辑删除:uniscrm-web/CLAUDE.md「重要的被关联数据用逻辑删除」,
-  // 而且 Iceberg sink 本来也没有 DELETE。
+  // 而且 Iceberg sink 本来也没有 DELETE。Also routed through buildContentRecord (I4).
   async delete(id: string): Promise<void> {
     if (!this.r2Env) throw new Error("ContentService.delete: r2Env is required");
-    const row = await getContent(this.r2Env, this.tenantId, id);
+    // includeDeleted: true — delete() must be idempotent against an already-deleted row rather
+    // than reporting "not found" for it.
+    const row = (await getContent(this.r2Env, this.tenantId, id, { includeDeleted: true })) as unknown as Record<string, unknown> | null;
     if (!row) throw new Error(`ContentService.delete: content ${id} not found`);
 
-    const next: Record<string, unknown> = { ...row };
-    next.tenant_id = this.tenantId;
-    next.is_deleted = 1;
-    next.updated_at = new Date().toISOString();
-
-    await this.pipelineContent?.send([next]).catch((err) => {
-      console.error(JSON.stringify({ event: "pipeline_content_error", contentId: id, error: String(err) }));
-    });
+    const now = new Date().toISOString();
+    const record = this.buildContentRecord(
+      {
+        id,
+        channelId: (row.channel_id as string | null) ?? null,
+        channelType: row.channel_type as ChannelType,
+        sourceContentId: row.source_content_id as string,
+        listId: (row.list_id as string | null) ?? null,
+        rawData: row.raw_data as string,
+        createdAt: row.created_at as string,
+        updatedAt: now,
+        isDeleted: 1,
+      },
+      row
+    );
+    await this.sendContentRecord(record);
     await this.vectorize.deleteByIds([id]);
   }
 

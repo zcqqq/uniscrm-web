@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ContentService } from "../../src/services/content";
+import contentSchema from "../../../analytics/pipelines/content-stream-schema.json";
+
+const SCHEMA_FIELD_NAMES = (contentSchema as { fields: { name: string }[] }).fields
+  .map((f) => f.name)
+  .sort();
 
 function createMockEntityState(overrides: Partial<{ entityId: string; isNew: boolean; unchanged: boolean }> = {}) {
   return {
@@ -55,7 +60,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
     expect(isNew).toBe(false);
   });
 
-  it("sends a complete row to the content pipeline — every mapped column present, null when absent", async () => {
+  it("sends a complete row to the content pipeline — every schema column present, null when absent", async () => {
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
     const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
 
@@ -66,9 +71,9 @@ describe("ContentService.upsertContentFromMetadata", () => {
     );
 
     const [[record]] = pipeline.send.mock.calls[0];
-    for (const col of ["title", "summary", "duration", "height", "width", "has_face", "view_count"]) {
-      expect(record).toHaveProperty(col);
-    }
+    // I4: a spot-check of a few columns can't catch a writer that silently drops others —
+    // compare the full key set against the R2 schema itself.
+    expect(Object.keys(record).sort()).toEqual(SCHEMA_FIELD_NAMES);
     expect(record.is_deleted).toBe(0);
     expect(record.tenant_id).toBe(42);
   });
@@ -87,20 +92,70 @@ describe("ContentService.upsertContentFromMetadata", () => {
     expect(pipeline.send).not.toHaveBeenCalled();
   });
 
-  it("keeps only unmapped payload fields in raw_data", async () => {
-    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+  // I5: propId ≠ payload field name (e.g. view_count ← public_metrics.impression_count), so
+  // filtering raw_data by propId strings (the old behavior) stripped nothing for X content —
+  // it shipped the entire tweet payload to R2. consumedPaths must be actual payload paths.
+  describe("raw_data filtering via consumedPaths (I5)", () => {
+    it("strips exactly the given consumedPaths, keeping everything else", async () => {
+      const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+      const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
 
-    await service.upsertContentFromMetadata(
-      { id: "t1", content_text: "hi", weird_field: 1 },
-      { source_content_id: "t1", content_text: "hi" },
-      "chan1", "X", false
-    );
+      await service.upsertContentFromMetadata(
+        { id: "t1", text: "hi", weird_field: 1 },
+        { source_content_id: "t1", content_text: "hi" },
+        "chan1", "X", false, undefined, ["text"]
+      );
 
-    const [[record]] = pipeline.send.mock.calls[0];
-    const raw = JSON.parse(record.raw_data as string);
-    expect(raw).toHaveProperty("weird_field", 1);
-    expect(raw).not.toHaveProperty("content_text");
+      const [[record]] = pipeline.send.mock.calls[0];
+      const raw = JSON.parse(record.raw_data as string);
+      expect(raw).toHaveProperty("weird_field", 1);
+      expect(raw).toHaveProperty("id", "t1");
+      expect(raw).not.toHaveProperty("text");
+    });
+
+    it("strips a nested path and leaves the parent object in place", async () => {
+      const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+      const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+
+      await service.upsertContentFromMetadata(
+        { id: "t1", public_metrics: { impression_count: 100, like_count: 1 } },
+        { source_content_id: "t1", view_count: 100 },
+        "chan1", "X", false, undefined, ["public_metrics.impression_count"]
+      );
+
+      const [[record]] = pipeline.send.mock.calls[0];
+      const raw = JSON.parse(record.raw_data as string);
+      expect(raw.public_metrics).toEqual({ like_count: 1 });
+    });
+
+    it("tolerates a consumedPaths entry that does not exist in the payload", async () => {
+      const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+      const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+
+      await expect(service.upsertContentFromMetadata(
+        { id: "t1" },
+        { source_content_id: "t1" },
+        "chan1", "X", false, undefined, ["nonexistent.path"]
+      )).resolves.not.toThrow();
+    });
+
+    it("falls back to storing the entire payload and warns once when consumedPaths is omitted", async () => {
+      const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+
+      await service.upsertContentFromMetadata(
+        { id: "t1", text: "hi", weird_field: 1 },
+        { source_content_id: "t1", content_text: "hi" },
+        "chan1", "X", false
+      );
+
+      const [[record]] = pipeline.send.mock.calls[0];
+      const raw = JSON.parse(record.raw_data as string);
+      expect(raw).toEqual({ id: "t1", text: "hi", weird_field: 1 });
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      warnSpy.mockRestore();
+    });
   });
 
   it("writes content_type/content_text/source_created_at to their mapped columns", async () => {
@@ -309,6 +364,95 @@ describe("ContentService.upsertContentFromMetadata", () => {
   });
 });
 
+// M1: syncBatch gained a claim key, a fingerprint, a pipeline send, and reworked
+// added/updated/skipped accounting in this migration, none of it previously covered.
+describe("ContentService.syncBatch", () => {
+  function makeItem(overrides: Partial<{
+    source_content_id: string;
+    title: string;
+    summary: string | null;
+    source_url: string | null;
+    source_updated_at: string | null;
+    raw_data?: Record<string, unknown>;
+  }> = {}) {
+    return {
+      source_content_id: "s1",
+      title: "T",
+      summary: null,
+      source_url: null,
+      source_updated_at: "2026-01-01T00:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("counts a new item as added and sends a complete row", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const entityState = createMockEntityState({ isNew: true, unchanged: false });
+    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+
+    const result = await service.syncBatch("LOCAL", [makeItem()]);
+
+    expect(result).toEqual({ added: 1, updated: 0, skipped: 0 });
+    expect(pipeline.send).toHaveBeenCalledTimes(1);
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(Object.keys(record).sort()).toEqual(SCHEMA_FIELD_NAMES);
+  });
+
+  it("counts an unchanged item as skipped and sends nothing", async () => {
+    const pipeline = { send: vi.fn() };
+    const entityState = createMockEntityState({ isNew: false, unchanged: true });
+    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+
+    const result = await service.syncBatch("LOCAL", [makeItem()]);
+
+    expect(result).toEqual({ added: 0, updated: 0, skipped: 1 });
+    expect(pipeline.send).not.toHaveBeenCalled();
+  });
+
+  it("counts a changed existing item as updated", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const entityState = createMockEntityState({ isNew: false, unchanged: false });
+    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+
+    const result = await service.syncBatch("LOCAL", [makeItem()]);
+
+    expect(result).toEqual({ added: 0, updated: 1, skipped: 0 });
+    expect(pipeline.send).toHaveBeenCalledTimes(1);
+  });
+
+  // I2 + I3 regression test: channel-less imports must key on channel_type, not "". Keying on
+  // "" made the R2 record's channel_id null (violating the schema's required column — R2
+  // Pipelines silently drops such records) AND made two different channel types collide on the
+  // same entity_state/partition key.
+  it("keys the entity_state claim (and R2 channel_id) by channel_type, so the same source_content_id under two channel types is not the same entity", async () => {
+    const entityState = createMockEntityState();
+    entityState.claim
+      .mockResolvedValueOnce({ entityId: "local-id", isNew: true, unchanged: false })
+      .mockResolvedValueOnce({ entityId: "notion-id", isNew: true, unchanged: false });
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+
+    await service.syncBatch("LOCAL", [makeItem({ source_content_id: "1" })]);
+    await service.syncBatch("NOTION", [makeItem({ source_content_id: "1" })]);
+
+    expect(entityState.claim).toHaveBeenNthCalledWith(1,
+      { entity: "content", channelId: "LOCAL", secondaryId: "", sourceId: "1" },
+      expect.any(String)
+    );
+    expect(entityState.claim).toHaveBeenNthCalledWith(2,
+      { entity: "content", channelId: "NOTION", secondaryId: "", sourceId: "1" },
+      expect.any(String)
+    );
+
+    const [[recordA]] = pipeline.send.mock.calls[0];
+    const [[recordB]] = pipeline.send.mock.calls[1];
+    expect(recordA.id).toBe("local-id");
+    expect(recordB.id).toBe("notion-id");
+    expect(recordA.channel_id).toBe("LOCAL");
+    expect(recordB.channel_id).toBe("NOTION");
+  });
+});
+
 describe("CONTENT_COLUMN_MAP coverage", () => {
   it("maps view_count, share_count, cover_image_url, duration, height, width, has_face to matching columns", async () => {
     const entityState = createMockEntityState();
@@ -401,6 +545,41 @@ describe("recordPublishedContent", () => {
     expect(record).not.toHaveProperty("status");
     const rawData = JSON.parse(record.raw_data as string);
     expect(rawData).toEqual({ generatedFromContentId: "source-content-1", flowId: "flow-1" });
+  });
+
+  it("sends every schema column (I4)", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+
+    await svc.recordPublishedContent("target-chan-1", "X", "tweet-123", "generated post text", {
+      generatedFromContentId: "source-content-1",
+      flowId: "flow-1",
+    });
+
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(Object.keys(record).sort()).toEqual(SCHEMA_FIELD_NAMES);
+  });
+
+  // 7.2: under D1 a bare crypto.randomUUID() was harmless (id was the PK). Under R2 this method
+  // writes into the same (channel_id, list_id, source_content_id) business key every other
+  // writer uses, so it must mint the id the same way — via entity_state.claim — or republishing
+  // the same sourceContentId would produce two different ids in one partition.
+  it("routes through entity_state.claim, keyed by sourceContentId, so the row id is stable per business key", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const entityState = createMockEntityState({ entityId: "stable-id" });
+    const svc = new ContentService(entityState as any, vectorize as any, ai as any, 42, pipeline as any);
+
+    await svc.recordPublishedContent("chan1", "X", "tweet-1", "hello", {
+      generatedFromContentId: "c1",
+      flowId: "f1",
+    });
+
+    expect(entityState.claim).toHaveBeenCalledWith(
+      { entity: "content", channelId: "chan1", secondaryId: "", sourceId: "tweet-1" },
+      expect.any(String)
+    );
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.id).toBe("stable-id");
   });
 
   it("stores an explicit contentType when given (e.g. TikTok's PHOTO_POST), instead of the hardcoded TWEET default", async () => {
@@ -553,6 +732,14 @@ describe("ContentService.list / get (R2-backed reads)", () => {
   });
 });
 
+const R2_ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+
+function stubR2Rows(rows: unknown[]) {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ result: { rows } }), { status: 200 })
+  ));
+}
+
 describe("ContentService.update", () => {
   it("throws a clear error when r2Env was not supplied", async () => {
     const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42);
@@ -561,12 +748,9 @@ describe("ContentService.update", () => {
 
   it("reads the full row, overwrites only the given fields, and writes the row back complete", async () => {
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ result: { rows: [{ id: "c1", channel_id: "chan1", title: "old title", summary: "old summary", view_count: 5 }] } }), { status: 200 })
-    ));
-    const r2Env = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+    stubR2Rows([{ id: "c1", channel_id: "chan1", channel_type: "X", source_content_id: "t1", title: "old title", summary: "old summary", view_count: 5, is_deleted: 0 }]);
     const service = new ContentService(
-      createMockEntityState() as any, {} as any, {} as any, 42, pipeline as any, undefined, r2Env
+      createMockEntityState() as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any, undefined, R2_ENV
     );
 
     await service.update("c1", { title: "new title" });
@@ -577,17 +761,67 @@ describe("ContentService.update", () => {
     expect(record.view_count).toBe(5); // untouched field preserved from the read
     expect(record.tenant_id).toBe(42);
     expect(record.is_deleted).toBe(0);
+    // I4: buildContentRecord is now the single source of the column set for update() too.
+    expect(Object.keys(record).sort()).toEqual(SCHEMA_FIELD_NAMES);
     vi.unstubAllGlobals();
   });
 
   it("throws when the content row does not exist", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ result: { rows: [] } }), { status: 200 })
-    ));
-    const r2Env = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
-    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42, undefined, undefined, r2Env);
+    stubR2Rows([]);
+    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42, undefined, undefined, R2_ENV);
 
     await expect(service.update("missing", { title: "x" })).rejects.toThrow("ContentService.update: content missing not found");
+    vi.unstubAllGlobals();
+  });
+
+  // I1: getContent had no is_deleted filter at all, and update() forced is_deleted back to 0
+  // on every write — so DELETE c1 followed by PATCH /items/c1 silently undeleted it. update()
+  // must instead refuse to edit a deleted row. This also proves update() passes
+  // includeDeleted: true to getContent — without it, a deleted row would come back as "not
+  // found" (wrong error) instead of "is deleted" (right error).
+  it("throws when the row is already deleted, instead of silently resurrecting it (I1)", async () => {
+    const pipeline = { send: vi.fn() };
+    stubR2Rows([{ id: "c1", channel_id: "chan1", channel_type: "X", source_content_id: "t1", is_deleted: 1 }]);
+    const service = new ContentService(
+      createMockEntityState() as any, {} as any, {} as any, 42, pipeline as any, undefined, R2_ENV
+    );
+
+    await expect(service.update("c1", { title: "x" })).rejects.toThrow("ContentService.update: content c1 is deleted");
+    expect(pipeline.send).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  // 7.3: the old D1-backed update() re-embedded on title/summary change; the R2 rewrite
+  // dropped that call. Vectorize is still live (delete() below still calls deleteByIds), so a
+  // silently-stale embedding would leave semantic search ranking on text the user replaced,
+  // with no path to ever catch up.
+  it("re-embeds Vectorize when title or summary changes (7.3)", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const vectorize = createMockVectorize();
+    const ai = createMockAi();
+    stubR2Rows([{ id: "c1", channel_id: "chan1", channel_type: "X", source_content_id: "t1", title: "old", summary: null, is_deleted: 0 }]);
+    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any, undefined, R2_ENV);
+
+    await service.update("c1", { title: "new title" });
+
+    expect(ai.run).toHaveBeenCalled();
+    expect(vectorize.upsert).toHaveBeenCalledTimes(1);
+    const [[embedRecord]] = vectorize.upsert.mock.calls[0];
+    expect(embedRecord.id).toBe("c1");
+    expect(embedRecord.metadata.title).toBe("new title");
+    vi.unstubAllGlobals();
+  });
+
+  it("does not re-embed when fields is empty", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const vectorize = createMockVectorize();
+    const ai = createMockAi();
+    stubR2Rows([{ id: "c1", channel_id: "chan1", channel_type: "X", source_content_id: "t1", is_deleted: 0 }]);
+    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any, undefined, R2_ENV);
+
+    await service.update("c1", {});
+
+    expect(vectorize.upsert).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 });
@@ -602,12 +836,9 @@ describe("ContentService.delete", () => {
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
     const vectorize = createMockVectorize();
     const ai = createMockAi();
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ result: { rows: [{ id: "c1", channel_id: "chan1", title: "t" }] } }), { status: 200 })
-    ));
-    const r2Env = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+    stubR2Rows([{ id: "c1", channel_id: "chan1", channel_type: "X", source_content_id: "t1", title: "t", is_deleted: 0 }]);
     const service = new ContentService(
-      createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any, undefined, r2Env
+      createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any, undefined, R2_ENV
     );
 
     await service.delete("c1");
@@ -615,7 +846,31 @@ describe("ContentService.delete", () => {
     const [[record]] = pipeline.send.mock.calls[0];
     expect(record.is_deleted).toBe(1);
     expect(record.id).toBe("c1");
+    // I4: buildContentRecord is now the single source of the column set for delete() too.
+    expect(Object.keys(record).sort()).toEqual(SCHEMA_FIELD_NAMES);
     expect(vectorize.deleteByIds).toHaveBeenCalledWith(["c1"]);
+    vi.unstubAllGlobals();
+  });
+
+  it("throws when the content row does not exist", async () => {
+    stubR2Rows([]);
+    const service = new ContentService(createMockEntityState() as any, createMockVectorize() as any, {} as any, 42, undefined, undefined, R2_ENV);
+
+    await expect(service.delete("missing")).rejects.toThrow("ContentService.delete: content missing not found");
+    vi.unstubAllGlobals();
+  });
+
+  it("is idempotent against a row that is already deleted", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const vectorize = createMockVectorize();
+    stubR2Rows([{ id: "c1", channel_id: "chan1", channel_type: "X", source_content_id: "t1", is_deleted: 1 }]);
+    const service = new ContentService(
+      createMockEntityState() as any, vectorize as any, {} as any, 42, pipeline as any, undefined, R2_ENV
+    );
+
+    await expect(service.delete("c1")).resolves.not.toThrow();
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.is_deleted).toBe(1);
     vi.unstubAllGlobals();
   });
 });

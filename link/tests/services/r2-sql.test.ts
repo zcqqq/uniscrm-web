@@ -56,6 +56,76 @@ describe("latestRowsSql", () => {
       })
     ).toThrow(/tenant_id/);
   });
+
+  // C1: WHERE runs before QUALIFY. A post-dedup condition like is_deleted=0 placed in `where`
+  // strips the tombstone row from the window's *input*, so the window falls back to the older
+  // (pre-delete) surviving row — the deleted item silently comes back. outerWhere exists so
+  // that class of filter runs on the dedup window's *output* instead.
+  it("wraps the query in a subquery and applies outerWhere after the QUALIFY window, not before", () => {
+    const sql = latestRowsSql({
+      table: "uniscrm.content",
+      columns: ["id", "is_deleted"],
+      partitionBy: ["channel_id", "list_id", "source_content_id"],
+      where: ["tenant_id = 7"],
+      outerWhere: ["is_deleted = 0"],
+    });
+
+    const qualifyIdx = sql.indexOf("QUALIFY ROW_NUMBER()");
+    const outerWhereIdx = sql.indexOf(") WHERE is_deleted = 0");
+    expect(qualifyIdx).toBeGreaterThan(-1);
+    expect(outerWhereIdx).toBeGreaterThan(qualifyIdx);
+
+    // The pre-QUALIFY WHERE must carry ONLY the tenant scoping — the is_deleted *filter* must
+    // not also be folded in there (it legitimately appears in the SELECT column list, since the
+    // outer query can only filter on a column the inner query actually produced).
+    const innerWhere = sql.slice(0, qualifyIdx);
+    expect(innerWhere).toContain("WHERE tenant_id = 7");
+    expect(innerWhere).not.toContain("is_deleted = 0");
+  });
+
+  it("keeps ORDER BY / LIMIT on the outer query so they apply to the post-dedup surviving rows", () => {
+    // orderBy deliberately differs from the QUALIFY window's own "ORDER BY updated_at DESC" —
+    // otherwise indexOf would match the window's internal ORDER BY instead of the outer one.
+    const sql = latestRowsSql({
+      table: "uniscrm.content",
+      columns: ["id", "is_deleted"],
+      partitionBy: ["channel_id", "list_id", "source_content_id"],
+      where: ["tenant_id = 7"],
+      outerWhere: ["is_deleted = 0"],
+      orderBy: "created_at DESC",
+      limit: 50,
+    });
+
+    const outerWhereIdx = sql.indexOf(") WHERE is_deleted = 0");
+    expect(outerWhereIdx).toBeGreaterThan(-1);
+    expect(sql.indexOf("ORDER BY created_at DESC")).toBeGreaterThan(outerWhereIdx);
+    expect(sql.indexOf("LIMIT 50")).toBeGreaterThan(outerWhereIdx);
+  });
+
+  it("omitting outerWhere keeps the single-query shape unchanged (backward compatible)", () => {
+    const sql = latestRowsSql({
+      table: "uniscrm.user",
+      columns: ["id", "name"],
+      partitionBy: ["channel_id", "source_user_id"],
+      where: ["tenant_id = 7"],
+      limit: 100,
+    });
+    expect(sql).not.toContain("FROM (");
+    expect(sql).toContain("SELECT id, name FROM uniscrm.user");
+    expect(sql).toContain("LIMIT 100");
+  });
+
+  it("the tenant_id guard only accepts tenant_id in `where` — outerWhere cannot satisfy it", () => {
+    expect(() =>
+      latestRowsSql({
+        table: "uniscrm.content",
+        columns: ["id"],
+        partitionBy: ["channel_id", "list_id", "source_content_id"],
+        where: ["is_deleted = 0"], // no tenant_id here
+        outerWhere: ["tenant_id = 7"], // tenant_id only in outerWhere must NOT satisfy the guard
+      })
+    ).toThrow(/tenant_id/);
+  });
 });
 
 describe("r2Query", () => {

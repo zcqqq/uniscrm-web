@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveProps } from "../../src/services/pollers/resolve-props";
+import { resolveProps, consumedPaths } from "../../src/services/pollers/resolve-props";
 import type { PropMapping } from "../../../metadata/dataTypes";
 
 describe("resolveProps", () => {
@@ -53,5 +53,42 @@ describe("resolveProps", () => {
       source_content_id: "t1",
       contentText: "hello world",
     });
+  });
+});
+
+describe("consumedPaths", () => {
+  // I5: a propId is not a payload field name (view_count ← public_metrics.impression_count),
+  // so the old raw_data filter — which matched on propId strings against the payload's own
+  // keys — stripped nothing for X content at all. consumedPaths must return the *payload*
+  // path, not the propId.
+  it("returns the relative payload path for each dataId mapping, not the propId", () => {
+    const props: PropMapping[] = [
+      { propId: "content_text", dataId: "{linkPrefix}.text" },
+      { propId: "view_count", dataId: "{linkPrefix}.public_metrics.impression_count" },
+      { propId: "source_created_at", dataId: "{linkPrefix}.created_at" },
+    ];
+    expect(consumedPaths(props, "data[]")).toEqual([
+      "text",
+      "public_metrics.impression_count",
+      "created_at",
+    ]);
+  });
+
+  it("excludes static value mappings, which consume nothing from the payload", () => {
+    const props: PropMapping[] = [
+      { propId: "content_type", value: "TWEET" },
+      { propId: "content_text", dataId: "{linkPrefix}.text" },
+    ];
+    expect(consumedPaths(props, "data[]")).toEqual(["text"]);
+  });
+
+  it("excludes mappings with neither dataId nor value", () => {
+    const props: PropMapping[] = [{ propId: "orphan" }];
+    expect(consumedPaths(props, "data[]")).toEqual([]);
+  });
+
+  it("uses dataId as-is when there is no linkPrefix", () => {
+    const props: PropMapping[] = [{ propId: "name", dataId: "name" }];
+    expect(consumedPaths(props)).toEqual(["name"]);
   });
 });

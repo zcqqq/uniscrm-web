@@ -30,6 +30,11 @@ export interface LatestRowsOpts {
   columns: string[];
   partitionBy: string[];
   where: string[];
+  // Filters applied AFTER the QUALIFY dedup window, on the surviving one-row-per-key result —
+  // as opposed to `where`, which filters BEFORE the window runs (see latestRowsSql doc comment
+  // for why is_deleted must go here, never in `where`). Any column referenced here must also be
+  // in `columns`, since the outer query can only see what the inner SELECT produced.
+  outerWhere?: string[];
   orderBy?: string;
   limit?: number;
 }
@@ -37,15 +42,36 @@ export interface LatestRowsOpts {
 // Iceberg sinks are append-only; the same business key will have multiple rows. QUALIFY +
 // ROW_NUMBER deduplicates at read time by picking the row with the latest updated_at,
 // so correctness no longer depends on analytics running its daily 02:00 compaction.
+//
+// `where` vs `outerWhere` matters more than it looks: SQL evaluates WHERE before QUALIFY, so a
+// filter placed in `where` removes rows from the *input* to the dedup window, not from its
+// output. Concretely — content c1 written at T1 (is_deleted=0), then logically deleted at T2
+// (tombstone row, is_deleted=1, updated_at=T2): filtering `is_deleted = 0` in `where` deletes
+// the T2 tombstone before the window ever sees it, leaving the T1 row alone in its partition —
+// which the window then happily returns as "latest". The deleted row resurrects itself, and
+// every future delete is equally inert. Post-dedup conditions (is_deleted, and anything else
+// that depends on "the current state of this business key" rather than "which raw rows to
+// consider") MUST go in `outerWhere`, which wraps the QUALIFY query in a subquery and filters
+// after it. `tenant_id` deliberately stays out of `outerWhere`'s reach — it's a partition-
+// pruning filter that belongs before the window (and cheaper that way), not a post-dedup
+// condition, so the guard below only ever inspects `where`.
 export function latestRowsSql(opts: LatestRowsOpts): string {
   if (!opts.where.some((w) => /\btenant_id\s*=/.test(w))) {
     throw new Error("latestRowsSql: every query must filter on tenant_id");
   }
-  const parts = [
+
+  const inner = [
     `SELECT ${opts.columns.join(", ")} FROM ${opts.table}`,
     `WHERE ${opts.where.join(" AND ")}`,
     `QUALIFY ROW_NUMBER() OVER (PARTITION BY ${opts.partitionBy.join(", ")} ORDER BY updated_at DESC) = 1`,
-  ];
+  ].join("\n");
+
+  const parts: string[] = [];
+  if (opts.outerWhere && opts.outerWhere.length > 0) {
+    parts.push(`SELECT ${opts.columns.join(", ")} FROM (`, inner, `) WHERE ${opts.outerWhere.join(" AND ")}`);
+  } else {
+    parts.push(inner);
+  }
   if (opts.orderBy) parts.push(`ORDER BY ${opts.orderBy}`);
   if (opts.limit !== undefined) parts.push(`LIMIT ${sqlInt(opts.limit)}`);
   return parts.join("\n");

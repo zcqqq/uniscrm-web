@@ -143,7 +143,6 @@ async function handleXActivityEventByChannel(body: Record<string, unknown>, env:
 
   const entityState = new EntityStateStore(env.LINK_DB, channel.tenant_id);
   const usersService = new XUsersService(entityState, {
-    queue: env.MAIGRET_QUEUE,
     pipelineEvent: env.PIPELINE_EVENT,
     pipelineUser: env.PIPELINE_USER,
     tenantId: channel.tenant_id,
@@ -339,7 +338,6 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
 
   const entityState = new EntityStateStore(env.LINK_DB, tenantId);
   const usersService = new XUsersService(entityState, {
-    queue: env.MAIGRET_QUEUE,
     pipelineEvent: env.PIPELINE_EVENT,
     pipelineUser: env.PIPELINE_USER,
     tenantId,

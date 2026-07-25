@@ -35,8 +35,14 @@ export function createWebhookRouter() {
 
     const service = new RecommendService(c.env.WEB_DB, c.env.VECTORIZE, c.env.KV);
 
+    // No WHERE clause: the old `d1_database_id IS NOT NULL` filter stood in for "tenant
+    // provisioning finished" (tenant-db-removal task 11 — that per-tenant D1 column is
+    // gone). Onboarding now inserts the `tenants` row and initialises billing with no
+    // provisioning step in between, so every row already represents a completed signup —
+    // there is nothing left to gate on. The per-tenant try/catch below matters more now
+    // that nothing pre-filters the list.
     const { results: tenants } = await c.env.WEB_DB
-      .prepare("SELECT tenant_id FROM tenants WHERE d1_database_id IS NOT NULL")
+      .prepare("SELECT tenant_id FROM tenants")
       .all<{ tenant_id: number }>();
 
     for (const tenant of tenants) {

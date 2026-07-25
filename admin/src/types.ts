@@ -8,7 +8,6 @@ export interface Env {
   STRIPE_PRICE_PRO: string;
   INTERNAL_SECRET: string;
   CF_ACCOUNT_ID: string;
-  CF_D1_API_TOKEN: string;
   ENVIRONMENT: string;
 }
 

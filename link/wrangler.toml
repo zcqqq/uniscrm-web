@@ -62,10 +62,6 @@ index_name = "uniscrm-embeddings-dev"
 binding = "AI"
 
 [[env.dev.queues.producers]]
-binding = "MAIGRET_QUEUE"
-queue = "uniscrm-maigret-dev"
-
-[[env.dev.queues.producers]]
 binding = "FLOW_QUEUE"
 queue = "uniscrm-event-dev"
 
@@ -132,10 +128,6 @@ index_name = "uniscrm-embeddings"
 
 [env.production.ai]
 binding = "AI"
-
-[[env.production.queues.producers]]
-binding = "MAIGRET_QUEUE"
-queue = "uniscrm-maigret"
 
 [[env.production.queues.producers]]
 binding = "FLOW_QUEUE"

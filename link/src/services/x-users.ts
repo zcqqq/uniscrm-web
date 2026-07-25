@@ -89,17 +89,15 @@ function stripConsumedPaths(payload: Record<string, unknown>, paths: string[]): 
 }
 
 export class XUsersService {
-  private queue?: Queue;
   private pipelineEvent?: Pipeline;
   private pipelineUser?: Pipeline;
   private tenantId?: number;
 
   constructor(
     private entityState: EntityStateStore,
-    opts?: { queue?: Queue; pipelineEvent?: Pipeline; pipelineUser?: Pipeline; tenantId?: number },
+    opts?: { pipelineEvent?: Pipeline; pipelineUser?: Pipeline; tenantId?: number },
     private r2Env?: R2SqlEnv
   ) {
-    this.queue = opts?.queue;
     this.pipelineEvent = opts?.pipelineEvent;
     this.pipelineUser = opts?.pipelineUser;
     this.tenantId = opts?.tenantId;

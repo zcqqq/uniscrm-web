@@ -79,7 +79,6 @@ function baseEnv(overrides: Record<string, unknown> = {}) {
     PIPELINE_EVENT: { send: vi.fn().mockResolvedValue(undefined) },
     PIPELINE_USER: { send: vi.fn().mockResolvedValue(undefined) },
     FLOW_QUEUE: { send: vi.fn().mockResolvedValue(undefined) },
-    MAIGRET_QUEUE: { send: vi.fn().mockResolvedValue(undefined) },
     VECTORIZE: { upsert: vi.fn().mockResolvedValue(undefined), deleteByIds: vi.fn() },
     AI: { run: vi.fn().mockResolvedValue({ data: [[0.1, 0.2]] }) },
     ...R2_ENV,

@@ -79,10 +79,10 @@ export function createAuthRouter() {
         .bind(memberId, tenantId, link.email, "global", tz, now)
         .run();
 
+      // Onboarding is now just the tenants row insert (above) + billing init — no per-tenant
+      // D1 provisioning step exists any more (tenant-db-removal task 11).
       const tasks = new PendingTaskService(c.env.WEB_DB);
-      const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
       const t2 = await tasks.create("activate-trial", { tenant_id: tenantId, tier: "basic", days: 30 });
-      c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t1));
       c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t2));
 
       member = { id: memberId, tenant_id: tenantId, email: link.email, preferred_location: "global", language: "en", timezone: tz };

@@ -1651,7 +1651,7 @@ Expected: 测试 PASS,构建无 TS 报错
 - [ ] **Step 6: 部署 dev 并浏览器自测**
 
 ```bash
-cd /Users/zc/Documents/UniSCRM/uniscrm-web && cd /Users/zc/Documents/UniSCRM/uniscrm-web/link && npm run deploy:dev
+cd /Users/zc/Documents/UniSCRM/uniscrm-web/link && npm run deploy:dev
 ```
 
 在浏览器打开 `https://link-dev.uni-scrm.com/users` 与 `/content`:
@@ -1714,7 +1714,7 @@ Expected: PASS
 - [ ] **Step 5: 部署 dev 并触发一次真实抓取**
 
 ```bash
-cd /Users/zc/Documents/UniSCRM/uniscrm-web && cd /Users/zc/Documents/UniSCRM/uniscrm-web/link && npm run deploy:dev
+cd /Users/zc/Documents/UniSCRM/uniscrm-web/link && npm run deploy:dev
 wrangler tail link-dev --env dev --config link/wrangler.toml --format pretty
 ```
 

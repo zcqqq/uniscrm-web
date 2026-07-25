@@ -704,6 +704,42 @@ describe("stub content-flow action endpoints", () => {
     vi.unstubAllGlobals();
   });
 
+  // Task-7 fix round 1, Important 1: channels.tenant_id is nullable in the schema even though
+  // `first<{tenant_id: number}>()` types it as non-nullable — a legacy or system-level channel
+  // row can have no tenant. The old `tenants.d1_database_id` lookup this route used to do
+  // incidentally guarded this (binding a null tenant_id matched no row, returning a graceful
+  // ok:false). Without an explicit guard, EntityStateStore would construct with a null
+  // tenant_id, the tweet would already be posted to X by the time claim()'s INSERT OR IGNORE
+  // hits entity_state's NOT NULL constraint, and the route would 500 with an unparseable body.
+  it("returns ok:false without posting to X when the channel has no tenant_id (Important 1)", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }),
+      channel_type: "X",
+      tenant_id: null,
+    } as any;
+    const pipelineContent = mockPipelineContent();
+
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "none", channelId: "tgt-chan", flowId: "flow-1" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb(), PIPELINE_CONTENT: pipelineContent }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^tenant_not_set(:|$)/) });
+    // The guard must fire before the tweet is posted, not after — an uncaught throw further
+    // down (inside EntityStateStore.claim) would happen AFTER createPost already succeeded.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(pipelineContent.send).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it("returns ok:false without calling X when generation fails", async () => {
     const channelRow = {
       config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }),

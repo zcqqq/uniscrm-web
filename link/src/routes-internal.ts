@@ -442,6 +442,19 @@ export function internalRoutes() {
       console.log(JSON.stringify({ event: "create_post_unsupported_platform", contentId, channelId, channelType: channel.channel_type }));
       return c.json({ ok: false, reason: `unsupported_channel_type: expected X, got ${channel.channel_type}` }, 200);
     }
+    // channels.tenant_id is nullable in the schema even though `first<{tenant_id: number}>()`
+    // lies about it — a legacy or system-level channel row can have no tenant. The old
+    // `tenants.d1_database_id` lookup this route used to do incidentally guarded this (binding
+    // a null tenant_id matched no row, returning a graceful ok:false). EntityStateStore has no
+    // such guard: `entity_state.tenant_id` is NOT NULL, so claim()'s INSERT OR IGNORE would
+    // silently fail the constraint and the follow-up get() would never match, throwing "row
+    // vanished" — and only AFTER the tweet has already been posted to X. Guard explicitly,
+    // before any external work, so a misconfigured channel fails cleanly instead of posting
+    // and then losing the record.
+    if (!channel.tenant_id) {
+      console.error(JSON.stringify({ event: "create_post_no_tenant", contentId, channelId }));
+      return c.json({ ok: false, reason: "tenant_not_set: channel has no tenant_id" }, 200);
+    }
 
     let text = interpolatedPrompt;
     if (provider !== "none") {
@@ -523,6 +536,12 @@ export function internalRoutes() {
     const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
       .bind(channelId).first<{ config: string; channel_type: string; tenant_id: number }>();
     if (!channel || channel.channel_type !== "X") return c.json({ ok: false, reason: "unsupported_channel_type: expected X" }, 200);
+    // channels.tenant_id is nullable — see /content/create-post's guard comment for why this
+    // must be checked before the (already-uploaded, about-to-be-posted) tweet goes out.
+    if (!channel.tenant_id) {
+      console.error(JSON.stringify({ event: "x_video_status_no_tenant", contentId, channelId }));
+      return c.json({ ok: false, reason: "tenant_not_set: channel has no tenant_id" }, 200);
+    }
 
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
     // Same guard as /content/create-post: an uncaught refresh throw would surface to the flow
@@ -628,6 +647,11 @@ export function internalRoutes() {
     if (channel.channel_type !== "TIKTOK") {
       return c.json({ ok: false, reason: `unsupported_channel_type: expected TIKTOK, got ${channel.channel_type}` }, 200);
     }
+    // channels.tenant_id is nullable — see /content/create-post's guard comment.
+    if (!channel.tenant_id) {
+      console.error(JSON.stringify({ event: "tiktok_photo_post_no_tenant", contentId, channelId }));
+      return c.json({ ok: false, reason: "tenant_not_set: channel has no tenant_id" }, 200);
+    }
 
     const tenantId = channel.tenant_id;
 
@@ -714,6 +738,11 @@ export function internalRoutes() {
     if (channel.channel_type !== "TIKTOK") {
       return c.json({ ok: false, reason: `unsupported_channel_type: expected TIKTOK, got ${channel.channel_type}` }, 200);
     }
+    // channels.tenant_id is nullable — see /content/create-post's guard comment.
+    if (!channel.tenant_id) {
+      console.error(JSON.stringify({ event: "tiktok_video_post_no_tenant", contentId, channelId }));
+      return c.json({ ok: false, reason: "tenant_not_set: channel has no tenant_id" }, 200);
+    }
 
     const tenantId = channel.tenant_id;
 
@@ -775,6 +804,12 @@ export function internalRoutes() {
 
     const config = JSON.parse(channel.config) as { access_token?: string };
     if (!config.access_token) return c.json({ error: "No token" }, 400);
+    // channels.tenant_id is nullable — see /content/create-post's guard comment. This route
+    // isn't flow-worker-facing (no {ok,reason} contract), so it keeps its own
+    // {error}/500 convention, matching the "Tenant DB not provisioned" 500 this replaces.
+    if (!channel.tenant_id) {
+      return c.json({ error: "Tenant not set for this channel" }, 500);
+    }
 
     const entityState = new EntityStateStore(c.env.LINK_DB, channel.tenant_id);
     const tiktok = new TikTokChannel(config.access_token);

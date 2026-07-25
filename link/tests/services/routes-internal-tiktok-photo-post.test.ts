@@ -107,4 +107,27 @@ describe("POST /internal/tiktok/photo-post", () => {
     expect(body.ok).toBe(false);
     vi.unstubAllGlobals();
   });
+
+  // Task-7 fix round 1, Important 1 — second site (see routes-internal-content.test.ts's
+  // create-post test for the full rationale): channels.tenant_id is nullable even though
+  // `first<{tenant_id: number}>()` lies about it.
+  it("returns ok:false without publishing when the channel has no tenant_id (Important 1)", async () => {
+    const noTenantChannelRow = { config: JSON.stringify({ access_token: "tok-1" }), channel_type: "TIKTOK", tenant_id: null } as any;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/tiktok/photo-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
+        body: JSON.stringify(baseBody),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(noTenantChannelRow), PIPELINE_CONTENT: mockPipelineContent() } as any
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^tenant_not_set(:|$)/) });
+    expect(fetchMock).not.toHaveBeenCalled(); // never reaches image generation
+    vi.unstubAllGlobals();
+  });
 });

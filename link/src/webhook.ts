@@ -366,7 +366,19 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
       const existing = await entityState.get(key);
       if (existing) {
         const contentService = new ContentService(entityState, env.VECTORIZE, env.AI, tenantId, env.PIPELINE_CONTENT, undefined, env);
-        await contentService.delete(existing.entity_id);
+        try {
+          await contentService.delete(existing.entity_id);
+        } catch (e) {
+          // R2's Pipelines batch flush can lag minutes behind entity_state's synchronous
+          // write — a delete arriving inside that window finds entity_state confirms the row
+          // exists but delete()'s getContent() finds nothing yet to read, so it throws. Falling
+          // back to a blind tombstone (built from what this handler already knows) keeps the
+          // delete durable instead of losing it or taking the whole webhook delivery down (an
+          // uncaught throw here would 500 the route, and X retries the same delivery
+          // indefinitely — see the try/catch around handleXActivityEvent in webhookRoutes()).
+          console.error(JSON.stringify({ event: "xaa_post_delete_r2_not_ready", channelId, tweetId, error: String(e) }));
+          await contentService.deleteByKnownIdentity(existing.entity_id, channelId, "X", tweetId);
+        }
       } else {
         console.log(JSON.stringify({ event: "xaa_post_delete_not_recorded", channelId, tweetId }));
       }

@@ -403,12 +403,16 @@ export class XUsersService {
     const records = events.map((e) => {
       const rawObj = e.rawData && typeof e.rawData === "object" ? (e.rawData as Record<string, unknown>) : {};
       let rawData: string;
-      if (e.consumedPaths) {
+      // An empty array strips nothing — same net effect as omitting the param entirely (the
+      // whole payload lands in raw_data), so it must warn the same way. `[]` is truthy, so a
+      // bare `if (e.consumedPaths)` silently swallowed this case (fix round 1, Minor 1) —
+      // check length, not presence.
+      if (e.consumedPaths && e.consumedPaths.length > 0) {
         rawData = JSON.stringify(stripConsumedPaths(rawObj, e.consumedPaths));
       } else {
         console.warn(JSON.stringify({
           event: "insertEvents_raw_data_unfiltered",
-          message: "consumedPaths not provided — storing the entire payload in raw_data",
+          message: "consumedPaths not provided (or empty) — storing the entire payload in raw_data",
           eventType: e.eventType,
         }));
         rawData = JSON.stringify(rawObj);

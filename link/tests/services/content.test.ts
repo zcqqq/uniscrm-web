@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ContentService, CONTENT_MAPPED_PROP_IDS } from "../../src/services/content";
-import { consumedPaths } from "../../src/services/pollers/resolve-props";
+import { consumedPaths, resolveProps } from "../../src/services/pollers/resolve-props";
 import type { PropMapping } from "../../../metadata/dataTypes";
+import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
+import { ContentMetadata_X } from "../../../metadata/x-byok";
 import contentSchema from "../../../analytics/pipelines/content-stream-schema.json";
 
 const SCHEMA_FIELD_NAMES = (contentSchema as { fields: { name: string }[] }).fields
@@ -166,21 +168,31 @@ describe("ContentService.upsertContentFromMetadata", () => {
     // happen to content: the field gets stripped from raw_data with nowhere else to land.
     // CONTENT_MAPPED_PROP_IDS + consumedPaths' allowedPropIds filter is the guard against
     // that; this proves the guard actually behaves as intended end-to-end.
+    //
+    // NOTE: this test originally used "content_url" as its real-world mapped-but-columnless
+    // example. Task-7 fix round 1 (Minor 3) gave content_url an actual column (source_url —
+    // see the CONTENT_COLUMN_MAP comment), so it's no longer an example of this bug class at
+    // all — it's now a positive case, covered by the dedicated test below. There is currently
+    // no other real ContentMetadata entry with a dataId and no CONTENT_COLUMN_MAP entry (the
+    // registry-only props in metadata/props.ts — processed_video_url, video_transcript,
+    // translated_subtitle_text — are declared but never actually mapped by any source's
+    // contentProps yet), so this test now uses a synthetic propId to keep exercising the
+    // guard mechanism itself rather than asserting on a specific field name.
     it("a mapped-but-columnless prop survives in raw_data when consumedPaths is filtered by CONTENT_MAPPED_PROP_IDS (Important 1)", async () => {
       const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
       const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
 
-      // "content_url" has a dataId (so a naive caller would compute a path for it) but is
-      // NOT a key of CONTENT_COLUMN_MAP — a real example of a mapped-but-columnless prop.
+      // "some_future_field" has a dataId (so a naive caller would compute a path for it) but
+      // is deliberately NOT a key of CONTENT_COLUMN_MAP.
       const props: PropMapping[] = [
         { propId: "content_text", dataId: "{linkPrefix}.text" },
-        { propId: "content_url", dataId: "{linkPrefix}.url" },
+        { propId: "some_future_field", dataId: "{linkPrefix}.extra" },
       ];
       const paths = consumedPaths(props, "data[]", CONTENT_MAPPED_PROP_IDS);
-      expect(paths).toEqual(["text"]); // "url" excluded — content_url has no column
+      expect(paths).toEqual(["text"]); // "extra" excluded — some_future_field has no column
 
       await service.upsertContentFromMetadata(
-        { id: "t1", text: "hi", url: "https://x/1" },
+        { id: "t1", text: "hi", extra: "https://x/1" },
         { source_content_id: "t1", content_text: "hi" },
         "chan1", "X", false, undefined, paths
       );
@@ -188,7 +200,35 @@ describe("ContentService.upsertContentFromMetadata", () => {
       const [[record]] = pipeline.send.mock.calls[0];
       const raw = JSON.parse(record.raw_data as string);
       expect(raw).not.toHaveProperty("text"); // consumed and column-mapped -> stripped
-      expect(raw.url).toBe("https://x/1"); // mapped but columnless -> survives
+      expect(raw.extra).toBe("https://x/1"); // mapped but columnless -> survives
+    });
+
+    // Minor 2 (task-7 fix round 1): CONTENT_MAPPED_PROP_IDS omitted source_content_id, so
+    // {linkPrefix}.id was never stripped and every tweet/video id was duplicated into
+    // raw_data despite already having a named column (source_content_id is the entity key,
+    // passed separately — not a CONTENT_COLUMN_MAP entry — but it IS a real R2 column).
+    it("strips source_content_id's payload path from raw_data (Minor 2) and writes content_url to the source_url column (Minor 3)", async () => {
+      const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+      const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+
+      const props: PropMapping[] = [
+        { propId: "source_content_id", dataId: "{linkPrefix}.id" },
+        { propId: "content_text", dataId: "{linkPrefix}.text" },
+      ];
+      const paths = consumedPaths(props, "data[]", CONTENT_MAPPED_PROP_IDS);
+      expect(paths).toEqual(["id", "text"]);
+
+      await service.upsertContentFromMetadata(
+        { id: "t1", text: "hi" },
+        { source_content_id: "t1", content_text: "hi", content_url: "https://x.com/i/status/t1" },
+        "chan1", "X", false, undefined, paths
+      );
+
+      const [[record]] = pipeline.send.mock.calls[0];
+      expect(record.source_url).toBe("https://x.com/i/status/t1");
+      const raw = JSON.parse(record.raw_data as string);
+      expect(raw).not.toHaveProperty("id"); // Minor 2: id is consumed + column-mapped -> stripped
+      expect(raw).not.toHaveProperty("text");
     });
   });
 
@@ -524,6 +564,77 @@ describe("CONTENT_COLUMN_MAP coverage", () => {
       has_face: 1,
     });
     expect(record.impression_count).toBeNull();
+  });
+});
+
+// Task-7 fix round 1, Important 3: nothing anywhere asserted that the `consumedPaths` argument
+// threaded into x-posts.ts/tiktok-content.ts/webhook.ts actually strips raw_data — deleting it
+// from any of those three call sites only emitted a console.warn, no test failed. These tests
+// exercise the exact resolveProps -> consumedPaths -> upsertContentFromMetadata composition
+// each poller performs (same metadata entries, same CONTENT_MAPPED_PROP_IDS filter), asserting
+// on the emitted record's raw_data content — not on the paths argument being passed.
+describe("consumedPaths threading — end-to-end raw_data stripping per poller (task-7 fix round 1, Important 3)", () => {
+  it("x-posts.ts's own:get-posts composition strips mapped payload fields from raw_data, keeping unmapped ones", async () => {
+    const POSTS_METADATA = ContentMetadata_X.find((m) => m.sourceContentType === "own:get-posts")!;
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService(createMockEntityState() as any, createMockVectorize() as any, createMockAi() as any, 1, pipeline as any);
+
+    // Mirrors x-posts.ts's upsertPage exactly: resolveProps -> consumedPaths -> upsert.
+    const item = {
+      id: "t1",
+      text: "hello world",
+      created_at: "2026-07-11T00:00:00.000Z",
+      public_metrics: { bookmark_count: 1, impression_count: 2, like_count: 3, quote_count: 4, reply_count: 5, retweet_count: 6 },
+      weird_unmapped_field: "survives",
+    };
+    const props = resolveProps(item, POSTS_METADATA.contentProps, POSTS_METADATA.linkPrefix);
+    const paths = consumedPaths(POSTS_METADATA.contentProps, POSTS_METADATA.linkPrefix, CONTENT_MAPPED_PROP_IDS);
+
+    await service.upsertContentFromMetadata(item, props, "chan1", "X", false, undefined, paths);
+
+    const [[record]] = pipeline.send.mock.calls[0];
+    const raw = JSON.parse(record.raw_data as string);
+    expect(raw).not.toHaveProperty("id"); // source_content_id, column-mapped -> stripped
+    expect(raw).not.toHaveProperty("text"); // content_text, column-mapped -> stripped
+    expect(raw).not.toHaveProperty("created_at"); // source_created_at, column-mapped -> stripped
+    expect(raw.public_metrics).toEqual({}); // every sub-field consumed and column-mapped
+    expect(raw.weird_unmapped_field).toBe("survives"); // never in contentProps -> untouched
+  });
+
+  it("tiktok-content.ts's video.list composition strips mapped payload fields (including content_url's share_url) from raw_data", async () => {
+    const VIDEO_METADATA = ContentMetadata_TikTok.find((m) => m.sourceContentType === "video.list")!;
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService(createMockEntityState() as any, createMockVectorize() as any, createMockAi() as any, 1, pipeline as any);
+
+    const item = {
+      id: "v1",
+      video_description: "a video",
+      cover_image_url: "https://tiktok.example/cover.jpg",
+      share_url: "https://tiktok.example/share/v1",
+      like_count: 10,
+      comment_count: 2,
+      share_count: 1,
+      view_count: 100,
+      duration: 30,
+      height: 1920,
+      width: 1080,
+      title: "A Title",
+      create_time: 1781669273,
+      unmapped_diagnostic_field: "survives",
+    };
+    const props = resolveProps(item, VIDEO_METADATA.contentProps, VIDEO_METADATA.linkPrefix);
+    const paths = consumedPaths(VIDEO_METADATA.contentProps, VIDEO_METADATA.linkPrefix, CONTENT_MAPPED_PROP_IDS);
+
+    await service.upsertContentFromMetadata(item, props, "chan1", "TIKTOK", false, undefined, paths);
+
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.source_url).toBe("https://tiktok.example/share/v1"); // Minor 3: content_url -> source_url column
+    const raw = JSON.parse(record.raw_data as string);
+    expect(raw).not.toHaveProperty("id"); // Minor 2: source_content_id -> stripped
+    expect(raw).not.toHaveProperty("video_description");
+    expect(raw).not.toHaveProperty("share_url"); // Minor 3: content_url now has a column -> stripped
+    expect(raw).not.toHaveProperty("cover_image_url");
+    expect(raw.unmapped_diagnostic_field).toBe("survives");
   });
 });
 

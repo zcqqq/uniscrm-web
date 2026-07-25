@@ -28,22 +28,33 @@ const CONTENT_COLUMN_MAP: Record<string, string> = {
   height: "height",
   width: "width",
   has_face: "has_face",
+  // `content_url` is the propId every caller (x-posts.ts/webhook.ts's manual permalink,
+  // tiktok.ts's metadata-mapped share_url) already uses; `source_url` is the R2 column it
+  // belongs in — the Content Library page renders the title as a link via item.source_url.
+  // Missing until task-7 fix round 1 (Minor 3): content_url reached neither a column nor
+  // raw_data (it's a value resolveProps computed, not consumed from the payload, so
+  // consumedPaths never targeted it either) — every X/TikTok/YouTube row lost its link.
+  content_url: "source_url",
 };
 
 // Business-field subset used for entity_state change detection in upsertContentFromMetadata.
 // created_at/updated_at deliberately excluded, or every call would look "changed".
 const CONTENT_TABLE_COLUMNS = Object.values(CONTENT_COLUMN_MAP);
 
-// propIds from CONTENT_COLUMN_MAP's keys — every propId that actually lands in a named R2
-// `content` column. Exported so a caller computing consumedPaths (pollers/resolve-props.ts)
-// before calling upsertContentFromMetadata can pass this as consumedPaths' `allowedPropIds`
-// filter, so a metadata prop that has a dataId but no CONTENT_COLUMN_MAP entry doesn't get
-// treated as "consumed" and stripped out of raw_data with nowhere else to land — the same bug
-// class the task-5 fix round caught on the user path (profile_image_url/description had a
-// dataId but no R2 `user` column, and were being destroyed). No current caller supplies
-// consumedPaths for content yet (Task 6/7 wires that), so this is a preemptive guard, not a
-// fix for a live bug — see content.test.ts's "raw_data filtering" tests for the guard in use.
-export const CONTENT_MAPPED_PROP_IDS = new Set(Object.keys(CONTENT_COLUMN_MAP));
+// propIds from CONTENT_COLUMN_MAP's keys, plus source_content_id — every propId that actually
+// lands in a named R2 `content` column. Exported so a caller computing consumedPaths
+// (pollers/resolve-props.ts) before calling upsertContentFromMetadata can pass this as
+// consumedPaths' `allowedPropIds` filter, so a metadata prop that has a dataId but no
+// CONTENT_COLUMN_MAP entry doesn't get treated as "consumed" and stripped out of raw_data with
+// nowhere else to land — the same bug class the task-5 fix round caught on the user path
+// (profile_image_url/description had a dataId but no R2 `user` column, and were being
+// destroyed). `source_content_id` isn't a CONTENT_COLUMN_MAP entry (it's the entity key, passed
+// separately by the caller — see upsertContentFromMetadata below) but it IS a real R2 column,
+// so it belongs here too — mirrors x-users.ts's MAPPED_USER_PROP_IDS, which explicitly includes
+// `source_user_id` for the identical reason. Omitting it here (task 7's original cut) meant
+// `{linkPrefix}.id` was never stripped and every X/TikTok tweet or video id ended up duplicated
+// into raw_data despite already having a named column (task-7 fix round 1, Minor 2).
+export const CONTENT_MAPPED_PROP_IDS = new Set(["source_content_id", ...Object.keys(CONTENT_COLUMN_MAP)]);
 
 // Full set of the R2 `content` table's value columns, i.e. everything except the
 // key/audit columns every write builds explicitly (tenant_id, id, channel_id, channel_type,
@@ -436,6 +447,34 @@ export class ContentService {
 
   // 逻辑删除:uniscrm-web/CLAUDE.md「重要的被关联数据用逻辑删除」,
   // 而且 Iceberg sink 本来也没有 DELETE。Also routed through buildContentRecord (I4).
+  // Writes a logical-delete tombstone directly from caller-known identity, without first
+  // reading the row from R2 — for a caller (webhook.ts's post.delete) that has already
+  // resolved the stable id via entity_state.get() but can't assume R2 has caught up:
+  // entity_state is written synchronously at claim() time, while the row a poller/webhook's
+  // upsertContentFromMetadata sent travels through R2's Pipelines batching and can take
+  // minutes to actually land. A delete arriving inside that window would find entity_state
+  // says "yes, this exists" but R2 says "no row" — the regular delete()'s getContent()-or-throw
+  // path can't tell that apart from a genuine data-integrity bug and (correctly, for that other
+  // case) throws. This method is the caller's escape hatch for the lag case specifically: every
+  // non-audit value column is left null (title/text/counts unknown without a real read), but
+  // is_deleted=1 lands durably — the row becomes invisible to every reader (outerWhere filters
+  // it) the instant this is sent, so a later real write for the same key is a normal append,
+  // never a merge with this placeholder's null columns.
+  async deleteByKnownIdentity(
+    id: string,
+    channelId: string,
+    channelType: ChannelType,
+    sourceContentId: string,
+    listId: string | null = null
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    const record = this.buildContentRecord(
+      { id, channelId, channelType, sourceContentId, listId, rawData: "{}", createdAt: now, updatedAt: now, isDeleted: 1 },
+      {}
+    );
+    await this.sendContentRecord(record);
+  }
+
   async delete(id: string): Promise<void> {
     if (!this.r2Env) throw new Error("ContentService.delete: r2Env is required");
     // includeDeleted: true — delete() must be idempotent against an already-deleted row rather

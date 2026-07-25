@@ -18,8 +18,11 @@ const [dumpPath, tenantId] = process.argv.slice(2);
 // Must match analytics/pipelines/user-stream-schema.json: a field the stream doesn't
 // declare is dropped, and a missing required field drops the whole record.
 const REQUIRED = ["id", "channel_id", "source_user_id", "is_active", "is_follow", "is_followed", "created_at", "updated_at"];
-const OPTIONAL = ["channel_type", "name", "username", "profile_id", "verified_type",
+const OPTIONAL = ["channel_type", "name", "username", "profile_id",
   "followers_count", "following_count", "post_count", "listed_count", "like_count", "media_count"];
+// The only R2 user column with no D1 column behind it — pickDbFields keeps it inside
+// raw_data, so it has to be read back out or every backfilled row lands with it null.
+const FROM_RAW_DATA = ["verified_type"];
 
 const rows = JSON.parse(readFileSync(dumpPath, "utf-8"))[0].results as Array<Record<string, unknown>>;
 const records = [];
@@ -38,10 +41,17 @@ for (const r of rows) {
     const v = r[col];
     if (v !== null && v !== undefined && v !== "") rec[col] = v;
   }
+  let raw: Record<string, unknown> = {};
+  try { raw = JSON.parse(String(r.raw_data ?? "{}")); } catch { /* keep {} */ }
+  for (const col of FROM_RAW_DATA) {
+    const v = raw[col];
+    if (v !== null && v !== undefined && v !== "") rec[col] = v;
+  }
   records.push(rec);
 }
 
 const withPostCount = records.filter((r) => "post_count" in r).length;
-console.error(`records=${records.length} withPostCount=${withPostCount} skipped=${skipped.length}`);
+const withVerified = records.filter((r) => "verified_type" in r).length;
+console.error(`records=${records.length} withPostCount=${withPostCount} withVerifiedType=${withVerified} skipped=${skipped.length}`);
 if (skipped.length) console.error(`skipped ids (missing a required field): ${skipped.slice(0, 5).join(", ")}${skipped.length > 5 ? " …" : ""}`);
 process.stdout.write(JSON.stringify(records));

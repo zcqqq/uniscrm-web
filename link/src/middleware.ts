@@ -1,7 +1,7 @@
 import { getCookie } from "hono/cookie";
 import type { Context, Next } from "hono";
 import type { Env, Session } from "./types";
-import { TenantDataDB } from "../../shared/tenant-data-db";
+import { EntityStateStore } from "./services/entity-state";
 
 export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
   const sessionId = getCookie(c, "session");
@@ -28,23 +28,14 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
     return c.json({ error: "Unauthorized" }, 401);
   }
 
-  const row = await c.env.WEB_DB
-    .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-    .bind(session.tenant_id)
-    .first<{ d1_database_id: string | null }>();
-
   c.set("tenantId" as never, session.tenant_id);
   c.set("memberId" as never, session.member_id);
   c.set("email" as never, session.email);
-
-  if (row?.d1_database_id) {
-    const tenantDataDb = new TenantDataDB(
-      c.env.CF_ACCOUNT_ID,
-      c.env.CF_D1_API_TOKEN,
-      row.d1_database_id
-    );
-    c.set("tenantDataDb" as never, tenantDataDb);
-  }
+  // entity_state lives in link's own LINK_DB (D1) — a small dedup-key/hot-follow-state index,
+  // not a per-tenant data store — so unlike the old TenantDataDB it needs no lookup against
+  // `tenants.d1_database_id` and is always available once tenant_id is known. Real entity rows
+  // (user/content) now live in R2 Data Catalog, read via shared/r2-sql.ts at the route level.
+  c.set("entityState" as never, new EntityStateStore(c.env.LINK_DB, session.tenant_id));
 
   await next();
 }

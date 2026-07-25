@@ -1,5 +1,4 @@
 import { useEffect, useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 import { DataTable, type Column } from "../../../shared/frontend/components/DataTable";
 import { buildEntityColumns } from "../../../shared/frontend/lib/metadata-columns";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
@@ -16,7 +15,6 @@ export function Users() {
   const { locale, timezone } = useLocale();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
 
   const columns: Column<UserRow>[] = useMemo(() => [
     { key: "channel_type", label: "Channel" },
@@ -36,7 +34,6 @@ export function Users() {
         data={users}
         pageSize={10}
         searchKeys={["name", "username"]}
-        onRowClick={(r) => navigate(`/users/${r.id}`)}
         loading={loading}
         timezone={timezone}
       />

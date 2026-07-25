@@ -4,7 +4,6 @@ import { Toaster } from "../../shared/frontend/ui/toaster";
 import { TierGuard } from "../../shared/frontend/TierGuard";
 import { Social } from "./pages/Social";
 import { Users } from "./pages/Users";
-import { UserDetail } from "./pages/UserDetail";
 import { Content } from "./pages/Content";
 import { Commerce } from "./pages/Commerce";
 import { Lists } from "./pages/Lists";
@@ -33,7 +32,6 @@ export function App() {
             <Route path="/" element={<Social />} />
             <Route path="/channel" element={<Social />} />
             <Route path="/users" element={<Users />} />
-            <Route path="/users/:id" element={<UserDetail />} />
             <Route path="/content" element={<Content />} />
             <Route path="/commerce" element={<TierGuard module="commerce"><Commerce /></TierGuard>} />
             <Route path="/list" element={<TierGuard module="social.lists"><Lists /></TierGuard>} />

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
-import type { TenantDataDB } from "../../shared/tenant-data-db";
+import { getUserNames } from "./services/r2-entities";
+import { R2SqlError } from "../../shared/r2-sql";
 
 export function listsRoutes() {
   const router = new Hono<{ Bindings: Env }>();
@@ -47,7 +48,6 @@ export function listsRoutes() {
 
   router.get("/:id/users", async (c) => {
     const tenantId = c.get("tenantId" as never) as number;
-    const tdb = c.get("tenantDataDb" as never) as TenantDataDB | undefined;
     const listId = c.req.param("id");
     const page = Math.max(1, Number(c.req.query("page")) || 1);
     const limit = 20;
@@ -62,19 +62,27 @@ export function listsRoutes() {
       "SELECT user_id, created_at as added_at FROM list_users WHERE list_id = ? AND tenant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
     ).bind(listId, tenantId, limit, offset).all<{ user_id: string; added_at: string }>();
 
-    let users: any[] = [];
-    if (tdb && listUserRows.length > 0) {
+    // list_users (LINK_DB, D1) still owns membership; the display name is an R2 read now that
+    // `user` rows only live in R2. getUserNames only resolves `name` (no `username` column in
+    // its projection — see r2-entities.ts), so `username` is always null here now; a silent
+    // empty `users` array would look identical to "list has no members", so an R2 failure must
+    // surface as an error rather than being swallowed the way the old `tdb &&` guard did.
+    let users: { id: string; name: string | null; username: string | null; added_at: string }[] = [];
+    if (listUserRows.length > 0) {
       const ids = listUserRows.map((r) => r.user_id);
-      const placeholders = ids.map(() => "?").join(",");
-      const userDetails = await tdb.query<{ id: string; name: string; username: string; updated_at: string }>(
-        `SELECT id, name, username, updated_at FROM user WHERE id IN (${placeholders})`,
-        ids
-      );
-      const detailMap = new Map(userDetails.map((u) => [u.id, u]));
-      users = listUserRows.map((r) => ({
-        ...(detailMap.get(r.user_id) || { id: r.user_id, name: null, username: null }),
-        added_at: r.added_at,
-      }));
+      try {
+        const names = await getUserNames(c.env, tenantId, ids);
+        users = listUserRows.map((r) => ({
+          id: r.user_id,
+          name: names.get(r.user_id) ?? null,
+          username: null,
+          added_at: r.added_at,
+        }));
+      } catch (err) {
+        console.error(JSON.stringify({ event: "list_users_r2_query_failed", tenantId, listId, error: String(err) }));
+        const status = err instanceof R2SqlError ? 502 : 500;
+        return c.json({ error: String(err) }, status);
+      }
     }
 
     return c.json({ users, total, page, totalPages: Math.ceil(total / limit) });

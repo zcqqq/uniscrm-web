@@ -75,24 +75,42 @@ export interface Session {
 
 // Content types
 export type ChannelType = "LOCAL" | "NOTION" | "TIKTOK" | "X" | "YOUTUBE" | "YOUTUBE_ACCOUNT";
-export type ContentStatus = "new" | "pending" | "published" | "ignored";
 
+// Shape actually returned by services/r2-entities.ts's getContent/listContents — the R2
+// `content` table's CONTENT_COLUMNS projection (tenant-db-removal task 4/6). There is no
+// `status` concept any more (the plan removed it outright, no replacement column); `list_id`
+// and `is_deleted` are real R2 columns that were missing here before. Field order mirrors
+// CONTENT_COLUMNS in r2-entities.ts for easy comparison.
 export interface ContentRow {
   id: string;
-  channel_id: string | null;
+  channel_id: string;
   channel_type: ChannelType;
   content_type: string | null;
   source_content_id: string;
+  list_id: string | null;
   title: string | null;
   content_text: string | null;
   summary: string | null;
-  status: ContentStatus;
   source_url: string | null;
   source_updated_at: string | null;
   source_created_at: string | null;
+  cover_image_url: string | null;
+  duration: number | null;
+  height: number | null;
+  width: number | null;
+  has_face: number | null;
+  bookmark_count: number | null;
+  impression_count: number | null;
+  view_count: number | null;
+  like_count: number | null;
+  quote_count: number | null;
+  reply_count: number | null;
+  repost_count: number | null;
+  share_count: number | null;
   raw_data: string;
   created_at: string;
   updated_at: string;
+  is_deleted: number;
 }
 
 // Commerce types

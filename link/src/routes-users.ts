@@ -1,63 +1,29 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
-import type { TenantDataDB } from "../../shared/tenant-data-db";
+import { listUsers } from "./services/r2-entities";
+import { R2SqlError } from "../../shared/r2-sql";
 
 export function usersRoutes() {
   const router = new Hono<{ Bindings: Env }>();
 
   router.get("/", async (c) => {
     const tenantId = c.get("tenantId" as never) as number;
-    if (!tenantId) return c.json({ users: [] });
-
-    const res = await fetch(
-      `https://api.sql.cloudflarestorage.com/api/v1/accounts/${c.env.CF_ACCOUNT_ID}/r2-sql/query/${c.env.R2_BUCKET}`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${c.env.R2_SQL_TOKEN}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          warehouse: c.env.R2_WAREHOUSE,
-          query: `SELECT id, channel_type, name, username, is_follow, is_followed, followers_count, following_count, updated_at FROM uniscrm.user WHERE tenant_id = ${tenantId} LIMIT 1000`,
-        }),
-      }
-    );
-    const data = await res.json() as { result?: { rows: Record<string, unknown>[] }; success: boolean };
-    if (!data.success) return c.json({ users: [] });
-
-    const rows = data.result?.rows || [];
-    return c.json({ users: rows });
+    try {
+      const users = await listUsers(c.env, tenantId, 1000);
+      return c.json({ users });
+    } catch (err) {
+      // 静默返回空列表会把「查询挂了」伪装成「没有用户」——
+      // 「数据准确性 > 系统稳定性 > 功能 > UI 界面」。
+      console.error(JSON.stringify({ event: "users_r2_query_failed", tenantId, error: String(err) }));
+      const status = err instanceof R2SqlError ? 502 : 500;
+      return c.json({ error: String(err) }, status);
+    }
   });
 
-  router.get("/:id", async (c) => {
-    const tdb = c.get("tenantDataDb" as never) as TenantDataDB;
-    if (!tdb) return c.json({ error: "Unauthorized" }, 401);
-
-    const userId = c.req.param("id");
-    const rows = await tdb.query(
-      "SELECT id, name, username, profile_image_url, socials, maigret_status, raw_data, created_at, updated_at FROM user WHERE id = ?",
-      [userId]
-    );
-
-    if (rows.length === 0) return c.json({ error: "Not found" }, 404);
-    return c.json({ user: rows[0] });
-  });
-
-  router.get("/:id/events", async (c) => {
-    const tdb = c.get("tenantDataDb" as never) as TenantDataDB;
-    if (!tdb) return c.json({ error: "Unauthorized" }, 401);
-
-    const userId = c.req.param("id");
-    const offset = Math.max(0, parseInt(c.req.query("offset") || "0", 10));
-    const limit = Math.min(200, Math.max(1, parseInt(c.req.query("limit") || "100", 10)));
-
-    const rows = await tdb.query<{ id: string; event_type: string; event_time: string; raw_data: string; created_at: string }>(
-      "SELECT id, event_type, event_time, raw_data, created_at FROM event WHERE user_id = ? ORDER BY event_time DESC LIMIT ? OFFSET ?",
-      [userId, limit + 1, offset]
-    );
-
-    const hasMore = rows.length > limit;
-    const events = hasMore ? rows.slice(0, limit) : rows;
-    return c.json({ events, hasMore });
-  });
+  // Per-user detail (GET /:id) and its event feed (GET /:id/events) are intentionally not
+  // routed here anymore: an R2 read per user is ~1-3s, too slow for a detail page, so the
+  // detail page was deleted (see .superpowers/sdd/2026-07-25-tenant-db-removal/task-6-brief.md).
+  // The list above is the only user-facing read path left.
 
   return router;
 }

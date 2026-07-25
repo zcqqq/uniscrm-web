@@ -1,0 +1,168 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { EntityStateStore, fingerprintOf } from "../../src/services/entity-state";
+
+// 内存版 D1 stub:只实现 entity_state 用到的三条语句形态,
+// 语义与 SQLite 的 INSERT OR IGNORE / SELECT / UPDATE 一致。
+function createFakeD1() {
+  const rows = new Map<string, Record<string, unknown>>();
+  const keyOf = (p: unknown[]) => p.slice(0, 5).join("\x1f");
+
+  return {
+    rows,
+    prepare(sql: string) {
+      return {
+        bind(...params: unknown[]) {
+          return {
+            async run() {
+              if (sql.includes("INSERT OR IGNORE INTO entity_state")) {
+                const k = keyOf(params);
+                if (rows.has(k)) return { meta: { changes: 0 } };
+                rows.set(k, {
+                  tenant_id: params[0], entity: params[1], channel_id: params[2],
+                  secondary_id: params[3], source_id: params[4],
+                  entity_id: params[5], fingerprint: params[6],
+                  seen_at: params[7], updated_at: params[8],
+                  is_follow: null, is_followed: null,
+                });
+                return { meta: { changes: 1 } };
+              }
+              if (sql.includes("UPDATE entity_state SET fingerprint")) {
+                const k = [params[2], params[3], params[4], params[5], params[6]].join("\x1f");
+                const row = rows.get(k);
+                if (row) { row.fingerprint = params[0]; row.updated_at = params[1]; }
+                return { meta: { changes: row ? 1 : 0 } };
+              }
+              if (sql.includes("UPDATE entity_state SET is_follow")) {
+                const k = [params[2], params[3], params[4], params[5], params[6]].join("\x1f");
+                const row = rows.get(k);
+                if (row) { row.is_follow = params[0]; row.updated_at = params[1]; }
+                return { meta: { changes: row ? 1 : 0 } };
+              }
+              if (sql.includes("UPDATE entity_state SET is_followed")) {
+                const k = [params[2], params[3], params[4], params[5], params[6]].join("\x1f");
+                const row = rows.get(k);
+                if (row) { row.is_followed = params[0]; row.updated_at = params[1]; }
+                return { meta: { changes: row ? 1 : 0 } };
+              }
+              throw new Error(`fake D1: unhandled run() for ${sql}`);
+            },
+            async first() {
+              if (sql.includes("WHERE tenant_id = ? AND entity_id = ?")) {
+                // Real D1 projects only the selected columns; this branch is only
+                // ever hit by getFollowByEntityId's two-column SELECT, so mirror that
+                // instead of leaking the whole stored row into the assertion.
+                for (const row of rows.values()) {
+                  if (row.tenant_id === params[0] && row.entity_id === params[1]) {
+                    return { is_follow: row.is_follow, is_followed: row.is_followed };
+                  }
+                }
+                return null;
+              }
+              return rows.get(keyOf(params)) ?? null;
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+describe("fingerprintOf", () => {
+  it("is stable for the same values regardless of key insertion order", async () => {
+    const a = await fingerprintOf({ name: "Ann", username: "ann" }, ["name", "username"]);
+    const b = await fingerprintOf({ username: "ann", name: "Ann" }, ["name", "username"]);
+    expect(a).toBe(b);
+  });
+
+  it("changes when any tracked field changes", async () => {
+    const a = await fingerprintOf({ name: "Ann" }, ["name"]);
+    const b = await fingerprintOf({ name: "Bob" }, ["name"]);
+    expect(a).not.toBe(b);
+  });
+
+  it("treats a missing field and an empty string identically", async () => {
+    const a = await fingerprintOf({ name: "Ann" }, ["name", "bio"]);
+    const b = await fingerprintOf({ name: "Ann", bio: "" }, ["name", "bio"]);
+    expect(a).toBe(b);
+  });
+});
+
+describe("EntityStateStore.claim", () => {
+  let db: ReturnType<typeof createFakeD1>;
+  let store: EntityStateStore;
+  const key = { entity: "user" as const, channelId: "c1", sourceId: "s1" };
+
+  beforeEach(() => {
+    db = createFakeD1();
+    store = new EntityStateStore(db as any, 7);
+  });
+
+  it("returns isNew on first sight and mints a stable entity_id", async () => {
+    const r = await store.claim(key, "fp1");
+    expect(r.isNew).toBe(true);
+    expect(r.unchanged).toBe(false);
+    expect(r.entityId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("returns the same entity_id on a second sight — the uuid must never churn", async () => {
+    const first = await store.claim(key, "fp1");
+    const second = await store.claim(key, "fp2");
+    expect(second.entityId).toBe(first.entityId);
+    expect(second.isNew).toBe(false);
+  });
+
+  it("reports unchanged when the fingerprint matches, so the poller skips the R2 write", async () => {
+    await store.claim(key, "fp1");
+    const again = await store.claim(key, "fp1");
+    expect(again.unchanged).toBe(true);
+  });
+
+  it("reports changed and stores the new fingerprint when it differs", async () => {
+    await store.claim(key, "fp1");
+    const changed = await store.claim(key, "fp2");
+    expect(changed.unchanged).toBe(false);
+    const third = await store.claim(key, "fp2");
+    expect(third.unchanged).toBe(true);
+  });
+
+  it("keys separately per secondary_id so the same post in two lists is two entities", async () => {
+    const a = await store.claim({ ...key, entity: "content", secondaryId: "listA" }, "fp");
+    const b = await store.claim({ ...key, entity: "content", secondaryId: "listB" }, "fp");
+    expect(a.entityId).not.toBe(b.entityId);
+  });
+
+  it("keys separately per tenant", async () => {
+    const other = new EntityStateStore(db as any, 8);
+    const a = await store.claim(key, "fp");
+    const b = await other.claim(key, "fp");
+    expect(b.isNew).toBe(true);
+    expect(b.entityId).not.toBe(a.entityId);
+  });
+});
+
+describe("EntityStateStore.markSeen", () => {
+  it("returns true only the first time — this is the flow-trigger dedup", async () => {
+    const store = new EntityStateStore(createFakeD1() as any, 7);
+    const key = { entity: "content_trigger" as const, channelId: "c1", secondaryId: "list1", sourceId: "t1" };
+    expect(await store.markSeen(key)).toBe(true);
+    expect(await store.markSeen(key)).toBe(false);
+  });
+});
+
+describe("EntityStateStore follow state", () => {
+  it("round-trips is_follow and leaves is_followed untouched", async () => {
+    const db = createFakeD1();
+    const store = new EntityStateStore(db as any, 7);
+    const key = { entity: "user" as const, channelId: "c1", sourceId: "s1" };
+    const { entityId } = await store.claim(key, "fp");
+
+    await store.setFollow(key, "is_follow", 1);
+
+    expect(await store.getFollowByEntityId(entityId)).toEqual({ is_follow: 1, is_followed: null });
+  });
+
+  it("returns null for an unknown entity_id rather than throwing", async () => {
+    const store = new EntityStateStore(createFakeD1() as any, 7);
+    expect(await store.getFollowByEntityId("nope")).toBeNull();
+  });
+});

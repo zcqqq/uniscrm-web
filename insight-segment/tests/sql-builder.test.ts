@@ -4,6 +4,13 @@ import { getAllFields } from "../src/fields";
 
 const fields = getAllFields();
 
+// buildSegmentQuery's SQL has exactly two top-level "WHERE ..." clauses: the dedup subquery's
+// (pre-QUALIFY, tenant_id only) and the outer one (post-QUALIFY, is_deleted + user/event
+// conditions). Order in the returned array matches source order — [inner, outer].
+function whereClauses(sql: string): string[] {
+  return [...sql.matchAll(/WHERE ([^\n]+)/g)].map((m) => m[1]);
+}
+
 describe("buildSegmentQuery", () => {
   it("targets the R2 tables and always filters by tenant", () => {
     const { sql } = buildSegmentQuery(
@@ -38,5 +45,96 @@ describe("buildSegmentQuery", () => {
       fields, 7
     );
     expect(sql).not.toContain("json_extract");
+  });
+
+  // Regression guard for the Task 4 row-resurrection bug (is_deleted filtered pre-QUALIFY drops
+  // the true-latest row from the dedup window's input, letting a stale row win "= 1"), applied
+  // here to buildSegmentQuery specifically since this module hand-writes its SQL instead of
+  // going through shared/r2-sql.ts's latestRowsSql. An edit that moved is_deleted back into the
+  // inner WHERE would pass every other test in this file untouched — see task-9-report.md's
+  // fix-round-1 section for the mutation-test proof that this assertion actually has teeth.
+  it("keeps the dedup subquery's WHERE limited to tenant_id, deferring is_deleted to the outer WHERE", () => {
+    const { sql } = buildSegmentQuery(
+      { logic: "AND", conditions: [{ field: "followers_count", operator: ">", value: 100 }] },
+      fields, 7
+    );
+    const [innerWhere, outerWhere] = whereClauses(sql);
+    expect(innerWhere).toBe("tenant_id = 7");
+    expect(innerWhere).not.toContain("is_deleted");
+    expect(outerWhere).toContain("is_deleted = 0");
+  });
+
+  it("also defers is_deleted to the outer WHERE, AND'd at the top level, when conditions are OR'd together", () => {
+    // An is_deleted=0 clause folded into the OR group itself would let a deleted user through
+    // the moment any other OR'd clause was true — a second, independent way the naive "flat
+    // WHERE list" shape breaks under OR logic. is_deleted must stay outside the parenthesized
+    // OR group: `WHERE u.is_deleted = 0 AND (...)`, never inside it.
+    const { sql } = buildSegmentQuery(
+      {
+        logic: "OR",
+        conditions: [
+          { field: "followers_count", operator: ">", value: 100 },
+          { field: "event_type", operator: "=", value: "purchase" },
+        ],
+      },
+      fields, 7
+    );
+    const [innerWhere, outerWhere] = whereClauses(sql);
+    expect(innerWhere).toBe("tenant_id = 7");
+    expect(outerWhere).toMatch(/^u\.is_deleted = 0 AND \(/);
+  });
+
+  it("dedups on exactly (channel_id, source_user_id), latest updated_at wins", () => {
+    const { sql } = buildSegmentQuery(
+      { logic: "AND", conditions: [{ field: "followers_count", operator: ">", value: 100 }] },
+      fields, 7
+    );
+    expect(sql).toMatch(
+      /QUALIFY ROW_NUMBER\(\) OVER \(PARTITION BY channel_id, source_user_id ORDER BY updated_at DESC\) = 1/
+    );
+  });
+
+  it("escapes every value in an IN list", () => {
+    const { sql } = buildSegmentQuery(
+      { logic: "AND", conditions: [{ field: "name", operator: "IN", value: ["o'brien", "Ann"] }] },
+      fields, 7
+    );
+    expect(sql).toContain("IN ('o''brien', 'Ann')");
+  });
+
+  it("escapes both endpoints of a BETWEEN", () => {
+    const { sql } = buildSegmentQuery(
+      { logic: "AND", conditions: [{ field: "followers_count", operator: "BETWEEN", value: ["100", "200"] }] },
+      fields, 7
+    );
+    expect(sql).toContain("BETWEEN 100 AND 200");
+  });
+
+  it("computes timeRelative as a quoted ISO literal, not raw SQL date arithmetic", () => {
+    const { sql } = buildSegmentQuery(
+      { logic: "AND", conditions: [{ field: "event_time", operator: ">=", value: "", timeRelative: "7d" }] },
+      fields, 7
+    );
+    expect(sql).toMatch(/e\.event_time >= '\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z'/);
+    expect(sql).not.toContain("NOW()");
+    expect(sql).not.toContain("INTERVAL");
+  });
+
+  it("does not quote an INT-typed field's literal", () => {
+    const { sql } = buildSegmentQuery(
+      { logic: "AND", conditions: [{ field: "followers_count", operator: ">", value: 100 }] },
+      fields, 7
+    );
+    expect(sql).toContain("u.followers_count > 100");
+    expect(sql).not.toContain("'100'");
+  });
+
+  it("does not quote an ENUM_INT-typed field's literal", () => {
+    const { sql } = buildSegmentQuery(
+      { logic: "AND", conditions: [{ field: "is_follow", operator: "=", value: 1 }] },
+      fields, 7
+    );
+    expect(sql).toContain("u.is_follow = 1");
+    expect(sql).not.toContain("'1'");
   });
 });

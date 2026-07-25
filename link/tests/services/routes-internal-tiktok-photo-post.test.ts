@@ -2,40 +2,24 @@ import { describe, it, expect, vi } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
 
-const tenantDataDbRunMock = vi.fn().mockResolvedValue({ changes: 1 });
-
-// Same reasoning/pattern as routes-internal-content.test.ts: the real TenantDataDB talks to
-// the Cloudflare D1 REST API over global fetch, which would collide with this file's
-// vi.stubGlobal("fetch", ...) mocks for content-generate/content-generate-image/TikTok calls.
-vi.mock("../../../shared/tenant-data-db", () => ({
-  TenantDataDB: class {
-    query() {
-      return Promise.resolve([]);
-    }
-    run(...args: unknown[]) {
-      return tenantDataDbRunMock(...args);
-    }
-  },
-}));
-
+// routes-internal.ts writes published content via ContentService.recordPublishedContent,
+// which now goes through EntityStateStore (a real D1 write against LINK_DB — no D1 REST API
+// call, so no fetch collision like the old TenantDataDB did) and PIPELINE_CONTENT.send (R2).
+// mockLinkDb routes by SQL text: the channel lookup uses `first`, entity_state bookkeeping
+// uses `run` (INSERT OR IGNORE / UPDATE) — same double serves both.
 function mockLinkDb(channelRow: { config: string; channel_type: string; tenant_id: number } | null) {
   return {
-    prepare: vi.fn().mockReturnValue({
+    prepare: vi.fn().mockImplementation((sql: string) => ({
       bind: vi.fn().mockReturnValue({
-        first: vi.fn().mockResolvedValue(channelRow),
+        first: vi.fn().mockResolvedValue(sql.includes("FROM channels") ? channelRow : null),
+        run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
       }),
-    }),
+    })),
   };
 }
 
-function mockWebDb(d1DatabaseId: string | null) {
-  return {
-    prepare: vi.fn().mockReturnValue({
-      bind: vi.fn().mockReturnValue({
-        first: vi.fn().mockResolvedValue(d1DatabaseId ? { d1_database_id: d1DatabaseId } : null),
-      }),
-    }),
-  };
+function mockPipelineContent() {
+  return { send: vi.fn().mockResolvedValue(undefined) };
 }
 
 
@@ -67,7 +51,7 @@ describe("POST /internal/tiktok/photo-post", () => {
   });
 
   it("generates images, forwards content's URLs, and publishes on success (best-effort: 1 of 2 images failing still succeeds)", async () => {
-    tenantDataDbRunMock.mockClear();
+    const pipelineContent = mockPipelineContent();
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("/internal/generate-image")) {
         // First call succeeds, second call fails -- best-effort should still publish with 1 image.
@@ -90,7 +74,7 @@ describe("POST /internal/tiktok/photo-post", () => {
         headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
         body: JSON.stringify(baseBody),
       }),
-      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") } as any
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), PIPELINE_CONTENT: pipelineContent } as any
     );
 
     expect(res.status).toBe(200);
@@ -101,7 +85,9 @@ describe("POST /internal/tiktok/photo-post", () => {
     const publishBody = JSON.parse(publishCall![1].body);
     expect(publishBody.source_info.photo_images).toEqual(["https://content-dev.uni-scrm.com/public/media/fake-key-1"]);
     expect(publishBody.post_info.title).toBe("Write a catchy title"); // textProvider: "none" -> literal prompt text
-    expect(tenantDataDbRunMock).toHaveBeenCalledTimes(1); // recordPublishedContent wrote the new content row
+    // recordPublishedContent wrote the new content row to R2 via the pipeline.
+    expect(pipelineContent.send).toHaveBeenCalledTimes(1);
+    expect(pipelineContent.send.mock.calls[0][0][0]).toMatchObject({ content_type: "PHOTO_POST", channel_type: "TIKTOK" });
     vi.unstubAllGlobals();
   });
 
@@ -114,7 +100,7 @@ describe("POST /internal/tiktok/photo-post", () => {
         headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
         body: JSON.stringify(baseBody),
       }),
-      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") } as any
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), PIPELINE_CONTENT: mockPipelineContent() } as any
     );
 
     const body = await res.json<{ ok: boolean }>();

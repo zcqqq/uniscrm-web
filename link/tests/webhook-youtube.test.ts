@@ -47,17 +47,12 @@ describe("youtubeWebhookRoutes", () => {
         }),
       }),
     };
-    const webDb = {
-      prepare: vi.fn().mockReturnValue({
-        bind: vi.fn().mockReturnValue({
-          first: vi.fn().mockResolvedValue({ d1_database_id: "db-1" }),
-        }),
-      }),
-    };
     const ingestSpy = vi.spyOn(youtubeContent, "ingestYouTubeVideo").mockResolvedValue(undefined);
 
+    // EntityStateStore is constructed directly from LINK_DB + tenantId now — no more
+    // per-tenant WEB_DB/d1_database_id lookup (TenantDataDB removed).
     const { app, env } = buildApp({
-      LINK_DB: linkDb, WEB_DB: webDb, CF_ACCOUNT_ID: "acc", CF_D1_API_TOKEN: "tok",
+      LINK_DB: linkDb, CF_ACCOUNT_ID: "acc",
       AI: {}, VECTORIZE: {}, YOUTUBE_API_KEY: "key",
     });
 

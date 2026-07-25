@@ -1,11 +1,31 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
 import { XWebhookService } from "./services/x-webhook";
-import { XUsersService, type XUserData } from "./services/x-users";
-import { TenantDataDB } from "../../shared/tenant-data-db";
+import { XUsersService, EVENT_VALUE_COLUMNS, type XUserData } from "./services/x-users";
+import { EntityStateStore, type EntityStateKey } from "./services/entity-state";
+import { ContentService, CONTENT_MAPPED_PROP_IDS } from "./services/content";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { EventMetadata_X } from "../../metadata/x";
-import { resolveProps } from "./services/pollers/resolve-props";
+import { ContentMetadata_X } from "../../metadata/x-byok";
+import { resolveProps, consumedPaths } from "./services/pollers/resolve-props";
+
+const POSTS_METADATA = ContentMetadata_X.find((m) => m.sourceContentType === "own:get-posts")!;
+
+// propIds an event's eventProps mapping can supply — same "mapped-but-columnless" guard as
+// x-users.ts's MAPPED_USER_PROP_IDS, applied to the event pipeline: a metadata eventProps
+// entry having a dataId doesn't mean EVENT_VALUE_COLUMNS has a matching R2 column for it.
+const EVENT_ALLOWED_PROP_IDS = new Set(EVENT_VALUE_COLUMNS);
+
+// The dataId paths an event's own metadata entry actually consumes from its scoped payload
+// object — same relative-path computation resolveEventProps uses for the values themselves,
+// reused here so raw_data can be stripped of exactly what eventProps already carries instead
+// of storing the entire external payload (uniscrm-web/CLAUDE.md「调用外部API返回的payload全量
+// 数据不要存在数据库中」). Returns [] for an eventType with no EventMetadata_X entry.
+function resolveEventConsumedPaths(eventType: string): string[] {
+  const meta = EventMetadata_X.find((e) => e.eventType === eventType);
+  if (!meta) return [];
+  return consumedPaths(meta.eventProps, meta.linkPrefix, EVENT_ALLOWED_PROP_IDS);
+}
 
 // The event's metadata-declared eventProps, pulled out of the raw webhook payload for
 // the R2 event pipeline. `scoped` is the linkPrefix-resolved user object (target.data /
@@ -81,26 +101,16 @@ function resolveLinkPrefix(payload: Record<string, unknown>, linkPrefix: string)
 interface ChannelInfo {
   channelId: string;
   tenantId: number | null;
-  d1DatabaseId: string | null;
 }
 
-async function findChannelByXUserId(linkDb: D1Database, mainDb: D1Database, xUserId: string): Promise<ChannelInfo | null> {
+async function findChannelByXUserId(linkDb: D1Database, xUserId: string): Promise<ChannelInfo | null> {
   const channel = await linkDb
     .prepare("SELECT id, tenant_id FROM channels WHERE channel_type IN ('TWITTER', 'X') AND source_channel_id = ? AND is_active = 1")
     .bind(xUserId)
     .first<{ id: string; tenant_id: number | null }>();
   if (!channel) return null;
 
-  let d1DatabaseId: string | null = null;
-  if (channel.tenant_id) {
-    const tenant = await mainDb
-      .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-      .bind(channel.tenant_id)
-      .first<{ d1_database_id: string | null }>();
-    d1DatabaseId = tenant?.d1_database_id || null;
-  }
-
-  return { channelId: channel.id, tenantId: channel.tenant_id, d1DatabaseId };
+  return { channelId: channel.id, tenantId: channel.tenant_id };
 }
 
 async function handleXActivityEventByChannel(body: Record<string, unknown>, env: Env, channelId: string): Promise<void> {
@@ -115,16 +125,8 @@ async function handleXActivityEventByChannel(body: Record<string, unknown>, env:
     return;
   }
 
-  let d1DatabaseId: string | null = null;
-  if (channel.tenant_id) {
-    const tenant = await env.WEB_DB
-      .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-      .bind(channel.tenant_id)
-      .first<{ d1_database_id: string | null }>();
-    d1DatabaseId = tenant?.d1_database_id || null;
-  }
-  if (!d1DatabaseId) {
-    console.log(JSON.stringify({ event: "xaa_byok_no_tenant_db", channelId }));
+  if (!channel.tenant_id) {
+    console.log(JSON.stringify({ event: "xaa_byok_no_tenant", channelId }));
     return;
   }
 
@@ -139,16 +141,16 @@ async function handleXActivityEventByChannel(body: Record<string, unknown>, env:
 
   if (!eventType) return;
 
-  const tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, d1DatabaseId);
-  const usersService = new XUsersService(tenantDb, {
+  const entityState = new EntityStateStore(env.LINK_DB, channel.tenant_id);
+  const usersService = new XUsersService(entityState, {
     queue: env.MAIGRET_QUEUE,
     pipelineEvent: env.PIPELINE_EVENT,
     pipelineUser: env.PIPELINE_USER,
-    tenantId: channel.tenant_id ?? undefined,
-  });
+    tenantId: channel.tenant_id,
+  }, env);
 
   // Reuse the same event processing logic
-  const fakeChannelInfo: ChannelInfo = { channelId, tenantId: channel.tenant_id, d1DatabaseId };
+  const fakeChannelInfo: ChannelInfo = { channelId, tenantId: channel.tenant_id };
   await processXEvent(eventType, filterUserId || "", payload, fakeChannelInfo, usersService, env);
 }
 
@@ -182,6 +184,7 @@ async function processXEvent(
         eventTime: new Date().toISOString(),
         rawData: userData,
         eventProps: resolveEventProps(resolvedEventType, userData),
+        consumedPaths: resolveEventConsumedPaths(resolvedEventType),
       }]);
 
       if (tenantId) {
@@ -207,6 +210,7 @@ async function processXEvent(
         eventTime: new Date().toISOString(),
         rawData: userData,
         eventProps: resolveEventProps(resolvedEventType, userData),
+        consumedPaths: resolveEventConsumedPaths(resolvedEventType),
       }]);
 
       if (tenantId) {
@@ -296,6 +300,7 @@ async function processXEvent(
     eventTime: new Date().toISOString(),
     rawData: payload,
     eventProps,
+    consumedPaths: resolveEventConsumedPaths(eventType),
   }]);
 
   console.log(JSON.stringify({ event: "xaa_event_processed", eventType, userId: eventUserId }));
@@ -320,48 +325,51 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
     return;
   }
 
-  const channelInfo = await findChannelByXUserId(env.LINK_DB, env.WEB_DB, filterUserId);
+  const channelInfo = await findChannelByXUserId(env.LINK_DB, filterUserId);
   if (!channelInfo) {
     console.log(JSON.stringify({ event: "xaa_webhook_no_channel", filterUserId }));
     return;
   }
-  const { channelId, tenantId, d1DatabaseId } = channelInfo;
+  const { channelId, tenantId } = channelInfo;
 
-  if (!d1DatabaseId) {
-    console.log(JSON.stringify({ event: "xaa_webhook_no_tenant_db", filterUserId, tenantId }));
+  if (!tenantId) {
+    console.log(JSON.stringify({ event: "xaa_webhook_no_tenant", filterUserId }));
     return;
   }
 
-  const tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, d1DatabaseId);
-  const usersService = new XUsersService(tenantDb, {
+  const entityState = new EntityStateStore(env.LINK_DB, tenantId);
+  const usersService = new XUsersService(entityState, {
     queue: env.MAIGRET_QUEUE,
     pipelineEvent: env.PIPELINE_EVENT,
     pipelineUser: env.PIPELINE_USER,
-    tenantId: tenantId ?? undefined,
-  });
+    tenantId,
+  }, env);
 
-  // Handle content events (post.create/delete) which need tenantDb directly
+  // Handle content events (post.create/delete) — these write the `content` entity directly
+  // via entity_state + R2, mirroring x-posts.ts's poller (same own:get-posts metadata).
   if (eventType === "post.create") {
     const tweetId = payload.id as string;
-    const text = payload.text as string || "";
     if (tweetId) {
-      const shareUrl = `https://x.com/i/web/status/${tweetId}`;
-      await tenantDb.run(
-        `INSERT INTO content (id, channel_type, source_content_id, title, summary, status, source_url, raw_data, created_at, updated_at)
-         VALUES (?, 'X', ?, ?, NULL, 'new', ?, ?, datetime('now'), datetime('now'))
-         ON CONFLICT(channel_type, source_content_id) DO UPDATE SET title = excluded.title, raw_data = excluded.raw_data, updated_at = datetime('now')`,
-        [crypto.randomUUID(), tweetId, text.slice(0, 200), shareUrl, JSON.stringify(payload)]
-      );
+      const props = resolveProps(payload, POSTS_METADATA.contentProps, POSTS_METADATA.linkPrefix);
+      if (payload.article) props.content_type = "ARTICLE";
+      props.content_url = `https://x.com/i/status/${tweetId}`;
+      const paths = consumedPaths(POSTS_METADATA.contentProps, POSTS_METADATA.linkPrefix, CONTENT_MAPPED_PROP_IDS);
+      const contentService = new ContentService(entityState, env.VECTORIZE, env.AI, tenantId, env.PIPELINE_CONTENT, undefined, env);
+      await contentService.upsertContentFromMetadata(payload, props, channelId, "X", false, undefined, paths);
     }
   }
 
   if (eventType === "post.delete") {
     const tweetId = payload.id as string || payload.tweet_id as string;
     if (tweetId) {
-      await tenantDb.run(
-        `UPDATE content SET status = 'deleted', updated_at = datetime('now') WHERE channel_type = 'X' AND source_content_id = ?`,
-        [tweetId]
-      );
+      const key: EntityStateKey = { entity: "content", channelId, secondaryId: "", sourceId: tweetId };
+      const existing = await entityState.get(key);
+      if (existing) {
+        const contentService = new ContentService(entityState, env.VECTORIZE, env.AI, tenantId, env.PIPELINE_CONTENT, undefined, env);
+        await contentService.delete(existing.entity_id);
+      } else {
+        console.log(JSON.stringify({ event: "xaa_post_delete_not_recorded", channelId, tweetId }));
+      }
     }
   }
 

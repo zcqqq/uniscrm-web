@@ -3,43 +3,38 @@ import { describe, it, expect, vi } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
 
-const tenantDataDbRunMock = vi.fn().mockResolvedValue({ changes: 1 });
-
-// The real TenantDataDB talks to the Cloudflare D1 REST API over global `fetch`, which
-// would collide with this file's `vi.stubGlobal("fetch", ...)` mocks for content-generate
-// and the X post call. Mocked here the same way tests/services/pollers/poll-channel.test.ts
-// mocks TenantDataDB.
-vi.mock("../../../shared/tenant-data-db", () => ({
-  TenantDataDB: class {
-    query() {
-      return Promise.resolve([]);
-    }
-    run(...args: unknown[]) {
-      return tenantDataDbRunMock(...args);
-    }
-  },
-}));
-
-function mockWebDb(d1DatabaseId: string | null) {
+// recordPublishedContent (content.ts) no longer writes via a per-tenant D1 REST-API detour
+// (TenantDataDB is gone) — it goes through EntityStateStore (a real D1 write against LINK_DB)
+// and PIPELINE_CONTENT.send (R2). mockWebDb is now inert (routes-internal.ts no longer reads
+// WEB_DB at all — the d1_database_id lookup this used to answer was deleted with
+// TenantDataDB) but is kept as a no-op stub since it's still passed at ~15 call sites below;
+// removing every occurrence isn't worth the churn since WEB_DB being present-but-unread is
+// harmless.
+function mockWebDb(_d1DatabaseId: string | null = null) {
   return {
     prepare: vi.fn().mockReturnValue({
-      bind: vi.fn().mockReturnValue({
-        first: vi.fn().mockResolvedValue(d1DatabaseId ? { d1_database_id: d1DatabaseId } : null),
-      }),
+      bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(null) }),
     }),
   };
+}
+
+function mockPipelineContent() {
+  return { send: vi.fn().mockResolvedValue(undefined) };
 }
 
 // The handler and XTokenService.getValidToken both `SELECT ... FROM channels WHERE id = ?`
 // on different subsets of columns from the same row — one canned row (with every field
 // either call might read) satisfies both, same pattern pollers/poll-channel.test.ts uses.
+// mockLinkDb now also routes SQL to a generic `run` handler for EntityStateStore's
+// entity_state INSERT OR IGNORE / UPDATE (recordPublishedContent's claim()).
 function mockLinkDb(channelRow: { config: string; channel_type: string; tenant_id: number } | null) {
   return {
-    prepare: vi.fn().mockReturnValue({
+    prepare: vi.fn().mockImplementation((sql: string) => ({
       bind: vi.fn().mockReturnValue({
-        first: vi.fn().mockResolvedValue(channelRow),
+        first: vi.fn().mockResolvedValue(sql.includes("FROM channels") ? channelRow : null),
+        run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
       }),
-    }),
+    })),
   };
 }
 
@@ -277,7 +272,7 @@ describe("stub content-flow action endpoints", () => {
       channel_type: "X",
       tenant_id: 1,
     };
-    tenantDataDbRunMock.mockClear();
+    const pipelineContent = mockPipelineContent();
 
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ text: "generated post text" }), { status: 200 })) // content /internal/generate
@@ -290,7 +285,7 @@ describe("stub content-flow action endpoints", () => {
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
         body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", channelId: "tgt-chan", flowId: "flow-1", skillId: "marketingskills-social" }),
       }),
-      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb(), PIPELINE_CONTENT: pipelineContent }
     );
 
     expect(res.status).toBe(200);
@@ -298,16 +293,15 @@ describe("stub content-flow action endpoints", () => {
     expect(body).toEqual({ ok: true, id: "tweet-999" });
     const generateCallBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(generateCallBody.skillId).toBe("marketingskills-social"); // forwarded through to content's /internal/generate
-    expect(tenantDataDbRunMock).toHaveBeenCalledTimes(1); // recordPublishedContent wrote the new content row
-    const [insertSql, insertParams] = tenantDataDbRunMock.mock.calls[0] as [string, unknown[]];
-    expect(insertSql).toMatch(/INSERT INTO content/);
-    // [id, channelId, channelType, contentType, sourceContentId, contentText, status, raw_data, created_at, updated_at]
-    expect(insertParams[1]).toBe("tgt-chan"); // target channel id
-    expect(insertParams[2]).toBe("X"); // channel_type
-    expect(insertParams[3]).toBe("TWEET"); // content_type (default value)
-    expect(insertParams[4]).toBe("tweet-999"); // source_content_id = new tweet's id
-    expect(insertParams[5]).toBe("generated post text"); // content_text
-    expect(JSON.parse(insertParams[7] as string)).toEqual({
+    // recordPublishedContent wrote the new content row to R2 via the pipeline.
+    expect(pipelineContent.send).toHaveBeenCalledTimes(1);
+    const record = pipelineContent.send.mock.calls[0][0][0] as Record<string, unknown>;
+    expect(record.channel_id).toBe("tgt-chan"); // target channel id
+    expect(record.channel_type).toBe("X");
+    expect(record.content_type).toBe("TWEET"); // content_type (default value)
+    expect(record.source_content_id).toBe("tweet-999"); // source_content_id = new tweet's id
+    expect(record.content_text).toBe("generated post text");
+    expect(JSON.parse(record.raw_data as string)).toEqual({
       generatedFromContentId: "content-1",
       flowId: "flow-1",
     });
@@ -331,7 +325,6 @@ describe("stub content-flow action endpoints", () => {
       channel_type: "X",
       tenant_id: 1,
     };
-    tenantDataDbRunMock.mockClear();
 
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { id: "tweet-none-1", text: "plain text post" } }), { status: 201 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -355,7 +348,6 @@ describe("stub content-flow action endpoints", () => {
 
   it("POST /internal/content/create-post with videoUrl under 50MB uploads to X and posts with media_ids when processing succeeds immediately", async () => {
     const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
-    tenantDataDbRunMock.mockClear();
 
     const videoBytes = new Uint8Array(1024); // tiny, well under 50MB
     const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
@@ -491,7 +483,6 @@ describe("stub content-flow action endpoints", () => {
 
   it("POST /internal/content/create-post chunks a video body larger than 5MB into multiple sequential APPEND calls", async () => {
     const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
-    tenantDataDbRunMock.mockClear();
 
     const videoBytes = new Uint8Array(12 * 1024 * 1024); // spans 2 full 5MB chunks + a 2MB remainder
     const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
@@ -551,7 +542,7 @@ describe("stub content-flow action endpoints", () => {
 
   it("POST /internal/content/create-post rejects a video whose streamed body exceeds 50MB even with no Content-Length header (running byte-count guard)", async () => {
     const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
-    tenantDataDbRunMock.mockClear();
+    const pipelineContent = mockPipelineContent();
 
     const chunkBytes = 6 * 1024 * 1024;
     const totalChunks = 9; // 54MB total, well over the 50MB cap
@@ -600,7 +591,7 @@ describe("stub content-flow action endpoints", () => {
           videoUrl: "https://content-dev.uni-scrm.com/public/media/vid-oversize",
         }),
       }),
-      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb(), PIPELINE_CONTENT: pipelineContent }
     );
 
     expect(res.status).toBe(200);
@@ -618,7 +609,7 @@ describe("stub content-flow action endpoints", () => {
       ([u]: [string, RequestInit]) => String(u) === "https://api.x.com/2/media/upload/media-oversize-1/finalize"
     );
     expect(finalizeCalled).toBe(false);
-    expect(tenantDataDbRunMock).not.toHaveBeenCalled();
+    expect(pipelineContent.send).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 
@@ -661,7 +652,7 @@ describe("stub content-flow action endpoints", () => {
       channel_type: "X",
       tenant_id: 1,
     };
-    tenantDataDbRunMock.mockClear();
+    const pipelineContent = mockPipelineContent();
 
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ text: "generated post text" }), { status: 200 })) // content /internal/generate
@@ -674,7 +665,7 @@ describe("stub content-flow action endpoints", () => {
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
         body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", channelId: "tgt-chan", flowId: "flow-1" }),
       }),
-      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb(), PIPELINE_CONTENT: pipelineContent }
     );
 
     expect(res.status).toBe(200);
@@ -682,7 +673,7 @@ describe("stub content-flow action endpoints", () => {
     expect(body.ok).toBe(false);
     expect(body.rateLimited).toBe(true);
     expect(typeof body.rateLimitReset).toBe("string");
-    expect(tenantDataDbRunMock).not.toHaveBeenCalled(); // no content row recorded when rate-limited
+    expect(pipelineContent.send).not.toHaveBeenCalled(); // no content row recorded when rate-limited
     vi.unstubAllGlobals();
   });
 
@@ -692,7 +683,7 @@ describe("stub content-flow action endpoints", () => {
       channel_type: "TIKTOK",
       tenant_id: 1,
     };
-    tenantDataDbRunMock.mockClear();
+    const pipelineContent = mockPipelineContent();
 
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -703,13 +694,13 @@ describe("stub content-flow action endpoints", () => {
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
         body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", channelId: "tgt-chan", flowId: "flow-1" }),
       }),
-      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb(), PIPELINE_CONTENT: pipelineContent }
     );
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^unsupported_channel_type(:|$)/) });
     expect(fetchMock).not.toHaveBeenCalled(); // platform check happens before generate/X calls
-    expect(tenantDataDbRunMock).not.toHaveBeenCalled();
+    expect(pipelineContent.send).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 
@@ -719,7 +710,7 @@ describe("stub content-flow action endpoints", () => {
       channel_type: "X",
       tenant_id: 1,
     };
-    tenantDataDbRunMock.mockClear();
+    const pipelineContent = mockPipelineContent();
 
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response("generation error", { status: 502 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -730,13 +721,13 @@ describe("stub content-flow action endpoints", () => {
         headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
         body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", channelId: "tgt-chan", flowId: "flow-1" }),
       }),
-      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb(), PIPELINE_CONTENT: pipelineContent }
     );
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^text_generation_failed(:|$)/) });
     expect(fetchMock).toHaveBeenCalledTimes(1); // generate only, no X call
-    expect(tenantDataDbRunMock).not.toHaveBeenCalled(); // no content row recorded
+    expect(pipelineContent.send).not.toHaveBeenCalled(); // no content row recorded
     vi.unstubAllGlobals();
   });
 
@@ -785,7 +776,7 @@ describe("stub content-flow action endpoints", () => {
   describe("POST /internal/content/x-video-status", () => {
     it("posts the tweet and records content when status is succeeded", async () => {
       const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
-      tenantDataDbRunMock.mockClear();
+      const pipelineContent = mockPipelineContent();
 
       const fetchMock = vi.fn().mockImplementation(async (url: string) => {
         const u = String(url);
@@ -801,12 +792,12 @@ describe("stub content-flow action endpoints", () => {
           headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
           body: JSON.stringify({ channelId: "tgt-chan", mediaId: "media-1", text: "caption text", contentId: "content-1", flowId: "flow-1" }),
         }),
-        { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+        { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb(), PIPELINE_CONTENT: pipelineContent }
       );
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true, id: "tweet-status-1" });
-      expect(tenantDataDbRunMock).toHaveBeenCalledTimes(1);
+      expect(pipelineContent.send).toHaveBeenCalledTimes(1);
       vi.unstubAllGlobals();
     });
 

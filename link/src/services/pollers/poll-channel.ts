@@ -8,7 +8,7 @@ import { runFollowersPoller } from "./x-followers";
 import { runPostsPoller } from "./x-posts";
 import { runTikTokContentPoller } from "./tiktok-content";
 import { runListPostsPoller } from "./x-list-posts";
-import { TenantDataDB } from "../../../../shared/tenant-data-db";
+import { EntityStateStore } from "../entity-state";
 
 const PER_CHANNEL_BUDGET_MS = 20_000;
 const REPOLL_INTERVAL_MS = 55 * 60 * 1000;
@@ -30,15 +30,6 @@ async function shouldPoll(env: Env, channelId: string, pollerName: string): Prom
     }
   }
   return true;
-}
-
-async function resolveTenantDb(env: Env, tenantId: number): Promise<TenantDataDB | null> {
-  const tenant = await env.WEB_DB
-    .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-    .bind(tenantId)
-    .first<{ d1_database_id: string | null }>();
-  if (!tenant?.d1_database_id) return null;
-  return new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenant.d1_database_id);
 }
 
 export async function pollChannelOnce(env: Env, channelType: ChannelType, channelId: string): Promise<void> {
@@ -65,27 +56,24 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
   if (!pollFollowers && !pollPosts) return;
 
   let accessToken: string;
-  let tenantDb: import("../../../../shared/tenant-data-db").TenantDataDB;
   let tokenService: XTokenService;
   try {
     const creds = await getAppCredentials(env, config);
     tokenService = new XTokenService(env.LINK_DB, creds.clientId, creds.clientSecret);
     accessToken = await tokenService.getValidToken(row.id);
-
-    const db = await resolveTenantDb(env, row.tenant_id!);
-    if (!db) return;
-    tenantDb = db;
   } catch (e) {
     console.error(JSON.stringify({ event: "poll_setup_error", channel_id: row.id, error: String(e) }));
     return;
   }
+
+  const entityState = new EntityStateStore(env.LINK_DB, row.tenant_id!);
 
   if (pollFollowers) {
     try {
       try {
         await runFollowersPoller({
           channelId: row.id, xUserId: config.x_user_id, accessToken,
-          linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id!,
+          linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id!, r2Env: env,
           pipelineUser: env.PIPELINE_USER, deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
         });
       } catch (e) {
@@ -93,7 +81,7 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
         accessToken = await tokenService.refreshAccessToken(row.id);
         await runFollowersPoller({
           channelId: row.id, xUserId: config.x_user_id, accessToken,
-          linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id!,
+          linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id!, r2Env: env,
           pipelineUser: env.PIPELINE_USER, deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
         });
       }
@@ -107,7 +95,7 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
       try {
         await runPostsPoller({
           channelId: row.id, xUserId: config.x_user_id, accessToken,
-          linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id!,
+          linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id!, r2Env: env,
           ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
           deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
         });
@@ -116,7 +104,7 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
         accessToken = await tokenService.refreshAccessToken(row.id);
         await runPostsPoller({
           channelId: row.id, xUserId: config.x_user_id, accessToken,
-          linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id!,
+          linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id!, r2Env: env,
           ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
           deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
         });
@@ -134,22 +122,20 @@ async function pollTikTokChannel(env: Env, row: { id: string; config: string; te
   if (!pollContent) return;
 
   let accessToken: string;
-  let tenantDb: import("../../../../shared/tenant-data-db").TenantDataDB;
   const tokenService = new TikTokTokenService(env.LINK_DB, env.TIKTOK_CLIENT_KEY, env.TIKTOK_CLIENT_SECRET);
   try {
     accessToken = await tokenService.getValidToken(row.id);
-    const db = await resolveTenantDb(env, row.tenant_id);
-    if (!db) return;
-    tenantDb = db;
   } catch (e) {
     console.error(JSON.stringify({ event: "poll_setup_error", channel_id: row.id, error: String(e) }));
     return;
   }
 
+  const entityState = new EntityStateStore(env.LINK_DB, row.tenant_id);
+
   try {
     try {
       await runTikTokContentPoller({
-        channelId: row.id, accessToken, linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id,
+        channelId: row.id, accessToken, linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id, r2Env: env,
         ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
         deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
       });
@@ -157,7 +143,7 @@ async function pollTikTokChannel(env: Env, row: { id: string; config: string; te
       if (!(e instanceof TikTokUnauthorizedError)) throw e;
       accessToken = await tokenService.refreshAccessToken(row.id);
       await runTikTokContentPoller({
-        channelId: row.id, accessToken, linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id,
+        channelId: row.id, accessToken, linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id, r2Env: env,
         ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
         deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
       });
@@ -192,26 +178,23 @@ export async function pollXListPosts(env: Env, channelId: string, listId: string
   if (!(await shouldPoll(env, channelId, pollerName))) return;
 
   let accessToken: string;
-  let tenantDb: import("../../../../shared/tenant-data-db").TenantDataDB;
   let tokenService: XTokenService;
   try {
     const creds = await getAppCredentials(env, config);
     tokenService = new XTokenService(env.LINK_DB, creds.clientId, creds.clientSecret);
     accessToken = await tokenService.getValidToken(channelId);
-
-    const db = await resolveTenantDb(env, row.tenant_id!);
-    if (!db) return;
-    tenantDb = db;
   } catch (e) {
     console.error(JSON.stringify({ event: "list_posts_poll_setup_error", channel_id: channelId, list_id: listId, error: String(e) }));
     return;
   }
 
+  const entityState = new EntityStateStore(env.LINK_DB, row.tenant_id!);
+
   try {
     try {
       await runListPostsPoller({
         channelId, listId, accessToken,
-        linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id!,
+        linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id!, r2Env: env,
         ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
         deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
       });
@@ -220,7 +203,7 @@ export async function pollXListPosts(env: Env, channelId: string, listId: string
       accessToken = await tokenService.refreshAccessToken(channelId);
       await runListPostsPoller({
         channelId, listId, accessToken,
-        linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id!,
+        linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id!, r2Env: env,
         ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
         deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
       });

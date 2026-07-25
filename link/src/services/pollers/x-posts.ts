@@ -1,8 +1,9 @@
-import type { TenantDataDB } from "../../../../shared/tenant-data-db";
 import type { Pipeline } from "../../types";
-import { ContentService } from "../content";
+import type { R2SqlEnv } from "../../../../shared/r2-sql";
+import { EntityStateStore } from "../entity-state";
+import { ContentService, CONTENT_MAPPED_PROP_IDS } from "../content";
 import { fetchPostsPage } from "../x-posts-api";
-import { resolveProps } from "./resolve-props";
+import { resolveProps, consumedPaths } from "./resolve-props";
 import { ContentMetadata_X } from "../../../../metadata/x-byok";
 
 const POSTS_METADATA = ContentMetadata_X.find((m) => m.sourceContentType === "own:get-posts")!;
@@ -12,12 +13,13 @@ export interface PostsPollerContext {
   xUserId: string;
   accessToken: string;
   linkDb: D1Database;
-  tenantDb: TenantDataDB;
+  entityState: EntityStateStore;
   tenantId: number;
   ai: Ai;
   vectorize: VectorizeIndex;
   pipelineContent?: Pipeline;
   flowQueue?: Queue;
+  r2Env?: R2SqlEnv;
   deadline: number;
 }
 
@@ -38,7 +40,7 @@ export async function runPostsPoller(ctx: PostsPollerContext): Promise<void> {
     return;
   }
 
-  const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue);
+  const contentService = new ContentService(ctx.entityState, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue, ctx.r2Env);
   const phase = state.backfill_complete ? "incremental" : "backfill";
   console.log(JSON.stringify({ event: "posts_poll_started", channel_id: ctx.channelId, phase, cursor: state.cursor }));
 
@@ -67,7 +69,12 @@ async function upsertPage(
     // X's tweet.fields has no permalink field; x.com/i/status/{id} is the official,
     // username-independent status URL format — same reasoning as the article fixup above.
     props.content_url = `https://x.com/i/status/${props.source_content_id}`;
-    const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "X", emitFlowEvent);
+    // raw_data 只保留没有被消费的字段 —— 全量 payload 进日志不进库
+    // (uniscrm-web/CLAUDE.md「调用外部API返回的payload全量数据不要存在数据库中」)。
+    // CONTENT_MAPPED_PROP_IDS restricts to propIds that actually land in a named R2 `content`
+    // column, so a mapped-but-columnless prop isn't stripped with nowhere else to land.
+    const paths = consumedPaths(POSTS_METADATA.contentProps, POSTS_METADATA.linkPrefix, CONTENT_MAPPED_PROP_IDS);
+    const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "X", emitFlowEvent, undefined, paths);
     if (isNew) newCount++;
   }
   return newCount;

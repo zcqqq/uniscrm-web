@@ -26,7 +26,6 @@ export interface Env {
   R2_BUCKET: string;
   R2_WAREHOUSE: string;
   CF_ACCOUNT_ID: string;
-  CF_D1_API_TOKEN: string;
   INTERNAL_SECRET: string;
 
   // Secrets Store

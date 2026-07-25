@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
-import { TenantDataDB } from "../../shared/tenant-data-db";
+import { EntityStateStore } from "./services/entity-state";
 import { ingestYouTubeVideo } from "./services/pollers/youtube-content";
 
 function extractVideoIds(atomXml: string): string[] {
@@ -67,13 +67,7 @@ export function youtubeWebhookRoutes() {
       return c.text("ok");
     }
 
-    const tenant = await c.env.WEB_DB
-      .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-      .bind(row.tenant_id)
-      .first<{ d1_database_id: string | null }>();
-    if (!tenant?.d1_database_id) return c.text("ok");
-
-    const tenantDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenant.d1_database_id);
+    const entityState = new EntityStateStore(c.env.LINK_DB, row.tenant_id);
 
     for (const videoId of videoIds) {
       try {
@@ -81,13 +75,14 @@ export function youtubeWebhookRoutes() {
           {
             accountChannelId,
             subscriptionChannelId: youtubeChannelId,
-            tenantDb,
+            entityState,
             tenantId: row.tenant_id,
             ai: c.env.AI,
             vectorize: c.env.VECTORIZE,
             apiKey: c.env.YOUTUBE_API_KEY,
             pipelineContent: c.env.PIPELINE_CONTENT,
             flowQueue: c.env.FLOW_QUEUE,
+            r2Env: c.env,
           },
           videoId
         );

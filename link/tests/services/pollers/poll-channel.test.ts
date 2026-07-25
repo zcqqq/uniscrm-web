@@ -39,16 +39,17 @@ vi.mock("../../../src/services/tiktok-token", () => ({
     refreshAccessToken(...args: unknown[]) { return tiktokRefreshAccessTokenMock(...args); }
   },
 }));
-vi.mock("../../../../shared/tenant-data-db", () => ({ TenantDataDB: class {} }));
-
 import { pollChannelOnce, pollXListPosts } from "../../../src/services/pollers/poll-channel";
 
+// EntityStateStore is constructed directly from env.LINK_DB now (no per-tenant D1 lookup
+// against WEB_DB) — its constructor is lazy (no DB access until a method is called), and
+// every poller call in this file is mocked wholesale, so LINK_DB's mock double is enough on
+// its own; WEB_DB is no longer read by poll-channel.ts at all.
 function baseEnv(linkDb: unknown, webDb: unknown) {
   return {
     LINK_DB: linkDb,
     WEB_DB: webDb,
     CF_ACCOUNT_ID: "acct",
-    CF_D1_API_TOKEN: "token",
     TIKTOK_CLIENT_KEY: "tt-key",
     TIKTOK_CLIENT_SECRET: "tt-secret",
     PIPELINE_USER: undefined,
@@ -61,7 +62,7 @@ function baseEnv(linkDb: unknown, webDb: unknown) {
 function mockWebDb() {
   return {
     prepare: vi.fn().mockReturnValue({
-      bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({ d1_database_id: "tenant-db-id" }) }),
+      bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(null) }),
     }),
   };
 }

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
-import type { TenantDataDB } from "../../shared/tenant-data-db";
+import type { EntityStateStore } from "./services/entity-state";
 import { ContentService } from "./services/content";
 import { NotionChannel } from "./channels/notion";
 import { TikTokChannel } from "./channels/tiktok";
@@ -214,7 +214,7 @@ export function channelsRoutes() {
 
   // --- TikTok ---
   router.post("/tiktok/sync", async (c) => {
-    const tenantDataDb = c.get("tenantDataDb" as never) as TenantDataDB;
+    const entityState = c.get("entityState" as never) as EntityStateStore;
     const tenantId = c.get("tenantId" as never) as number;
 
     const channel = await c.env.LINK_DB
@@ -229,7 +229,7 @@ export function channelsRoutes() {
     const tiktok = new TikTokChannel(config.access_token);
     const items = await tiktok.fetchItems({});
 
-    const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);
+    const contentService = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT, undefined, c.env);
     const result = await contentService.syncBatch("TIKTOK", items);
     return c.json({ status: "ok", ...result });
   });
@@ -376,7 +376,7 @@ export function channelsRoutes() {
 
   router.post("/notion/sync", async (c) => {
     const memberId = c.get("memberId" as never) as string;
-    const tenantDataDb = c.get("tenantDataDb" as never) as TenantDataDB;
+    const entityState = c.get("entityState" as never) as EntityStateStore;
     const tenantId = c.get("tenantId" as never) as number;
 
     const ch = await c.env.LINK_DB
@@ -395,7 +395,7 @@ export function channelsRoutes() {
     const channel = new NotionChannel(notionConfig.access_token);
     const items = await channel.fetchItems(folderConfig);
 
-    const service = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);
+    const service = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT, undefined, c.env);
     const result = await service.syncBatch("NOTION", items);
     return c.json(result);
   });
@@ -443,7 +443,7 @@ export function channelsRoutes() {
 
   router.put("/:type/config", async (c) => {
     const memberId = c.get("memberId" as never) as string;
-    const tenantDataDb = c.get("tenantDataDb" as never) as TenantDataDB;
+    const entityState = c.get("entityState" as never) as EntityStateStore;
     const tenantId = c.get("tenantId" as never) as number;
     const channelType = c.req.param("type").toUpperCase();
     const { config } = await c.req.json<{ config: Record<string, unknown> }>();
@@ -467,7 +467,7 @@ export function channelsRoutes() {
         const notionConfig = JSON.parse(ch.config) as { access_token: string };
         const channel = new NotionChannel(notionConfig.access_token);
         const items = await channel.fetchItems(config);
-        const service = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);
+        const service = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT, undefined, c.env);
         const result = await service.syncBatch("NOTION", items);
         return c.json({ ok: true, sync: result });
       }

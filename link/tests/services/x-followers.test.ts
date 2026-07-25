@@ -10,12 +10,11 @@ function createMockLinkDb(initialState: { cursor: string | null; backfill_comple
   return { prepare, _state: state, _run: run, _bind: bind };
 }
 
-// XUsersService's constructor now takes an EntityStateStore, not a TenantDataDB (task-5
-// converted the user write path to R2). runFollowersPoller (x-followers.ts) still forwards
-// whatever it's handed as `ctx.tenantDb` straight into `new XUsersService(ctx.tenantDb, ...)`
-// — its own conversion is Task 6/7 scope, so the field name stays `tenantDb` here even
-// though the value we pass is entity-state-shaped, not D1-shaped. `claim`'s isNew controls
-// how many followers upsertPage (x-followers.ts) counts as "new" per page.
+// XUsersService's constructor takes an EntityStateStore, not a TenantDataDB (task-5 converted
+// the user write path to R2). runFollowersPoller (x-followers.ts, task-7) forwards whatever
+// it's handed as `ctx.entityState` straight into `new XUsersService(ctx.entityState, ...)`.
+// `claim`'s isNew controls how many followers upsertPage (x-followers.ts) counts as "new" per
+// page.
 function createMockEntityState() {
   let seq = 0;
   return {
@@ -47,7 +46,7 @@ describe("runFollowersPoller", () => {
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, tenantDb: entityState as any, tenantId: 1,
+      linkDb: linkDb as any, entityState: entityState as any, tenantId: 1,
       deadline: Date.now() + 20_000,
     });
 
@@ -64,7 +63,7 @@ describe("runFollowersPoller", () => {
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, tenantDb: entityState as any, tenantId: 1,
+      linkDb: linkDb as any, entityState: entityState as any, tenantId: 1,
       deadline: Date.now() + 20_000,
     });
 
@@ -83,7 +82,7 @@ describe("runFollowersPoller", () => {
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, tenantDb: entityState as any, tenantId: 1,
+      linkDb: linkDb as any, entityState: entityState as any, tenantId: 1,
       deadline: Date.now() + 20_000,
     });
 
@@ -100,7 +99,7 @@ describe("runFollowersPoller", () => {
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, tenantDb: entityState as any, tenantId: 1,
+      linkDb: linkDb as any, entityState: entityState as any, tenantId: 1,
       deadline: Date.now() - 1, // already past
     });
 
@@ -121,7 +120,7 @@ describe("runFollowersPoller", () => {
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, tenantDb: entityState as any, tenantId: 1,
+      linkDb: linkDb as any, entityState: entityState as any, tenantId: 1,
       deadline: Date.now() + 20_000,
     });
 

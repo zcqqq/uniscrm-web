@@ -41,7 +41,10 @@ const MAPPED_USER_PROP_IDS = new Set<string>(["source_user_id", ...R2_USER_VALUE
 
 // R2 event pipeline's value columns beyond the fixed identity/time columns every write
 // builds explicitly. Keep in sync with analytics/pipelines/event-stream-schema.json.
-const EVENT_VALUE_COLUMNS = ["followers_count", "following_count", "verified_type", "message_text"];
+// Exported so a caller computing consumedPaths for an eventProps array (webhook.ts) can pass
+// this as consumedPaths' allowedPropIds filter, mirroring MAPPED_USER_PROP_IDS above — same
+// "mapped-but-columnless" guard, applied to the event pipeline instead of the user one.
+export const EVENT_VALUE_COLUMNS = ["followers_count", "following_count", "verified_type", "message_text"];
 
 export interface XUserData {
   id: string;

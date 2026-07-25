@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "./types";
 import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
-import { TenantDataDB } from "../../shared/tenant-data-db";
+import { EntityStateStore } from "./services/entity-state";
 import { CreditService, getActiveSubscriptionTier } from "../../shared/credit-service";
 import { EventMetadata_X } from "../../metadata/x";
 import { dollarsToMicros } from "../../shared/credit";
@@ -458,10 +458,6 @@ export function internalRoutes() {
       text = generated.text;
     }
 
-    const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-      .bind(channel.tenant_id).first<{ d1_database_id: string | null }>();
-    if (!tenantRow?.d1_database_id) return c.json({ ok: false, reason: "tenant_db_not_provisioned" }, 200);
-
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
     // getValidToken throws when the proactive refresh fails (X oauth hiccup, revoked grant).
     // Uncaught, that throw becomes a plain-text 500 the flow worker can't parse — the node then
@@ -505,8 +501,8 @@ export function internalRoutes() {
       return c.json({ ok: false, reason: "x_api_error: create post rejected" }, 200);
     }
 
-    const tenantDataDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
-    const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, channel.tenant_id);
+    const entityState = new EntityStateStore(c.env.LINK_DB, channel.tenant_id);
+    const contentService = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, channel.tenant_id, c.env.PIPELINE_CONTENT, undefined, c.env);
     await contentService.recordPublishedContent(channelId, "X", postResult.id, text, {
       generatedFromContentId: contentId,
       flowId: flowId || "",
@@ -566,21 +562,12 @@ export function internalRoutes() {
       return c.json({ ok: false, reason: "x_api_error: create post rejected" }, 200);
     }
 
-    const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-      .bind(channel.tenant_id).first<{ d1_database_id: string | null }>();
-    if (tenantRow?.d1_database_id) {
-      const tenantDataDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
-      const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, channel.tenant_id);
-      await contentService.recordPublishedContent(channelId, "X", postResult.id, text, {
-        generatedFromContentId: contentId,
-        flowId: flowId || "",
-      });
-    } else {
-      // Unlike /content/create-post, we don't fail here because the video was already uploaded to X
-      // in an earlier request (Task 4), so refusing to post now would waste a consumed resource.
-      // Instead, we proceed with posting but log the skipped recording for data-integrity auditing.
-      console.error(JSON.stringify({ event: "x_video_status_post_not_recorded", contentId, channelId, postId: postResult.id }));
-    }
+    const entityState = new EntityStateStore(c.env.LINK_DB, channel.tenant_id);
+    const contentService = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, channel.tenant_id, c.env.PIPELINE_CONTENT, undefined, c.env);
+    await contentService.recordPublishedContent(channelId, "X", postResult.id, text, {
+      generatedFromContentId: contentId,
+      flowId: flowId || "",
+    });
 
     return c.json({ ok: true, id: postResult.id });
   });
@@ -700,16 +687,12 @@ export function internalRoutes() {
       return c.json({ ok: false, reason: publishResult.reason || "tiktok_api_error" }, 200);
     }
 
-    const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-      .bind(tenantId).first<{ d1_database_id: string | null }>();
-    if (tenantRow?.d1_database_id) {
-      const tenantDataDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
-      const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);
-      await contentService.recordPublishedContent(
-        channelId, "TIKTOK", publishResult.publishId || crypto.randomUUID(), description,
-        { generatedFromContentId: contentId, flowId: flowId || "" }, "PHOTO_POST"
-      );
-    }
+    const entityState = new EntityStateStore(c.env.LINK_DB, tenantId);
+    const contentService = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT, undefined, c.env);
+    await contentService.recordPublishedContent(
+      channelId, "TIKTOK", publishResult.publishId || crypto.randomUUID(), description,
+      { generatedFromContentId: contentId, flowId: flowId || "" }, "PHOTO_POST"
+    );
 
     return c.json({ ok: true });
   });
@@ -770,16 +753,12 @@ export function internalRoutes() {
       return c.json({ ok: false, reason: publishResult.reason || "tiktok_api_error" }, 200);
     }
 
-    const tenantRow = await c.env.WEB_DB.prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-      .bind(tenantId).first<{ d1_database_id: string | null }>();
-    if (tenantRow?.d1_database_id) {
-      const tenantDataDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenantRow.d1_database_id);
-      const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, tenantId);
-      await contentService.recordPublishedContent(
-        channelId, "TIKTOK", publishResult.publishId || crypto.randomUUID(), description,
-        { generatedFromContentId: contentId, flowId: flowId || "" }, "VIDEO_POST"
-      );
-    }
+    const entityState = new EntityStateStore(c.env.LINK_DB, tenantId);
+    const contentService = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT, undefined, c.env);
+    await contentService.recordPublishedContent(
+      channelId, "TIKTOK", publishResult.publishId || crypto.randomUUID(), description,
+      { generatedFromContentId: contentId, flowId: flowId || "" }, "VIDEO_POST"
+    );
 
     return c.json({ ok: true });
   });
@@ -797,18 +776,12 @@ export function internalRoutes() {
     const config = JSON.parse(channel.config) as { access_token?: string };
     if (!config.access_token) return c.json({ error: "No token" }, 400);
 
-    const tenant = await c.env.WEB_DB
-      .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-      .bind(channel.tenant_id)
-      .first<{ d1_database_id: string | null }>();
-    if (!tenant?.d1_database_id) return c.json({ error: "Tenant DB not provisioned" }, 500);
-
-    const tenantDataDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenant.d1_database_id);
+    const entityState = new EntityStateStore(c.env.LINK_DB, channel.tenant_id);
     const tiktok = new TikTokChannel(config.access_token);
     const items = await tiktok.fetchItems({});
     if (items.length === 0) return c.json({ status: "ok", added: 0, updated: 0, skipped: 0 });
 
-    const contentService = new ContentService(tenantDataDb, c.env.VECTORIZE, c.env.AI, channel.tenant_id);
+    const contentService = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, channel.tenant_id, c.env.PIPELINE_CONTENT, undefined, c.env);
     const result = await contentService.syncBatch("TIKTOK", items);
     return c.json({ status: "ok", ...result });
   });

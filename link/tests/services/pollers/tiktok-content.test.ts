@@ -17,6 +17,16 @@ vi.mock("../../../src/services/content", () => ({
       return upsertContentFromMetadataMock(...args);
     }
   },
+  // tiktok-content.ts (task-7) imports this to filter consumedPaths — content_url has a
+  // dataId in ContentMetadata_TikTok but no CONTENT_COLUMN_MAP entry, and this test mocks
+  // ContentService wholesale, so it needs its own real (not mocked) prop-id set. Value copied
+  // from content.ts's CONTENT_COLUMN_MAP keys rather than importing it, to keep this vi.mock
+  // factory self-contained.
+  CONTENT_MAPPED_PROP_IDS: new Set([
+    "content_type", "content_text", "title", "source_created_at",
+    "bookmark_count", "view_count", "like_count", "quote_count", "reply_count",
+    "repost_count", "share_count", "cover_image_url", "duration", "height", "width", "has_face",
+  ]),
 }));
 
 import { runTikTokContentPoller } from "../../../src/services/pollers/tiktok-content";
@@ -46,7 +56,7 @@ describe("runTikTokContentPoller", () => {
       channelId: "chan-1",
       accessToken: "tok",
       linkDb: linkDb as any,
-      tenantDb: {} as any,
+      entityState: {} as any,
       tenantId: 1,
       ai: {} as any,
       vectorize: {} as any,
@@ -66,7 +76,7 @@ describe("runTikTokContentPoller", () => {
       channelId: "chan-1",
       accessToken: "tok",
       linkDb: linkDb as any,
-      tenantDb: {} as any,
+      entityState: {} as any,
       tenantId: 1,
       ai: {} as any,
       vectorize: {} as any,
@@ -91,7 +101,7 @@ describe("runTikTokContentPoller", () => {
       channelId: "chan-1",
       accessToken: "tok",
       linkDb: linkDb as any,
-      tenantDb: {} as any,
+      entityState: {} as any,
       tenantId: 1,
       ai: {} as any,
       vectorize: {} as any,
@@ -113,7 +123,7 @@ describe("runTikTokContentPoller", () => {
       channelId: "chan-1",
       accessToken: "tok",
       linkDb: linkDb as any,
-      tenantDb: {} as any,
+      entityState: {} as any,
       tenantId: 1,
       ai: {} as any,
       vectorize: {} as any,
@@ -133,7 +143,7 @@ describe("runTikTokContentPoller", () => {
       channelId: "chan-1",
       accessToken: "tok",
       linkDb: linkDb as any,
-      tenantDb: {} as any,
+      entityState: {} as any,
       tenantId: 1,
       ai: {} as any,
       vectorize: {} as any,
@@ -162,7 +172,7 @@ describe("runTikTokContentPoller", () => {
         channelId: "chan-1",
         accessToken: "tok",
         linkDb: linkDb as any,
-        tenantDb: {} as any,
+        entityState: {} as any,
         tenantId: 1,
         ai: {} as any,
         vectorize: {} as any,
@@ -187,7 +197,7 @@ describe("runTikTokContentPoller", () => {
         channelId: "chan-1",
         accessToken: "tok",
         linkDb: linkDb as any,
-        tenantDb: {} as any,
+        entityState: {} as any,
         tenantId: 1,
         ai: {} as any,
         vectorize: {} as any,

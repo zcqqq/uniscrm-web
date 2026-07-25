@@ -10,12 +10,17 @@ function createMockLinkDb(initialState: { cursor: string | null; backfill_comple
   return { prepare, _state: state, _run: run, _bind: bind };
 }
 
-function createMockTenantDb() {
+// ContentService isn't mocked in this file — it exercises the real content.ts, whose
+// recordTriggerContentSeen delegates straight to entityState.markSeen (see entity-state.ts).
+// The old D1-era assertions inspected `tenantDb.run`'s raw INSERT OR IGNORE INTO
+// content_trigger_dedup SQL; that table is gone, replaced by the entity_state row markSeen
+// writes, so assertions now inspect markSeen's call args instead.
+function createMockEntityState() {
   return {
-    query: vi.fn().mockResolvedValue([]),
-    run: vi.fn().mockResolvedValue({ changes: 1 }),
-    batch: vi.fn(),
-    getDbId: vi.fn().mockReturnValue("db-1"),
+    claim: vi.fn().mockResolvedValue({ entityId: "uuid-default", isNew: true, unchanged: false }),
+    get: vi.fn().mockResolvedValue(null),
+    markSeen: vi.fn().mockResolvedValue(true), // true = newly seen (not seen before)
+    setFollow: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -43,10 +48,10 @@ describe("runListPostsPoller", () => {
     return Promise.resolve(new Response(JSON.stringify(body), { status }));
   }
 
-  function baseCtx(linkDb: any, tenantDb: any, overrides: Partial<Record<string, unknown>> = {}) {
+  function baseCtx(linkDb: any, entityState: any, overrides: Partial<Record<string, unknown>> = {}) {
     return {
       channelId: "chan1", listId: "listA", accessToken: "tok",
-      linkDb: linkDb as any, tenantDb: tenantDb as any, tenantId: 1,
+      linkDb: linkDb as any, entityState: entityState as any, tenantId: 1,
       ai: createMockAi() as any, vectorize: createMockVectorize() as any,
       deadline: Date.now() + 20_000,
       ...overrides,
@@ -55,17 +60,17 @@ describe("runListPostsPoller", () => {
 
   it("does nothing when no poll_state row exists for this channel+list", async () => {
     const linkDb = createMockLinkDb(null);
-    const tenantDb = createMockTenantDb();
-    await runListPostsPoller(baseCtx(linkDb, tenantDb));
+    const entityState = createMockEntityState();
+    await runListPostsPoller(baseCtx(linkDb, entityState));
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("reads/writes channel_poll_state under poller_name 'list_posts:listA'", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
-    const tenantDb = createMockTenantDb();
+    const entityState = createMockEntityState();
     fetchMock.mockImplementationOnce(() => jsonResponse({ data: [], meta: {} }));
 
-    await runListPostsPoller(baseCtx(linkDb, tenantDb));
+    await runListPostsPoller(baseCtx(linkDb, entityState));
 
     const selectCall = linkDb.prepare.mock.calls.find((c: unknown[]) => (c[0] as string).includes("SELECT"));
     expect(selectCall[0]).toContain("poller_name = ?");
@@ -75,20 +80,20 @@ describe("runListPostsPoller", () => {
 
   it("first-ever poll (backfill_complete=0): seeds dedup index from ONE latest-page fetch (no historical pagination), without emitting content.created, then marks backfill_complete", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null });
-    const tenantDb = createMockTenantDb();
+    const entityState = createMockEntityState();
     const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
 
     // next_token present (more historical pages exist) but must NOT be followed — List Posts
     // triggers only care about new content going forward, not a full historical import.
     fetchMock.mockImplementationOnce(() => jsonResponse({ data: [{ id: "t1", text: "existing post" }], meta: { next_token: "p2" } }));
 
-    await runListPostsPoller(baseCtx(linkDb, tenantDb, { flowQueue }));
+    await runListPostsPoller(baseCtx(linkDb, entityState, { flowQueue }));
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    // Seed phase still records into content_trigger_dedup (so the next incremental poll
-    // doesn't see this backlog as new and flood the flow) — it just never emits.
-    expect(tenantDb.run).toHaveBeenCalledTimes(1);
-    expect(tenantDb.run.mock.calls[0][0]).toContain("INSERT OR IGNORE INTO content_trigger_dedup");
+    // Seed phase still marks the entity_state dedup row (so the next incremental poll doesn't
+    // see this backlog as new and flood the flow) — it just never emits.
+    expect(entityState.markSeen).toHaveBeenCalledTimes(1);
+    expect(entityState.markSeen.mock.calls[0][0]).toMatchObject({ entity: "content_trigger", channelId: "chan1", secondaryId: "listA", sourceId: "t1" });
     expect(flowQueue.send).not.toHaveBeenCalled();
 
     const updateCall = linkDb.prepare.mock.calls.find((c: unknown[]) => (c[0] as string).includes("UPDATE channel_poll_state"));
@@ -97,25 +102,25 @@ describe("runListPostsPoller", () => {
 
   it("first-ever poll: rate-limited seed fetch leaves backfill_complete unset so the next cron cycle retries", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null });
-    const tenantDb = createMockTenantDb();
+    const entityState = createMockEntityState();
 
     fetchMock.mockImplementationOnce(() => Promise.resolve(new Response(null, { status: 429 })));
 
-    await runListPostsPoller(baseCtx(linkDb, tenantDb));
+    await runListPostsPoller(baseCtx(linkDb, entityState));
 
-    expect(tenantDb.run).not.toHaveBeenCalled();
+    expect(entityState.markSeen).not.toHaveBeenCalled();
     const updateCall = linkDb.prepare.mock.calls.find((c: unknown[]) => (c[0] as string).includes("UPDATE channel_poll_state"));
     expect(updateCall).toBeUndefined();
   });
 
   it("incremental: emits content.created with listId for new list posts", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
-    const tenantDb = createMockTenantDb();
+    const entityState = createMockEntityState();
     const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
 
     fetchMock.mockImplementationOnce(() => jsonResponse({ data: [{ id: "t1", text: "hello" }], meta: {} }));
 
-    await runListPostsPoller(baseCtx(linkDb, tenantDb, { flowQueue }));
+    await runListPostsPoller(baseCtx(linkDb, entityState, { flowQueue }));
 
     expect(flowQueue.send).toHaveBeenCalledTimes(1);
     expect(flowQueue.send.mock.calls[0][0]).toMatchObject({ eventType: "content.created", channelId: "chan1", listId: "listA" });
@@ -123,24 +128,23 @@ describe("runListPostsPoller", () => {
 
   it("populates content_url as the X status permalink, derived from source_content_id", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
-    const tenantDb = createMockTenantDb();
+    const entityState = createMockEntityState();
     const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
 
     fetchMock.mockImplementationOnce(() => jsonResponse({ data: [{ id: "12345", text: "hello" }], meta: {} }));
 
-    await runListPostsPoller(baseCtx(linkDb, tenantDb, { flowQueue }));
+    await runListPostsPoller(baseCtx(linkDb, entityState, { flowQueue }));
 
     expect(flowQueue.send.mock.calls[0][0].payload).toMatchObject({ content_url: "https://x.com/i/status/12345" });
   });
 
-  it("passes listId as the dedup table's secondary_id", async () => {
+  it("passes listId as the dedup entity_state row's secondary_id", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
-    const tenantDb = createMockTenantDb();
+    const entityState = createMockEntityState();
     fetchMock.mockImplementationOnce(() => jsonResponse({ data: [{ id: "t1", text: "hello" }], meta: {} }));
 
-    await runListPostsPoller(baseCtx(linkDb, tenantDb));
+    await runListPostsPoller(baseCtx(linkDb, entityState));
 
-    const dedupCall = tenantDb.run.mock.calls.find((c: unknown[]) => (c[0] as string).includes("content_trigger_dedup"));
-    expect(dedupCall![1]).toEqual(["chan1", "listA", "t1", 1, expect.any(String)]);
+    expect(entityState.markSeen).toHaveBeenCalledWith({ entity: "content_trigger", channelId: "chan1", secondaryId: "listA", sourceId: "t1" });
   });
 });

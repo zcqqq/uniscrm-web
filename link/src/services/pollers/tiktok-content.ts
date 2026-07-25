@@ -1,8 +1,9 @@
-import type { TenantDataDB } from "../../../../shared/tenant-data-db";
 import type { Pipeline } from "../../types";
-import { ContentService } from "../content";
+import type { R2SqlEnv } from "../../../../shared/r2-sql";
+import { EntityStateStore } from "../entity-state";
+import { ContentService, CONTENT_MAPPED_PROP_IDS } from "../content";
 import { fetchVideoListPage } from "../tiktok-content-api";
-import { resolveProps } from "./resolve-props";
+import { resolveProps, consumedPaths } from "./resolve-props";
 import { ContentMetadata_TikTok } from "../../../../metadata/tiktok";
 
 const VIDEO_METADATA = ContentMetadata_TikTok.find((m) => m.sourceContentType === "video.list")!;
@@ -11,12 +12,13 @@ export interface TikTokContentPollerContext {
   channelId: string;
   accessToken: string;
   linkDb: D1Database;
-  tenantDb: TenantDataDB;
+  entityState: EntityStateStore;
   tenantId: number;
   ai: Ai;
   vectorize: VectorizeIndex;
   pipelineContent?: Pipeline;
   flowQueue?: Queue;
+  r2Env?: R2SqlEnv;
   deadline: number;
 }
 
@@ -37,7 +39,7 @@ export async function runTikTokContentPoller(ctx: TikTokContentPollerContext): P
     return;
   }
 
-  const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue);
+  const contentService = new ContentService(ctx.entityState, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue, ctx.r2Env);
   const phase = state.backfill_complete ? "incremental" : "backfill";
   console.log(JSON.stringify({ event: "tiktok_content_poll_started", channel_id: ctx.channelId, phase, cursor: state.cursor }));
 
@@ -64,7 +66,12 @@ async function upsertPage(
     if (typeof props.source_created_at === "number") {
       props.source_created_at = new Date(props.source_created_at * 1000).toISOString();
     }
-    const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "TIKTOK", emitFlowEvent);
+    // raw_data 只保留没有被消费的字段 —— 全量 payload 进日志不进库
+    // (uniscrm-web/CLAUDE.md「调用外部API返回的payload全量数据不要存在数据库中」)。
+    // CONTENT_MAPPED_PROP_IDS restricts to propIds with an actual R2 `content` column —
+    // content_url has a dataId here but no R2 column, so it correctly stays in raw_data.
+    const paths = consumedPaths(VIDEO_METADATA.contentProps, VIDEO_METADATA.linkPrefix, CONTENT_MAPPED_PROP_IDS);
+    const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "TIKTOK", emitFlowEvent, undefined, paths);
     if (isNew) newCount++;
   }
   return newCount;

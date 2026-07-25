@@ -9,12 +9,17 @@ const DURATION_LIMIT = Number(
     .contentPropsFilter!.find((f) => f.propId === "duration")!.value
 );
 
-function createMockTenantDb() {
+// ContentService isn't mocked in this file — it exercises the real content.ts, whose
+// recordTriggerContentSeen delegates straight to entityState.markSeen (see entity-state.ts).
+// The old D1-era assertions inspected `tenantDb.run`'s raw INSERT OR IGNORE INTO
+// content_trigger_dedup SQL and `{changes: N}` results; that table is gone, replaced by the
+// entity_state row markSeen writes (boolean return: true = newly seen).
+function createMockEntityState() {
   return {
-    query: vi.fn().mockResolvedValue([]),
-    run: vi.fn().mockResolvedValue({ changes: 1 }),
-    batch: vi.fn(),
-    getDbId: vi.fn().mockReturnValue("db-1"),
+    claim: vi.fn().mockResolvedValue({ entityId: "uuid-default", isNew: true, unchanged: false }),
+    get: vi.fn().mockResolvedValue(null),
+    markSeen: vi.fn().mockResolvedValue(true),
+    setFollow: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -22,7 +27,7 @@ function baseCtx(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     accountChannelId: "chan-acc",
     subscriptionChannelId: "chan-sub",
-    tenantDb: createMockTenantDb() as any,
+    entityState: createMockEntityState() as any,
     tenantId: 1,
     ai: { run: vi.fn().mockResolvedValue({ data: [[0.1, 0.2]] }) } as any,
     vectorize: { upsert: vi.fn().mockResolvedValue(undefined), deleteByIds: vi.fn() } as any,
@@ -44,10 +49,10 @@ describe("ingestYouTubeVideo", () => {
     vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue(null);
     const ctx = baseCtx();
     await ingestYouTubeVideo(ctx, "gone-vid");
-    expect((ctx.tenantDb as any).run).not.toHaveBeenCalled();
+    expect((ctx.entityState as any).markSeen).not.toHaveBeenCalled();
   });
 
-  it("records a genuinely new video into content_trigger_dedup keyed by accountChannelId/subscriptionChannelId", async () => {
+  it("records a genuinely new video into entity_state keyed by accountChannelId/subscriptionChannelId", async () => {
     vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
       id: "vid1",
       snippet: {
@@ -60,14 +65,14 @@ describe("ingestYouTubeVideo", () => {
       statistics: { viewCount: "100", likeCount: "10" },
     });
 
-    const tenantDb = createMockTenantDb();
-    const ctx = baseCtx({ tenantDb });
+    const entityState = createMockEntityState();
+    const ctx = baseCtx({ entityState });
     await ingestYouTubeVideo(ctx, "vid1");
 
-    const dedupCall = tenantDb.run.mock.calls.find((c: unknown[]) => (c[0] as string).includes("content_trigger_dedup"));
-    expect(dedupCall).toBeTruthy();
-    expect(dedupCall![0]).toContain("INSERT OR IGNORE INTO content_trigger_dedup");
-    expect(dedupCall![1]).toEqual(["chan-acc", "chan-sub", "vid1", 1, expect.any(String)]);
+    expect(entityState.markSeen).toHaveBeenCalledTimes(1);
+    expect(entityState.markSeen.mock.calls[0][0]).toMatchObject({
+      entity: "content_trigger", channelId: "chan-acc", secondaryId: "chan-sub", sourceId: "vid1",
+    });
   });
 
   it("emits content.created via flowQueue on a genuinely new video, with subscriptionChannelId and parsed duration", async () => {
@@ -104,17 +109,17 @@ describe("ingestYouTubeVideo", () => {
     expect(flowQueue.send.mock.calls[0][0].payload).toMatchObject({ content_url: "https://www.youtube.com/watch?v=vid5" });
   });
 
-  it("does not emit content.created when the video was already seen (dedup insert reports changes: 0)", async () => {
+  it("does not emit content.created when the video was already seen (markSeen reports false)", async () => {
     vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
       id: "vid4",
       snippet: { title: "Dup", publishedAt: "2026-07-18T00:00:00Z", thumbnails: { default: { url: "https://img/t.jpg" } } },
       contentDetails: { duration: "PT1M" },
     });
 
-    const tenantDb = createMockTenantDb();
-    tenantDb.run.mockResolvedValue({ changes: 0 });
+    const entityState = createMockEntityState();
+    entityState.markSeen.mockResolvedValue(false);
     const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
-    const ctx = baseCtx({ tenantDb, flowQueue });
+    const ctx = baseCtx({ entityState, flowQueue });
     await ingestYouTubeVideo(ctx, "vid4");
 
     expect(flowQueue.send).not.toHaveBeenCalled();
@@ -127,14 +132,13 @@ describe("ingestYouTubeVideo", () => {
       contentDetails: { duration: `PT${DURATION_LIMIT + 1}S` },
     });
 
-    const tenantDb = createMockTenantDb();
+    const entityState = createMockEntityState();
     const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
     const logSpy = vi.spyOn(console, "log");
-    const ctx = baseCtx({ tenantDb, flowQueue });
+    const ctx = baseCtx({ entityState, flowQueue });
     await ingestYouTubeVideo(ctx, "vid-long");
 
-    const dedupCall = tenantDb.run.mock.calls.find((c: unknown[]) => (c[0] as string).includes("content_trigger_dedup"));
-    expect(dedupCall).toBeTruthy();
+    expect(entityState.markSeen).toHaveBeenCalledTimes(1);
     expect(flowQueue.send).not.toHaveBeenCalled();
     const skipLog = logSpy.mock.calls.map((c) => String(c[0])).find((s) => s.includes("youtube_content_skipped_filter"));
     expect(skipLog).toBeTruthy();
@@ -154,14 +158,13 @@ describe("ingestYouTubeVideo", () => {
       contentDetails: { duration: "P0D" },
     });
 
-    const tenantDb = createMockTenantDb();
+    const entityState = createMockEntityState();
     const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
     const logSpy = vi.spyOn(console, "log");
-    const ctx = baseCtx({ tenantDb, flowQueue });
+    const ctx = baseCtx({ entityState, flowQueue });
     await ingestYouTubeVideo(ctx, "vid-live");
 
-    const dedupCall = tenantDb.run.mock.calls.find((c: unknown[]) => (c[0] as string).includes("content_trigger_dedup"));
-    expect(dedupCall).toBeTruthy();
+    expect(entityState.markSeen).toHaveBeenCalledTimes(1);
     expect(flowQueue.send).not.toHaveBeenCalled();
     const skipLog = logSpy.mock.calls.map((c) => String(c[0])).find((s) => s.includes("youtube_content_skipped_filter"));
     expect(skipLog).toBeTruthy();

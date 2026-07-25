@@ -1,4 +1,5 @@
 {
+  "_comment": "Fixed identity/time fields, plus exactly the props any event type can carry: the union of EventMetadata_*[].eventProps across every channel metadata module (today only metadata/x.ts declares eventProps). That union is also what analytics' eventPropsFor() offers as dimensions/filters, so a column outside it would be invisible in the UI and never written. Do NOT derive this from PROPS.filter(isInsight) — that list is user/content props and produces dead columns. Enforced by analytics/tests/unit/event-stream-schema.test.ts.",
   "fields": [
     { "name": "tenant_id", "type": "int32", "required": true },
     { "name": "id", "type": "string", "required": true },
@@ -7,26 +8,9 @@
     { "name": "event_type", "type": "string", "required": true },
     { "name": "event_time", "type": "string", "required": false },
     { "name": "created_at", "type": "string", "required": true },
-    { "name": "is_follow", "type": "int32", "required": false },
-    { "name": "is_followed", "type": "int32", "required": false },
-    { "name": "verified_type", "type": "string", "required": false },
     { "name": "followers_count", "type": "int32", "required": false },
     { "name": "following_count", "type": "int32", "required": false },
-    { "name": "post_count", "type": "int32", "required": false },
-    { "name": "listed_count", "type": "int32", "required": false },
-    { "name": "like_count", "type": "int32", "required": false },
-    { "name": "media_count", "type": "int32", "required": false },
-    { "name": "message_text", "type": "string", "required": false },
-    { "name": "source_created_at", "type": "string", "required": false },
-    { "name": "content_type", "type": "string", "required": false },
-    { "name": "duration", "type": "int32", "required": false },
-    { "name": "height", "type": "int32", "required": false },
-    { "name": "width", "type": "int32", "required": false },
-    { "name": "bookmark_count", "type": "int32", "required": false },
-    { "name": "view_count", "type": "int32", "required": false },
-    { "name": "quote_count", "type": "int32", "required": false },
-    { "name": "reply_count", "type": "int32", "required": false },
-    { "name": "repost_count", "type": "int32", "required": false },
-    { "name": "share_count", "type": "int32", "required": false }
+    { "name": "verified_type", "type": "string", "required": false },
+    { "name": "message_text", "type": "string", "required": false }
   ]
 }

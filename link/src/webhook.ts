@@ -4,6 +4,30 @@ import { XWebhookService } from "./services/x-webhook";
 import { XUsersService, type XUserData } from "./services/x-users";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
+import { EventMetadata_X } from "../../metadata/x";
+import { resolveProps } from "./services/pollers/resolve-props";
+
+// The event's metadata-declared eventProps, pulled out of the raw webhook payload for
+// the R2 event pipeline. `scoped` is the linkPrefix-resolved user object (target.data /
+// source.data / users.{...}.data) that every `{linkPrefix}.`-prefixed dataId is relative
+// to — the counts live under `public_metrics` there, never at the top level.
+//
+// Gap: dm.received's `message_text` declares an unprefixed dataId with `[]` array syntax
+// (`direct_message_events[].message_create.message_data.text`) which navigatePath cannot
+// walk, so resolveProps silently drops it. The dm branch below supplies it explicitly.
+function resolveEventProps(eventType: string, scoped?: Record<string, unknown> | null): Record<string, unknown> {
+  const meta = EventMetadata_X.find((e) => e.eventType === eventType);
+  if (!meta || !scoped) return {};
+  return resolveProps(scoped, meta.eventProps, meta.linkPrefix);
+}
+
+// dm.received carries the message body in a shape no dataId resolver can reach; both the
+// flow queue payload and the event pipeline record need it.
+function extractDmText(payload: Record<string, unknown>): string | undefined {
+  const events = payload.direct_message_events as Array<Record<string, unknown>> | undefined;
+  const msgData = (events?.[0]?.message_create as Record<string, unknown> | undefined)?.message_data as Record<string, unknown> | undefined;
+  return typeof msgData?.text === "string" ? msgData.text : undefined;
+}
 
 function flattenUserPayload(userData?: Record<string, unknown>): Record<string, unknown> {
   if (!userData) return {};
@@ -154,6 +178,7 @@ async function processXEvent(
         eventType: resolvedEventType,
         eventTime: new Date().toISOString(),
         rawData: userData,
+        eventProps: resolveEventProps(resolvedEventType, userData),
       }]);
 
       if (tenantId) {
@@ -177,6 +202,7 @@ async function processXEvent(
         eventType: resolvedEventType,
         eventTime: new Date().toISOString(),
         rawData: userData,
+        eventProps: resolveEventProps(resolvedEventType, userData),
       }]);
 
       if (tenantId) {
@@ -210,9 +236,8 @@ async function processXEvent(
 
         const flatPayload = flattenUserPayload(userData);
         if (eventType === "dm.received") {
-          const events = payload.direct_message_events as Array<Record<string, unknown>>;
-          const msgData = (events?.[0]?.message_create as Record<string, unknown>)?.message_data as Record<string, unknown>;
-          if (msgData?.text) flatPayload.message_text = msgData.text;
+          const text = extractDmText(payload);
+          if (text) flatPayload.message_text = text;
         }
 
         if (tenantId) {
@@ -252,12 +277,21 @@ async function processXEvent(
     return filterUserId;
   })();
 
+  const eventMeta = EventMetadata_X.find((e) => e.eventType === eventType);
+  const scopedUser = eventMeta?.linkPrefix ? resolveLinkPrefix(payload, eventMeta.linkPrefix) : payload;
+  const eventProps = resolveEventProps(eventType, scopedUser);
+  if (eventType === "dm.received") {
+    const text = extractDmText(payload);
+    if (text) eventProps.message_text = text;
+  }
+
   await usersService.insertEvents([{
     userId: eventUserId,
     channelId,
     eventType,
     eventTime: new Date().toISOString(),
     rawData: payload,
+    eventProps,
   }]);
 
   console.log(JSON.stringify({ event: "xaa_event_processed", eventType, userId: eventUserId }));

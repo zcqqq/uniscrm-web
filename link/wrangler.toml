@@ -71,7 +71,7 @@ queue = "uniscrm-event-dev"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_EVENT"
-stream = "6e7389d3040d4a4192c9419032dbebda"
+stream = "91aff39a029746b5b5f6f0e162063096"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_USER"

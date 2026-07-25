@@ -244,8 +244,16 @@ export class XUsersService {
     }
   }
 
+  // `eventProps` must arrive already resolved: the metadata `dataId` paths that describe
+  // an event's props (e.g. `{linkPrefix}.public_metrics.followers_count`) can only be
+  // walked by the caller, which is what holds the raw webhook payload and its linkPrefix.
+  // `rawData` stays untouched — it is stored verbatim in D1's `event.raw_data` and must
+  // not be widened to the full external payload (see repo CLAUDE.md).
   async insertEvents(
-    events: Array<{ userId: string; channelId: string; eventType: string; eventTime?: string; rawData?: unknown }>
+    events: Array<{
+      userId: string; channelId: string; eventType: string; eventTime?: string;
+      rawData?: unknown; eventProps?: Record<string, unknown>;
+    }>
   ): Promise<void> {
     const now = new Date().toISOString();
     const ids = events.map(() => crypto.randomUUID());
@@ -267,9 +275,8 @@ export class XUsersService {
           event_time: e.eventTime || now,
           created_at: now,
         };
-        const raw = (e.rawData || {}) as Record<string, unknown>;
-        for (const prop of INSIGHT_PROPS) {
-          if (prop.propId in raw) record[prop.propId] = raw[prop.propId];
+        for (const [propId, val] of Object.entries(e.eventProps || {})) {
+          if (val !== undefined && val !== null) record[propId] = val;
         }
         return record;
       });

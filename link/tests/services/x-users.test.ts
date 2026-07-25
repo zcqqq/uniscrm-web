@@ -160,3 +160,76 @@ describe("XUsersService.upsertUser (regression: no more zero-defaulting)", () =>
     expect(record).not.toHaveProperty("following_count");
   });
 });
+
+describe("XUsersService.insertEvents pipeline record", () => {
+  let tenantDb: ReturnType<typeof createMockTenantDb>;
+  let pipelineEvent: { send: ReturnType<typeof vi.fn> };
+  let service: XUsersService;
+
+  beforeEach(() => {
+    tenantDb = createMockTenantDb();
+    tenantDb.batch.mockResolvedValue([]);
+    pipelineEvent = { send: vi.fn().mockResolvedValue(undefined) };
+    service = new XUsersService(tenantDb as any, { pipelineEvent: pipelineEvent as any, tenantId: 42 });
+  });
+
+  // The X webhook payload nests counts under public_metrics, so the caller resolves
+  // them via the event's metadata dataId mappings and hands them over already flat.
+  const resolvedEventProps = { followers_count: 1234, following_count: 56, verified_type: "blue" };
+
+  it("writes caller-resolved event props onto the pipeline record", async () => {
+    await service.insertEvents([{
+      userId: "u1",
+      channelId: "chan1",
+      eventType: "follow.follow",
+      eventTime: "2026-07-24T10:00:00.000Z",
+      rawData: { id: "u1", verified_type: "blue", public_metrics: { followers_count: 1234, following_count: 56 } },
+      eventProps: resolvedEventProps,
+    }]);
+
+    const record = pipelineEvent.send.mock.calls[0][0][0];
+    expect(record.followers_count).toBe(1234);
+    expect(record.following_count).toBe(56);
+    expect(record.verified_type).toBe("blue");
+    expect(record.tenant_id).toBe(42);
+    expect(record.event_type).toBe("follow.follow");
+  });
+
+  it("does not reach into the raw payload itself — nested counts stay unread without eventProps", async () => {
+    await service.insertEvents([{
+      userId: "u1",
+      channelId: "chan1",
+      eventType: "follow.follow",
+      rawData: { id: "u1", public_metrics: { followers_count: 1234 } },
+    }]);
+
+    const record = pipelineEvent.send.mock.calls[0][0][0];
+    expect(record).not.toHaveProperty("followers_count");
+    expect(record).not.toHaveProperty("public_metrics");
+  });
+
+  it("omits props the caller could not resolve rather than writing null/0", async () => {
+    await service.insertEvents([{
+      userId: "u1",
+      channelId: "chan1",
+      eventType: "follow.follow",
+      rawData: { id: "u1" },
+      eventProps: { followers_count: 7, following_count: undefined, verified_type: null },
+    }]);
+
+    const record = pipelineEvent.send.mock.calls[0][0][0];
+    expect(record.followers_count).toBe(7);
+    expect(record).not.toHaveProperty("following_count");
+    expect(record).not.toHaveProperty("verified_type");
+  });
+
+  it("still stores the untouched raw payload in D1 (full payload never widened)", async () => {
+    const rawData = { id: "u1", public_metrics: { followers_count: 1234 } };
+    await service.insertEvents([{
+      userId: "u1", channelId: "chan1", eventType: "follow.follow", rawData, eventProps: resolvedEventProps,
+    }]);
+
+    const params = tenantDb.batch.mock.calls[0][0][0].params;
+    expect(params).toContain(JSON.stringify(rawData));
+  });
+});

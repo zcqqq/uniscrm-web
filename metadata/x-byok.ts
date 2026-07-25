@@ -18,6 +18,7 @@ export const UserMetadata_X: UserMetadata[] = [
       { propId: "listed_count", dataId: "{linkPrefix}.public_metrics.listed_count" },
       { propId: "like_count", dataId: "{linkPrefix}.public_metrics.like_count" },
       { propId: "media_count", dataId: "{linkPrefix}.public_metrics.media_count" },
+      { propId: "verified_type", dataId: "{linkPrefix}.verified_type" },
     ],
   },
 ];

@@ -123,22 +123,32 @@ export async function getUserBySource(
   return rows[0] ?? null;
 }
 
-export async function getUserNames(
+export interface UserDisplayName {
+  name: string | null;
+  username: string | null;
+}
+
+// Batch id -> {name, username} lookup for rendering a list of users without a full row read
+// per id (e.g. list-membership pages). Renamed from getUserNames (task-6 fix round 1,
+// Important 2): the old version only projected `name`, so every caller silently rendered
+// `username` as null — a real UI regression, not a stylistic gap. General-purpose enough to
+// reuse from flow (Task 8) without another rename: add fields here, not a second function.
+export async function getUserDisplayNames(
   env: R2SqlEnv,
   tenantId: number,
   ids: string[]
-): Promise<Map<string, string>> {
+): Promise<Map<string, UserDisplayName>> {
   if (ids.length === 0) return new Map();
   const list = ids.map(sqlStr).join(", ");
-  const rows = await r2Query<{ id: string; name: string | null }>(
+  const rows = await r2Query<{ id: string; name: string | null; username: string | null }>(
     env,
     latestRowsSql({
       table: "uniscrm.user",
-      columns: ["id", "name", "is_deleted"],
+      columns: ["id", "name", "username", "is_deleted"],
       partitionBy: USER_PARTITION,
       where: [`tenant_id = ${sqlInt(tenantId)}`, `id IN (${list})`],
       outerWhere: ["is_deleted = 0"],
     })
   );
-  return new Map(rows.filter((r) => r.name).map((r) => [r.id, r.name as string]));
+  return new Map(rows.map((r) => [r.id, { name: r.name ?? null, username: r.username ?? null }]));
 }

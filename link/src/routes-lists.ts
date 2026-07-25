@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
-import { getUserNames } from "./services/r2-entities";
+import { getUserDisplayNames } from "./services/r2-entities";
 import { R2SqlError } from "../../shared/r2-sql";
 
 export function listsRoutes() {
@@ -62,22 +62,24 @@ export function listsRoutes() {
       "SELECT user_id, created_at as added_at FROM list_users WHERE list_id = ? AND tenant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
     ).bind(listId, tenantId, limit, offset).all<{ user_id: string; added_at: string }>();
 
-    // list_users (LINK_DB, D1) still owns membership; the display name is an R2 read now that
-    // `user` rows only live in R2. getUserNames only resolves `name` (no `username` column in
-    // its projection — see r2-entities.ts), so `username` is always null here now; a silent
-    // empty `users` array would look identical to "list has no members", so an R2 failure must
-    // surface as an error rather than being swallowed the way the old `tdb &&` guard did.
+    // list_users (LINK_DB, D1) still owns membership; the display name/username are an R2 read
+    // now that `user` rows only live in R2. A silent empty `users` array would look identical
+    // to "list has no members", so an R2 failure must surface as an error rather than being
+    // swallowed the way the old `tdb &&` guard did.
     let users: { id: string; name: string | null; username: string | null; added_at: string }[] = [];
     if (listUserRows.length > 0) {
       const ids = listUserRows.map((r) => r.user_id);
       try {
-        const names = await getUserNames(c.env, tenantId, ids);
-        users = listUserRows.map((r) => ({
-          id: r.user_id,
-          name: names.get(r.user_id) ?? null,
-          username: null,
-          added_at: r.added_at,
-        }));
+        const names = await getUserDisplayNames(c.env, tenantId, ids);
+        users = listUserRows.map((r) => {
+          const display = names.get(r.user_id);
+          return {
+            id: r.user_id,
+            name: display?.name ?? null,
+            username: display?.username ?? null,
+            added_at: r.added_at,
+          };
+        });
       } catch (err) {
         console.error(JSON.stringify({ event: "list_users_r2_query_failed", tenantId, listId, error: String(err) }));
         const status = err instanceof R2SqlError ? 502 : 500;

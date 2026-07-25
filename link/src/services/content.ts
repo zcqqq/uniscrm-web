@@ -92,6 +92,17 @@ export interface SyncResult {
   skipped: number;
 }
 
+// Vectorize embedding only ever reads these four fields (see buildEmbeddingText below) — it
+// never needed a full ContentRow. Every embedding call site used to build a fake full ContentRow
+// just to satisfy the old signature, silently omitting the R2-only columns (list_id,
+// cover_image_url, bookmark_count, ...) that TypeScript's excess-property check on `status`
+// (removed — the column no longer exists, see task-4-report.md) had been masking: once an object
+// literal has one excess property, TS skips reporting *missing* ones for that same literal, so
+// those omissions were never actually caught by the compiler. Narrowing the type to exactly what
+// embedding uses fixes both problems at once instead of padding three call sites with 15 fake
+// nulls apiece.
+type EmbeddingInput = Pick<ContentRow, "id" | "title" | "content_text" | "summary">;
+
 export class ContentService {
   private namespace: string;
 
@@ -158,7 +169,7 @@ export class ContentService {
     let added = 0;
     let updated = 0;
     let skipped = 0;
-    const needsEmbedding: ContentRow[] = [];
+    const needsEmbedding: EmbeddingInput[] = [];
 
     for (const item of items) {
       const rawData = JSON.stringify(item.raw_data || {});
@@ -195,20 +206,9 @@ export class ContentService {
 
       needsEmbedding.push({
         id,
-        channel_id: channelType,
-        channel_type: channelType,
-        content_type: null,
-        source_content_id: item.source_content_id,
         title: item.title,
         content_text: null,
         summary: item.summary,
-        status: "new",
-        source_url: item.source_url,
-        source_updated_at: item.source_updated_at,
-        source_created_at: null,
-        raw_data: rawData,
-        created_at: now,
-        updated_at: now,
       });
 
       const record = this.buildContentRecord(
@@ -280,20 +280,9 @@ export class ContentService {
 
     await this.embedContents([{
       id,
-      channel_id: channelId,
-      channel_type: channelType,
-      content_type: (columnValues.content_type as string) ?? null,
-      source_content_id: sourceContentId,
       title: (columnValues.title as string) ?? null,
       content_text: (columnValues.content_text as string) ?? null,
       summary: null,
-      status: "new",
-      source_url: null,
-      source_updated_at: null,
-      source_created_at: (columnValues.source_created_at as string) ?? null,
-      raw_data: rawData,
-      created_at: now,
-      updated_at: now,
     }]);
 
     if (this.pipelineContent && this.tenantId && !unchanged) {
@@ -438,20 +427,9 @@ export class ContentService {
     if (needsReEmbed) {
       await this.embedContents([{
         id,
-        channel_id: (row.channel_id as string | null) ?? null,
-        channel_type: row.channel_type as ChannelType,
-        content_type: (row.content_type as string | null) ?? null,
-        source_content_id: row.source_content_id as string,
         title: (values.title as string | null) ?? null,
         content_text: (row.content_text as string | null) ?? null,
         summary: (values.summary as string | null) ?? null,
-        status: "new",
-        source_url: (row.source_url as string | null) ?? null,
-        source_updated_at: (row.source_updated_at as string | null) ?? null,
-        source_created_at: (row.source_created_at as string | null) ?? null,
-        raw_data: row.raw_data as string,
-        created_at: row.created_at as string,
-        updated_at: now,
       }]);
     }
   }
@@ -484,13 +462,13 @@ export class ContentService {
     await this.vectorize.deleteByIds([id]);
   }
 
-  private buildEmbeddingText(item: ContentRow): string {
+  private buildEmbeddingText(item: EmbeddingInput): string {
     const parts = [item.title || item.content_text || ""];
     if (item.summary) parts.push(item.summary);
     return parts.join(" | ");
   }
 
-  private async embedContents(items: ContentRow[]): Promise<void> {
+  private async embedContents(items: EmbeddingInput[]): Promise<void> {
     if (items.length === 0) return;
 
     const texts = items.map((item) => this.buildEmbeddingText(item));

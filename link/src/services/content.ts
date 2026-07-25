@@ -1,16 +1,16 @@
-import type { TenantDataDB } from "../../../shared/tenant-data-db";
 import type { ContentRow, ChannelType, Pipeline } from "../types";
 import type { ChannelItem } from "../channels/interface";
-import { PROPS } from "../../../metadata/props";
+import type { R2SqlEnv } from "../../../shared/r2-sql";
+import { EntityStateStore, fingerprintOf } from "./entity-state";
+import { listContents, getContent } from "./r2-entities";
 
 const EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5";
 
-// Same isInsight registry x-users.ts uses for the user/event pipelines — only
-// props marked isInsight:true become dynamic columns on the R2 Iceberg tables.
-const INSIGHT_PROPS = PROPS.filter((p) => p.isInsight);
-
-// propId -> content column. All propIds here are 1:1 name matches with their column.
-// A resolved prop not in this map only ever lives in raw_data.
+// propId -> R2 `content` column. These are R2 Iceberg columns now, not D1 columns — tenant
+// D1 no longer stores content rows (see .superpowers/sdd/2026-07-25-tenant-db-removal).
+// A resolved prop not in this map only ever lives in raw_data. `list_id` deliberately does
+// not go through this map: it's a dedup-key component the caller passes separately, not a
+// value resolved from metadata props.
 const CONTENT_COLUMN_MAP: Record<string, string> = {
   content_type: "content_type",
   content_text: "content_text",
@@ -29,7 +29,27 @@ const CONTENT_COLUMN_MAP: Record<string, string> = {
   width: "width",
   has_face: "has_face",
 };
+
+// Business-field subset used for entity_state change detection in upsertContentFromMetadata.
+// created_at/updated_at deliberately excluded, or every call would look "changed".
 const CONTENT_TABLE_COLUMNS = Object.values(CONTENT_COLUMN_MAP);
+
+// Full set of the R2 `content` table's value columns, i.e. everything except the
+// key/audit columns every write builds explicitly (tenant_id, id, channel_id, channel_type,
+// source_content_id, list_id, raw_data, is_deleted, created_at, updated_at). This is a
+// superset of CONTENT_COLUMN_MAP's values: some columns here (summary, source_url,
+// source_updated_at, impression_count) aren't resolvable from metadata props and are only
+// ever populated by other write paths (e.g. syncBatch), but every write must still send them
+// explicitly as null — reads take one whole row via QUALIFY ROW_NUMBER() = 1, so a write that
+// omits a column here silently nulls it out. Keep in sync with
+// analytics/pipelines/content-stream-schema.json.
+const R2_CONTENT_VALUE_COLUMNS = [
+  "content_type", "content_text", "title", "summary",
+  "source_url", "source_updated_at", "source_created_at",
+  "cover_image_url", "duration", "height", "width", "has_face",
+  "bookmark_count", "impression_count", "view_count", "like_count",
+  "quote_count", "reply_count", "repost_count", "share_count",
+];
 
 export interface SyncResult {
   added: number;
@@ -41,14 +61,57 @@ export class ContentService {
   private namespace: string;
 
   constructor(
-    private tenantDb: TenantDataDB,
+    private entityState: EntityStateStore,
     private vectorize: VectorizeIndex,
     private ai: Ai,
     private tenantId: number,
     private pipelineContent?: Pipeline,
-    private flowQueue?: Queue
+    private flowQueue?: Queue,
+    private r2Env?: R2SqlEnv
   ) {
     this.namespace = `tenant-${tenantId}`;
+  }
+
+  // Builds a complete R2 `content` row: every value column present, explicit null when
+  // unknown. `values` only needs to carry the columns this call site actually knows —
+  // everything else in R2_CONTENT_VALUE_COLUMNS is filled in as null.
+  private buildContentRecord(
+    base: {
+      id: string;
+      channelId: string | null;
+      channelType: ChannelType;
+      sourceContentId: string;
+      listId?: string | null;
+      rawData: string;
+      createdAt: string;
+      updatedAt: string;
+      isDeleted?: 0 | 1;
+    },
+    values: Record<string, unknown>
+  ): Record<string, unknown> {
+    const record: Record<string, unknown> = {
+      tenant_id: this.tenantId,
+      id: base.id,
+      channel_id: base.channelId,
+      channel_type: base.channelType,
+      source_content_id: base.sourceContentId,
+      list_id: base.listId ?? null,
+      raw_data: base.rawData,
+      is_deleted: base.isDeleted ?? 0,
+      created_at: base.createdAt,
+      updated_at: base.updatedAt,
+    };
+    for (const col of R2_CONTENT_VALUE_COLUMNS) {
+      record[col] = values[col] ?? null;
+    }
+    return record;
+  }
+
+  private async sendContentRecord(record: Record<string, unknown>): Promise<void> {
+    if (!this.pipelineContent) return;
+    await this.pipelineContent.send([record]).catch((err) => {
+      console.error(JSON.stringify({ event: "pipeline_content_error", contentId: record.id, error: String(err) }));
+    });
   }
 
   async syncBatch(
@@ -57,82 +120,63 @@ export class ContentService {
   ): Promise<SyncResult> {
     const now = new Date().toISOString();
 
-    const existing = await this.tenantDb.query<{
-      id: string;
-      source_content_id: string;
-      source_updated_at: string | null;
-    }>(
-      "SELECT id, source_content_id, source_updated_at FROM content WHERE channel_type = ?",
-      [channelType]
-    );
-
-    const existingMap = new Map(existing.map((e) => [e.source_content_id, e]));
-
     let added = 0;
     let updated = 0;
     let skipped = 0;
     const needsEmbedding: ContentRow[] = [];
 
     for (const item of items) {
-      const ex = existingMap.get(item.source_content_id);
+      const rawData = JSON.stringify(item.raw_data || {});
+      const values = {
+        source_updated_at: item.source_updated_at,
+        title: item.title,
+        summary: item.summary,
+        source_url: item.source_url,
+      };
+      const fingerprint = await fingerprintOf(values, ["source_updated_at", "title", "summary", "source_url"]);
 
-      if (ex && ex.source_updated_at === item.source_updated_at) {
+      // LOCAL/NOTION/TIKTOK imports (the only callers of syncBatch) have no channel_id at
+      // sync time, so key on ("", "", source_content_id) — kept consistent with the R2
+      // record's channel_id, which is null for the same reason.
+      const key = {
+        entity: "content" as const,
+        channelId: "",
+        secondaryId: "",
+        sourceId: item.source_content_id,
+      };
+      const { entityId: id, isNew, unchanged } = await this.entityState.claim(key, fingerprint);
+
+      if (unchanged) {
         skipped++;
         continue;
       }
 
-      const rawData = JSON.stringify(item.raw_data || {});
+      needsEmbedding.push({
+        id,
+        channel_id: null,
+        channel_type: channelType,
+        content_type: null,
+        source_content_id: item.source_content_id,
+        title: item.title,
+        content_text: null,
+        summary: item.summary,
+        status: "new",
+        source_url: item.source_url,
+        source_updated_at: item.source_updated_at,
+        source_created_at: null,
+        raw_data: rawData,
+        created_at: now,
+        updated_at: now,
+      });
 
-      if (ex) {
-        await this.tenantDb.run(
-          "UPDATE content SET title = ?, summary = ?, source_url = ?, source_updated_at = ?, raw_data = ?, updated_at = ? WHERE id = ?",
-          [item.title, item.summary, item.source_url, item.source_updated_at, rawData, now, ex.id]
-        );
+      const record = this.buildContentRecord(
+        { id, channelId: null, channelType, sourceContentId: item.source_content_id, listId: null, rawData, createdAt: now, updatedAt: now },
+        values
+      );
+      await this.sendContentRecord(record);
 
-        needsEmbedding.push({
-          id: ex.id,
-          channel_id: null,
-          channel_type: channelType,
-          content_type: null,
-          source_content_id: item.source_content_id,
-          title: item.title,
-          content_text: null,
-          summary: item.summary,
-          status: "new",
-          source_url: item.source_url,
-          source_updated_at: item.source_updated_at,
-          source_created_at: null,
-          raw_data: rawData,
-          created_at: now,
-          updated_at: now,
-        });
-        updated++;
-      } else {
-        const id = crypto.randomUUID();
-        await this.tenantDb.run(
-          "INSERT INTO content (id, channel_type, source_content_id, title, summary, source_url, source_updated_at, raw_data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [id, channelType, item.source_content_id, item.title, item.summary, item.source_url, item.source_updated_at, rawData, now, now]
-        );
-
-        needsEmbedding.push({
-          id,
-          channel_id: null,
-          channel_type: channelType,
-          content_type: null,
-          source_content_id: item.source_content_id,
-          title: item.title,
-          content_text: null,
-          summary: item.summary,
-          status: "new",
-          source_url: item.source_url,
-          source_updated_at: item.source_updated_at,
-          source_created_at: null,
-          raw_data: rawData,
-          created_at: now,
-          updated_at: now,
-        });
-        added++;
-      }
+      if (isNew) added++;
+      else updated++;
     }
 
     await this.embedContents(needsEmbedding);
@@ -150,51 +194,32 @@ export class ContentService {
     const sourceContentId = String(resolvedProps.source_content_id ?? "");
     if (!sourceContentId) throw new Error("upsertContentFromMetadata: missing source_content_id");
 
-    const existing = listId
-      ? await this.tenantDb.query<Record<string, unknown> & { id: string }>(
-          `SELECT id, ${CONTENT_TABLE_COLUMNS.join(", ")} FROM content WHERE channel_id = ? AND source_content_id = ? AND list_id = ?`,
-          [channelId, sourceContentId, listId]
-        )
-      : await this.tenantDb.query<Record<string, unknown> & { id: string }>(
-          `SELECT id, ${CONTENT_TABLE_COLUMNS.join(", ")} FROM content WHERE channel_id = ? AND source_content_id = ? AND list_id IS NULL`,
-          [channelId, sourceContentId]
-        );
-    const isNew = existing.length === 0;
-    const id = isNew ? crypto.randomUUID() : existing[0].id;
     const now = new Date().toISOString();
-    const rawData = JSON.stringify(rawItem);
 
     const columnValues: Record<string, unknown> = {};
     for (const [propId, column] of Object.entries(CONTENT_COLUMN_MAP)) {
       const val = resolvedProps[propId];
       if (val !== undefined && val !== null && val !== "") columnValues[column] = val;
     }
-    const dynamicCols = Object.keys(columnValues);
-    // Incremental poller re-walks recently-seen posts every cron tick (see
-    // pollers/x-posts.ts's runIncrementalPoll) — without this check, every visit resends
-    // an unchanged content row to the R2 pipeline, which has no dedup on write (append-only
-    // Iceberg sink; see docs/adr/0002-r2-data-catalog-dedup-via-periodic-compaction.md).
-    const unchanged = !isNew && dynamicCols.every((c) => String(columnValues[c]) === String(existing[0][c] ?? ""));
 
-    const insertCols = ["id", "channel_id", "channel_type", "source_content_id", "list_id", "raw_data", ...dynamicCols, "created_at", "updated_at"];
-    const insertPlaceholders = ["?", "?", "?", "?", "?", "?", ...dynamicCols.map(() => "?"), "?", "?"];
-    const insertParams = [id, channelId, channelType, sourceContentId, listId ?? null, rawData, ...dynamicCols.map((c) => columnValues[c]), now, now];
-    const updateSets = [
-      "raw_data = json_patch(content.raw_data, excluded.raw_data)",
-      "updated_at = excluded.updated_at",
-      ...dynamicCols.map((c) => `${c} = excluded.${c}`),
-    ];
-    const conflictTarget = listId
-      ? "(channel_id, list_id, source_content_id) WHERE list_id IS NOT NULL"
-      : "(channel_id, source_content_id) WHERE list_id IS NULL";
+    // 指纹只覆盖会变的业务字段;created_at/updated_at 不参与,否则每次都判定为「变了」。
+    const fingerprint = await fingerprintOf(columnValues, CONTENT_TABLE_COLUMNS);
+    const key = {
+      entity: "content" as const,
+      channelId,
+      secondaryId: listId ?? "",
+      sourceId: sourceContentId,
+    };
+    const { entityId: id, isNew, unchanged } = await this.entityState.claim(key, fingerprint);
 
-    await this.tenantDb.run(
-      `INSERT INTO content (${insertCols.join(", ")})
-       VALUES (${insertPlaceholders.join(", ")})
-       ON CONFLICT${conflictTarget} DO UPDATE SET
-         ${updateSets.join(",\n         ")}`,
-      insertParams
-    );
+    // raw_data 只保留没有映射到具名列的剩余字段 —— 全量 payload 进日志不进库
+    // (uniscrm-web/CLAUDE.md「调用外部API返回的payload全量数据不要存在数据库中」)。
+    const mapped = new Set(Object.keys(CONTENT_COLUMN_MAP));
+    const leftover: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(rawItem)) {
+      if (!mapped.has(k)) leftover[k] = v;
+    }
+    const rawData = JSON.stringify(leftover);
 
     await this.embedContents([{
       id,
@@ -202,7 +227,7 @@ export class ContentService {
       channel_type: channelType,
       content_type: (columnValues.content_type as string) ?? null,
       source_content_id: sourceContentId,
-      title: null,
+      title: (columnValues.title as string) ?? null,
       content_text: (columnValues.content_text as string) ?? null,
       summary: null,
       status: "new",
@@ -215,26 +240,12 @@ export class ContentService {
     }]);
 
     if (this.pipelineContent && this.tenantId && !unchanged) {
-      const record: Record<string, unknown> = {
-        tenant_id: this.tenantId,
-        id,
-        channel_id: channelId,
-        channel_type: channelType,
-        source_content_id: sourceContentId,
-        created_at: now,
-        updated_at: now,
-      };
-      // Only isInsight-marked props reach R2 — free-text fields like title/content_text
-      // stay D1-only (raw_data), same rule x-users.ts follows for the user pipeline.
-      // list_id intentionally does not join this record — R2 analytics collapses the same
-      // tweet seen via two lists into one row, which is accepted for this phase (see plan's
-      // Global Constraints).
-      for (const prop of INSIGHT_PROPS) {
-        if (prop.propId in resolvedProps) record[prop.propId] = resolvedProps[prop.propId];
-      }
-      await this.pipelineContent.send([record]).catch((err) => {
-        console.error(JSON.stringify({ event: "pipeline_content_error", error: String(err) }));
-      });
+      // 完整行:读路径用 QUALIFY 取整行最新,漏一列就等于把那列写成 null。
+      const record = this.buildContentRecord(
+        { id, channelId, channelType, sourceContentId, listId, rawData, createdAt: now, updatedAt: now },
+        columnValues
+      );
+      await this.sendContentRecord(record);
     }
 
     if (isNew && emitFlowEvent && this.flowQueue) {
@@ -263,11 +274,15 @@ export class ContentService {
   ): Promise<void> {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
-    await this.tenantDb.run(
-      `INSERT INTO content (id, channel_id, channel_type, content_type, source_content_id, content_text, status, raw_data, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, channelId, channelType, contentType, sourceContentId, contentText, "published", JSON.stringify(ref), now, now]
+    const rawData = JSON.stringify(ref);
+
+    // `status` no longer exists as an R2 column — the plan drops the concept entirely
+    // rather than inventing a replacement (published-ness now lives only in `ref`/raw_data).
+    const record = this.buildContentRecord(
+      { id, channelId, channelType, sourceContentId, listId: null, rawData, createdAt: now, updatedAt: now },
+      { content_type: contentType, content_text: contentText }
     );
+    await this.sendContentRecord(record);
   }
 
   async recordTriggerContentSeen(
@@ -276,12 +291,7 @@ export class ContentService {
     sourceContentId: string
   ): Promise<boolean> {
     if (!sourceContentId) throw new Error("recordTriggerContentSeen: missing source_content_id");
-    const now = new Date().toISOString();
-    const result = await this.tenantDb.run(
-      `INSERT OR IGNORE INTO content_trigger_dedup (channel_id, secondary_id, source_content_id, tenant_id, seen_at) VALUES (?, ?, ?, ?, ?)`,
-      [channelId, secondaryId, sourceContentId, this.tenantId, now]
-    );
-    return result.changes > 0;
+    return await this.entityState.markSeen({ entity: "content_trigger", channelId, secondaryId, sourceId: sourceContentId });
   }
 
   async emitContentTriggerEvent(
@@ -305,60 +315,49 @@ export class ContentService {
   }
 
   async list(channelType?: ChannelType): Promise<ContentRow[]> {
-    if (channelType) {
-      return this.tenantDb.query<ContentRow>(
-        "SELECT * FROM content WHERE channel_type = ? ORDER BY source_updated_at DESC",
-        [channelType]
-      );
-    }
-    return this.tenantDb.query<ContentRow>(
-      "SELECT * FROM content ORDER BY source_updated_at DESC"
-    );
+    if (!this.r2Env) throw new Error("ContentService.list: r2Env is required");
+    return await listContents(this.r2Env, this.tenantId, channelType);
   }
 
-  async update(
-    id: string,
-    fields: { title?: string; summary?: string; status?: string }
-  ): Promise<void> {
-    const rows = await this.tenantDb.query<ContentRow>(
-      "SELECT * FROM content WHERE id = ?",
-      [id]
-    );
-    if (rows.length === 0) throw new Error("Content not found");
-    const existing = rows[0];
-
-    const VALID_STATUSES = ["new", "pending", "published", "ignored"];
-    if (fields.status !== undefined && !VALID_STATUSES.includes(fields.status)) {
-      throw new Error("Invalid status");
-    }
-
-    const sets: string[] = [];
-    const values: (string | null)[] = [];
-    if (fields.title !== undefined) { sets.push("title = ?"); values.push(fields.title); }
-    if (fields.summary !== undefined) { sets.push("summary = ?"); values.push(fields.summary); }
-    if (fields.status !== undefined) { sets.push("status = ?"); values.push(fields.status); }
-    sets.push("updated_at = ?");
-    values.push(new Date().toISOString());
-    values.push(id);
-
-    await this.tenantDb.run(
-      `UPDATE content SET ${sets.join(", ")} WHERE id = ?`,
-      values
-    );
-
-    const needsReEmbed = fields.title !== undefined || fields.summary !== undefined;
-    if (needsReEmbed) {
-      const updatedItem: ContentRow = {
-        ...existing,
-        title: fields.title ?? existing.title,
-        summary: fields.summary ?? existing.summary,
-      };
-      await this.embedContents([updatedItem]);
-    }
+  async get(id: string): Promise<ContentRow | null> {
+    if (!this.r2Env) throw new Error("ContentService.get: r2Env is required");
+    return await getContent(this.r2Env, this.tenantId, id);
   }
 
+  // R2 是 append-only 且读路径按 QUALIFY 取整行最新,所以"改一个字段"必须
+  // 读整行 → 覆盖 → 整行回写。只发 {id, title} 会把其余列全部写成 null。
+  async update(id: string, fields: { title?: string; summary?: string }): Promise<void> {
+    if (!this.r2Env) throw new Error("ContentService.update: r2Env is required");
+    const row = await getContent(this.r2Env, this.tenantId, id);
+    if (!row) throw new Error(`ContentService.update: content ${id} not found`);
+
+    const next: Record<string, unknown> = { ...row };
+    if (fields.title !== undefined) next.title = fields.title;
+    if (fields.summary !== undefined) next.summary = fields.summary;
+    next.tenant_id = this.tenantId;
+    next.is_deleted = 0;
+    next.updated_at = new Date().toISOString();
+
+    await this.pipelineContent?.send([next]).catch((err) => {
+      console.error(JSON.stringify({ event: "pipeline_content_error", contentId: id, error: String(err) }));
+    });
+  }
+
+  // 逻辑删除:uniscrm-web/CLAUDE.md「重要的被关联数据用逻辑删除」,
+  // 而且 Iceberg sink 本来也没有 DELETE。
   async delete(id: string): Promise<void> {
-    await this.tenantDb.run("DELETE FROM content WHERE id = ?", [id]);
+    if (!this.r2Env) throw new Error("ContentService.delete: r2Env is required");
+    const row = await getContent(this.r2Env, this.tenantId, id);
+    if (!row) throw new Error(`ContentService.delete: content ${id} not found`);
+
+    const next: Record<string, unknown> = { ...row };
+    next.tenant_id = this.tenantId;
+    next.is_deleted = 1;
+    next.updated_at = new Date().toISOString();
+
+    await this.pipelineContent?.send([next]).catch((err) => {
+      console.error(JSON.stringify({ event: "pipeline_content_error", contentId: id, error: String(err) }));
+    });
     await this.vectorize.deleteByIds([id]);
   }
 

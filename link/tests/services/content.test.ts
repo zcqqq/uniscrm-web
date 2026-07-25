@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ContentService } from "../../src/services/content";
 
-function createMockTenantDb() {
+function createMockEntityState(overrides: Partial<{ entityId: string; isNew: boolean; unchanged: boolean }> = {}) {
   return {
-    query: vi.fn(),
-    run: vi.fn().mockResolvedValue({ changes: 1 }),
-    batch: vi.fn(),
-    getDbId: vi.fn().mockReturnValue("db-1"),
+    claim: vi.fn().mockResolvedValue({ entityId: "c-uuid", isNew: true, unchanged: false, ...overrides }),
+    markSeen: vi.fn().mockResolvedValue(true),
+    get: vi.fn().mockResolvedValue(null),
+    setFollow: vi.fn(),
+    getFollowByEntityId: vi.fn(),
   };
 }
 
@@ -19,47 +20,92 @@ function createMockVectorize() {
 }
 
 describe("ContentService.upsertContentFromMetadata", () => {
-  let tenantDb: ReturnType<typeof createMockTenantDb>;
+  let entityState: ReturnType<typeof createMockEntityState>;
   let ai: ReturnType<typeof createMockAi>;
   let vectorize: ReturnType<typeof createMockVectorize>;
   let service: ContentService;
 
   beforeEach(() => {
-    tenantDb = createMockTenantDb();
+    entityState = createMockEntityState();
     ai = createMockAi();
     vectorize = createMockVectorize();
-    service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42);
+    service = new ContentService(entityState as any, vectorize as any, ai as any, 42);
   });
 
-  it("inserts a new content row and returns true when none exists for channel+source_content_id", async () => {
-    tenantDb.query.mockResolvedValue([]);
+  it("claims an entity_state id and returns isNew from the claim", async () => {
     const rawItem = { id: "t1", text: "hello world" };
     const resolvedProps = { source_content_id: "t1", content_type: "TWEET", content_text: "hello world" };
 
     const isNew = await service.upsertContentFromMetadata(rawItem, resolvedProps, "chan1", "X", false);
 
     expect(isNew).toBe(true);
-    expect(tenantDb.run).toHaveBeenCalledWith(
-      expect.stringContaining("INSERT INTO content"),
-      expect.arrayContaining(["chan1", "t1", "X"])
+    expect(entityState.claim).toHaveBeenCalledWith(
+      { entity: "content", channelId: "chan1", secondaryId: "", sourceId: "t1" },
+      expect.any(String)
     );
   });
 
-  it("updates and returns false when a content row already exists", async () => {
-    tenantDb.query.mockResolvedValue([{ id: "existing-uuid" }]);
+  it("returns false when entity_state reports an existing (non-new) entity", async () => {
+    entityState = createMockEntityState({ isNew: false, unchanged: false });
+    service = new ContentService(entityState as any, vectorize as any, ai as any, 42);
     const resolvedProps = { source_content_id: "t1", content_text: "updated text" };
 
     const isNew = await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X", false);
 
     expect(isNew).toBe(false);
-    expect(tenantDb.run).toHaveBeenCalledWith(
-      expect.stringContaining("ON CONFLICT(channel_id, source_content_id) WHERE list_id IS NULL DO UPDATE SET"),
-      expect.arrayContaining(["t1"])
-    );
   });
 
-  it("writes content_type/content_text/source_created_at to their mapped columns (content_type, content_text, source_created_at)", async () => {
-    tenantDb.query.mockResolvedValue([]);
+  it("sends a complete row to the content pipeline — every mapped column present, null when absent", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+
+    await service.upsertContentFromMetadata(
+      { id: "t1", text: "hi" },
+      { source_content_id: "t1", content_type: "TWEET", content_text: "hi" },
+      "chan1", "X", false
+    );
+
+    const [[record]] = pipeline.send.mock.calls[0];
+    for (const col of ["title", "summary", "duration", "height", "width", "has_face", "view_count"]) {
+      expect(record).toHaveProperty(col);
+    }
+    expect(record.is_deleted).toBe(0);
+    expect(record.tenant_id).toBe(42);
+  });
+
+  it("does not send to the pipeline when entity_state reports the fingerprint unchanged", async () => {
+    const pipeline = { send: vi.fn() };
+    const service = new ContentService(
+      createMockEntityState({ isNew: false, unchanged: true }) as any,
+      vectorize as any, ai as any, 42, pipeline as any
+    );
+
+    await service.upsertContentFromMetadata(
+      { id: "t1" }, { source_content_id: "t1", content_text: "hi" }, "chan1", "X", false
+    );
+
+    expect(pipeline.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps only unmapped payload fields in raw_data", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+
+    await service.upsertContentFromMetadata(
+      { id: "t1", content_text: "hi", weird_field: 1 },
+      { source_content_id: "t1", content_text: "hi" },
+      "chan1", "X", false
+    );
+
+    const [[record]] = pipeline.send.mock.calls[0];
+    const raw = JSON.parse(record.raw_data as string);
+    expect(raw).toHaveProperty("weird_field", 1);
+    expect(raw).not.toHaveProperty("content_text");
+  });
+
+  it("writes content_type/content_text/source_created_at to their mapped columns", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
     const resolvedProps = {
       source_content_id: "t1",
       content_type: "TWEET",
@@ -69,15 +115,15 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X", false);
 
-    const [sql, params] = tenantDb.run.mock.calls[0];
-    expect(sql).toContain("content_type");
-    expect(sql).toContain("content_text");
-    expect(sql).toContain("source_created_at");
-    expect(params).toEqual(expect.arrayContaining(["TWEET", "hello world", "2026-07-11T00:00:00.000Z"]));
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.content_type).toBe("TWEET");
+    expect(record.content_text).toBe("hello world");
+    expect(record.source_created_at).toBe("2026-07-11T00:00:00.000Z");
   });
 
   it("writes title and the engagement metric props to their mapped columns", async () => {
-    tenantDb.query.mockResolvedValue([]);
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
     const resolvedProps = {
       source_content_id: "t1",
       title: "Free Skill - some article",
@@ -91,114 +137,42 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X", false);
 
-    const [sql, params] = tenantDb.run.mock.calls[0];
-    for (const col of ["title", "bookmark_count", "view_count", "like_count", "quote_count", "reply_count", "repost_count"]) {
-      expect(sql).toContain(col);
-    }
-    expect(params).toEqual(expect.arrayContaining(["Free Skill - some article", 3, 100, 1, 0, 2, 5]));
-  });
-
-  it("sends only isInsight props to the content pipeline, keyed by tenant_id/id/source_content_id", async () => {
-    tenantDb.query.mockResolvedValue([]);
-    const pipelineContent = { send: vi.fn().mockResolvedValue(undefined) };
-    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipelineContent as any);
-    const resolvedProps = {
-      source_content_id: "t1",
-      content_type: "TWEET",
-      title: "not sent to R2 (free text)",
-      content_text: "not sent to R2 (free text)",
-      view_count: 100,
-      like_count: 1,
-    };
-
-    await svc.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X", false);
-
-    expect(pipelineContent.send).toHaveBeenCalledTimes(1);
-    const [record] = pipelineContent.send.mock.calls[0][0];
+    const [[record]] = pipeline.send.mock.calls[0];
     expect(record).toMatchObject({
-      tenant_id: 42,
-      channel_id: "chan1",
-      channel_type: "X",
-      source_content_id: "t1",
-      content_type: "TWEET",
+      title: "Free Skill - some article",
+      bookmark_count: 3,
       view_count: 100,
       like_count: 1,
+      quote_count: 0,
+      reply_count: 2,
+      repost_count: 5,
     });
-    expect(record.title).toBeUndefined();
-    expect(record.content_text).toBeUndefined();
   });
 
-  it("does not send to the pipeline when the resolved values exactly match the existing row", async () => {
-    tenantDb.query.mockResolvedValue([{
-      id: "existing-uuid",
-      content_type: "TWEET",
-      impression_count: 37,
-      like_count: 1,
-    }]);
-    const pipelineContent = { send: vi.fn().mockResolvedValue(undefined) };
-    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipelineContent as any);
-    const resolvedProps = {
-      source_content_id: "t1",
-      content_type: "TWEET",
-      impression_count: 37,
-      like_count: 1,
-    };
-
-    await svc.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X", false);
-
-    expect(pipelineContent.send).not.toHaveBeenCalled();
-  });
-
-  it("still sends to the pipeline when a resolved value differs from the existing row", async () => {
-    tenantDb.query.mockResolvedValue([{
-      id: "existing-uuid",
-      content_type: "TWEET",
-      impression_count: 37,
-      like_count: 1,
-    }]);
-    const pipelineContent = { send: vi.fn().mockResolvedValue(undefined) };
-    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipelineContent as any);
-    const resolvedProps = {
-      source_content_id: "t1",
-      content_type: "TWEET",
-      impression_count: 37,
-      like_count: 2, // changed from 1
-    };
-
-    await svc.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X", false);
-
-    expect(pipelineContent.send).toHaveBeenCalledTimes(1);
-  });
-
-  it("omits an unresolved column-mapped field from the SQL entirely, rather than writing null", async () => {
-    tenantDb.query.mockResolvedValue([]);
+  it("leaves an unresolved column-mapped field as null in the pipeline row", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
     const resolvedProps = { source_content_id: "t1" }; // no content_type/content_text/source_created_at resolved
 
     await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X", false);
 
-    const [sql] = tenantDb.run.mock.calls[0];
-    expect(sql).not.toContain("content_type");
-    expect(sql).not.toContain("content_text");
-    expect(sql).not.toContain("source_created_at");
-  });
-
-  it("stores the full rawItem in raw_data, unfiltered", async () => {
-    tenantDb.query.mockResolvedValue([]);
-    const rawItem = { id: "t1", text: "hi", extra_field: "kept" };
-
-    await service.upsertContentFromMetadata(rawItem, { source_content_id: "t1" }, "chan1", "X", false);
-
-    const [, params] = tenantDb.run.mock.calls[0];
-    const rawDataArg = params.find((p: unknown) => typeof p === "string" && p.includes('"extra_field"'));
-    expect(rawDataArg).toBe(JSON.stringify(rawItem));
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.content_type).toBeNull();
+    expect(record.content_text).toBeNull();
+    expect(record.source_created_at).toBeNull();
   });
 
   it("triggers Vectorize embedding on insert", async () => {
-    tenantDb.query.mockResolvedValue([]);
     await service.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1", content_text: "hello" }, "chan1", "X", false);
 
     expect(ai.run).toHaveBeenCalled();
     expect(vectorize.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws when source_content_id is missing", async () => {
+    await expect(
+      service.upsertContentFromMetadata({ id: "t1" }, {}, "chan1", "X", false)
+    ).rejects.toThrow("upsertContentFromMetadata: missing source_content_id");
   });
 
   describe("content.created emission (emitFlowEvent param)", () => {
@@ -208,8 +182,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     it("sends content.created when isNew and emitFlowEvent is true", async () => {
       const flowQueue = createMockFlowQueue();
-      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
-      tenantDb.query.mockResolvedValue([]);
+      const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
 
       await svc.upsertContentFromMetadata(
         { id: "t1" },
@@ -233,8 +206,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     it("does not send content.created when emitFlowEvent is false (backfill phase)", async () => {
       const flowQueue = createMockFlowQueue();
-      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
-      tenantDb.query.mockResolvedValue([]);
+      const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
 
       await svc.upsertContentFromMetadata(
         { id: "t1" },
@@ -249,8 +221,10 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     it("does not send content.created when the row already existed (isNew false), even if emitFlowEvent is true", async () => {
       const flowQueue = createMockFlowQueue();
-      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
-      tenantDb.query.mockResolvedValue([{ id: "existing-uuid" }]);
+      const svc = new ContentService(
+        createMockEntityState({ isNew: false, unchanged: false }) as any,
+        vectorize as any, ai as any, 42, undefined, flowQueue as any
+      );
 
       await svc.upsertContentFromMetadata(
         { id: "t1" },
@@ -264,8 +238,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
     });
 
     it("does not throw when no flowQueue was provided at all", async () => {
-      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42);
-      tenantDb.query.mockResolvedValue([]);
+      const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42);
 
       await expect(
         svc.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1" }, "chan1", "X", true)
@@ -274,58 +247,48 @@ describe("ContentService.upsertContentFromMetadata", () => {
   });
 
   describe("per-list dedup (listId param)", () => {
-    it("omits list_id from the SQL and matches today's dedup exactly when listId is not passed", async () => {
-      tenantDb.query.mockResolvedValue([]);
+    it("keys the entity_state claim with an empty secondaryId when listId is not passed", async () => {
       await service.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1" }, "chan1", "X", false);
 
-      const [querySql, queryParams] = tenantDb.query.mock.calls[0];
-      expect(querySql).toContain("list_id IS NULL");
-      expect(queryParams).toEqual(["chan1", "t1"]);
-
-      const [insertSql] = tenantDb.run.mock.calls[0];
-      expect(insertSql).toContain("ON CONFLICT(channel_id, source_content_id) WHERE list_id IS NULL DO UPDATE SET");
+      expect(entityState.claim).toHaveBeenCalledWith(
+        { entity: "content", channelId: "chan1", secondaryId: "", sourceId: "t1" },
+        expect.any(String)
+      );
     });
 
-    it("scopes the existing-row lookup and conflict target by listId when provided", async () => {
-      tenantDb.query.mockResolvedValue([]);
-      await service.upsertContentFromMetadata({ id: "t2" }, { source_content_id: "t2" }, "chan1", "X", false, "listA");
+    it("keys the entity_state claim and the R2 record's list_id by listId when provided", async () => {
+      const svcEntityState = createMockEntityState();
+      const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+      const svc = new ContentService(svcEntityState as any, vectorize as any, ai as any, 42, pipeline as any);
 
-      const [querySql, queryParams] = tenantDb.query.mock.calls[0];
-      expect(querySql).toContain("list_id = ?");
-      expect(queryParams).toEqual(["chan1", "t2", "listA"]);
+      await svc.upsertContentFromMetadata({ id: "t2" }, { source_content_id: "t2" }, "chan1", "X", false, "listA");
 
-      const [insertSql, insertParams] = tenantDb.run.mock.calls[0];
-      expect(insertSql).toContain("ON CONFLICT(channel_id, list_id, source_content_id) WHERE list_id IS NOT NULL DO UPDATE SET");
-      expect(insertParams).toEqual(expect.arrayContaining(["listA"]));
+      expect(svcEntityState.claim).toHaveBeenCalledWith(
+        { entity: "content", channelId: "chan1", secondaryId: "listA", sourceId: "t2" },
+        expect.any(String)
+      );
+      const [[record]] = pipeline.send.mock.calls[0];
+      expect(record.list_id).toBe("listA");
     });
 
-    it("treats the same source_content_id in two different lists as two separate new rows", async () => {
-      tenantDb.query.mockResolvedValue([]); // both lookups find nothing existing
-      const isNewA = await service.upsertContentFromMetadata({ id: "t3" }, { source_content_id: "t3" }, "chan1", "X", false, "listA");
-      const isNewB = await service.upsertContentFromMetadata({ id: "t3" }, { source_content_id: "t3" }, "chan1", "X", false, "listB");
+    it("treats the same source_content_id in two different lists as two separate claims", async () => {
+      await service.upsertContentFromMetadata({ id: "t3" }, { source_content_id: "t3" }, "chan1", "X", false, "listA");
+      await service.upsertContentFromMetadata({ id: "t3" }, { source_content_id: "t3" }, "chan1", "X", false, "listB");
 
-      expect(isNewA).toBe(true);
-      expect(isNewB).toBe(true);
-      expect(tenantDb.run).toHaveBeenCalledTimes(2);
-
-      // Prove the two upserts were genuinely scoped to different lists, not just called twice
-      // with the same effective query — each call's SELECT must be bound to its own listId, and
-      // each INSERT must write list_id = that same value.
-      expect(tenantDb.query.mock.calls[0][1]).toEqual(["chan1", "t3", "listA"]);
-      expect(tenantDb.query.mock.calls[1][1]).toEqual(["chan1", "t3", "listB"]);
-
-      const [, insertParamsA] = tenantDb.run.mock.calls[0];
-      const [, insertParamsB] = tenantDb.run.mock.calls[1];
-      expect(insertParamsA).toContain("listA");
-      expect(insertParamsB).toContain("listB");
-      expect(insertParamsA).not.toContain("listB");
-      expect(insertParamsB).not.toContain("listA");
+      expect(entityState.claim).toHaveBeenCalledTimes(2);
+      expect(entityState.claim).toHaveBeenNthCalledWith(1,
+        { entity: "content", channelId: "chan1", secondaryId: "listA", sourceId: "t3" },
+        expect.any(String)
+      );
+      expect(entityState.claim).toHaveBeenNthCalledWith(2,
+        { entity: "content", channelId: "chan1", secondaryId: "listB", sourceId: "t3" },
+        expect.any(String)
+      );
     });
 
     it("includes listId in the emitted content.created message when provided", async () => {
       const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
-      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
-      tenantDb.query.mockResolvedValue([]);
+      const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
 
       await svc.upsertContentFromMetadata({ id: "t4" }, { source_content_id: "t4" }, "chan1", "X", true, "listA");
 
@@ -336,8 +299,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     it("omits listId from the emitted message entirely when not provided (not just undefined)", async () => {
       const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
-      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
-      tenantDb.query.mockResolvedValue([]);
+      const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
 
       await svc.upsertContentFromMetadata({ id: "t5" }, { source_content_id: "t5" }, "chan1", "X", true);
 
@@ -349,12 +311,12 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
 describe("CONTENT_COLUMN_MAP coverage", () => {
   it("maps view_count, share_count, cover_image_url, duration, height, width, has_face to matching columns", async () => {
-    const tenantDb = createMockTenantDb();
+    const entityState = createMockEntityState();
     const ai = createMockAi();
     const vectorize = createMockVectorize();
-    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 1);
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService(entityState as any, vectorize as any, ai as any, 1, pipeline as any);
 
-    tenantDb.query.mockResolvedValue([]);
     await service.upsertContentFromMetadata(
       { id: "v1" },
       {
@@ -373,25 +335,26 @@ describe("CONTENT_COLUMN_MAP coverage", () => {
       false
     );
 
-    const insertCall = tenantDb.run.mock.calls.find((c: unknown[]) => (c[0] as string).includes("INSERT INTO content"));
-    expect(insertCall![0]).toContain("view_count");
-    expect(insertCall![0]).toContain("share_count");
-    expect(insertCall![0]).toContain("cover_image_url");
-    expect(insertCall![0]).toContain("duration");
-    expect(insertCall![0]).toContain("height");
-    expect(insertCall![0]).toContain("width");
-    expect(insertCall![0]).toContain("has_face");
-    expect(insertCall![0]).not.toContain("impression_count");
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record).toMatchObject({
+      view_count: 100,
+      share_count: 5,
+      cover_image_url: "https://example.com/c.jpg",
+      duration: 30,
+      height: 1920,
+      width: 1080,
+      has_face: 1,
+    });
+    expect(record.impression_count).toBeNull();
   });
 });
 
 describe("ContentService.buildEmbeddingText fallback (via embedContents through upsertContentFromMetadata)", () => {
   it("falls back to content_text when title is null", async () => {
-    const tenantDb = createMockTenantDb();
-    tenantDb.query.mockResolvedValue([]);
+    const entityState = createMockEntityState();
     const ai = createMockAi();
     const vectorize = createMockVectorize();
-    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42);
+    const service = new ContentService(entityState as any, vectorize as any, ai as any, 42);
 
     await service.upsertContentFromMetadata(
       { id: "t1", text: "tweet body text" },
@@ -407,35 +370,42 @@ describe("ContentService.buildEmbeddingText fallback (via embedContents through 
 });
 
 describe("recordPublishedContent", () => {
-  let tenantDb: ReturnType<typeof createMockTenantDb>;
   let ai: ReturnType<typeof createMockAi>;
   let vectorize: ReturnType<typeof createMockVectorize>;
 
   beforeEach(() => {
-    tenantDb = createMockTenantDb();
     ai = createMockAi();
     vectorize = createMockVectorize();
   });
 
-  it("inserts a published content row referencing the source content and flow", async () => {
-    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42);
+  it("sends a full content row referencing the source content and flow, without a status field", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
 
     await svc.recordPublishedContent("target-chan-1", "X", "tweet-123", "generated post text", {
       generatedFromContentId: "source-content-1",
       flowId: "flow-1",
     });
 
-    expect(tenantDb.run).toHaveBeenCalledWith(
-      expect.stringContaining("INSERT INTO content"),
-      expect.arrayContaining(["target-chan-1", "X", "tweet-123", "generated post text", "published"])
-    );
-    const [, params] = tenantDb.run.mock.calls[tenantDb.run.mock.calls.length - 1];
-    const rawData = JSON.parse(params.find((p: unknown) => typeof p === "string" && p.startsWith("{")) || "{}");
+    expect(pipeline.send).toHaveBeenCalledTimes(1);
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record).toMatchObject({
+      tenant_id: 42,
+      channel_id: "target-chan-1",
+      channel_type: "X",
+      source_content_id: "tweet-123",
+      content_type: "TWEET",
+      content_text: "generated post text",
+      is_deleted: 0,
+    });
+    expect(record).not.toHaveProperty("status");
+    const rawData = JSON.parse(record.raw_data as string);
     expect(rawData).toEqual({ generatedFromContentId: "source-content-1", flowId: "flow-1" });
   });
 
   it("stores an explicit contentType when given (e.g. TikTok's PHOTO_POST), instead of the hardcoded TWEET default", async () => {
-    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42);
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
 
     await svc.recordPublishedContent(
       "channel-1", "TIKTOK", "publish-id-1", "a caption",
@@ -443,54 +413,55 @@ describe("recordPublishedContent", () => {
       "PHOTO_POST"
     );
 
-    expect(tenantDb.run).toHaveBeenCalledWith(
-      expect.stringContaining("INSERT INTO content"),
-      expect.arrayContaining(["channel-1", "TIKTOK", "PHOTO_POST", "publish-id-1", "a caption", "published"])
-    );
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.content_type).toBe("PHOTO_POST");
   });
 
   it("still defaults to TWEET when contentType is omitted (existing X call sites unaffected)", async () => {
-    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42);
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
 
     await svc.recordPublishedContent("channel-2", "X", "tweet-id-1", "a tweet", {
       generatedFromContentId: "content-2",
       flowId: "flow-1",
     });
 
-    expect(tenantDb.run).toHaveBeenCalledWith(
-      expect.stringContaining("INSERT INTO content"),
-      expect.arrayContaining(["channel-2", "X", "TWEET", "tweet-id-1", "a tweet", "published"])
-    );
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.content_type).toBe("TWEET");
+  });
+
+  it("does nothing when no pipelineContent was provided", async () => {
+    const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42);
+
+    await expect(
+      svc.recordPublishedContent("channel-2", "X", "tweet-id-1", "a tweet", {
+        generatedFromContentId: "content-2",
+        flowId: "flow-1",
+      })
+    ).resolves.not.toThrow();
   });
 });
 
 describe("ContentService.recordTriggerContentSeen", () => {
-  function createMockTenantDb() {
-    return {
-      query: vi.fn(),
-      run: vi.fn().mockResolvedValue({ changes: 1 }),
-      batch: vi.fn(),
-      getDbId: vi.fn().mockReturnValue("db-1"),
-    };
-  }
-
-  it("inserts into content_trigger_dedup and returns true when the row is new", async () => {
-    const tenantDb = createMockTenantDb();
-    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42);
+  it("delegates to entityState.markSeen with the content_trigger entity kind", async () => {
+    const entityState = createMockEntityState();
+    const service = new ContentService(entityState as any, {} as any, {} as any, 42);
 
     const isNew = await service.recordTriggerContentSeen("chan1", "listA", "t1");
 
     expect(isNew).toBe(true);
-    expect(tenantDb.run).toHaveBeenCalledWith(
-      expect.stringContaining("INSERT OR IGNORE INTO content_trigger_dedup"),
-      ["chan1", "listA", "t1", 42, expect.any(String)]
-    );
+    expect(entityState.markSeen).toHaveBeenCalledWith({
+      entity: "content_trigger",
+      channelId: "chan1",
+      secondaryId: "listA",
+      sourceId: "t1",
+    });
   });
 
-  it("returns false when the row already existed (changes: 0)", async () => {
-    const tenantDb = createMockTenantDb();
-    tenantDb.run.mockResolvedValue({ changes: 0 });
-    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42);
+  it("returns false when markSeen reports the row already existed", async () => {
+    const entityState = createMockEntityState();
+    entityState.markSeen.mockResolvedValue(false);
+    const service = new ContentService(entityState as any, {} as any, {} as any, 42);
 
     const isNew = await service.recordTriggerContentSeen("chan1", "listA", "t1");
 
@@ -498,28 +469,32 @@ describe("ContentService.recordTriggerContentSeen", () => {
   });
 
   it("accepts an empty secondaryId for trigger types with no secondary dimension", async () => {
-    const tenantDb = createMockTenantDb();
-    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42);
+    const entityState = createMockEntityState();
+    const service = new ContentService(entityState as any, {} as any, {} as any, 42);
 
     await service.recordTriggerContentSeen("chan1", "", "t1");
 
-    expect(tenantDb.run).toHaveBeenCalledWith(expect.any(String), ["chan1", "", "t1", 42, expect.any(String)]);
+    expect(entityState.markSeen).toHaveBeenCalledWith({
+      entity: "content_trigger",
+      channelId: "chan1",
+      secondaryId: "",
+      sourceId: "t1",
+    });
   });
 
-  it("does not touch the content table or pipelineContent", async () => {
-    const tenantDb = createMockTenantDb();
+  it("does not touch pipelineContent", async () => {
+    const entityState = createMockEntityState();
     const pipelineContent = { send: vi.fn() };
-    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42, pipelineContent as any);
+    const service = new ContentService(entityState as any, {} as any, {} as any, 42, pipelineContent as any);
 
     await service.recordTriggerContentSeen("chan1", "listA", "t1");
 
-    expect(tenantDb.run).toHaveBeenCalledTimes(1);
     expect(pipelineContent.send).not.toHaveBeenCalled();
   });
 
   it("throws for an empty sourceContentId", async () => {
-    const tenantDb = createMockTenantDb();
-    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42);
+    const entityState = createMockEntityState();
+    const service = new ContentService(entityState as any, {} as any, {} as any, 42);
 
     await expect(service.recordTriggerContentSeen("chan1", "listA", "")).rejects.toThrow(
       "recordTriggerContentSeen: missing source_content_id"
@@ -530,7 +505,7 @@ describe("ContentService.recordTriggerContentSeen", () => {
 describe("ContentService.emitContentTriggerEvent", () => {
   it("sends content.created with a freshly generated contentId and the named secondary field", async () => {
     const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService({} as any, {} as any, {} as any, 42, undefined, flowQueue as any);
+    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42, undefined, flowQueue as any);
 
     await service.emitContentTriggerEvent("chan1", "X", "listId", "listA", { content_type: "TWEET" });
 
@@ -549,7 +524,7 @@ describe("ContentService.emitContentTriggerEvent", () => {
 
   it("omits the secondary field entirely when secondaryValue is empty (not just undefined)", async () => {
     const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService({} as any, {} as any, {} as any, 42, undefined, flowQueue as any);
+    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42, undefined, flowQueue as any);
 
     await service.emitContentTriggerEvent("chan1", "YOUTUBE", "subscriptionChannelId", "", { content_type: "VIDEO" });
 
@@ -558,10 +533,89 @@ describe("ContentService.emitContentTriggerEvent", () => {
   });
 
   it("does not throw when no flowQueue was provided", async () => {
-    const service = new ContentService({} as any, {} as any, {} as any, 42);
+    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42);
 
     await expect(
       service.emitContentTriggerEvent("chan1", "X", "listId", "listA", {})
     ).resolves.not.toThrow();
+  });
+});
+
+describe("ContentService.list / get (R2-backed reads)", () => {
+  it("list() throws a clear error when r2Env was not supplied", async () => {
+    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42);
+    await expect(service.list()).rejects.toThrow("ContentService.list: r2Env is required");
+  });
+
+  it("get() throws a clear error when r2Env was not supplied", async () => {
+    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42);
+    await expect(service.get("c1")).rejects.toThrow("ContentService.get: r2Env is required");
+  });
+});
+
+describe("ContentService.update", () => {
+  it("throws a clear error when r2Env was not supplied", async () => {
+    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42);
+    await expect(service.update("c1", { title: "x" })).rejects.toThrow("ContentService.update: r2Env is required");
+  });
+
+  it("reads the full row, overwrites only the given fields, and writes the row back complete", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ result: { rows: [{ id: "c1", channel_id: "chan1", title: "old title", summary: "old summary", view_count: 5 }] } }), { status: 200 })
+    ));
+    const r2Env = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+    const service = new ContentService(
+      createMockEntityState() as any, {} as any, {} as any, 42, pipeline as any, undefined, r2Env
+    );
+
+    await service.update("c1", { title: "new title" });
+
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.title).toBe("new title");
+    expect(record.summary).toBe("old summary"); // untouched field preserved from the read
+    expect(record.view_count).toBe(5); // untouched field preserved from the read
+    expect(record.tenant_id).toBe(42);
+    expect(record.is_deleted).toBe(0);
+    vi.unstubAllGlobals();
+  });
+
+  it("throws when the content row does not exist", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ result: { rows: [] } }), { status: 200 })
+    ));
+    const r2Env = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42, undefined, undefined, r2Env);
+
+    await expect(service.update("missing", { title: "x" })).rejects.toThrow("ContentService.update: content missing not found");
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("ContentService.delete", () => {
+  it("throws a clear error when r2Env was not supplied", async () => {
+    const service = new ContentService(createMockEntityState() as any, createMockVectorize() as any, {} as any, 42);
+    await expect(service.delete("c1")).rejects.toThrow("ContentService.delete: r2Env is required");
+  });
+
+  it("delete() writes a full row with is_deleted = 1 instead of removing anything", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const vectorize = createMockVectorize();
+    const ai = createMockAi();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ result: { rows: [{ id: "c1", channel_id: "chan1", title: "t" }] } }), { status: 200 })
+    ));
+    const r2Env = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_SQL_TOKEN: "t" };
+    const service = new ContentService(
+      createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any, undefined, r2Env
+    );
+
+    await service.delete("c1");
+
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.is_deleted).toBe(1);
+    expect(record.id).toBe("c1");
+    expect(vectorize.deleteByIds).toHaveBeenCalledWith(["c1"]);
+    vi.unstubAllGlobals();
   });
 });

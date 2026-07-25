@@ -92,6 +92,37 @@ export async function listUsers(
   );
 }
 
+// Powers XUsersService.upsertUser's read-modify-write (task-5 fix round, Important 2): the
+// webhook path only ever knows name/username/profile_image_url, never follower counts — so an
+// existing user's R2 row must be read and merged first, or every webhook touch would null out
+// the columns the poller last populated. Same is_deleted placement as every other reader here:
+// it must run in outerWhere (post-QUALIFY), never in `where` — folding it into the pre-dedup
+// WHERE would drop the tombstone from the window's input and let the pre-delete row win (the
+// Task 4 bug).
+export async function getUserBySource(
+  env: R2SqlEnv,
+  tenantId: number,
+  channelId: string,
+  sourceUserId: string
+): Promise<Record<string, unknown> | null> {
+  const rows = await r2Query<Record<string, unknown>>(
+    env,
+    latestRowsSql({
+      table: "uniscrm.user",
+      columns: USER_COLUMNS,
+      partitionBy: USER_PARTITION,
+      where: [
+        `tenant_id = ${sqlInt(tenantId)}`,
+        `channel_id = ${sqlStr(channelId)}`,
+        `source_user_id = ${sqlStr(sourceUserId)}`,
+      ],
+      outerWhere: ["is_deleted = 0"],
+      limit: 1,
+    })
+  );
+  return rows[0] ?? null;
+}
+
 export async function getUserNames(
   env: R2SqlEnv,
   tenantId: number,

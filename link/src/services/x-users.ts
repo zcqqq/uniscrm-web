@@ -1,6 +1,8 @@
 import type { Pipeline } from "../types";
+import type { R2SqlEnv } from "../../../shared/r2-sql";
 import { EntityStateStore, fingerprintOf, type EntityStateKey } from "./entity-state";
 import { resolveProps, consumedPaths } from "./pollers/resolve-props";
+import { getUserBySource } from "./r2-entities";
 import { UserMetadata_X } from "../../../metadata/x-byok";
 
 // X nests the counts under public_metrics and names some fields differently from our
@@ -17,16 +19,25 @@ const X_USER_MAPPINGS = (X_USER_META?.userProps || []).filter((m) => m.dataId);
 // updated_at). profile_image_url and description are real X user fields but have no R2
 // column — they only ever land in raw_data. Keep in sync with
 // analytics/pipelines/user-stream-schema.json.
+//
+// This is ALSO the one shared fingerprint field list for both upsertUser and
+// upsertUserFromMetadata (task-5 fix round, Important 2). The two writers know different
+// subsets of it (the webhook knows name/username; the poller knows all nine), so if each
+// fingerprinted its own subset the two fingerprints would never agree — every poll tick and
+// every webhook touch would look "changed" to the other and resend into the append-only
+// sink forever. Fingerprinting the same field list, over the MERGED row for an existing
+// user (see upsertUser's read-modify-write), is what makes them agree.
 const R2_USER_VALUE_COLUMNS = [
   "name", "username", "verified_type",
   "followers_count", "following_count", "post_count", "listed_count", "like_count", "media_count",
 ];
 
-// Business-field subset used for entity_state change detection in upsertUserFromMetadata.
-// A superset of R2_USER_VALUE_COLUMNS: profile_image_url/description have no R2 column but
-// still land in raw_data, so a change to either is still a real change worth resending.
-// created_at/updated_at deliberately excluded, or every poll would look "changed".
-const USER_FINGERPRINT_FIELDS = [...R2_USER_VALUE_COLUMNS, "profile_image_url", "description"];
+// propIds that land in a named R2 column — source_user_id (the entity key itself) plus every
+// R2_USER_VALUE_COLUMNS entry. Used to filter consumedPaths() so a mapped-but-columnless prop
+// (profile_image_url, description — real X_USER_MAPPINGS entries with no R2 column) is never
+// treated as "consumed" and stripped out of raw_data, which would destroy it with nowhere else
+// to land (task-5 fix round, Important 1).
+const MAPPED_USER_PROP_IDS = new Set<string>(["source_user_id", ...R2_USER_VALUE_COLUMNS]);
 
 // R2 event pipeline's value columns beyond the fixed identity/time columns every write
 // builds explicitly. Keep in sync with analytics/pipelines/event-stream-schema.json.
@@ -46,22 +57,6 @@ export interface XUserData {
   created_at?: string;
   public_metrics?: { followers_count?: number; following_count?: number; tweet_count?: number };
   [key: string]: unknown;
-}
-
-// Fields the legacy bulk upsertUsers() still snapshots into raw_data. It never resolves
-// metadata props (no channel/linkPrefix context — see upsertUsers's comment), so it keeps
-// its own small curated field list rather than the consumedPaths machinery.
-const DB_FIELDS = ["id", "name", "username", "profile_image_url", "description", "location", "url", "verified", "verified_type", "protected", "created_at", "public_metrics"] as const;
-
-function pickDbFields(user: XUserData): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const key of DB_FIELDS) {
-    const val = user[key];
-    if (val !== null && val !== undefined && val !== "") {
-      result[key] = val;
-    }
-  }
-  return result;
 }
 
 // Deep-clones `payload` and deletes each dotted `path` (e.g. "public_metrics.followers_count")
@@ -98,7 +93,8 @@ export class XUsersService {
 
   constructor(
     private entityState: EntityStateStore,
-    opts?: { queue?: Queue; pipelineEvent?: Pipeline; pipelineUser?: Pipeline; tenantId?: number }
+    opts?: { queue?: Queue; pipelineEvent?: Pipeline; pipelineUser?: Pipeline; tenantId?: number },
+    private r2Env?: R2SqlEnv
   ) {
     this.queue = opts?.queue;
     this.pipelineEvent = opts?.pipelineEvent;
@@ -179,14 +175,10 @@ export class XUsersService {
     });
   }
 
-  // Both is_follow and is_followed are ALSO stored in D1 entity_state (flow's hot-read
-  // path — a 1-3s R2 query per node evaluation is not affordable) by the setFollow calls
-  // at each call site; this only decides what value the R2 row's two columns get. A
-  // freshly claimed key (isNew) has nothing stored yet, so there is no point reading it —
-  // skip the D1 round-trip and default straight to 0. An existing key that leaves either
-  // bit unspecified must read the stored value back, or e.g. a follow.follow webhook
-  // (which only ever tells us is_follow) would silently reset is_followed to 0 on every
-  // R2 write, even though nothing about "do they follow us" changed.
+  // Only used by upsertUserFromMetadata, which never reads entity_state up front (unlike
+  // upsertUser, see below) — so it still needs its own conditional read here. A freshly
+  // claimed key (isNew) has nothing stored yet, so there is no point reading it — skip the
+  // D1 round-trip and default straight to 0.
   private async resolveFollow(
     key: EntityStateKey,
     isNew: boolean,
@@ -215,9 +207,49 @@ export class XUsersService {
     const now = new Date().toISOString();
     const key: EntityStateKey = { entity: "user", channelId, sourceId: user.id };
 
-    const tracked = { name: user.name, username: user.username, profile_image_url: user.profile_image_url };
-    const fingerprint = await fingerprintOf(tracked, ["name", "username", "profile_image_url"]);
-    const { entityId, isNew, unchanged } = await this.entityState.claim(key, fingerprint);
+    // A single upfront read answers both "does this user already exist" (for read-modify-write
+    // below, Important 2) and "what follow state is currently stored" (Critical 1) — claim()
+    // itself can't safely answer the first question: it commits whatever fingerprint it's
+    // given, so probing existence by calling it with a not-yet-merged fingerprint would
+    // corrupt the stored fingerprint before there's a chance to compute the correct one (see
+    // upsertUserFromMetadata's fingerprint, which this MUST end up agreeing with).
+    const existingState = await this.entityState.get(key);
+    const isNew = existingState === null;
+
+    const resolved = resolveProps(user as Record<string, unknown>, X_USER_MAPPINGS, X_USER_META?.linkPrefix);
+    const webhookValues: Record<string, unknown> = {};
+    for (const col of R2_USER_VALUE_COLUMNS) {
+      if (col in resolved) webhookValues[col] = resolved[col];
+    }
+
+    // The webhook only ever knows name/username/profile_image_url — never follower counts,
+    // verified_type etc. Overlaying webhookValues onto the poller's last-known row (rather
+    // than sending webhookValues alone) is what keeps those columns from being nulled out by
+    // every DM/chat/follow touch (task-5 fix round, Important 2). Skipped for a brand-new
+    // user: there is nothing to merge with.
+    let mergedValues = webhookValues;
+    if (!isNew) {
+      const r2Env = this.r2Env;
+      const tenantId = this.tenantId;
+      if (!r2Env || !tenantId) {
+        throw new Error("XUsersService.upsertUser: existing user requires r2Env and tenantId for read-modify-write");
+      }
+      // No R2 read for a brand-new user (isNew above) — only existing users pay this cost,
+      // never the poller's per-tick, hundreds-of-followers loop (that's upsertUserFromMetadata,
+      // which never reads R2 at all — see its comment).
+      const priorRow = await getUserBySource(r2Env, tenantId, channelId, user.id);
+      if (priorRow) {
+        const priorValues: Record<string, unknown> = {};
+        for (const col of R2_USER_VALUE_COLUMNS) priorValues[col] = priorRow[col];
+        mergedValues = { ...priorValues, ...webhookValues };
+      }
+    }
+
+    // Fingerprint over the exact same field list upsertUserFromMetadata uses
+    // (R2_USER_VALUE_COLUMNS), computed over the MERGED row — this is what lets the two
+    // writers' fingerprints agree when nothing has actually changed (Important 2).
+    const fingerprint = await fingerprintOf(mergedValues, R2_USER_VALUE_COLUMNS);
+    const { entityId, unchanged } = await this.entityState.claim(key, fingerprint);
 
     // Written unconditionally (even when the R2 pipeline below ends up skipped) so a
     // tenant with no pipeline configured still gets correct flow-trigger behavior — flow
@@ -232,25 +264,24 @@ export class XUsersService {
     if (unchanged && !changedFollow) return entityId;
     if (!this.pipelineUser || !this.tenantId) return entityId;
 
-    const { isFollow, isFollowed } = await this.resolveFollow(key, isNew, follow ?? {});
+    // existingState already carries the currently-stored follow bits (fetched above) — no
+    // extra D1 round trip needed here, unlike upsertUserFromMetadata's resolveFollow.
+    const isFollow = (follow?.is_follow ?? existingState?.is_follow ?? 0) as 0 | 1;
+    const isFollowed = (follow?.is_followed ?? existingState?.is_followed ?? 0) as 0 | 1;
 
     // raw_data 只保留没有被消费的字段 —— 全量 payload 进日志不进库
     // (uniscrm-web/CLAUDE.md「调用外部API返回的payload全量数据不要存在数据库中」)。
     // Strip by dataId path (consumedPaths), never by propId: propId ≠ payload field name
     // (followers_count ← public_metrics.followers_count) — matching propId names against
     // top-level keys stripped nothing at all, which is how this repo got burned before.
-    const paths = consumedPaths(X_USER_MAPPINGS, X_USER_META?.linkPrefix);
+    // MAPPED_USER_PROP_IDS additionally excludes profile_image_url/description — they have a
+    // dataId but no R2 column, so treating them as "consumed" would destroy them (Important 1).
+    const paths = consumedPaths(X_USER_MAPPINGS, X_USER_META?.linkPrefix, MAPPED_USER_PROP_IDS);
     const rawData = JSON.stringify(stripConsumedPaths(user as Record<string, unknown>, paths));
-
-    const resolved = resolveProps(user as Record<string, unknown>, X_USER_MAPPINGS, X_USER_META?.linkPrefix);
-    const values: Record<string, unknown> = {};
-    for (const col of R2_USER_VALUE_COLUMNS) {
-      if (col in resolved) values[col] = resolved[col];
-    }
 
     const record = this.buildUserRecord(
       { id: entityId, channelId, channelType, sourceUserId: user.id, isFollow, isFollowed, rawData, createdAt: now, updatedAt: now },
-      values
+      mergedValues
     );
     await this.sendUserRecord(record);
     return entityId;
@@ -260,6 +291,12 @@ export class XUsersService {
   // which walks FOLLOWERS_METADATA.userProps itself) — this method does not re-derive it,
   // only uses its own X_USER_MAPPINGS/X_USER_META (the same metadata entry) to compute
   // which payload paths were consumed, for raw_data stripping.
+  //
+  // No R2 read here, ever — unlike upsertUser, this path already knows every value column it
+  // can know (own:get-followers resolves name/username/profile_image_url/all counts in one
+  // page fetch), so there is nothing to merge in, and the poller walks pages of hundreds of
+  // followers per tick — a 1-3s R2 query per follower would be catastrophic (task-5 fix round,
+  // Important 2's critical constraint).
   async upsertUserFromMetadata(
     rawItem: Record<string, unknown>,
     resolvedProps: Record<string, unknown>,
@@ -272,27 +309,37 @@ export class XUsersService {
     const now = new Date().toISOString();
     const key: EntityStateKey = { entity: "user", channelId, sourceId: sourceUserId };
 
-    // 指纹只覆盖会变的业务字段;created_at/updated_at 不参与,否则每次都判定为「变了」。
-    // Poller re-walks pages of already-known followers on every tick (see x-followers.ts
-    // runIncrementalPoll) — without this check, every visit resends an unchanged user to
-    // the R2 pipeline, which has no dedup on write (append-only Iceberg sink).
+    // 指纹覆盖 R2_USER_VALUE_COLUMNS —— 与 upsertUser 共用同一份字段清单(Important 2),
+    // 否则两个 writer 的指纹永远对不上,poller 每 tick / webhook 每次 touch 都会被对方判定
+    // 为「变了」,把没变的行也重发进 append-only 的 R2。created_at/updated_at 不参与,否则
+    // 每次都判定为「变了」。Poller re-walks pages of already-known followers on every tick
+    // (see x-followers.ts runIncrementalPoll) — without the fingerprint check, every visit
+    // resends an unchanged user to the R2 pipeline, which has no dedup on write.
     const trackedValues: Record<string, unknown> = {};
-    for (const col of USER_FINGERPRINT_FIELDS) {
+    for (const col of R2_USER_VALUE_COLUMNS) {
       if (col in resolvedProps) trackedValues[col] = resolvedProps[col];
     }
-    const fingerprint = await fingerprintOf(trackedValues, USER_FINGERPRINT_FIELDS);
+    const fingerprint = await fingerprintOf(trackedValues, R2_USER_VALUE_COLUMNS);
     const { entityId: id, isNew, unchanged } = await this.entityState.claim(key, fingerprint);
+
+    // Mirror any known follow bit into entity_state immediately (task-5 fix round, Critical
+    // 1): own:get-followers always resolves is_followed via its fixed `{value:1}` mapping.
+    // Without this write, entity_state.is_followed stayed NULL forever for a
+    // poller-discovered follower — the next webhook touch (upsertUser, no follow arg) read
+    // that NULL back as 0 and overwrote a correct R2 is_followed=1 with 0, reintroducing the
+    // exact bug this task exists to close. Written unconditionally (before the
+    // unchanged/pipeline early-return below), matching upsertUser's ordering — D1 is the flow
+    // engine's hot-read path regardless of whether an R2 pipeline is configured here.
+    const explicitIsFollow = resolvedProps.is_follow as 0 | 1 | undefined;
+    const explicitIsFollowed = resolvedProps.is_followed as 0 | 1 | undefined;
+    if (explicitIsFollow !== undefined) await this.entityState.setFollow(key, "is_follow", explicitIsFollow);
+    if (explicitIsFollowed !== undefined) await this.entityState.setFollow(key, "is_followed", explicitIsFollowed);
 
     if (!this.pipelineUser || !this.tenantId || unchanged) return isNew;
 
-    // own:get-followers maps is_followed via a fixed `{ value: 1 }` (not a dataId), so it
-    // arrives as a plain resolved prop; is_follow is never known from this path (a
-    // followers-list page tells us nothing about whether we follow them back) — resolved
-    // from stored entity_state instead, same as upsertUser.
-    const explicitIsFollowed = resolvedProps.is_followed as 0 | 1 | undefined;
-    const { isFollow, isFollowed } = await this.resolveFollow(key, isNew, { is_followed: explicitIsFollowed });
+    const { isFollow, isFollowed } = await this.resolveFollow(key, isNew, { is_follow: explicitIsFollow, is_followed: explicitIsFollowed });
 
-    const paths = consumedPaths(X_USER_MAPPINGS, X_USER_META?.linkPrefix);
+    const paths = consumedPaths(X_USER_MAPPINGS, X_USER_META?.linkPrefix, MAPPED_USER_PROP_IDS);
     const rawData = JSON.stringify(stripConsumedPaths(rawItem, paths));
 
     const record = this.buildUserRecord(
@@ -302,49 +349,6 @@ export class XUsersService {
     await this.sendUserRecord(record);
 
     return isNew;
-  }
-
-  // Legacy bulk path with no live caller today (grep confirms) and, unlike upsertUser/
-  // upsertUserFromMetadata, no channel context at all — it predates per-channel scoping.
-  // Kept working rather than deleted (少改动) by scoping its entity_state key on an empty
-  // channelId, which still gives it a stable per-tenant business key.
-  async upsertUsers(users: XUserData[]): Promise<void> {
-    if (users.length > 0) {
-      console.log(JSON.stringify({ event: "x_user_raw", sample: true, user_id: users[0].id, payload: users[0] }));
-    }
-
-    const now = new Date().toISOString();
-    const newUserIds = new Set<string>();
-
-    for (const user of users) {
-      const key: EntityStateKey = { entity: "user", channelId: "", sourceId: user.id };
-      const tracked = { name: user.name, username: user.username, profile_image_url: user.profile_image_url };
-      const fingerprint = await fingerprintOf(tracked, ["name", "username", "profile_image_url"]);
-      const { entityId, isNew, unchanged } = await this.entityState.claim(key, fingerprint);
-      if (isNew) newUserIds.add(user.id);
-
-      if (this.pipelineUser && this.tenantId && !unchanged) {
-        const record = this.buildUserRecord(
-          {
-            id: entityId, channelId: "", channelType: "", sourceUserId: user.id,
-            isFollow: 0, isFollowed: 0,
-            rawData: JSON.stringify(pickDbFields(user)),
-            createdAt: now, updatedAt: now,
-          },
-          { name: user.name ?? null, username: user.username ?? null }
-        );
-        await this.sendUserRecord(record);
-      }
-    }
-
-    if (this.queue && newUserIds.size > 0) {
-      const messages = users
-        .filter((u) => newUserIds.has(u.id) && u.username)
-        .map((u) => ({ body: { user_id: u.id, username: u.username } }));
-      if (messages.length > 0) {
-        await this.queue.sendBatch(messages);
-      }
-    }
   }
 
   // `eventProps` must arrive already resolved: the metadata `dataId` paths that describe
@@ -361,7 +365,19 @@ export class XUsersService {
       rawData?: unknown; eventProps?: Record<string, unknown>; consumedPaths?: string[];
     }>
   ): Promise<void> {
-    if (!this.pipelineEvent || !this.tenantId) return;
+    if (!this.pipelineEvent || !this.tenantId) {
+      // The old D1 insert was unconditional — a mid-rollout tenant (pipeline/tenantId not
+      // wired yet) now silently loses every event instead. Loud, so it's visible (task-5 fix
+      // round, Minor 2).
+      if (events.length > 0) {
+        console.warn(JSON.stringify({
+          event: "insertEvents_no_pipeline",
+          message: "PIPELINE_EVENT/tenantId not configured — events dropped",
+          count: events.length,
+        }));
+      }
+      return;
+    }
     const now = new Date().toISOString();
 
     const records = events.map((e) => {

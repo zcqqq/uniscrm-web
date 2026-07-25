@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ContentService } from "../../src/services/content";
+import { ContentService, CONTENT_MAPPED_PROP_IDS } from "../../src/services/content";
+import { consumedPaths } from "../../src/services/pollers/resolve-props";
+import type { PropMapping } from "../../../metadata/dataTypes";
 import contentSchema from "../../../analytics/pipelines/content-stream-schema.json";
 
 const SCHEMA_FIELD_NAMES = (contentSchema as { fields: { name: string }[] }).fields
@@ -155,6 +157,38 @@ describe("ContentService.upsertContentFromMetadata", () => {
       expect(raw).toEqual({ id: "t1", text: "hi", weird_field: 1 });
       expect(warnSpy).toHaveBeenCalledTimes(1);
       warnSpy.mockRestore();
+    });
+
+    // Important 1 (task-5 fix round): a metadata prop can have a dataId (so it looks
+    // "consumed") without CONTENT_COLUMN_MAP having a column for it. If a future caller
+    // computes consumedPaths from the raw metadata mapping array unfiltered — exactly the
+    // shape that destroyed X user's profile_image_url/description — the same thing would
+    // happen to content: the field gets stripped from raw_data with nowhere else to land.
+    // CONTENT_MAPPED_PROP_IDS + consumedPaths' allowedPropIds filter is the guard against
+    // that; this proves the guard actually behaves as intended end-to-end.
+    it("a mapped-but-columnless prop survives in raw_data when consumedPaths is filtered by CONTENT_MAPPED_PROP_IDS (Important 1)", async () => {
+      const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+      const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+
+      // "content_url" has a dataId (so a naive caller would compute a path for it) but is
+      // NOT a key of CONTENT_COLUMN_MAP — a real example of a mapped-but-columnless prop.
+      const props: PropMapping[] = [
+        { propId: "content_text", dataId: "{linkPrefix}.text" },
+        { propId: "content_url", dataId: "{linkPrefix}.url" },
+      ];
+      const paths = consumedPaths(props, "data[]", CONTENT_MAPPED_PROP_IDS);
+      expect(paths).toEqual(["text"]); // "url" excluded — content_url has no column
+
+      await service.upsertContentFromMetadata(
+        { id: "t1", text: "hi", url: "https://x/1" },
+        { source_content_id: "t1", content_text: "hi" },
+        "chan1", "X", false, undefined, paths
+      );
+
+      const [[record]] = pipeline.send.mock.calls[0];
+      const raw = JSON.parse(record.raw_data as string);
+      expect(raw).not.toHaveProperty("text"); // consumed and column-mapped -> stripped
+      expect(raw.url).toBe("https://x/1"); // mapped but columnless -> survives
     });
   });
 

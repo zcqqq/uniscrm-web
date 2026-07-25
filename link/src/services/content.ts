@@ -34,6 +34,17 @@ const CONTENT_COLUMN_MAP: Record<string, string> = {
 // created_at/updated_at deliberately excluded, or every call would look "changed".
 const CONTENT_TABLE_COLUMNS = Object.values(CONTENT_COLUMN_MAP);
 
+// propIds from CONTENT_COLUMN_MAP's keys — every propId that actually lands in a named R2
+// `content` column. Exported so a caller computing consumedPaths (pollers/resolve-props.ts)
+// before calling upsertContentFromMetadata can pass this as consumedPaths' `allowedPropIds`
+// filter, so a metadata prop that has a dataId but no CONTENT_COLUMN_MAP entry doesn't get
+// treated as "consumed" and stripped out of raw_data with nowhere else to land — the same bug
+// class the task-5 fix round caught on the user path (profile_image_url/description had a
+// dataId but no R2 `user` column, and were being destroyed). No current caller supplies
+// consumedPaths for content yet (Task 6/7 wires that), so this is a preemptive guard, not a
+// fix for a live bug — see content.test.ts's "raw_data filtering" tests for the guard in use.
+export const CONTENT_MAPPED_PROP_IDS = new Set(Object.keys(CONTENT_COLUMN_MAP));
+
 // Full set of the R2 `content` table's value columns, i.e. everything except the
 // key/audit columns every write builds explicitly (tenant_id, id, channel_id, channel_type,
 // source_content_id, list_id, raw_data, is_deleted, created_at, updated_at). This is a

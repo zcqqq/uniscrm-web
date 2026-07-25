@@ -91,4 +91,28 @@ describe("consumedPaths", () => {
     const props: PropMapping[] = [{ propId: "name", dataId: "name" }];
     expect(consumedPaths(props)).toEqual(["name"]);
   });
+
+  // task-5 fix round, Important 1: a mapping having a dataId doesn't mean the caller's
+  // record builder has a column for it (X user's profile_image_url/description have a
+  // dataId but no R2 `user` column). allowedPropIds lets a caller that owns a fixed column
+  // set exclude those from what's treated as "consumed", so their value isn't stripped out
+  // of raw_data with nowhere else to land.
+  describe("allowedPropIds filter", () => {
+    const props: PropMapping[] = [
+      { propId: "name", dataId: "{linkPrefix}.name" },
+      { propId: "profile_image_url", dataId: "{linkPrefix}.profile_image_url" },
+    ];
+
+    it("excludes a mapped propId not present in allowedPropIds", () => {
+      expect(consumedPaths(props, "data[]", new Set(["name"]))).toEqual(["name"]);
+    });
+
+    it("behaves identically to the unfiltered call when allowedPropIds is omitted", () => {
+      expect(consumedPaths(props, "data[]")).toEqual(["name", "profile_image_url"]);
+    });
+
+    it("returns nothing when allowedPropIds excludes every mapping", () => {
+      expect(consumedPaths(props, "data[]", new Set())).toEqual([]);
+    });
+  });
 });

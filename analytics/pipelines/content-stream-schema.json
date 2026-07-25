@@ -1,4 +1,5 @@
 {
+  "_comment": "raw_data holds only the payload fields that didn't map to a named column above (never the full API payload — see 调用外部API返回的payload全量数据不要存在数据库中). is_deleted is a logical-delete flag: 0 = present, 1 = deleted; every read path filters AND is_deleted = 0. impression_count and view_count are separate metrics from different channel APIs and intentionally coexist.",
   "fields": [
     { "name": "tenant_id", "type": "int32", "required": true },
     { "name": "id", "type": "string", "required": true },
@@ -14,6 +15,21 @@
     { "name": "like_count", "type": "int32", "required": false },
     { "name": "quote_count", "type": "int32", "required": false },
     { "name": "reply_count", "type": "int32", "required": false },
-    { "name": "repost_count", "type": "int32", "required": false }
+    { "name": "repost_count", "type": "int32", "required": false },
+    { "name": "list_id", "type": "string", "required": false },
+    { "name": "title", "type": "string", "required": false },
+    { "name": "content_text", "type": "string", "required": false },
+    { "name": "summary", "type": "string", "required": false },
+    { "name": "source_url", "type": "string", "required": false },
+    { "name": "source_updated_at", "type": "string", "required": false },
+    { "name": "cover_image_url", "type": "string", "required": false },
+    { "name": "duration", "type": "int32", "required": false },
+    { "name": "height", "type": "int32", "required": false },
+    { "name": "width", "type": "int32", "required": false },
+    { "name": "has_face", "type": "int32", "required": false },
+    { "name": "view_count", "type": "int32", "required": false },
+    { "name": "share_count", "type": "int32", "required": false },
+    { "name": "raw_data", "type": "string", "required": false },
+    { "name": "is_deleted", "type": "int32", "required": true }
   ]
 }

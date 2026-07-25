@@ -1,4 +1,5 @@
 {
+  "_comment": "raw_data holds only the payload fields that didn't map to a named column above (never the full API payload — see 调用外部API返回的payload全量数据不要存在数据库中). is_deleted is a logical-delete flag: 0 = present, 1 = deleted; every read path filters AND is_deleted = 0. profile_id was dropped with the cross-channel profile feature.",
   "fields": [
     { "name": "tenant_id", "type": "int32", "required": true },
     { "name": "id", "type": "string", "required": true },
@@ -12,13 +13,14 @@
     { "name": "is_followed", "type": "int32", "required": true },
     { "name": "created_at", "type": "string", "required": true },
     { "name": "updated_at", "type": "string", "required": true },
-    { "name": "profile_id", "type": "string", "required": false },
     { "name": "followers_count", "type": "int32", "required": false },
     { "name": "following_count", "type": "int32", "required": false },
     { "name": "verified_type", "type": "string", "required": false },
     { "name": "post_count", "type": "int32", "required": false },
     { "name": "listed_count", "type": "int32", "required": false },
     { "name": "like_count", "type": "int32", "required": false },
-    { "name": "media_count", "type": "int32", "required": false }
+    { "name": "media_count", "type": "int32", "required": false },
+    { "name": "raw_data", "type": "string", "required": false },
+    { "name": "is_deleted", "type": "int32", "required": true }
   ]
 }

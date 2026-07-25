@@ -10,7 +10,10 @@ import { PROPS } from "../../../metadata/props";
 // and no less. Two earlier drifts motivated this test: the file was once generated from
 // PROPS.filter(isInsight) (17 dead columns, incl. content-only props like `height`), and
 // `tweet_count` outlived its rename to `post_count` in the sibling user schema.
-const IDENTITY_FIELDS = ["tenant_id", "id", "user_id", "channel_id", "event_type", "event_time", "created_at"];
+// raw_data 存的是 payload 中没有映射到具名列的剩余字段(见
+// docs/superpowers/specs/2026-07-25-tenant-db-removal-design.md),
+// 不由 eventProps 推导,所以和身份列一样豁免于 prop 对账。
+const IDENTITY_FIELDS = ["tenant_id", "id", "user_id", "channel_id", "event_type", "event_time", "created_at", "raw_data"];
 
 // Only metadata/x.ts declares eventProps today; tiktok/youtube/x-byok define User/Content
 // metadata only. Add their event metadata arrays here when they gain event support.

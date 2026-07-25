@@ -11,6 +11,7 @@
     { "name": "followers_count", "type": "int32", "required": false },
     { "name": "following_count", "type": "int32", "required": false },
     { "name": "verified_type", "type": "string", "required": false },
-    { "name": "message_text", "type": "string", "required": false }
+    { "name": "message_text", "type": "string", "required": false },
+    { "name": "raw_data", "type": "string", "required": false }
   ]
 }

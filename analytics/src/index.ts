@@ -970,7 +970,10 @@ async function compactContentTable(env: Env): Promise<void> {
         warehouse: env.R2_WAREHOUSE,
         namespace: "uniscrm",
         table: "content",
-        key_columns: ["tenant_id", "channel_id", "source_content_id"],
+        // list_id must be part of the key: the same content can appear under multiple
+        // lists, and the read path partitions by channel_id, list_id, source_content_id —
+        // without list_id here, compaction would wrongly merge those rows into one.
+        key_columns: ["tenant_id", "channel_id", "list_id", "source_content_id"],
         token: env.R2_CATALOG_TOKEN,
       }),
     });

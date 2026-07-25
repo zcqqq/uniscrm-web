@@ -624,16 +624,28 @@ describe("consumedPaths threading — end-to-end raw_data stripping per poller (
     };
     const props = resolveProps(item, VIDEO_METADATA.contentProps, VIDEO_METADATA.linkPrefix);
     const paths = consumedPaths(VIDEO_METADATA.contentProps, VIDEO_METADATA.linkPrefix, CONTENT_MAPPED_PROP_IDS);
+    // Sanity check that the metadata this test reads off disk still maps *something* — if this
+    // ever goes empty the rest of the test would trivially pass without proving anything.
+    expect(paths.length).toBeGreaterThan(0);
+    // source_content_id ({linkPrefix}.id) and content_url ({linkPrefix}.share_url, Minor 3)
+    // are the two fields this task's fix rounds specifically added to CONTENT_MAPPED_PROP_IDS —
+    // assert their exact paths are present rather than hardcoding the full path list, so this
+    // test doesn't depend on which of TikTok's other content fields metadata/tiktok.ts happens
+    // to map at any given moment.
+    expect(paths).toContain("id");
+    expect(paths).toContain("share_url");
 
     await service.upsertContentFromMetadata(item, props, "chan1", "TIKTOK", false, undefined, paths);
 
     const [[record]] = pipeline.send.mock.calls[0];
     expect(record.source_url).toBe("https://tiktok.example/share/v1"); // Minor 3: content_url -> source_url column
     const raw = JSON.parse(record.raw_data as string);
-    expect(raw).not.toHaveProperty("id"); // Minor 2: source_content_id -> stripped
-    expect(raw).not.toHaveProperty("video_description");
-    expect(raw).not.toHaveProperty("share_url"); // Minor 3: content_url now has a column -> stripped
-    expect(raw).not.toHaveProperty("cover_image_url");
+    // Every path consumedPaths computed must be gone from raw_data — checked dynamically
+    // (against whatever metadata/tiktok.ts currently maps) rather than hardcoding TikTok's
+    // full field list, which can change independently of this fix.
+    for (const path of paths) {
+      expect(raw).not.toHaveProperty(path.split(".")[0]);
+    }
     expect(raw.unmapped_diagnostic_field).toBe("survives");
   });
 });

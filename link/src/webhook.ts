@@ -170,10 +170,11 @@ async function processXEvent(
 
     if (sourceId === filterUserId && target?.data) {
       const userData = target.data;
-      await usersService.upsertUser(userData as XUserData, channelId, "X");
       const isFollow = eventType === "follow.follow";
       const resolvedEventType = isFollow ? "follow.follow" : "follow.unfollow";
-      await usersService.setFollowState(userData.id as string, channelId, "is_follow", isFollow ? 1 : 0);
+      // follow 状态与用户快照一次性写完:R2 读路径按 QUALIFY 取整行最新,
+      // 分两次写会让后一次把前一次的列冲成 null。
+      await usersService.upsertUser(userData as XUserData, channelId, "X", { is_follow: isFollow ? 1 : 0 });
       await usersService.insertEvents([{
         userId: userData.id as string,
         channelId,
@@ -194,10 +195,11 @@ async function processXEvent(
       }
     } else if (targetId === filterUserId && source?.data) {
       const userData = source.data;
-      await usersService.upsertUser(userData as XUserData, channelId, "X");
       const isFollow = eventType === "follow.follow";
       const resolvedEventType = isFollow ? "follow.followed" : "follow.unfollowed";
-      await usersService.setFollowState(userData.id as string, channelId, "is_followed", isFollow ? 1 : 0);
+      // follow 状态与用户快照一次性写完:R2 读路径按 QUALIFY 取整行最新,
+      // 分两次写会让后一次把前一次的列冲成 null。
+      await usersService.upsertUser(userData as XUserData, channelId, "X", { is_followed: isFollow ? 1 : 0 });
       await usersService.insertEvents([{
         userId: userData.id as string,
         channelId,

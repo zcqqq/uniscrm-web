@@ -10,12 +10,18 @@ function createMockLinkDb(initialState: { cursor: string | null; backfill_comple
   return { prepare, _state: state, _run: run, _bind: bind };
 }
 
-function createMockTenantDb() {
+// XUsersService's constructor now takes an EntityStateStore, not a TenantDataDB (task-5
+// converted the user write path to R2). runFollowersPoller (x-followers.ts) still forwards
+// whatever it's handed as `ctx.tenantDb` straight into `new XUsersService(ctx.tenantDb, ...)`
+// — its own conversion is Task 6/7 scope, so the field name stays `tenantDb` here even
+// though the value we pass is entity-state-shaped, not D1-shaped. `claim`'s isNew controls
+// how many followers upsertPage (x-followers.ts) counts as "new" per page.
+function createMockEntityState() {
+  let seq = 0;
   return {
-    query: vi.fn().mockResolvedValue([]), // every followed user is "new" by default
-    run: vi.fn().mockResolvedValue({ changes: 1 }),
-    batch: vi.fn(),
-    getDbId: vi.fn().mockReturnValue("db-1"),
+    claim: vi.fn().mockImplementation(async () => ({ entityId: `uuid-${seq++}`, isNew: true, unchanged: false })),
+    get: vi.fn().mockResolvedValue(null),
+    setFollow: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -37,11 +43,11 @@ describe("runFollowersPoller", () => {
 
   it("does nothing when no poll_state row exists (channel not yet authorized)", async () => {
     const linkDb = createMockLinkDb(null);
-    const tenantDb = createMockTenantDb();
+    const entityState = createMockEntityState();
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, tenantDb: tenantDb as any, tenantId: 1,
+      linkDb: linkDb as any, tenantDb: entityState as any, tenantId: 1,
       deadline: Date.now() + 20_000,
     });
 
@@ -50,7 +56,7 @@ describe("runFollowersPoller", () => {
 
   it("backfill: pages until no next_token, then marks backfill_complete", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null });
-    const tenantDb = createMockTenantDb();
+    const entityState = createMockEntityState();
 
     fetchMock
       .mockImplementationOnce(() => jsonResponse({ data: [{ id: "1", name: "A", username: "a" }], meta: { next_token: "p2" } }))
@@ -58,21 +64,18 @@ describe("runFollowersPoller", () => {
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, tenantDb: tenantDb as any, tenantId: 1,
+      linkDb: linkDb as any, tenantDb: entityState as any, tenantId: 1,
       deadline: Date.now() + 20_000,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(tenantDb.run).toHaveBeenCalledTimes(2); // one INSERT per follower
-    const finalUpdate = linkDb._run.mock.calls.find((c: unknown[]) =>
-      (linkDb._bind.mock.calls as unknown[][]).length > 0
-    );
+    expect(entityState.claim).toHaveBeenCalledTimes(2); // one claim per follower
     expect(linkDb._run).toHaveBeenCalled();
   });
 
   it("backfill: stops on 429 and persists the cursor for next run", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null });
-    const tenantDb = createMockTenantDb();
+    const entityState = createMockEntityState();
 
     fetchMock
       .mockImplementationOnce(() => jsonResponse({ data: [{ id: "1", name: "A", username: "a" }], meta: { next_token: "p2" } }))
@@ -80,7 +83,7 @@ describe("runFollowersPoller", () => {
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, tenantDb: tenantDb as any, tenantId: 1,
+      linkDb: linkDb as any, tenantDb: entityState as any, tenantId: 1,
       deadline: Date.now() + 20_000,
     });
 
@@ -93,11 +96,11 @@ describe("runFollowersPoller", () => {
 
   it("backfill: stops when the deadline has passed, without calling fetch", async () => {
     const linkDb = createMockLinkDb({ cursor: "resume-here", backfill_complete: 0, last_polled_at: null });
-    const tenantDb = createMockTenantDb();
+    const entityState = createMockEntityState();
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, tenantDb: tenantDb as any, tenantId: 1,
+      linkDb: linkDb as any, tenantDb: entityState as any, tenantId: 1,
       deadline: Date.now() - 1, // already past
     });
 
@@ -106,11 +109,11 @@ describe("runFollowersPoller", () => {
 
   it("post-backfill: stops after a page with zero new users", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
-    const tenantDb = createMockTenantDb();
-    // first page: one new user; second page: user already exists -> query returns a row
-    tenantDb.query
-      .mockResolvedValueOnce([]) // page 1, user "1" is new
-      .mockResolvedValueOnce([{ id: "existing" }]); // page 2, user "2" already known
+    const entityState = createMockEntityState();
+    // page 1: follower "1" is new; page 2: follower "2" already known (isNew: false)
+    entityState.claim
+      .mockImplementationOnce(async () => ({ entityId: "uuid-0", isNew: true, unchanged: false }))
+      .mockImplementationOnce(async () => ({ entityId: "uuid-existing", isNew: false, unchanged: true }));
 
     fetchMock
       .mockImplementationOnce(() => jsonResponse({ data: [{ id: "1", name: "A", username: "a" }], meta: { next_token: "p2" } }))
@@ -118,7 +121,7 @@ describe("runFollowersPoller", () => {
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, tenantDb: tenantDb as any, tenantId: 1,
+      linkDb: linkDb as any, tenantDb: entityState as any, tenantId: 1,
       deadline: Date.now() + 20_000,
     });
 

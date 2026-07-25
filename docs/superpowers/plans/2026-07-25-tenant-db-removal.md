@@ -81,8 +81,16 @@ Expected(坏的情况): `80011: Unauthenticated`
 
 - [ ] **Step 2: 在 Cloudflare Dashboard 重建 R2 API token**
 
-R2 → Manage API Tokens → Create,权限勾 **Object Read**(R2 SQL 读需要),
-作用域选 `uniscrm-dev` 与 `uniscrm` 两个 bucket。记下 token 值。
+R2 → Manage API Tokens → Create,权限必须选 **Admin Read only**,作用域选对应 bucket
+(dev token 给 `uniscrm-dev`,prod token 给 `uniscrm`)。
+
+⚠️ **不能选 "Object Read"**。按
+<https://developers.cloudflare.com/r2/api/tokens/>:Object Read / Object Read & Write
+只对 **S3-compatible API** 生效,对 Cloudflare REST API(R2 SQL 与 R2 Data Catalog 走的就是它)
+无效。R2 SQL 需要的是两个权限组 **Workers R2 Data Catalog Read** ＋
+**Workers R2 Storage Bucket Item Read** —— 在 Dashboard 上就是 "Admin Read only"。
+用错权限的表现是 `80013: Unauthorized`(token 有效但没权限),
+而不是 `80011: Unauthenticated`(token 本身无效/过期)。
 
 - [ ] **Step 3: 用新 token 复验**
 

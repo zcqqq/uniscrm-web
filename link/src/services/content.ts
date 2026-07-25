@@ -277,12 +277,19 @@ export class ContentService {
     // consumedPaths must be payload paths (resolve-props.ts's consumedPaths), never propIds —
     // propId ≠ payload field name.
     let rawData: string;
-    if (consumedPaths) {
+    // An empty array strips nothing — same net effect as omitting the param entirely (the
+    // whole payload lands in raw_data), so it must warn the same way. `[]` is truthy, so a
+    // bare `if (consumedPaths)` silently swallowed this case (task-7 fix round 2, same bug
+    // class already fixed in x-users.ts's insertEvents for fix round 1's Minor 1) — check
+    // length, not presence. Doesn't bite today because X/TikTok's contentProps always resolve
+    // a non-empty consumedPaths, but a future source with an empty or missing mapping would
+    // silently over-store with no warning otherwise.
+    if (consumedPaths && consumedPaths.length > 0) {
       rawData = JSON.stringify(stripConsumedPaths(rawItem, consumedPaths));
     } else {
       console.warn(JSON.stringify({
         event: "upsertContentFromMetadata_raw_data_unfiltered",
-        message: "consumedPaths not provided — storing the entire payload in raw_data",
+        message: "consumedPaths not provided (or empty) — storing the entire payload in raw_data",
         channelId,
         sourceContentId,
       }));

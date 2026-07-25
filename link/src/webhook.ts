@@ -376,6 +376,15 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
           // delete durable instead of losing it or taking the whole webhook delivery down (an
           // uncaught throw here would 500 the route, and X retries the same delivery
           // indefinitely — see the try/catch around handleXActivityEvent in webhookRoutes()).
+          //
+          // This catch is deliberately broad (any throw from delete(), not just "not found" /
+          // R2-lag) — a transient R2 SQL error (network blip, rate limit) falls into the same
+          // fallback and synthesizes a blind tombstone rather than being retried. Accepted
+          // trade-off, not an oversight (task-7 fix round 2): the row is being deleted either
+          // way, so a blind tombstone in place of a real-data one is low-impact, and there is no
+          // retry path here to fall back to — X only delivers this webhook once per event. Do
+          // NOT narrow this to a specific error type without adding a retry mechanism first, or
+          // a transient failure would silently drop the delete entirely (Important 2's exact bug).
           console.error(JSON.stringify({ event: "xaa_post_delete_r2_not_ready", channelId, tweetId, error: String(e) }));
           await contentService.deleteByKnownIdentity(existing.entity_id, channelId, "X", tweetId);
         }

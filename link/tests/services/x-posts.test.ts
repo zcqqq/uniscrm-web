@@ -136,6 +136,43 @@ describe("runPostsPoller", () => {
     expect(articleRecord.title).toBe("Free Skill - some article");
   });
 
+  // Task-7 fix round 2: regression-proof that upsertPage actually threads consumedPaths into
+  // upsertContentFromMetadata's 7th argument — content.test.ts's "consumedPaths threading"
+  // tests reproduce resolveProps -> consumedPaths -> upsertContentFromMetadata inline with
+  // hand-built data, so they'd stay green even if x-posts.ts stopped passing the argument
+  // entirely. This test drives the real poller entry point and asserts on the emitted record's
+  // raw_data content — both that mapped fields are gone AND that an unmapped one survives
+  // (asserting only absence would also pass if raw_data were empty/missing, e.g. the
+  // consumedPaths-omitted fallback in content.ts, which stores nothing usable either).
+  it("threads consumedPaths into upsertContentFromMetadata so raw_data strips mapped payload fields, keeping unmapped ones (task-7 fix round 2)", async () => {
+    const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null });
+    const entityState = createMockEntityState();
+    const pipelineContent = createMockPipelineContent();
+
+    fetchMock.mockImplementationOnce(() =>
+      jsonResponse({
+        data: [{
+          id: "t3",
+          text: "hello",
+          public_metrics: { bookmark_count: 5, impression_count: 10, like_count: 1, quote_count: 0, reply_count: 2, retweet_count: 3 },
+          weird_unmapped_field: "survives",
+        }],
+        meta: {},
+      })
+    );
+
+    await runPostsPoller(baseCtx(linkDb, entityState, { pipelineContent }));
+
+    const [[record]] = pipelineContent.send.mock.calls[0];
+    const raw = JSON.parse(record.raw_data as string);
+    expect(raw).not.toHaveProperty("id"); // source_content_id, column-mapped -> stripped
+    // stripConsumedPaths deletes each consumed leaf but leaves the parent object in place even
+    // once emptied (see content.ts's stripConsumedPaths doc comment) — every sub-field here is
+    // column-mapped, so the object survives but empty, not absent.
+    expect(raw.public_metrics).toEqual({});
+    expect(raw.weird_unmapped_field).toBe("survives"); // never mapped -> must still be there
+  });
+
   it("post-backfill: stops after a page with zero new tweets", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
     const entityState = createMockEntityState();

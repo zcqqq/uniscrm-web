@@ -5,9 +5,9 @@ import { getAllFields } from "./fields";
 import { parseNaturalLanguage } from "./services/nl-parser";
 import { validateConditions } from "./services/validator";
 import { buildSegmentQuery } from "./services/sql-builder";
-import { TenantDataDB } from "../../shared/tenant-data-db";
+import { r2Query, latestRowsSql, sqlStr, sqlInt, R2SqlError } from "../../shared/r2-sql";
 
-type HonoEnv = { Bindings: Env; Variables: { tenantId: string; memberId: string; tenantDataDb: TenantDataDB } };
+type HonoEnv = { Bindings: Env; Variables: { tenantId: string; memberId: string } };
 
 const app = new Hono<HonoEnv>();
 app.use("*", cors());
@@ -18,7 +18,12 @@ function getCookieValue(request: Request, name: string): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-// Auth middleware for /api/segments routes
+// Auth middleware for /api/segments routes. Used to also look up tenants.d1_database_id and
+// provision a TenantDataDB client for the per-tenant D1 database — no longer needed: segments
+// now compute against R2 (uniscrm.user/event) and store membership in WEB_DB's segment_users,
+// so there's no per-tenant D1 left in this module's loop. Dropping the lookup also means a
+// tenant with no provisioned tenant DB (the norm going forward, per the plan this task is part
+// of) no longer gets wrongly 503'd out of a feature that doesn't need one.
 async function segmentAuth(c: any, next: any) {
   const cookie = c.req.raw.headers.get("Cookie") || "";
   const webUrl = c.env.WEB_URL;
@@ -30,12 +35,6 @@ async function segmentAuth(c: any, next: any) {
   if (!data.member?.id || !data.tenant?.id) return c.json({ error: "Unauthorized" }, 401);
   c.set("tenantId", data.tenant.id);
   c.set("memberId", data.member.id);
-
-  const row = await (c.env.WEB_DB as D1Database).prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
-    .bind(Number(data.tenant.id))
-    .first<{ d1_database_id: string | null }>();
-  if (!row?.d1_database_id) return c.json({ error: "Tenant DB not provisioned" }, 503);
-  c.set("tenantDataDb", new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, row.d1_database_id));
   await next();
 }
 app.use("/api/segments", segmentAuth);
@@ -105,7 +104,7 @@ app.post("/api/segments", async (c) => {
     return c.json({ errors: validation.errors, stage: "validate" }, 422);
   }
 
-  const { sql, params } = buildSegmentQuery(validation.conditions, fields);
+  const { sql } = buildSegmentQuery(validation.conditions, fields, Number(tenantId));
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
@@ -155,16 +154,27 @@ app.post("/api/segments/preview", async (c) => {
     return c.json({ errors: validation.errors, stage: "validate" }, 422);
   }
 
-  const { sql, params } = buildSegmentQuery(validation.conditions, fields);
+  const { sql } = buildSegmentQuery(validation.conditions, fields, Number(tenantId));
 
-  const tenantDataDb = c.get("tenantDataDb");
-  const countSql = sql.replace("SELECT DISTINCT profile.id", "SELECT COUNT(DISTINCT profile.id) as cnt");
-  const countRows = await tenantDataDb.query<{ cnt: number }>(countSql, params);
+  // Wrap rather than string-replace the SELECT list: buildSegmentQuery's SQL is a QUALIFY
+  // subquery with an outer WHERE/LIMIT, so there's no single "SELECT DISTINCT ..." prefix left
+  // to swap for a COUNT the way the old flat D1 query allowed.
+  let estimatedCount = 0;
+  try {
+    const countRows = await r2Query<{ cnt: number }>(c.env, `SELECT COUNT(*) AS cnt FROM (${sql}) AS t`);
+    estimatedCount = countRows[0]?.cnt ?? 0;
+  } catch (e) {
+    // Never report a failed R2 query as "estimated_count: 0" — that reads as "this segment is
+    // empty" instead of "this couldn't be checked", the exact silent-failure this module must
+    // avoid (数据准确性 > 系统稳定性).
+    const msg = e instanceof Error ? e.message : String(e);
+    return c.json({ error: `R2 query failed: ${msg}`, stage: "preview" }, e instanceof R2SqlError ? 502 : 500);
+  }
 
   return c.json({
     conditions: validation.conditions,
     sql_query: sql,
-    estimated_count: countRows[0]?.cnt || 0,
+    estimated_count: estimatedCount,
   });
 });
 
@@ -202,35 +212,43 @@ app.post("/api/segments/:id/compute", async (c) => {
     .run();
 
   try {
-    const tenantDataDb = c.get("tenantDataDb");
     const conditions = JSON.parse(segment.conditions_json);
     const fields = getAllFields();
-    const { sql, params } = buildSegmentQuery(conditions, fields);
+    const { sql } = buildSegmentQuery(conditions, fields, Number(tenantId));
 
-    const rows = await tenantDataDb.query<{ id: string }>(sql, params);
-    const profileIds = rows.map((r) => r.id).slice(0, 10000);
+    // r2Query throws (never returns []) on failure — a bad query or an R2 outage lands in the
+    // catch below and marks the segment 'error', instead of this route mistaking "the query
+    // failed" for "the query matched zero users" and reporting status: 'ready', user_count: 0.
+    // Silently-empty segments are worse than a visible error: 数据准确性 > 系统稳定性.
+    const rows = await r2Query<{ id: string }>(c.env, sql);
+    const userIds = rows.map((r) => r.id);
 
-    await tenantDataDb.run(`DELETE FROM segment_profiles WHERE segment_id = ?`, [segmentId]);
+    // tenant-scope-ok: segmentId ownership verified by the SELECT ... AND tenant_id = ? guard
+    // above (404s a non-owner); this DELETE also filters tenant_id directly.
+    await c.env.WEB_DB.prepare(`DELETE FROM segment_users WHERE tenant_id = ? AND segment_id = ?`)
+      .bind(tenantId, segmentId)
+      .run();
 
     const now = new Date().toISOString();
     const BATCH_SIZE = 50;
-    for (let i = 0; i < profileIds.length; i += BATCH_SIZE) {
-      const batch = profileIds.slice(i, i + BATCH_SIZE);
-      const stmts = batch.map((pid) => ({
-        sql: `INSERT OR IGNORE INTO segment_profiles (segment_id, profile_id, created_at) VALUES (?, ?, ?)`,
-        params: [segmentId, pid, now],
-      }));
-      await tenantDataDb.batch(stmts);
+    for (let i = 0; i < userIds.length; i += BATCH_SIZE) {
+      await c.env.WEB_DB.batch(
+        userIds.slice(i, i + BATCH_SIZE).map((uid) =>
+          c.env.WEB_DB
+            .prepare(`INSERT OR IGNORE INTO segment_users (tenant_id, segment_id, user_id, created_at) VALUES (?, ?, ?, ?)`)
+            .bind(tenantId, segmentId, uid, now)
+        )
+      );
     }
 
     // tenant-scope-ok: segmentId ownership verified by the SELECT ... AND tenant_id = ? guard above (404s a non-owner)
     await c.env.WEB_DB.prepare(
       `UPDATE segments SET status = 'ready', user_count = ?, updated_at = datetime('now') WHERE id = ?`
     )
-      .bind(profileIds.length, segmentId)
+      .bind(userIds.length, segmentId)
       .run();
 
-    return c.json({ segment: { id: segmentId, status: "ready", user_count: profileIds.length } });
+    return c.json({ segment: { id: segmentId, status: "ready", user_count: userIds.length } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     // tenant-scope-ok: segmentId ownership verified by the SELECT ... AND tenant_id = ? guard above (404s a non-owner)
@@ -239,7 +257,7 @@ app.post("/api/segments/:id/compute", async (c) => {
     )
       .bind(segmentId)
       .run();
-    return c.json({ error: msg }, 500);
+    return c.json({ error: msg }, e instanceof R2SqlError ? 502 : 500);
   }
 });
 
@@ -259,24 +277,58 @@ app.get("/api/segments/:id/users", async (c) => {
     .first();
   if (!segment) return c.json({ error: "Not found" }, 404);
 
-  const tenantDataDb = c.get("tenantDataDb");
-  const rows = await tenantDataDb.query(
-    `SELECT sp.profile_id, u.id as user_id, u.name, u.username, u.profile_image_url
-     FROM segment_profiles sp
-     INNER JOIN user u ON u.profile_id = sp.profile_id
-     WHERE sp.segment_id = ?
-     ORDER BY sp.created_at DESC LIMIT ? OFFSET ?`,
-    [segmentId, limit, offset]
-  );
+  // Membership lives in WEB_DB's segment_users now (task 9) — paginate there first, then hydrate
+  // display fields for just that page from R2, rather than joining across two data stores.
+  const memberRows = await c.env.WEB_DB.prepare(
+    `SELECT user_id FROM segment_users WHERE tenant_id = ? AND segment_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`
+  )
+    .bind(tenantId, segmentId, limit, offset)
+    .all<{ user_id: string }>();
+  const userIds = memberRows.results.map((r) => r.user_id);
 
-  const countRows = await tenantDataDb.query<{ total: number }>(
-    `SELECT COUNT(*) as total FROM segment_profiles WHERE segment_id = ?`,
-    [segmentId]
-  );
-  const total = countRows[0]?.total || 0;
+  const countRow = await c.env.WEB_DB.prepare(
+    `SELECT COUNT(*) as total FROM segment_users WHERE tenant_id = ? AND segment_id = ?`
+  )
+    .bind(tenantId, segmentId)
+    .first<{ total: number }>();
+  const total = countRow?.total || 0;
+
+  let hydrated: { id: string; name: string | null; username: string | null }[] = [];
+  if (userIds.length > 0) {
+    try {
+      hydrated = await r2Query<{ id: string; name: string | null; username: string | null }>(
+        c.env,
+        latestRowsSql({
+          table: "uniscrm.user",
+          columns: ["id", "name", "username", "is_deleted"],
+          partitionBy: ["channel_id", "source_user_id"],
+          where: [`tenant_id = ${sqlInt(Number(tenantId))}`, `id IN (${userIds.map(sqlStr).join(", ")})`],
+          outerWhere: ["is_deleted = 0"],
+        })
+      );
+    } catch (e) {
+      // Same rule as compute: a failed R2 read must surface as an error, never as "this
+      // segment has no members" (数据准确性 > 系统稳定性).
+      const msg = e instanceof Error ? e.message : String(e);
+      return c.json({ error: `R2 query failed: ${msg}` }, e instanceof R2SqlError ? 502 : 500);
+    }
+  }
+  const byId = new Map(hydrated.map((u) => [u.id, u]));
+  // Field names (id/name/username) match frontend/lib/api.ts's SegmentUser and
+  // SegmentDetail.tsx's rendering, which key off `id` — not segment_users' own `user_id`
+  // column name. profile_image_url has no R2 column (link/src/services/x-users.ts: it only
+  // ever lands in raw_data) so it's omitted; SegmentDetail.tsx's `{u.profile_image_url && ...}`
+  // guard already renders nothing when it's absent. Preserve segment_users' created_at
+  // ordering; a member whose R2 row is now deleted (dropped by outerWhere above) still renders
+  // — with blank name/username — rather than silently vanishing from a page whose
+  // `total`/pagination already counted it.
+  const users = userIds.map((id) => {
+    const u = byId.get(id);
+    return { id, name: u?.name ?? null, username: u?.username ?? null };
+  });
 
   return c.json({
-    users: rows,
+    users,
     total,
     page,
     totalPages: Math.ceil(total / limit),

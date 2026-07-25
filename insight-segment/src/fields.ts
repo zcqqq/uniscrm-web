@@ -24,12 +24,17 @@ export interface InsightField {
   enums?: { value: string | number; label: string }[];
 }
 
+// R2 的 uniscrm.user 把这些做成了真实列,不再需要从 raw_data 里 json_extract。
+// "u" is the alias buildSegmentQuery gives the deduped-latest-row subquery over uniscrm.user —
+// every entry here must stay in sync with that alias, not with the raw table name.
 const SQL_EXPR_MAP: Record<string, { source: "user" | "event"; sqlExpr: string }> = {
-  name: { source: "user", sqlExpr: "user.name" },
-  username: { source: "user", sqlExpr: "user.username" },
-  followers_count: { source: "user", sqlExpr: "CAST(json_extract(user.raw_data, '$.public_metrics.followers_count') AS INTEGER)" },
-  following_count: { source: "user", sqlExpr: "CAST(json_extract(user.raw_data, '$.public_metrics.following_count') AS INTEGER)" },
-  verified_type: { source: "user", sqlExpr: "json_extract(user.raw_data, '$.verified_type')" },
+  name: { source: "user", sqlExpr: "u.name" },
+  username: { source: "user", sqlExpr: "u.username" },
+  followers_count: { source: "user", sqlExpr: "u.followers_count" },
+  following_count: { source: "user", sqlExpr: "u.following_count" },
+  verified_type: { source: "user", sqlExpr: "u.verified_type" },
+  is_follow: { source: "user", sqlExpr: "u.is_follow" },
+  is_followed: { source: "user", sqlExpr: "u.is_followed" },
 };
 
 export function getAllFields(locale: Locale = "en"): InsightField[] {
@@ -50,7 +55,10 @@ export function getAllFields(locale: Locale = "en"): InsightField[] {
     propId: "event_type",
     dataType: "ENUM",
     source: "event",
-    sqlExpr: "event.event_type",
+    // "e" is the alias buildSegmentQuery gives the LEFT JOIN uniscrm.event — matches the "u"
+    // convention above, kept in its own field since event rows are never deduped (each is a
+    // discrete occurrence, not an entity with a "current state" — see buildSegmentQuery).
+    sqlExpr: "e.event_type",
     description: locale === "zh" ? "事件类型" : "Event Type",
     enums: EventMetadata_X.map((m) => ({ value: m.eventType, label: t(m.label, locale) })),
   };
@@ -59,7 +67,7 @@ export function getAllFields(locale: Locale = "en"): InsightField[] {
     propId: "event_time",
     dataType: "DATETIME",
     source: "event",
-    sqlExpr: "event.event_time",
+    sqlExpr: "e.event_time",
     description: locale === "zh" ? "事件时间" : "Event Time",
   };
 

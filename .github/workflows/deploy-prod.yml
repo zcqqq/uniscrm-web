@@ -27,6 +27,8 @@ jobs:
             config: trend-skill/wrangler.toml
           - module: content
             config: content/wrangler.toml
+          - module: analytics
+            config: analytics/wrangler.toml
     steps:
       - uses: actions/checkout@v4
 
@@ -51,6 +53,10 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          # Repository-level secret (like CF_API_TOKEN): one R2 Data Catalog token shared by
+          # dev and production. Read by the analytics worker for R2 SQL queries AND by the
+          # PyIceberg compactor, so it needs Admin Read & Write, not Read only.
+          R2_CATALOG_TOKEN: ${{ secrets.R2_CATALOG_TOKEN }}
 
   migrate:
     needs: [sync-secrets]

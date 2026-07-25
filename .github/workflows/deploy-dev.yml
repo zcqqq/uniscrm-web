@@ -26,15 +26,20 @@ jobs:
             echo "analytics=false" >> "$GITHUB_OUTPUT"
           fi
 
-  tenant-scope-audit:
+  audits:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Tenant-scope audit
-        run: node scripts/tenant-scope-audit.mjs --check
+      # `npm test` runs every scripts/*.test.mjs guard plus the tenant-scope and
+      # time-format audits (see package.json), so it supersedes running one audit
+      # alone. Without this, scripts/secrets-sync.test.mjs would only ever pass on
+      # a developer's machine and could not block a deploy — which is the failure
+      # mode it exists to catch. No `npm ci`: these scripts have no dependencies.
+      - name: Repo audits and script tests
+        run: npm test
 
   sync-secrets:
     runs-on: ubuntu-latest
@@ -66,6 +71,8 @@ jobs:
             config: trend-skill/wrangler.toml
           - module: content
             config: content/wrangler.toml
+          - module: analytics
+            config: analytics/wrangler.toml
     steps:
       - uses: actions/checkout@v4
 
@@ -89,6 +96,10 @@ jobs:
           TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          # Repository-level secret (like CF_API_TOKEN): one R2 Data Catalog token shared by
+          # dev and production. Read by the analytics worker for R2 SQL queries AND by the
+          # PyIceberg compactor, so it needs Admin Read & Write, not Read only.
+          R2_CATALOG_TOKEN: ${{ secrets.R2_CATALOG_TOKEN }}
 
   migrate:
     needs: [sync-secrets]
@@ -154,7 +165,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
   deploy:
-    needs: [migrate, migrate-tenant-dbs, changes, tenant-scope-audit]
+    needs: [migrate, migrate-tenant-dbs, changes, audits]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

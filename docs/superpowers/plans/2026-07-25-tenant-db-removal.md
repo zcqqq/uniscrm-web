@@ -130,7 +130,7 @@ git commit -m "chore: ensure R2_SQL_TOKEN is synced to link/flow/analytics/insig
 
 **Files:**
 - Create: `shared/r2-sql.ts`
-- Test: `shared/tests/r2-sql.test.ts`
+- Test: `link/tests/services/r2-sql.test.ts`
 
 **Interfaces:**
 - Consumes: 无
@@ -148,11 +148,14 @@ git commit -m "chore: ensure R2_SQL_TOKEN is synced to link/flow/analytics/insig
 
 - [ ] **Step 1: 建目录并写失败测试**
 
-创建 `shared/tests/r2-sql.test.ts`:
+创建 `link/tests/services/r2-sql.test.ts`(**不要**放在 `shared/tests/` —— `shared/` 没有
+vitest 配置,`link/vitest.config.ts` 的 root 是 `link/`,放在 `shared/` 下的测试不会被任何 runner 收录。
+仓库既有约定就是从模块的 `tests/` 里测 `shared/` 代码,例如 `admin/tests/unit/credit-service.test.ts`
+测的是 `shared/credit-service.ts`):
 
 ```ts
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { sqlStr, sqlInt, latestRowsSql, r2Query, R2SqlError } from "../r2-sql";
+import { sqlStr, sqlInt, latestRowsSql, r2Query, R2SqlError } from "../../../shared/r2-sql";
 
 const ENV = {
   CF_ACCOUNT_ID: "acct1",
@@ -250,11 +253,9 @@ describe("r2Query", () => {
 - [ ] **Step 2: 跑测试确认失败**
 
 ```bash
-cd /Users/zc/Documents/UniSCRM/uniscrm-web/link && npx vitest run ../shared/tests/r2-sql.test.ts
+cd /Users/zc/Documents/UniSCRM/uniscrm-web/link && npx vitest run tests/services/r2-sql.test.ts
 ```
-Expected: FAIL —— `Failed to resolve import "../r2-sql"`
-
-> `shared/` 没有自己的 vitest 配置,借 `link` 的跑。
+Expected: FAIL —— `Failed to resolve import "../../../shared/r2-sql"`
 
 - [ ] **Step 3: 实现 `shared/r2-sql.ts`**
 
@@ -346,15 +347,16 @@ export async function r2Query<T>(env: R2SqlEnv, sql: string): Promise<T[]> {
 - [ ] **Step 4: 跑测试确认通过**
 
 ```bash
-cd /Users/zc/Documents/UniSCRM/uniscrm-web/link && npx vitest run ../shared/tests/r2-sql.test.ts
+cd /Users/zc/Documents/UniSCRM/uniscrm-web/link && npx vitest run tests/services/r2-sql.test.ts
 ```
-Expected: PASS,11 个用例全绿
+Expected: PASS,9 个用例全绿。再跑一次 `cd link && npx vitest run`,确认 `r2-sql.test.ts`
+出现在被收集的测试文件里 —— 这一步才证明它真的进了常规测试流。
 
 - [ ] **Step 5: 提交**
 
 ```bash
 cd /Users/zc/Documents/UniSCRM/uniscrm-web
-git add shared/r2-sql.ts shared/tests/r2-sql.test.ts
+git add shared/r2-sql.ts link/tests/services/r2-sql.test.ts
 git commit -m "feat(shared): add R2 SQL client with tenant_id enforcement and error surfacing"
 ```
 

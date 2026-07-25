@@ -60,6 +60,20 @@ export const TIERS: Record<Tier, TierConfig> = {
 
 export const TIER_LIST: TierConfig[] = [TIERS.basic];
 
+// The gating floor. Whenever a tenant's tier can't be determined — no subscription row, an
+// expired one, an unrecognized tier string (the DB column still defaults to 'free'), or a
+// lookup that threw — callers fall back to this instead of granting access outright.
+// TIER_LIST is ordered cheapest-first; findRequiredTier below relies on the same ordering.
+export const LOWEST_TIER: Tier = TIER_LIST[0].tier;
+
+// The `tier` cookie is written at login (web/worker/api/auth.ts) and refreshed with the real
+// subscription tier on the Billing page. It is a non-httpOnly display hint, so an absent or
+// unrecognized value must fail closed — returning "no tier" used to unlock every gated menu.
+export function parseTierCookie(cookie: string): Tier {
+  const value = cookie.match(/(?:^|;\s*)tier=([^;]*)/)?.[1];
+  return value === "basic" || value === "pro" ? value : LOWEST_TIER;
+}
+
 export function canAccessModule(tier: Tier, module: string): boolean {
   return TIERS[tier]?.modules[module]?.enabled ?? true;
 }

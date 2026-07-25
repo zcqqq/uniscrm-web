@@ -10,7 +10,7 @@ interface TierGuardProps {
 
 export function TierGuard({ module, children }: TierGuardProps) {
   const tier = useTier();
-  const allowed = tier ? canAccessModule(tier, module) : true;
+  const allowed = canAccessModule(tier, module);
 
   useEffect(() => {
     if (!allowed) {

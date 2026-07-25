@@ -140,12 +140,15 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
     },
   ];
 
-  const tierModules = tier ? TIERS[tier]?.modules : undefined;
+  // useTier always resolves to a concrete tier (LOWEST_TIER when the cookie is missing or
+  // unrecognized), so there is no "unknown tier" branch that leaves every group unlocked.
+  // A key absent from the map is unrestricted — that's how pro's empty map opens everything.
+  const tierModules = TIERS[tier].modules;
   const isGroupDisabled = (groupId: string) =>
-    tierModules ? groupId in tierModules && !tierModules[groupId].enabled : false;
+    groupId in tierModules && !tierModules[groupId].enabled;
   const isItemDisabled = (groupId: string, itemId: string) => {
     const key = `${groupId}.${itemId}`;
-    return tierModules ? key in tierModules && !tierModules[key].enabled : false;
+    return key in tierModules && !tierModules[key].enabled;
   };
 
   const currentUrl = typeof window !== "undefined" ? window.location.origin + window.location.pathname : "";

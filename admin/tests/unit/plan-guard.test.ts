@@ -31,8 +31,21 @@ describe("createModuleGuard", () => {
     expect(c.json).not.toHaveBeenCalled();
   });
 
-  it("passes through (fail-open) when resolveTier returns null — no active subscription found", async () => {
+  // null means "tier unknown" — no subscription row, an expired one, or a failed lookup.
+  // It must fall back to the cheapest plan, not skip the gate: fail closed, never open.
+  it("blocks when resolveTier returns null and the lowest tier disallows the module", async () => {
     const guard = createModuleGuard("content.recommendations", async () => null);
+    const c = fakeContext();
+    const next = vi.fn();
+
+    await guard(c, next);
+
+    expect(c.json).toHaveBeenCalledWith({ error: "forbidden" }, 403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("still calls next() when resolveTier returns null but the lowest tier allows the module", async () => {
+    const guard = createModuleGuard("social.channels", async () => null);
     const c = fakeContext();
     const next = vi.fn();
 

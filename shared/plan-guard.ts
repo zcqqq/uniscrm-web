@@ -1,4 +1,4 @@
-import { TIERS, TIER_LIST, type Tier } from "./plans";
+import { LOWEST_TIER, TIERS, TIER_LIST, type Tier } from "./plans";
 
 export interface PlanCheck {
   allowed: boolean;
@@ -50,8 +50,10 @@ export function checkLimit(tier: Tier, key: string, currentCount: number): PlanC
 // worker builds it, which isn't reliable. Callers pass a real Hono Context; duck-typed at runtime.
 export function createModuleGuard(moduleKey: string, resolveTier: (c: any) => Promise<Tier | null>) {
   return async (c: any, next: () => Promise<void>) => {
-    const tier = await resolveTier(c);
-    if (tier && !checkModuleAccess(tier, moduleKey).allowed) {
+    // A null tier means "couldn't determine it" — no active subscription, or the lookup
+    // failed. Treat that as the cheapest plan; skipping the check granted the module outright.
+    const tier = (await resolveTier(c)) ?? LOWEST_TIER;
+    if (!checkModuleAccess(tier, moduleKey).allowed) {
       return c.json({ error: "forbidden" }, 403);
     }
     await next();

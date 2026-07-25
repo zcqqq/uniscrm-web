@@ -1,5 +1,5 @@
 // Minimal shape of a container Durable Object stub/namespace, mirroring
-// profile/src/types.ts's ContainerInstance/ContainerNamespace pattern — avoids a
+// analytics/src/types.ts's ContainerInstance/ContainerNamespace pattern — avoids a
 // circular import between types.ts and index.ts (where SubtitleContainer lives).
 interface ContainerInstance {
   startAndWaitForPorts(): Promise<void>;

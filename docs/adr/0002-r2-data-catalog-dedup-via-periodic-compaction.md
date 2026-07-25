@@ -20,3 +20,10 @@ being fixed.
 
 This pattern applies to every R2-Data-Catalog-backed table fed by a poller/webhook in this
 codebase (`uniscrm.user`, `uniscrm.content`, and any future one) — not a one-off for `user`.
+
+**2026-07-25 更新**:读路径改用 `QUALIFY ROW_NUMBER() OVER (PARTITION BY <业务键>
+ORDER BY updated_at DESC) = 1` 之后,compaction 不再承担读取正确性,只是存储优化 ——
+两次 compaction 之间的重复行由查询自己滤掉。`compactContentTable` 的 `key_columns`
+同步补上了 `list_id`,与读路径的 PARTITION BY 保持一致 —— 更窄的 compaction key
+会把同一篇内容在两个不同 list 下被抓到的行错误合并成一行。见
+`docs/adr/0005-tenant-db-removed-r2-as-single-source.md`。

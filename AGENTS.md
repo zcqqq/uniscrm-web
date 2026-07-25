@@ -8,7 +8,7 @@ uniscrm-web库是多租户SaaS，分多个模块/worker：
 - content: 租户BYOK LLM key管理 + 内置skill配方 + 内容生成(/internal/generate)，供flow的aiRewritePublish action调用。
 - flow: 基于reactflow的事件触发工作流。
 - analytics: 多种SQL即席分析、和可视化报表。
-- insight-segment: 基于profile的SQL规则分群。
+- insight-segment: 基于user（单渠道账号）的SQL规则分群，membership存WEB_DB的segment_users。
 - link: 统一渠道模块。social/content/commerce/lists统一在一个Worker中。
 - metadata: event/user/flow等实体基于元数据配置。
 - operation: 生产环境运维相关，可以存储一些修复数据的临时脚本。
@@ -21,7 +21,11 @@ git分dev和main分支，提交到main分支时自动通过github部署dev环境
 
 # Technical
 大数据存储基于R2 data catalog.
-各模块间尽量减少逻辑耦合，通过数据（Cloudflare各组件）耦合。所以在Cloudflare组件的配置文件中，尽量用模块名做前后缀，如DB_WEB，而不是通用的DB、以减少各个模块间的歧义。比较特殊的是tenantdb，各个模块可能都有数据量大的表，要按租户分库放到tenantdb。
+各模块间尽量减少逻辑耦合，通过数据（Cloudflare各组件）耦合。所以在Cloudflare组件的配置文件中，尽量用模块名做前后缀，如DB_WEB，而不是通用的DB、以减少各个模块间的歧义。
+user/content/event 的唯一真相在 R2 Data Catalog（namespace uniscrm）。读取一律经
+shared/r2-sql.ts，必须带 tenant_id 过滤并用 QUALIFY 取每个业务键的最新行；写入一律
+发完整行——部分写会把未包含的列变成 null。R2 做不到的原子去重/变更检测/uuid 映射
+落在 uniscrm-link 的 entity_state 表。见 docs/adr/0005。
 UI：所有icons都要加上tooltip文字便于区分。
 
 ## 外部公开子仓库依赖

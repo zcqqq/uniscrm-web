@@ -69,7 +69,8 @@ async function upsertPage(
     // raw_data 只保留没有被消费的字段 —— 全量 payload 进日志不进库
     // (uniscrm-web/CLAUDE.md「调用外部API返回的payload全量数据不要存在数据库中」)。
     // CONTENT_MAPPED_PROP_IDS restricts to propIds with an actual R2 `content` column —
-    // content_url has a dataId here but no R2 column, so it correctly stays in raw_data.
+    // content_url maps to the R2 `source_url` column (CONTENT_COLUMN_MAP in
+    // services/content.ts), so it's excluded from raw_data like every other mapped prop.
     const paths = consumedPaths(VIDEO_METADATA.contentProps, VIDEO_METADATA.linkPrefix, CONTENT_MAPPED_PROP_IDS);
     const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "TIKTOK", emitFlowEvent, undefined, paths);
     if (isNew) newCount++;

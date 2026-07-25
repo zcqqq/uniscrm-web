@@ -321,6 +321,9 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
       try {
         const res = await getReport(reportId);
         if (res.report.status === "ready" && res.report.results) {
+          // A recompute that succeeds must retire the previous run's error banner —
+          // otherwise a fixed report keeps showing the old failure next to fresh data.
+          setError("");
           setResults(res.report.results);
           setComputedAt(res.report.computed_at || null);
           setLoading(false);

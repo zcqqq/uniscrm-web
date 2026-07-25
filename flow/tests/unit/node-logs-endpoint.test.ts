@@ -149,6 +149,15 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — UUID validation guard", () =
     expect(res.status).toBe(200);
     expect(r2Calls()).toHaveLength(1);
   });
+
+  // Template-instantiated flows (flow/frontend/config/templates.ts) hardcode short node ids like
+  // "t1"/"w1"/"a1" — these persist forever unless the node is deleted and re-added, so real
+  // production flows have non-UUID node ids. The guard must accept them, not just crypto.randomUUID().
+  it("does not block a legitimate request where nodeId is a template-style short id like 't1'", async () => {
+    const res = await worker.fetch(req(`/api/flows/${FLOW_ID}/nodes/t1/logs`), env);
+    expect(res.status).toBe(200);
+    expect(r2Calls()).toHaveLength(1);
+  });
 });
 
 describe("GET /api/flows/:id/nodes/:nodeId/logs — content domain reads R2 only, no D1 join", () => {

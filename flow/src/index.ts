@@ -8,6 +8,28 @@ import { TenantDataDB } from "../../shared/tenant-data-db";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY } from "../nodeTypeRegistry";
 
+// node ids are NOT always UUIDs: flow/frontend/config/templates.ts hardcodes short ids like
+// "t1"/"w1"/"a1" for template-instantiated flows, and those ids persist forever unless the node
+// is deleted and re-added. queryNodeLogRows interpolates a node id directly into an R2 SQL
+// string, so this character class is a hard security boundary there — not just a format nicety.
+// Enforced at both ends of the id's lifecycle: here at save time (reject a non-conforming graph
+// outright) and again at the node-logs route (defense in depth, in case old data predates this).
+const NODE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+// Malformed JSON is the caller's problem elsewhere (this graph won't render either way) — only
+// the id shape is this guard's concern.
+function findInvalidNodeIds(graphJson: string): string[] {
+  let graph: { nodes?: { id?: unknown }[] };
+  try {
+    graph = JSON.parse(graphJson);
+  } catch {
+    return [];
+  }
+  return (graph.nodes || [])
+    .map((n) => String(n?.id ?? ""))
+    .filter((id) => !NODE_ID_RE.test(id));
+}
+
 // A flow's domain is stored on the row (migration 0014), set at creation and never changed.
 // It used to be sniffed from graph_json for a content trigger node type, which broke as soon
 // as the graph lost its trigger — the flow then read the user-domain counts/log tables.
@@ -1213,6 +1235,11 @@ app.post("/api/flows", async (c) => {
   // Fixed at creation and never updated afterwards — see migration 0014.
   const domain = body.domain === "content" ? "content" : "user";
 
+  const invalidIds = findInvalidNodeIds(graphJson);
+  if (invalidIds.length > 0) {
+    return c.json({ error: `Invalid node id(s): ${invalidIds.join(", ")}` }, 400);
+  }
+
   await c.env.FLOW_DB.prepare(
     `INSERT INTO flows (id, tenant_id, member_id, name, description, graph_json, domain, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`
@@ -1261,7 +1288,13 @@ app.put("/api/flows/:id", async (c) => {
 
   if (body.name !== undefined) { sets.push("name = ?"); params.push(body.name); }
   if (body.description !== undefined) { sets.push("description = ?"); params.push(body.description); }
-  if (body.graph_json !== undefined) { sets.push("graph_json = ?"); params.push(body.graph_json); }
+  if (body.graph_json !== undefined) {
+    const invalidIds = findInvalidNodeIds(body.graph_json);
+    if (invalidIds.length > 0) {
+      return c.json({ error: `Invalid node id(s): ${invalidIds.join(", ")}` }, 400);
+    }
+    sets.push("graph_json = ?"); params.push(body.graph_json);
+  }
   if (body.status !== undefined) { sets.push("status = ?"); params.push(body.status); }
 
   if (sets.length === 0) return c.json({ error: "No fields to update" }, 400);
@@ -1353,10 +1386,8 @@ app.get("/api/flows/:id/analytics", async (c) => {
   return c.json({ nodes });
 });
 
-// flowId/nodeId are always crypto.randomUUID() values in this codebase (see flow creation and
-// flow-editor.ts addNode()). queryNodeLogRows interpolates them directly into an R2 SQL string,
-// so route params are validated against this shape before reaching it — a non-UUID value can
-// only be a forged/malicious request, never a legitimate one.
+// flow.id is always crypto.randomUUID() — set server-side at creation (POST /api/flows) and
+// never accepted from the client — so the strict UUID shape is a safe invariant for it.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Node logs: list which users/content items entered a specific node (two-step: R2 for the
@@ -1366,7 +1397,7 @@ app.get("/api/flows/:id/nodes/:nodeId/logs", async (c) => {
   const tenantId = c.get("tenantId");
   const flowId = c.req.param("id");
   const nodeId = c.req.param("nodeId");
-  if (!UUID_RE.test(flowId) || !UUID_RE.test(nodeId)) return c.json({ logs: [] });
+  if (!UUID_RE.test(flowId) || !NODE_ID_RE.test(nodeId)) return c.json({ logs: [] });
 
   try {
     const isContentDomain = await isContentDomainFlow(c.env, flowId, tenantId);

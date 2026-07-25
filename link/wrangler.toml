@@ -67,15 +67,15 @@ queue = "uniscrm-event-dev"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_EVENT"
-stream = "91aff39a029746b5b5f6f0e162063096"
+stream = "f8a87f61f6dd4e88bc61d47b21cf9776"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_USER"
-stream = "b2a9528928814147a6dfa742b8319d92"
+stream = "5945ec685d6e41749af0509b7fea157a"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_CONTENT"
-stream = "2ed6fd2b333d42638580689910ed2661"
+stream = "84c43e1ed4124df59d3794a253f0227f"
 
 [[env.dev.secrets_store_secrets]]
 binding = "ENCRYPTION_KEY"

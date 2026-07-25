@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { sqlStr, sqlInt, latestRowsSql, r2Query, R2SqlError } from "../r2-sql";
+import { sqlStr, sqlInt, latestRowsSql, r2Query, R2SqlError } from "../../../shared/r2-sql";
 
 const ENV = {
   CF_ACCOUNT_ID: "acct1",

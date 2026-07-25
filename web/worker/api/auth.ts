@@ -5,6 +5,7 @@ import { SessionService } from "../auth/session";
 import { EmailService } from "../services/email";
 import { PendingTaskService } from "../services/pending-tasks";
 import { executePendingTask } from "../services/task-executor";
+import { cfTimezone, resolveSignupTimezone } from "../services/timezone";
 
 export function createAuthRouter() {
   const router = new Hono<{ Bindings: Env }>();
@@ -71,7 +72,7 @@ export function createAuthRouter() {
         .first<{ tenant_id: number }>();
       const tenantId = tenant!.tenant_id;
 
-      const tz = link.timezone || "UTC";
+      const tz = resolveSignupTimezone(link.timezone, cfTimezone(c.req.raw));
       await c.env.WEB_DB.prepare(
         "INSERT INTO members (id, tenant_id, email, preferred_location, timezone, created_at) VALUES (?, ?, ?, ?, ?, ?)"
       )

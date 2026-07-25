@@ -3,18 +3,10 @@ import { setCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { RecommendService } from "../services/recommend";
 import { OAuthService } from "../services/oauth";
+import { isValidTimezone } from "../services/timezone";
 
 const VALID_LOCATIONS = ["global", "china"];
 const VALID_LANGUAGES = ["en", "zh"];
-
-function isValidTimezone(tz: string): boolean {
-  try {
-    Intl.DateTimeFormat(undefined, { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export function createSettingsRouter() {
   const router = new Hono<{ Bindings: Env }>();

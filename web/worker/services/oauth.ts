@@ -12,6 +12,9 @@ export interface PendingOAuthData {
   access_token?: string;
   refresh_token?: string | null;
   expires_at?: string;
+  // Carried over from OAuthState so the member finally created in /auth/verify-code keeps the
+  // zone captured when the user clicked "Continue with X", not a hardcoded default.
+  timezone?: string;
 }
 
 export interface ResolveUserResult {

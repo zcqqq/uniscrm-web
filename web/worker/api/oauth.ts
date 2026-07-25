@@ -8,6 +8,7 @@ import { EmailService } from "../services/email";
 import { X_CHANNEL_SCOPES } from "../../../shared/x-scopes";
 import { PendingTaskService } from "../services/pending-tasks";
 import { executePendingTask } from "../services/task-executor";
+import { cfTimezone, resolveSignupTimezone } from "../services/timezone";
 
 async function memberLanguage(db: Env["WEB_DB"], memberId: string, isNew: boolean): Promise<string> {
   if (isNew) return "en";
@@ -69,7 +70,7 @@ export function createOAuthRouter() {
       return c.redirect("/settings");
     }
 
-    const { memberId, tenantId, isNew } = await oauthService.resolveUser("google", sub, email, stored.timezone || "UTC");
+    const { memberId, tenantId, isNew } = await oauthService.resolveUser("google", sub, email, resolveSignupTimezone(stored.timezone, cfTimezone(c.req.raw)));
     const lang = await memberLanguage(c.env.WEB_DB, memberId, isNew);
     if (isNew) {
       const tasks = new PendingTaskService(c.env.WEB_DB);
@@ -160,7 +161,7 @@ export function createOAuthRouter() {
     const email = emailData.data?.email;
 
     if (email) {
-      const { memberId, tenantId, isNew } = await oauthService.resolveUser("x", xUserId, email, stored.timezone || "UTC");
+      const { memberId, tenantId, isNew } = await oauthService.resolveUser("x", xUserId, email, resolveSignupTimezone(stored.timezone, cfTimezone(c.req.raw)));
       const lang = await memberLanguage(c.env.WEB_DB, memberId, isNew);
       if (isNew) {
         const tasks = new PendingTaskService(c.env.WEB_DB);
@@ -195,6 +196,7 @@ export function createOAuthRouter() {
       access_token: tokens.accessToken(),
       refresh_token: tokens.hasRefreshToken() ? tokens.refreshToken() : null,
       expires_at: expiresAt,
+      timezone: stored.timezone,
     });
     setCookie(c, "pending_oauth", pendingId, {
       httpOnly: true,
@@ -255,7 +257,7 @@ export function createOAuthRouter() {
     }
 
     await c.env.KV.delete(`email_code:${email}`);
-    const { memberId, tenantId, isNew } = await oauthService.resolveUser(pending.provider, pending.providerUserId, email, "UTC");
+    const { memberId, tenantId, isNew } = await oauthService.resolveUser(pending.provider, pending.providerUserId, email, resolveSignupTimezone(pending.timezone, cfTimezone(c.req.raw)));
     await oauthService.deletePendingOAuth(pendingId);
     if (isNew) {
       const tasks = new PendingTaskService(c.env.WEB_DB);

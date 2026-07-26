@@ -71,7 +71,7 @@ stream = "f8a87f61f6dd4e88bc61d47b21cf9776"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_USER"
-stream = "5945ec685d6e41749af0509b7fea157a"
+stream = "8fac960b35ca4458bcad4f21306259e6"
 
 [[env.dev.pipelines]]
 binding = "PIPELINE_CONTENT"

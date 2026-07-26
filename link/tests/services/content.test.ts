@@ -30,12 +30,10 @@ function createMockTenantDb() {
 
 function createMockEntityState() {
   return {
-    claim: vi.fn(),
     markSeen: vi.fn().mockResolvedValue(true),
     get: vi.fn().mockResolvedValue(null),
     setFollow: vi.fn(),
     getFollowByEntityId: vi.fn(),
-    rollbackFingerprint: vi.fn(),
   };
 }
 

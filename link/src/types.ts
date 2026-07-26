@@ -75,11 +75,12 @@ export interface Session {
 // Content types
 export type ChannelType = "LOCAL" | "NOTION" | "TIKTOK" | "X" | "YOUTUBE" | "YOUTUBE_ACCOUNT";
 
-// Shape actually returned by services/r2-entities.ts's getContent/listContents — the R2
-// `content` table's CONTENT_COLUMNS projection (tenant-db-removal task 4/6). There is no
-// `status` concept any more (the plan removed it outright, no replacement column); `list_id`
-// and `is_deleted` are real R2 columns that were missing here before. Field order mirrors
-// CONTENT_COLUMNS in r2-entities.ts for easy comparison.
+// Shape of a `content` row as ContentService (services/content.ts, D1-backed per the
+// 2026-07-26 user/content-back-to-D1 plan) reads and returns it; also the shape of the R2
+// Iceberg `content` table's analytics-copy columns (task-9 dead-code sweep removed
+// r2-entities.ts's getContent/listContents/CONTENT_COLUMNS — D1 is the only reader now).
+// There is no `status` concept any more (the plan removed it outright, no replacement
+// column); `list_id` and `is_deleted` are real columns.
 export interface ContentRow {
   id: string;
   channel_id: string;

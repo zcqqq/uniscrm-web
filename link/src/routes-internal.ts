@@ -867,5 +867,53 @@ export function internalRoutes() {
     return c.json({ status: "ok", ...result });
   });
 
+  // Permanent operational utility (2026-07-26 plan, task 9b), not a one-off. The write path
+  // deliberately skips the R2 send when a row is `unchanged` vs D1 — correct for steady state,
+  // but it means a row that never changes after its first write never reaches R2. A table
+  // rebuild (analytics/pipelines/rebuild-tables.md) compounds this: the rebuilt table starts at
+  // zero and only refills as rows change again. The fix is replaying every D1 row through the
+  // pipeline once (analytics/pipelines/backfill-users.mts / backfill-content.mts), but those
+  // scripts have no way to reach the stream's authenticated HTTP ingest endpoint directly — that
+  // needs a Cloudflare API token scoped "Workers Pipelines: Send", which this deployment doesn't
+  // provision (R2_CATALOG_TOKEN is scoped for R2 Data Catalog config only, confirmed by a 401
+  // from the ingest endpoint). This worker already holds the PIPELINE_* bindings, which need no
+  // such credential — so instead of provisioning a new one, the backfill scripts POST batches
+  // here and this route forwards them onto the matching binding. Auth is the existing
+  // X-Internal-Secret check (index.ts's `app.use("/internal/*", internalAuthMiddleware)` runs
+  // before this router is mounted — no second guard needed).
+  const BACKFILL_TABLE_BINDING = {
+    user: "PIPELINE_USER",
+    content: "PIPELINE_CONTENT",
+    event: "PIPELINE_EVENT",
+  } as const;
+  const BACKFILL_MAX_RECORDS = 200;
+
+  router.post("/backfill/pipeline", async (c) => {
+    const body = await c.req.json<{ table?: string; records?: Record<string, unknown>[] }>();
+    const binding = body.table && (body.table as string) in BACKFILL_TABLE_BINDING
+      ? BACKFILL_TABLE_BINDING[body.table as keyof typeof BACKFILL_TABLE_BINDING]
+      : undefined;
+    if (!binding) {
+      return c.json({ error: `table must be one of: ${Object.keys(BACKFILL_TABLE_BINDING).join(", ")}` }, 400);
+    }
+    if (!Array.isArray(body.records) || body.records.length === 0) {
+      return c.json({ error: "records must be a non-empty array" }, 400);
+    }
+    if (body.records.length > BACKFILL_MAX_RECORDS) {
+      return c.json({ error: `records exceeds the ${BACKFILL_MAX_RECORDS}-record cap per call` }, 413);
+    }
+
+    // Unlike the fire-and-log sendUserRecord/sendContentRecord write paths (R2 is a copy, not
+    // the truth, so a normal write's pipeline failure is logged and swallowed), a backfill batch
+    // silently dropped defeats the entire point of running one — surface it instead.
+    try {
+      await c.env[binding].send(body.records);
+    } catch (err) {
+      return c.json({ error: String(err) }, 502);
+    }
+
+    return c.json({ ok: true, sent: body.records.length });
+  });
+
   return router;
 }

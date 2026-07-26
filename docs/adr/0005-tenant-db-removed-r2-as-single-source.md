@@ -1,5 +1,10 @@
 # Per-tenant D1 下线,R2 Data Catalog 成为唯一真相
 
+> **2026-07-26 部分推翻**:本 ADR 描述的架构对 `user`/`content` 已被
+> `docs/adr/0006-user-content-back-to-per-tenant-d1.md` 部分推翻——这两个可变实体的真相
+> 回到了 per-tenant D1,R2 降级为分析副本。`event` 不受影响,本 ADR 记录的
+> 「R2 是唯一真相」「不可变数据放 append-only 存储」对 `event` 依然成立。
+
 每个租户一个 D1(`uniscrm-t*`)承载 `user`/`content`/`event`/`profile`/`segment_profiles`/
 `content_trigger_dedup`,并且是通过 D1 REST API(而非 binding)访问的 —— 每次读写都是一次
 跨网 HTTP。代价是:每开一个租户要建一个库、每次加列要遍历所有租户库跑 ALTER TABLE、

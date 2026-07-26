@@ -1,5 +1,12 @@
 # R2 Data Catalog 表重建步骤
 
+> **表状态(2026-07-26 起,见 docs/adr/0006)**:`user`/`content` 现在是 analytics 副本,
+> 真相在 per-tenant D1;`event` 不受影响,仍是 R2 唯一真相。**重建 `user`/`content` 之后新表是
+> 空的,必须回填**——用 `analytics/pipelines/backfill-users.mts` / `backfill-content.mts`
+> (用法见各自文件头)从 D1 dump 生成 record,再经 link 的 `POST /internal/backfill/pipeline`
+> 路由(guarded,按表名白名单,200 条/批上限)一次性灌回,不要指望 poller 增量重跑自己补齐
+> (`unchanged` 的行永远不会重发)。重建流程本身(旁置旧表 → 建新 stream/sink/pipeline)不变。
+
 Pipeline sink 的 schema 不可修改,且拒绝写入已存在的 Iceberg 表。所以加列必须:
 **旁置旧表 → 删旧 pipeline → 删旧 sink → 删旧 stream → 用新 schema 建 stream/sink/pipeline**。
 删除顺序必须是 pipeline 在先(pipeline 引用 sink,sink 引用不到就删不掉;同理 sink 要在

@@ -92,6 +92,22 @@ export async function run(env: string, migrations?: TenantMigration[]): Promise<
   }
 
   const tenants = listTenants(env);
+  // An empty result is indistinguishable from "provisioning legitimately hasn't happened yet"
+  // UNLESS this job races the web DB's own migrate job (see deploy-*.yml's `needs`): if
+  // migrate-tenant-dbs reads tenants.d1_database_id while the 0009 migration that
+  // adds/backfills it is still running, every row can look NULL and this silently "succeeds"
+  // having migrated nothing. Exit non-zero instead of treating zero tenants as a clean no-op —
+  // a CI operator seeing this fail is far cheaper than every real tenant DB silently drifting
+  // out of schema sync.
+  if (tenants.length === 0) {
+    console.error(JSON.stringify({
+      event: "tenant_migration_no_tenants",
+      message: "no tenants with d1_database_id — refusing to treat an empty run as success; did migrations just NULL the column?",
+      env,
+    }));
+    process.exitCode = 1;
+    return;
+  }
   const migs = migrations ?? (await loadMigrations());
   console.log(JSON.stringify({ event: "tenant_migration_run_started", env, tenantCount: tenants.length, migrationCount: migs.length }));
 

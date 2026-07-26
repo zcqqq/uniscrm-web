@@ -32,10 +32,14 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
   c.set("tenantId" as never, session.tenant_id);
   c.set("memberId" as never, session.member_id);
   c.set("email" as never, session.email);
-  // entity_state lives in link's own LINK_DB (D1) — a small dedup-key/hot-follow-state index,
-  // not a per-tenant data store — so unlike the old TenantDataDB it needs no lookup against
-  // `tenants.d1_database_id` and is always available once tenant_id is known. Real entity rows
-  // (user/content) now live in R2 Data Catalog, read via shared/r2-sql.ts at the route level.
+  // entity_state lives in link's own LINK_DB (D1) — a small shared index, not a per-tenant data
+  // store — so unlike TenantDataDB below it needs no lookup against `tenants.d1_database_id`
+  // and is always available once tenant_id is known. Its job has shrunk to two things: trigger
+  // content's seen-dedup ledger (recordTriggerContentSeen — trigger content is never persisted
+  // as a row at all) and a follow-state mirror (mirrorFollowState in x-users.ts) kept for fast
+  // reads that don't need a per-tenant D1 round trip. The user/content rows themselves are NOT
+  // read from here or from R2 at route level — D1 is the truth (2026-07-26 plan: user/content
+  // back to per-tenant D1), read via `tenantDataDb` below; R2 is an analytics-only copy.
   c.set("entityState" as never, new EntityStateStore(c.env.LINK_DB, session.tenant_id));
 
   // Per-tenant D1 (task 4 of user/content-back-to-tenant-d1): only injected when the tenant

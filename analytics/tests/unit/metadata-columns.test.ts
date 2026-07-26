@@ -78,8 +78,8 @@ describe("buildEntityColumns", () => {
 
   it("falls back to an em dash for missing values", () => {
     const cols = buildEntityColumns<Row>(PROPS, "user", "en", "UTC");
-    const desc = cols.find((c) => c.key === "description")!;
-    expect(desc.render!({})).toBe("—");
+    const name = cols.find((c) => c.key === "name")!;
+    expect(name.render!({})).toBe("—");
   });
 
   it("content_type prop accepts VIDEO alongside TWEET/ARTICLE", () => {

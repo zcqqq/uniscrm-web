@@ -161,6 +161,27 @@ describe("webhookRoutes POST /webhook — post.create", () => {
     const [tenantDbArg] = contentServiceConstructorMock.mock.calls[0];
     expect(tenantDbArg).not.toBeNull();
   });
+
+  // I6: a transient failure writing the D1/R2 copy must not 500 the whole webhook delivery — X
+  // retries a non-2xx response indefinitely and eventually disables the subscription over what
+  // may be a one-off D1 REST hiccup. Event recording (processXEvent -> insertEvents) is a
+  // separate concern and must still run.
+  it("still 200s and still records the event when ContentService.upsertContentFromMetadata throws", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    upsertContentFromMetadataMock.mockRejectedValueOnce(new Error("transient D1 REST error"));
+    const env = baseEnv();
+    const app = buildApp();
+
+    const res = await post(app, activityBody("post.create", { id: "tweet1", text: "hello" }), env);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(upsertContentFromMetadataMock).toHaveBeenCalledTimes(1);
+    expect(insertEventsMock).toHaveBeenCalledTimes(1);
+    expect(errSpy).toHaveBeenCalled();
+
+    errSpy.mockRestore();
+  });
 });
 
 describe("webhookRoutes POST /webhook — post.delete", () => {

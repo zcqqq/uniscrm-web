@@ -387,8 +387,16 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
       props.content_url = `https://x.com/i/status/${tweetId}`;
       const paths = consumedPaths(POSTS_METADATA.contentProps, POSTS_METADATA.linkPrefix, CONTENT_MAPPED_PROP_IDS);
       const contentService = new ContentService(tenantDb, env.VECTORIZE, env.AI, tenantId, env.PIPELINE_CONTENT);
-      // flowType comes from the own:get-posts metadata entry itself, never a literal.
-      await contentService.upsertContentFromMetadata(payload, props, channelId, "X", false, undefined, paths, POSTS_METADATA.flowType);
+      // Never let a throw here 500 the webhook — X retries a non-2xx delivery indefinitely and
+      // eventually disables the subscription entirely over what may be a transient D1 REST
+      // failure. Event recording (processXEvent, below) must still run regardless. Mirrors
+      // post.delete's try/catch below.
+      try {
+        // flowType comes from the own:get-posts metadata entry itself, never a literal.
+        await contentService.upsertContentFromMetadata(payload, props, channelId, "X", false, undefined, paths, POSTS_METADATA.flowType);
+      } catch (e) {
+        console.error(JSON.stringify({ event: "xaa_post_create_error", channelId, tweetId, error: String(e) }));
+      }
     }
   }
 

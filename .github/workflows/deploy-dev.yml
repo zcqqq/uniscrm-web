@@ -139,7 +139,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
   migrate-tenant-dbs:
-    needs: [sync-secrets]
+    # Must run after `migrate`, not just sync-secrets: `migrate` applies the web DB migrations
+    # (incl. 0009, which adds/backfills the tenants.d1_database_id column this job reads to find
+    # which tenants have a provisioned DB). Racing ahead of it can read that column mid-migration
+    # — empty or NULL — and silently treat "no tenants" as a successful no-op run.
+    needs: [sync-secrets, migrate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

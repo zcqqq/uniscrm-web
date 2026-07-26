@@ -229,6 +229,34 @@ describe("ContentService.upsertContentFromMetadata", () => {
     expect(pipeline.send).toHaveBeenCalledTimes(1);
   });
 
+  // I2: the R2 copy must be the COMPLETE row (its read path takes one whole row per key via
+  // QUALIFY ROW_NUMBER() = 1). A caller that only resolves a subset of columns — a metrics-only
+  // poller tick bumping view_count, exactly the shape a TikTok metrics refresh sends — must not
+  // blank out columns it didn't touch. The D1 probe row's PRIOR title/summary/cover_image_url
+  // must carry forward into the R2 record instead of shipping as null.
+  it("merges the D1 probe row's unresolved title/summary/cover_image_url into the R2 record instead of nulling them (I2)", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    tenantDb.query.mockResolvedValue([{
+      id: "c1",
+      created_at: "2026-01-01T00:00:00.000Z",
+      title: "Prior Title",
+      summary: "Prior summary",
+      cover_image_url: "https://example.com/cover.png",
+      view_count: 100,
+    }]);
+    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
+
+    await service.upsertContentFromMetadata(
+      { id: "t1" }, { source_content_id: "t1", view_count: 101 }, "chan1", "X", false
+    );
+
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.title).toBe("Prior Title");
+    expect(record.summary).toBe("Prior summary");
+    expect(record.cover_image_url).toBe("https://example.com/cover.png");
+    expect(record.view_count).toBe(101);
+  });
+
   // R2 is a copy, D1 is the truth: a failed analytics send must not fail the caller and must not
   // undo anything. It logs and moves on — a deliberate, accepted downgrade.
   it("resolves normally and logs when the R2 send fails, leaving the D1 write intact", async () => {

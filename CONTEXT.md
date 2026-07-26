@@ -13,7 +13,7 @@ An entry inside `UserMetadata`/`ContentMetadata`/`EventMetadata` that resolves o
 _Avoid_: field mapping, prop rule.
 
 **isInsight**:
-A flag on a PropDefinition marking it as a dynamic column in the corresponding R2 Data Catalog (Iceberg) table — `uniscrm.user`, `uniscrm.content`, `uniscrm.event`. Free-text props (description, title, content_text) are deliberately never `isInsight`; they stay D1-only in `raw_data`/dedicated columns and never reach the analytics warehouse.
+A flag on a PropDefinition marking it as a dynamic column in the corresponding R2 Data Catalog (Iceberg) table — `uniscrm.user`, `uniscrm.content`, `uniscrm.event`. Free-text props (description, title, content_text, profile_image_url, cover_image_url) are deliberately never `isInsight`, but that does NOT mean they're D1-only: they went back to per-tenant D1 as the source of truth (2026-07-26 plan) and now ship as dedicated fixed columns on the R2 `user`/`content` copy too — see `USER_VALUE_COLUMNS` (`link/src/services/x-users.ts`) and `CONTENT_COLUMN_MAP`/`R2_CONTENT_VALUE_COLUMNS` (`link/src/services/content.ts`). `raw_data` only carries the remainder that has no dedicated column anywhere.
 _Avoid_: analytics prop, tracked field.
 
 **content_type**:

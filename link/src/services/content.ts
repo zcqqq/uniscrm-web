@@ -38,12 +38,6 @@ const CONTENT_COLUMN_MAP: Record<string, string> = {
   content_url: "source_url",
 };
 
-// The columns upsertContentFromMetadata probes off the existing D1 row to decide whether
-// anything actually changed. This replaces the entity_state fingerprint the R2-as-truth phase
-// used: D1 holds the previous values, so a plain column compare is both cheaper (no hashing)
-// and exact. created_at/updated_at are deliberately excluded, or every call would look "changed".
-const CONTENT_TABLE_COLUMNS = Object.values(CONTENT_COLUMN_MAP);
-
 // propIds from CONTENT_COLUMN_MAP's keys, plus source_content_id — every propId that actually
 // lands in a named column. Exported so a caller computing consumedPaths
 // (pollers/resolve-props.ts) before calling upsertContentFromMetadata can pass this as
@@ -75,6 +69,18 @@ const R2_CONTENT_VALUE_COLUMNS = [
   "bookmark_count", "impression_count", "view_count", "like_count",
   "quote_count", "reply_count", "repost_count", "share_count",
 ];
+
+// The D1-queryable subset of R2_CONTENT_VALUE_COLUMNS: every R2 value column except
+// impression_count, which (per CONTENT_READ_PROJECTION's comment above) has no D1 column at
+// all — no writer anywhere populates it. upsertContentFromMetadata's probe SELECTs this full
+// set — not just the columns THIS call's metadata mapping happens to resolve (dynamicCols,
+// below) — so a caller that only knows a subset of columns (a metrics-only poller tick, a
+// webhook carrying just name/username-shaped fields) can still merge the D1 row's OTHER values
+// (title, summary, cover_image_url, ...) into the R2 record it ships. Without this, a call that
+// legitimately changed only (say) view_count would rebuild the R2 copy from columnValues alone
+// and null out every column it didn't resolve — permanently, since the next tick sees D1
+// unchanged and never re-sends.
+const CONTENT_PROBE_COLUMNS = R2_CONTENT_VALUE_COLUMNS.filter((c) => c !== "impression_count");
 
 // Read projection that turns a D1 `content` row into the exact ContentRow shape the routes and
 // the frontend already consume. Two of ContentRow's fields are not D1 columns and are projected
@@ -356,11 +362,11 @@ export class ContentService {
     // semantics of the ON CONFLICT target chosen below.
     const existing = listId
       ? await db.query<Record<string, unknown> & { id: string; created_at: string }>(
-          `SELECT id, created_at, ${CONTENT_TABLE_COLUMNS.join(", ")} FROM content WHERE channel_id = ? AND source_content_id = ? AND list_id = ?`,
+          `SELECT id, created_at, ${CONTENT_PROBE_COLUMNS.join(", ")} FROM content WHERE channel_id = ? AND source_content_id = ? AND list_id = ?`,
           [channelId, sourceContentId, listId]
         )
       : await db.query<Record<string, unknown> & { id: string; created_at: string }>(
-          `SELECT id, created_at, ${CONTENT_TABLE_COLUMNS.join(", ")} FROM content WHERE channel_id = ? AND source_content_id = ? AND list_id IS NULL`,
+          `SELECT id, created_at, ${CONTENT_PROBE_COLUMNS.join(", ")} FROM content WHERE channel_id = ? AND source_content_id = ? AND list_id IS NULL`,
           [channelId, sourceContentId]
         );
     // The probe only PROPOSES an id: between it and the upsert another writer for the same
@@ -379,6 +385,16 @@ export class ContentService {
     // identical row to the R2 copy, which has no dedup on write (append-only Iceberg sink; see
     // docs/adr/0002-r2-data-catalog-dedup-via-periodic-compaction.md).
     const unchanged = !probeIsNew && dynamicCols.every((c) => String(columnValues[c]) === String(existing[0][c] ?? ""));
+
+    // The R2 copy must be the COMPLETE row (its read path takes one whole row per key via
+    // QUALIFY ROW_NUMBER() = 1, so a column omitted from a write is a column nulled out). This
+    // caller may only know a subset of CONTENT_PROBE_COLUMNS (a metrics-only poller tick, a
+    // webhook payload), so the merge source is the D1 probe row — the truth — with this call's
+    // columnValues layered on top. Mirrors x-users.ts's persistUser mergedValues (same pattern,
+    // same reason).
+    const mergedValues: Record<string, unknown> = {};
+    if (!probeIsNew) for (const col of CONTENT_PROBE_COLUMNS) mergedValues[col] = existing[0][col];
+    Object.assign(mergedValues, columnValues);
 
     let id = candidateId;
     let createdAt = candidateCreatedAt;
@@ -467,10 +483,11 @@ export class ContentService {
     }]);
 
     if (!unchanged) {
-      // 完整行:读路径用 QUALIFY 取整行最新,漏一列就等于把那列写成 null。
+      // 完整行:读路径用 QUALIFY 取整行最新,漏一列就等于把那列写成 null。mergedValues, not
+      // columnValues — see its comment above.
       const record = this.buildContentRecord(
         { id, channelId, channelType, sourceContentId, listId, rawData, createdAt, updatedAt: now },
-        columnValues
+        mergedValues
       );
       await this.sendContentRecord(record);
     }
@@ -524,7 +541,7 @@ export class ContentService {
        ON CONFLICT(channel_id, source_content_id) WHERE list_id IS NULL DO UPDATE SET
          content_type = excluded.content_type,
          content_text = excluded.content_text,
-         raw_data = excluded.raw_data,
+         raw_data = json_patch(content.raw_data, excluded.raw_data),
          updated_at = excluded.updated_at
        RETURNING id, created_at`,
       [candidateId, channelId, channelType, contentType, sourceContentId, contentText, rawData, candidateCreatedAt, now]

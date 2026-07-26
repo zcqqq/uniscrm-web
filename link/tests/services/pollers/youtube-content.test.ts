@@ -27,6 +27,7 @@ function baseCtx(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     accountChannelId: "chan-acc",
     subscriptionChannelId: "chan-sub",
+    tenantDb: null,
     entityState: createMockEntityState() as any,
     tenantId: 1,
     ai: { run: vi.fn().mockResolvedValue({ data: [[0.1, 0.2]] }) } as any,

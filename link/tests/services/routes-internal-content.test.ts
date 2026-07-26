@@ -3,23 +3,56 @@ import { describe, it, expect, vi } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
 
-// recordPublishedContent (content.ts) no longer writes via a per-tenant D1 REST-API detour
-// (TenantDataDB is gone) — it goes through EntityStateStore (a real D1 write against LINK_DB)
-// and PIPELINE_CONTENT.send (R2). mockWebDb is now inert (routes-internal.ts no longer reads
-// WEB_DB at all — the d1_database_id lookup this used to answer was deleted with
-// TenantDataDB) but is kept as a no-op stub since it's still passed at ~15 call sites below;
-// removing every occurrence isn't worth the churn since WEB_DB being present-but-unread is
-// harmless.
-function mockWebDb(_d1DatabaseId: string | null = null) {
+// Per-tenant D1 is the source of truth again (2026-07-26 plan, task 7: TenantDataDB is back).
+// routes-internal.ts reads tenants.d1_database_id off WEB_DB right after the tenant_not_set
+// guard, before any external call — a tenant without one gets `{ok:false,
+// reason:"tenant_db_not_provisioned"}`. Defaults to "provisioned" since nearly every test below
+// exercises something past that guard; the dedicated tests further down pass `null` to prove
+// the guard itself.
+function mockWebDb(d1DatabaseId: string | null = "tenant-db-1") {
   return {
     prepare: vi.fn().mockReturnValue({
-      bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(null) }),
+      bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(d1DatabaseId ? { d1_database_id: d1DatabaseId } : null) }),
     }),
   };
 }
 
 function mockPipelineContent() {
   return { send: vi.fn().mockResolvedValue(undefined) };
+}
+
+// ContentService's tenantDb (TenantDataDB, shared/tenant-data-db.ts) talks to the real
+// Cloudflare D1 REST API via fetch() — recordPublishedContent's probe SELECT + `INSERT ...
+// RETURNING` upsert now issue two of these per call. Every test below stubs global fetch for
+// its OWN business calls (X/TikTok/content-worker), so this wraps that stub: any request to the
+// CF D1 REST endpoint is answered by a tiny in-memory fake (insert echoes back the bound
+// id/created_at, mirroring content.test.ts's createMockTenantDb) and is NEVER forwarded to (or
+// counted against) the caller's own fetchMock — every existing call-count/call-order assertion
+// on `fetchMock` stays about the X/TikTok/content calls only.
+const D1_API_RE = /^https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\//;
+function withFakeD1(businessFetch: (...args: unknown[]) => unknown) {
+  return vi.fn(async (input: unknown, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : (input as Request).url ?? String(input);
+    if (D1_API_RE.test(url)) {
+      const body = JSON.parse((init?.body as string) || "{}") as { sql: string; params?: unknown[] };
+      const { sql, params = [] } = body;
+      let results: Record<string, unknown>[] = [];
+      if (/^\s*INSERT/i.test(sql)) {
+        const cols = sql.slice(sql.indexOf("(") + 1, sql.indexOf(")")).split(",").map((c) => c.trim());
+        const row: Record<string, unknown> = {};
+        cols.forEach((c, i) => { row[c] = params[i]; });
+        results = [{ id: row.id, created_at: row.created_at }];
+      }
+      // SELECT probes always report "no existing row" (every write is treated as new) — these
+      // are integration tests of the ROUTE, not of D1 row-identity edge cases (already covered
+      // by content.test.ts).
+      return new Response(
+        JSON.stringify({ success: true, result: [{ results, success: true, meta: { changes: results.length } }] }),
+        { status: 200 }
+      );
+    }
+    return (businessFetch as (...a: unknown[]) => unknown)(input, init);
+  });
 }
 
 // The handler and XTokenService.getValidToken both `SELECT ... FROM channels WHERE id = ?`
@@ -51,7 +84,7 @@ describe("stub content-flow action endpoints", () => {
     };
 
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { retweeted: true } }), { status: 200 })); // X /2/users/:id/repost
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/x/repost", {
@@ -79,7 +112,7 @@ describe("stub content-flow action endpoints", () => {
     };
 
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ title: "Too Many Requests" }), { status: 429 }));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/x/repost", {
@@ -101,7 +134,7 @@ describe("stub content-flow action endpoints", () => {
   it("returns ok:false without calling X when the channel has no X user id", async () => {
     const channelRow = { config: JSON.stringify({ access_token: "tok" }), channel_type: "X", tenant_id: 1 };
     const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/x/repost", {
@@ -126,7 +159,7 @@ describe("stub content-flow action endpoints", () => {
     };
 
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { bookmarked: true } }), { status: 200 })); // X /2/users/:id/bookmarks
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/x/bookmark", {
@@ -153,7 +186,7 @@ describe("stub content-flow action endpoints", () => {
     };
 
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ title: "Too Many Requests" }), { status: 429 }));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/x/bookmark", {
@@ -175,7 +208,7 @@ describe("stub content-flow action endpoints", () => {
   it("returns ok:false without calling X when the channel has no X user id (bookmark)", async () => {
     const channelRow = { config: JSON.stringify({ access_token: "tok" }), channel_type: "X", tenant_id: 1 };
     const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/x/bookmark", {
@@ -200,7 +233,7 @@ describe("stub content-flow action endpoints", () => {
     };
 
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { liked: true } }), { status: 200 })); // X /2/users/:id/likes
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/x/like", {
@@ -227,7 +260,7 @@ describe("stub content-flow action endpoints", () => {
     };
 
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ title: "Too Many Requests" }), { status: 429 }));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/x/like", {
@@ -249,7 +282,7 @@ describe("stub content-flow action endpoints", () => {
   it("returns ok:false without calling X when the channel has no X user id (like)", async () => {
     const channelRow = { config: JSON.stringify({ access_token: "tok" }), channel_type: "X", tenant_id: 1 };
     const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/x/like", {
@@ -277,7 +310,7 @@ describe("stub content-flow action endpoints", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ text: "generated post text" }), { status: 200 })) // content /internal/generate
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: { id: "tweet-999", text: "generated post text" } }), { status: 201 })); // X /2/tweets
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
@@ -308,6 +341,33 @@ describe("stub content-flow action endpoints", () => {
     vi.unstubAllGlobals();
   });
 
+  it("POST /internal/content/create-post returns tenant_db_not_provisioned (200, not 500) and never posts to X when the tenant has no provisioned D1 database", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }),
+      channel_type: "X",
+      tenant_id: 1,
+    };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "raw prompt text", provider: "default", channelId: "tgt-chan", flowId: "flow-1" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb(null) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false, reason: "tenant_db_not_provisioned" });
+    // Guarded before the X post (and before content's /internal/generate) even goes out —
+    // wasting either on a tenant that can't record the result would be exactly last round's
+    // I1 lesson.
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   // NOTE: The brief's original version of this test wrote directly to `env.LINK_DB`/relied on
   // real `env.WEB_DB` (via `cloudflare:test`). Empirically, this repo's link/vitest.config.ts
   // passes `configPath`/`environment` as flat WorkersPoolOptions keys instead of nesting them
@@ -327,7 +387,7 @@ describe("stub content-flow action endpoints", () => {
     };
 
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { id: "tweet-none-1", text: "plain text post" } }), { status: 201 }));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
@@ -368,7 +428,7 @@ describe("stub content-flow action endpoints", () => {
       if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-vid-1", text: "caption text" } }), { status: 201 });
       throw new Error(`Unexpected fetch: ${u}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
@@ -414,7 +474,7 @@ describe("stub content-flow action endpoints", () => {
       }
       throw new Error(`Unexpected fetch: ${u}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
@@ -457,7 +517,7 @@ describe("stub content-flow action endpoints", () => {
       }
       throw new Error(`Unexpected fetch: ${u}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
@@ -503,7 +563,7 @@ describe("stub content-flow action endpoints", () => {
       if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-chunk-1", text: "caption text" } }), { status: 201 });
       throw new Error(`Unexpected fetch: ${u}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
@@ -579,7 +639,7 @@ describe("stub content-flow action endpoints", () => {
       }
       throw new Error(`Unexpected fetch: ${u}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
@@ -624,7 +684,7 @@ describe("stub content-flow action endpoints", () => {
       }
       throw new Error(`Unexpected fetch to X: ${u}`);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
@@ -657,7 +717,7 @@ describe("stub content-flow action endpoints", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ text: "generated post text" }), { status: 200 })) // content /internal/generate
       .mockResolvedValueOnce(new Response(JSON.stringify({ title: "Too Many Requests" }), { status: 429 })); // X /2/tweets rate-limited
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
@@ -686,7 +746,7 @@ describe("stub content-flow action endpoints", () => {
     const pipelineContent = mockPipelineContent();
 
     const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
@@ -720,7 +780,7 @@ describe("stub content-flow action endpoints", () => {
     const pipelineContent = mockPipelineContent();
 
     const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
@@ -749,7 +809,7 @@ describe("stub content-flow action endpoints", () => {
     const pipelineContent = mockPipelineContent();
 
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response("generation error", { status: 502 }));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
     const res = await worker.fetch(
       new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
@@ -820,7 +880,7 @@ describe("stub content-flow action endpoints", () => {
         if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-status-1", text: "caption text" } }), { status: 201 });
         throw new Error(`Unexpected fetch: ${u}`);
       });
-      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
       const res = await worker.fetch(
         new Request("https://link-dev.uni-scrm.com/internal/content/x-video-status", {
@@ -885,7 +945,7 @@ describe("stub content-flow action endpoints", () => {
         if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ title: "Too Many Requests" }), { status: 429 });
         throw new Error(`Unexpected fetch: ${u}`);
       });
-      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("fetch", withFakeD1(fetchMock));
 
       const res = await worker.fetch(
         new Request("https://link-dev.uni-scrm.com/internal/content/x-video-status", {

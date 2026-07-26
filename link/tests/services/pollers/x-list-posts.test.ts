@@ -51,7 +51,7 @@ describe("runListPostsPoller", () => {
   function baseCtx(linkDb: any, entityState: any, overrides: Partial<Record<string, unknown>> = {}) {
     return {
       channelId: "chan1", listId: "listA", accessToken: "tok",
-      linkDb: linkDb as any, entityState: entityState as any, tenantId: 1,
+      linkDb: linkDb as any, tenantDb: null, entityState: entityState as any, tenantId: 1,
       ai: createMockAi() as any, vectorize: createMockVectorize() as any,
       deadline: Date.now() + 20_000,
       ...overrides,

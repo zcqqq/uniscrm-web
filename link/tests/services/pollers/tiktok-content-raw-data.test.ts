@@ -26,12 +26,19 @@ function createFakeLinkDb(pollState: Record<string, unknown> | null) {
   };
 }
 
-function createRealishEntityState() {
+// ContentService's D1 truth (2026-07-26 plan) — the probe SELECT returns "no existing row" so
+// every item in this test is a plain insert, and the RETURNING upsert echoes back the bound
+// id/created_at (mirrors content.test.ts's createMockTenantDb).
+function createRealishTenantDb() {
   return {
-    claim: vi.fn().mockResolvedValue({ entityId: "tt-uuid-1", isNew: true, unchanged: false }),
-    get: vi.fn().mockResolvedValue(null),
-    markSeen: vi.fn().mockResolvedValue(true),
-    setFollow: vi.fn().mockResolvedValue(undefined),
+    query: vi.fn(async (sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> => {
+      if (!/^\s*INSERT/i.test(sql)) return [];
+      const cols = sql.slice(sql.indexOf("(") + 1, sql.indexOf(")")).split(",").map((c) => c.trim());
+      return [{ id: params[cols.indexOf("id")], created_at: params[cols.indexOf("created_at")] }];
+    }),
+    run: vi.fn().mockResolvedValue({ changes: 1 }),
+    batch: vi.fn(),
+    getDbId: vi.fn().mockReturnValue("db-1"),
   };
 }
 
@@ -67,7 +74,7 @@ describe("runTikTokContentPoller — real ContentService, raw_data stripping (ta
       channelId: "chan-1",
       accessToken: "tok",
       linkDb: linkDb as any,
-      entityState: createRealishEntityState() as any,
+      tenantDb: createRealishTenantDb() as any,
       tenantId: 1,
       ai: { run: vi.fn().mockResolvedValue({ data: [[0.1, 0.2]] }) } as any,
       vectorize: { upsert: vi.fn().mockResolvedValue(undefined), deleteByIds: vi.fn() } as any,

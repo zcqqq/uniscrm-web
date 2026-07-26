@@ -39,6 +39,14 @@ describe("youtubeWebhookRoutes", () => {
     expect(res.status).toBe(400);
   });
 
+  function mockWebDb(d1DatabaseId: string | null) {
+    return {
+      prepare: vi.fn().mockReturnValue({
+        bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(d1DatabaseId ? { d1_database_id: d1DatabaseId } : null) }),
+      }),
+    };
+  }
+
   it("POST /websub/:accountChannelId/:youtubeChannelId extracts videoIds and ingests each one", async () => {
     const linkDb = {
       prepare: vi.fn().mockReturnValue({
@@ -49,10 +57,10 @@ describe("youtubeWebhookRoutes", () => {
     };
     const ingestSpy = vi.spyOn(youtubeContent, "ingestYouTubeVideo").mockResolvedValue(undefined);
 
-    // EntityStateStore is constructed directly from LINK_DB + tenantId now — no more
-    // per-tenant WEB_DB/d1_database_id lookup (TenantDataDB removed).
+    // Per-tenant D1 — the source of truth (2026-07-26 plan). Resolved once per WebSub delivery
+    // off WEB_DB, before any video is fetched (guard-before-external-call).
     const { app, env } = buildApp({
-      LINK_DB: linkDb, CF_ACCOUNT_ID: "acc",
+      LINK_DB: linkDb, WEB_DB: mockWebDb("tenant-db-1"), CF_ACCOUNT_ID: "acc", CF_D1_API_TOKEN: "tok",
       AI: {}, VECTORIZE: {}, YOUTUBE_API_KEY: "key",
     });
 
@@ -63,6 +71,9 @@ describe("youtubeWebhookRoutes", () => {
     expect(ingestSpy).toHaveBeenCalledTimes(1);
     expect(ingestSpy.mock.calls[0][1]).toBe("vid1");
     expect(ingestSpy.mock.calls[0][0]).toMatchObject({ accountChannelId: "acct1", subscriptionChannelId: "UCabc", tenantId: 1 });
+    // tenantDb is threaded through too, even though this ingest path doesn't need it for its
+    // own D1 calls (trigger-only — see youtube-content.ts's comment).
+    expect(ingestSpy.mock.calls[0][0].tenantDb).not.toBeNull();
   });
 
   it("POST /websub/:accountChannelId/:youtubeChannelId is a no-op when there's no matching lease", async () => {
@@ -72,6 +83,22 @@ describe("youtubeWebhookRoutes", () => {
 
     const atomBody = `<entry><yt:videoId>vid1</yt:videoId></entry>`;
     const res = await app.request("/youtube/websub/unknown-acct/UCabc", { method: "POST", body: atomBody }, env);
+
+    expect(res.status).toBe(200);
+    expect(ingestSpy).not.toHaveBeenCalled();
+  });
+
+  it("POST /websub/:accountChannelId/:youtubeChannelId skips ingestion (no external fetch) when the tenant has no provisioned D1 database", async () => {
+    const linkDb = {
+      prepare: vi.fn().mockReturnValue({
+        bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({ tenant_id: 1 }) }),
+      }),
+    };
+    const ingestSpy = vi.spyOn(youtubeContent, "ingestYouTubeVideo").mockResolvedValue(undefined);
+    const { app, env } = buildApp({ LINK_DB: linkDb, WEB_DB: mockWebDb(null) });
+
+    const atomBody = `<entry><yt:videoId>vid1</yt:videoId></entry>`;
+    const res = await app.request("/youtube/websub/acct1/UCabc", { method: "POST", body: atomBody }, env);
 
     expect(res.status).toBe(200);
     expect(ingestSpy).not.toHaveBeenCalled();

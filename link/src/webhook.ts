@@ -2,8 +2,9 @@ import { Hono } from "hono";
 import type { Env } from "./types";
 import { XWebhookService } from "./services/x-webhook";
 import { XUsersService, EVENT_VALUE_COLUMNS, type XUserData } from "./services/x-users";
-import { EntityStateStore, type EntityStateKey } from "./services/entity-state";
+import { EntityStateStore } from "./services/entity-state";
 import { ContentService, CONTENT_MAPPED_PROP_IDS } from "./services/content";
+import { TenantDataDB } from "../../shared/tenant-data-db";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { EventMetadata_X } from "../../metadata/x";
 import { ContentMetadata_X } from "../../metadata/x-byok";
@@ -101,16 +102,26 @@ function resolveLinkPrefix(payload: Record<string, unknown>, linkPrefix: string)
 interface ChannelInfo {
   channelId: string;
   tenantId: number | null;
+  d1DatabaseId: string | null;
 }
 
-async function findChannelByXUserId(linkDb: D1Database, xUserId: string): Promise<ChannelInfo | null> {
+async function findChannelByXUserId(linkDb: D1Database, mainDb: D1Database, xUserId: string): Promise<ChannelInfo | null> {
   const channel = await linkDb
     .prepare("SELECT id, tenant_id FROM channels WHERE channel_type IN ('TWITTER', 'X') AND source_channel_id = ? AND is_active = 1")
     .bind(xUserId)
     .first<{ id: string; tenant_id: number | null }>();
   if (!channel) return null;
 
-  return { channelId: channel.id, tenantId: channel.tenant_id };
+  let d1DatabaseId: string | null = null;
+  if (channel.tenant_id) {
+    const tenant = await mainDb
+      .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+      .bind(channel.tenant_id)
+      .first<{ d1_database_id: string | null }>();
+    d1DatabaseId = tenant?.d1_database_id || null;
+  }
+
+  return { channelId: channel.id, tenantId: channel.tenant_id, d1DatabaseId };
 }
 
 async function handleXActivityEventByChannel(body: Record<string, unknown>, env: Env, channelId: string): Promise<void> {
@@ -130,6 +141,18 @@ async function handleXActivityEventByChannel(body: Record<string, unknown>, env:
     return;
   }
 
+  // Per-tenant D1 — the source of truth (2026-07-26 plan). Skip before any write/side effect
+  // (this webhook makes no outbound API calls of its own, but does write D1/R2/flow queue) if
+  // the tenant has no provisioned database — dev has several e2e test tenants in this state.
+  const tenant = await env.WEB_DB
+    .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+    .bind(channel.tenant_id)
+    .first<{ d1_database_id: string | null }>();
+  if (!tenant?.d1_database_id) {
+    console.log(JSON.stringify({ event: "xaa_byok_no_tenant_db", channelId }));
+    return;
+  }
+
   const data = (body["data"] || body) as {
     event_type?: string;
     filter?: { user_id?: string };
@@ -141,15 +164,17 @@ async function handleXActivityEventByChannel(body: Record<string, unknown>, env:
 
   if (!eventType) return;
 
+  const tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenant.d1_database_id);
   const entityState = new EntityStateStore(env.LINK_DB, channel.tenant_id);
-  const usersService = new XUsersService(entityState, {
+  const usersService = new XUsersService(tenantDb, {
     pipelineEvent: env.PIPELINE_EVENT,
     pipelineUser: env.PIPELINE_USER,
     tenantId: channel.tenant_id,
-  }, env);
+    entityState,
+  });
 
   // Reuse the same event processing logic
-  const fakeChannelInfo: ChannelInfo = { channelId, tenantId: channel.tenant_id };
+  const fakeChannelInfo: ChannelInfo = { channelId, tenantId: channel.tenant_id, d1DatabaseId: tenant.d1_database_id };
   await processXEvent(eventType, filterUserId || "", payload, fakeChannelInfo, usersService, env);
 }
 
@@ -324,27 +349,36 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
     return;
   }
 
-  const channelInfo = await findChannelByXUserId(env.LINK_DB, filterUserId);
+  const channelInfo = await findChannelByXUserId(env.LINK_DB, env.WEB_DB, filterUserId);
   if (!channelInfo) {
     console.log(JSON.stringify({ event: "xaa_webhook_no_channel", filterUserId }));
     return;
   }
-  const { channelId, tenantId } = channelInfo;
+  const { channelId, tenantId, d1DatabaseId } = channelInfo;
 
   if (!tenantId) {
     console.log(JSON.stringify({ event: "xaa_webhook_no_tenant", filterUserId }));
     return;
   }
 
+  // Per-tenant D1 — the source of truth (2026-07-26 plan). Skip before any write/side effect
+  // if the tenant has no provisioned database — dev has several e2e test tenants in this state.
+  if (!d1DatabaseId) {
+    console.log(JSON.stringify({ event: "xaa_webhook_no_tenant_db", filterUserId, tenantId }));
+    return;
+  }
+
+  const tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, d1DatabaseId);
   const entityState = new EntityStateStore(env.LINK_DB, tenantId);
-  const usersService = new XUsersService(entityState, {
+  const usersService = new XUsersService(tenantDb, {
     pipelineEvent: env.PIPELINE_EVENT,
     pipelineUser: env.PIPELINE_USER,
     tenantId,
-  }, env);
+    entityState,
+  });
 
-  // Handle content events (post.create/delete) — these write the `content` entity directly
-  // via entity_state + R2, mirroring x-posts.ts's poller (same own:get-posts metadata).
+  // Handle content events (post.create/delete) — own posts, same own:get-posts metadata entry
+  // x-posts.ts's poller uses (flowType "content" — see the spec's flowType table).
   if (eventType === "post.create") {
     const tweetId = payload.id as string;
     if (tweetId) {
@@ -352,42 +386,38 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
       if (payload.article) props.content_type = "ARTICLE";
       props.content_url = `https://x.com/i/status/${tweetId}`;
       const paths = consumedPaths(POSTS_METADATA.contentProps, POSTS_METADATA.linkPrefix, CONTENT_MAPPED_PROP_IDS);
-      const contentService = new ContentService(entityState, env.VECTORIZE, env.AI, tenantId, env.PIPELINE_CONTENT, undefined, env);
-      await contentService.upsertContentFromMetadata(payload, props, channelId, "X", false, undefined, paths);
+      const contentService = new ContentService(tenantDb, env.VECTORIZE, env.AI, tenantId, env.PIPELINE_CONTENT);
+      // flowType comes from the own:get-posts metadata entry itself, never a literal.
+      await contentService.upsertContentFromMetadata(payload, props, channelId, "X", false, undefined, paths, POSTS_METADATA.flowType);
     }
   }
 
   if (eventType === "post.delete") {
     const tweetId = payload.id as string || payload.tweet_id as string;
     if (tweetId) {
-      const key: EntityStateKey = { entity: "content", channelId, secondaryId: "", sourceId: tweetId };
-      const existing = await entityState.get(key);
-      if (existing) {
-        const contentService = new ContentService(entityState, env.VECTORIZE, env.AI, tenantId, env.PIPELINE_CONTENT, undefined, env);
-        try {
-          await contentService.delete(existing.entity_id);
-        } catch (e) {
-          // R2's Pipelines batch flush can lag minutes behind entity_state's synchronous
-          // write — a delete arriving inside that window finds entity_state confirms the row
-          // exists but delete()'s getContent() finds nothing yet to read, so it throws. Falling
-          // back to a blind tombstone (built from what this handler already knows) keeps the
-          // delete durable instead of losing it or taking the whole webhook delivery down (an
-          // uncaught throw here would 500 the route, and X retries the same delivery
-          // indefinitely — see the try/catch around handleXActivityEvent in webhookRoutes()).
-          //
-          // This catch is deliberately broad (any throw from delete(), not just "not found" /
-          // R2-lag) — a transient R2 SQL error (network blip, rate limit) falls into the same
-          // fallback and synthesizes a blind tombstone rather than being retried. Accepted
-          // trade-off, not an oversight (task-7 fix round 2): the row is being deleted either
-          // way, so a blind tombstone in place of a real-data one is low-impact, and there is no
-          // retry path here to fall back to — X only delivers this webhook once per event. Do
-          // NOT narrow this to a specific error type without adding a retry mechanism first, or
-          // a transient failure would silently drop the delete entirely (Important 2's exact bug).
-          console.error(JSON.stringify({ event: "xaa_post_delete_r2_not_ready", channelId, tweetId, error: String(e) }));
-          await contentService.deleteByKnownIdentity(existing.entity_id, channelId, "X", tweetId);
+      const contentService = new ContentService(tenantDb, env.VECTORIZE, env.AI, tenantId, env.PIPELINE_CONTENT);
+      // D1 is the truth now: look the row up directly by its business key (mirrors the
+      // partial unique index own posts use — channel_id + source_content_id, list_id NULL)
+      // instead of asking entity_state, which no longer tracks content identity at all
+      // (task 5). Never let a throw here 500 the webhook — X retries the same delivery
+      // indefinitely on a non-2xx response, and a delete is not worth an infinite retry loop.
+      try {
+        const rows = await tenantDb.query<{ id: string }>(
+          "SELECT id FROM content WHERE channel_id = ? AND channel_type = 'X' AND source_content_id = ? AND list_id IS NULL",
+          [channelId, tweetId]
+        );
+        if (rows.length > 0) {
+          await contentService.delete(rows[0].id);
+        } else {
+          // Not in D1 — a historical R2-as-truth-era row, or a race with the write that
+          // created it. deleteByKnownIdentity is kept for exactly this: it writes a tombstone
+          // straight from what this handler already knows, no D1 row required.
+          console.log(JSON.stringify({ event: "xaa_post_delete_not_found_in_d1", channelId, tweetId }));
+          await contentService.deleteByKnownIdentity(crypto.randomUUID(), channelId, "X", tweetId);
         }
-      } else {
-        console.log(JSON.stringify({ event: "xaa_post_delete_not_recorded", channelId, tweetId }));
+      } catch (e) {
+        console.error(JSON.stringify({ event: "xaa_post_delete_error", channelId, tweetId, error: String(e) }));
+        await contentService.deleteByKnownIdentity(crypto.randomUUID(), channelId, "X", tweetId);
       }
     }
   }

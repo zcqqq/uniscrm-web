@@ -9,9 +9,24 @@ import { runPostsPoller } from "./x-posts";
 import { runTikTokContentPoller } from "./tiktok-content";
 import { runListPostsPoller } from "./x-list-posts";
 import { EntityStateStore } from "../entity-state";
+import { TenantDataDB } from "../../../../shared/tenant-data-db";
 
 const PER_CHANNEL_BUDGET_MS = 20_000;
 const REPOLL_INTERVAL_MS = 55 * 60 * 1000;
+
+// Per-tenant D1 — the source of truth (2026-07-26 plan: user/content back to per-tenant D1).
+// Returns null when the tenant has no provisioned database yet (dev has several e2e test
+// tenants in this state) — every caller below must skip BEFORE any external API call once it
+// sees null, not just before the D1 write (last round's I1 lesson: burning an X/TikTok token
+// refresh for a tenant that can't persist the result anyway).
+async function resolveTenantDb(env: Env, tenantId: number): Promise<TenantDataDB | null> {
+  const tenant = await env.WEB_DB
+    .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+    .bind(tenantId)
+    .first<{ d1_database_id: string | null }>();
+  if (!tenant?.d1_database_id) return null;
+  return new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenant.d1_database_id);
+}
 
 async function shouldPoll(env: Env, channelId: string, pollerName: string): Promise<boolean> {
   const state = await env.LINK_DB
@@ -55,6 +70,15 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
   const pollPosts = await shouldPoll(env, row.id, "posts");
   if (!pollFollowers && !pollPosts) return;
 
+  // Guard before any external (X) API call, including the token refresh below — a tenant
+  // with no provisioned D1 can't persist anything this poll would fetch, so there is no
+  // reason to spend the token refresh or the fetch budget on it (last round's I1 lesson).
+  const tenantDb = await resolveTenantDb(env, row.tenant_id!);
+  if (!tenantDb) {
+    console.log(JSON.stringify({ event: "poll_skipped_no_tenant_db", channel_id: row.id, tenant_id: row.tenant_id }));
+    return;
+  }
+
   let accessToken: string;
   let tokenService: XTokenService;
   try {
@@ -73,7 +97,7 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
       try {
         await runFollowersPoller({
           channelId: row.id, xUserId: config.x_user_id, accessToken,
-          linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id!, r2Env: env,
+          linkDb: env.LINK_DB, tenantDb, entityState, tenantId: row.tenant_id!,
           pipelineUser: env.PIPELINE_USER, deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
         });
       } catch (e) {
@@ -81,7 +105,7 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
         accessToken = await tokenService.refreshAccessToken(row.id);
         await runFollowersPoller({
           channelId: row.id, xUserId: config.x_user_id, accessToken,
-          linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id!, r2Env: env,
+          linkDb: env.LINK_DB, tenantDb, entityState, tenantId: row.tenant_id!,
           pipelineUser: env.PIPELINE_USER, deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
         });
       }
@@ -95,7 +119,7 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
       try {
         await runPostsPoller({
           channelId: row.id, xUserId: config.x_user_id, accessToken,
-          linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id!, r2Env: env,
+          linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id!,
           ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
           deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
         });
@@ -104,7 +128,7 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
         accessToken = await tokenService.refreshAccessToken(row.id);
         await runPostsPoller({
           channelId: row.id, xUserId: config.x_user_id, accessToken,
-          linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id!, r2Env: env,
+          linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id!,
           ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
           deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
         });
@@ -121,6 +145,14 @@ async function pollTikTokChannel(env: Env, row: { id: string; config: string; te
   const pollContent = await shouldPoll(env, row.id, "content");
   if (!pollContent) return;
 
+  // Guard before any external (TikTok) API call, including the token refresh below — see
+  // pollXChannel's identical guard above for the I1 lesson this restores.
+  const tenantDb = await resolveTenantDb(env, row.tenant_id);
+  if (!tenantDb) {
+    console.log(JSON.stringify({ event: "poll_skipped_no_tenant_db", channel_id: row.id, tenant_id: row.tenant_id }));
+    return;
+  }
+
   let accessToken: string;
   const tokenService = new TikTokTokenService(env.LINK_DB, env.TIKTOK_CLIENT_KEY, env.TIKTOK_CLIENT_SECRET);
   try {
@@ -130,12 +162,10 @@ async function pollTikTokChannel(env: Env, row: { id: string; config: string; te
     return;
   }
 
-  const entityState = new EntityStateStore(env.LINK_DB, row.tenant_id);
-
   try {
     try {
       await runTikTokContentPoller({
-        channelId: row.id, accessToken, linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id, r2Env: env,
+        channelId: row.id, accessToken, linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id,
         ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
         deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
       });
@@ -143,7 +173,7 @@ async function pollTikTokChannel(env: Env, row: { id: string; config: string; te
       if (!(e instanceof TikTokUnauthorizedError)) throw e;
       accessToken = await tokenService.refreshAccessToken(row.id);
       await runTikTokContentPoller({
-        channelId: row.id, accessToken, linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id, r2Env: env,
+        channelId: row.id, accessToken, linkDb: env.LINK_DB, tenantDb, tenantId: row.tenant_id,
         ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
         deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
       });
@@ -177,6 +207,18 @@ export async function pollXListPosts(env: Env, channelId: string, listId: string
 
   if (!(await shouldPoll(env, channelId, pollerName))) return;
 
+  // Guard before any external (X) API call, including the token refresh below — see
+  // pollXChannel's identical guard above. x-list-posts.ts's poller is trigger-only (dedup via
+  // entity_state, never a D1 content write — flowType:"trigger" in ContentMetadata_X), so
+  // tenantDb itself is unused downstream; resolving and gating on it anyway keeps one
+  // consistent "is this tenant provisioned" checkpoint across every X ingest path rather than
+  // a special case for this one.
+  const tenantDb = await resolveTenantDb(env, row.tenant_id!);
+  if (!tenantDb) {
+    console.log(JSON.stringify({ event: "list_posts_poll_skipped_no_tenant_db", channel_id: channelId, list_id: listId, tenant_id: row.tenant_id }));
+    return;
+  }
+
   let accessToken: string;
   let tokenService: XTokenService;
   try {
@@ -194,7 +236,7 @@ export async function pollXListPosts(env: Env, channelId: string, listId: string
     try {
       await runListPostsPoller({
         channelId, listId, accessToken,
-        linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id!, r2Env: env,
+        linkDb: env.LINK_DB, tenantDb, entityState, tenantId: row.tenant_id!,
         ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
         deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
       });
@@ -203,7 +245,7 @@ export async function pollXListPosts(env: Env, channelId: string, listId: string
       accessToken = await tokenService.refreshAccessToken(channelId);
       await runListPostsPoller({
         channelId, listId, accessToken,
-        linkDb: env.LINK_DB, entityState, tenantId: row.tenant_id!, r2Env: env,
+        linkDb: env.LINK_DB, tenantDb, entityState, tenantId: row.tenant_id!,
         ai: env.AI, vectorize: env.VECTORIZE, pipelineContent: env.PIPELINE_CONTENT, flowQueue: env.FLOW_QUEUE,
         deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
       });

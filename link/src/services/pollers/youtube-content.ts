@@ -1,17 +1,25 @@
 import type { Pipeline } from "../../types";
-import type { R2SqlEnv } from "../../../../shared/r2-sql";
-import { EntityStateStore } from "../entity-state";
+import type { TenantDataDB } from "../../../../shared/tenant-data-db";
+import type { EntityStateStore } from "../entity-state";
 import { ContentService } from "../content";
 import { fetchVideoDetails, parseISO8601Duration } from "../youtube-api";
 import { resolveProps } from "./resolve-props";
 import { ContentMetadata_YouTube } from "../../../../metadata/youtube";
 import { passesPropsFilter } from "../../../../metadata/props-filter";
 
+// watch:get-videos is flowType:"trigger" in ContentMetadata_YouTube (spec's flowType table) —
+// this ingest path only ever calls recordTriggerContentSeen + emitContentTriggerEvent below,
+// never upsertContentFromMetadata, so a subscribed video is never persisted into `content`.
 const YOUTUBE_METADATA = ContentMetadata_YouTube.find((m) => m.sourceContentType === "watch:get-videos")!;
 
 export interface YouTubeIngestContext {
   accountChannelId: string;
   subscriptionChannelId: string;
+  // Per-tenant D1 — webhook-youtube.ts resolves this once per WebSub delivery before any
+  // video is ingested, but this path's own D1 calls (recordTriggerContentSeen/
+  // emitContentTriggerEvent) don't need it, only entityState below — see the flowType comment
+  // above.
+  tenantDb: TenantDataDB | null;
   entityState: EntityStateStore;
   tenantId: number;
   ai: Ai;
@@ -19,7 +27,6 @@ export interface YouTubeIngestContext {
   apiKey: string;
   pipelineContent?: Pipeline;
   flowQueue?: Queue;
-  r2Env?: R2SqlEnv;
 }
 
 export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: string): Promise<void> {
@@ -43,7 +50,7 @@ export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: str
     props.duration = parsedDuration;
   }
 
-  const contentService = new ContentService(ctx.entityState, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue, ctx.r2Env);
+  const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue, ctx.entityState);
   const sourceContentId = String(props.source_content_id ?? "");
   const isNew = await contentService.recordTriggerContentSeen(ctx.accountChannelId, ctx.subscriptionChannelId, sourceContentId);
   if (isNew) {

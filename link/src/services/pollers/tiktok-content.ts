@@ -1,6 +1,5 @@
 import type { Pipeline } from "../../types";
-import type { R2SqlEnv } from "../../../../shared/r2-sql";
-import { EntityStateStore } from "../entity-state";
+import type { TenantDataDB } from "../../../../shared/tenant-data-db";
 import { ContentService, CONTENT_MAPPED_PROP_IDS } from "../content";
 import { fetchVideoListPage } from "../tiktok-content-api";
 import { resolveProps, consumedPaths } from "./resolve-props";
@@ -12,13 +11,16 @@ export interface TikTokContentPollerContext {
   channelId: string;
   accessToken: string;
   linkDb: D1Database;
-  entityState: EntityStateStore;
+  // Per-tenant D1 — the source of truth (2026-07-26 plan). poll-channel.ts resolves this once
+  // per channel and skips the whole poll before it ever gets here when the tenant has no
+  // provisioned database. No entityState field (see x-posts.ts's identical note): the D1
+  // column-compare inside upsertContentFromMetadata replaced the entity_state fingerprint here.
+  tenantDb: TenantDataDB;
   tenantId: number;
   ai: Ai;
   vectorize: VectorizeIndex;
   pipelineContent?: Pipeline;
   flowQueue?: Queue;
-  r2Env?: R2SqlEnv;
   deadline: number;
 }
 
@@ -39,7 +41,7 @@ export async function runTikTokContentPoller(ctx: TikTokContentPollerContext): P
     return;
   }
 
-  const contentService = new ContentService(ctx.entityState, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue, ctx.r2Env);
+  const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue);
   const phase = state.backfill_complete ? "incremental" : "backfill";
   console.log(JSON.stringify({ event: "tiktok_content_poll_started", channel_id: ctx.channelId, phase, cursor: state.cursor }));
 
@@ -72,7 +74,9 @@ async function upsertPage(
     // content_url maps to the R2 `source_url` column (CONTENT_COLUMN_MAP in
     // services/content.ts), so it's excluded from raw_data like every other mapped prop.
     const paths = consumedPaths(VIDEO_METADATA.contentProps, VIDEO_METADATA.linkPrefix, CONTENT_MAPPED_PROP_IDS);
-    const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "TIKTOK", emitFlowEvent, undefined, paths);
+    // flowType comes from the metadata entry itself (spec's flowType table: video.list is
+    // "content"), never a literal — see content.ts's upsertContentFromMetadata gate.
+    const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "TIKTOK", emitFlowEvent, undefined, paths, VIDEO_METADATA.flowType);
     if (isNew) newCount++;
   }
   return newCount;

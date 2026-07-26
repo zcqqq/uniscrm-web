@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
-import type { EntityStateStore } from "./services/entity-state";
+import type { TenantDataDB } from "../../shared/tenant-data-db";
 import { ContentService } from "./services/content";
 import { NotionChannel } from "./channels/notion";
 import { TikTokChannel } from "./channels/tiktok";
@@ -214,8 +214,11 @@ export function channelsRoutes() {
 
   // --- TikTok ---
   router.post("/tiktok/sync", async (c) => {
-    const entityState = c.get("entityState" as never) as EntityStateStore;
     const tenantId = c.get("tenantId" as never) as number;
+    // Per-tenant D1 — the source of truth (2026-07-26 plan). authMiddleware only sets this when
+    // tenants.d1_database_id is provisioned — absence means "not provisioned", not an error.
+    const tenantDb = c.get("tenantDataDb" as never) as TenantDataDB | undefined;
+    if (!tenantDb) return c.json({ error: "Tenant DB not provisioned" }, 503);
 
     const channel = await c.env.LINK_DB
       .prepare("SELECT config FROM channels WHERE tenant_id = ? AND channel_type = 'TIKTOK' AND is_active = 1")
@@ -229,7 +232,7 @@ export function channelsRoutes() {
     const tiktok = new TikTokChannel(config.access_token);
     const items = await tiktok.fetchItems({});
 
-    const contentService = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT, undefined, c.env);
+    const contentService = new ContentService(tenantDb, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT);
     const result = await contentService.syncBatch("TIKTOK", items);
     return c.json({ status: "ok", ...result });
   });
@@ -376,8 +379,11 @@ export function channelsRoutes() {
 
   router.post("/notion/sync", async (c) => {
     const memberId = c.get("memberId" as never) as string;
-    const entityState = c.get("entityState" as never) as EntityStateStore;
     const tenantId = c.get("tenantId" as never) as number;
+    // Per-tenant D1 — the source of truth. See /tiktok/sync's identical guard comment above.
+    // Checked before the Notion fetch below, not just before the D1 write.
+    const tenantDb = c.get("tenantDataDb" as never) as TenantDataDB | undefined;
+    if (!tenantDb) return c.json({ error: "Tenant DB not provisioned" }, 503);
 
     const ch = await c.env.LINK_DB
       .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND member_id = ? AND is_active = 1")
@@ -395,7 +401,7 @@ export function channelsRoutes() {
     const channel = new NotionChannel(notionConfig.access_token);
     const items = await channel.fetchItems(folderConfig);
 
-    const service = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT, undefined, c.env);
+    const service = new ContentService(tenantDb, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT);
     const result = await service.syncBatch("NOTION", items);
     return c.json(result);
   });
@@ -443,7 +449,6 @@ export function channelsRoutes() {
 
   router.put("/:type/config", async (c) => {
     const memberId = c.get("memberId" as never) as string;
-    const entityState = c.get("entityState" as never) as EntityStateStore;
     const tenantId = c.get("tenantId" as never) as number;
     const channelType = c.req.param("type").toUpperCase();
     const { config } = await c.req.json<{ config: Record<string, unknown> }>();
@@ -464,10 +469,16 @@ export function channelsRoutes() {
         .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND member_id = ? AND is_active = 1")
         .bind(memberId).first<{ config: string }>();
       if (ch && (config as { folder_ids?: string[] }).folder_ids) {
+        // Per-tenant D1 — the source of truth. Scoped to this branch (not the whole route,
+        // which is a generic per-channel-type config setter most types don't need D1 for),
+        // checked before the Notion fetch below. See /tiktok/sync's identical guard comment.
+        const tenantDb = c.get("tenantDataDb" as never) as TenantDataDB | undefined;
+        if (!tenantDb) return c.json({ error: "Tenant DB not provisioned" }, 503);
+
         const notionConfig = JSON.parse(ch.config) as { access_token: string };
         const channel = new NotionChannel(notionConfig.access_token);
         const items = await channel.fetchItems(config);
-        const service = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT, undefined, c.env);
+        const service = new ContentService(tenantDb, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT);
         const result = await service.syncBatch("NOTION", items);
         return c.json({ ok: true, sync: result });
       }

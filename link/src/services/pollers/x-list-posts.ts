@@ -1,11 +1,14 @@
 import type { Pipeline } from "../../types";
-import type { R2SqlEnv } from "../../../../shared/r2-sql";
-import { EntityStateStore } from "../entity-state";
+import type { TenantDataDB } from "../../../../shared/tenant-data-db";
+import type { EntityStateStore } from "../entity-state";
 import { ContentService } from "../content";
 import { fetchListPostsPage } from "../x-posts-api";
 import { resolveProps } from "./resolve-props";
 import { ContentMetadata_X } from "../../../../metadata/x-byok";
 
+// get-list-posts is flowType:"trigger" in ContentMetadata_X (spec's flowType table) — this
+// poller only ever calls recordTriggerContentSeen + emitContentTriggerEvent below, never
+// upsertContentFromMetadata, so a List Posts watch is never persisted into `content`.
 const LIST_POSTS_METADATA = ContentMetadata_X.find((m) => m.sourceContentType === "get-list-posts")!;
 
 export interface ListPostsPollerContext {
@@ -13,13 +16,16 @@ export interface ListPostsPollerContext {
   listId: string;
   accessToken: string;
   linkDb: D1Database;
+  // Per-tenant D1 — poll-channel.ts resolves this once per channel before any poller runs, but
+  // this poller's own D1 calls (recordTriggerContentSeen/emitContentTriggerEvent) don't need
+  // it, only entityState below — see the flowType comment above.
+  tenantDb: TenantDataDB | null;
   entityState: EntityStateStore;
   tenantId: number;
   ai: Ai;
   vectorize: VectorizeIndex;
   pipelineContent?: Pipeline;
   flowQueue?: Queue;
-  r2Env?: R2SqlEnv;
   deadline: number;
 }
 
@@ -44,7 +50,7 @@ export async function runListPostsPoller(ctx: ListPostsPollerContext): Promise<v
     return;
   }
 
-  const contentService = new ContentService(ctx.entityState, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue, ctx.r2Env);
+  const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue, ctx.entityState);
   const phase = state.backfill_complete ? "incremental" : "seed";
   console.log(JSON.stringify({ event: "list_posts_poll_started", channel_id: ctx.channelId, list_id: ctx.listId, phase }));
 

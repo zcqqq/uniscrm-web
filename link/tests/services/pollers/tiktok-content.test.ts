@@ -56,7 +56,7 @@ describe("runTikTokContentPoller", () => {
       channelId: "chan-1",
       accessToken: "tok",
       linkDb: linkDb as any,
-      entityState: {} as any,
+      tenantDb: {} as any,
       tenantId: 1,
       ai: {} as any,
       vectorize: {} as any,
@@ -76,7 +76,7 @@ describe("runTikTokContentPoller", () => {
       channelId: "chan-1",
       accessToken: "tok",
       linkDb: linkDb as any,
-      entityState: {} as any,
+      tenantDb: {} as any,
       tenantId: 1,
       ai: {} as any,
       vectorize: {} as any,
@@ -101,7 +101,7 @@ describe("runTikTokContentPoller", () => {
       channelId: "chan-1",
       accessToken: "tok",
       linkDb: linkDb as any,
-      entityState: {} as any,
+      tenantDb: {} as any,
       tenantId: 1,
       ai: {} as any,
       vectorize: {} as any,
@@ -123,7 +123,7 @@ describe("runTikTokContentPoller", () => {
       channelId: "chan-1",
       accessToken: "tok",
       linkDb: linkDb as any,
-      entityState: {} as any,
+      tenantDb: {} as any,
       tenantId: 1,
       ai: {} as any,
       vectorize: {} as any,
@@ -135,6 +135,27 @@ describe("runTikTokContentPoller", () => {
     expect(resolvedProps.source_created_at).toBe(new Date(1781669273 * 1000).toISOString());
   });
 
+  it("threads flowType (video.list's metadata entry, never a literal) into upsertContentFromMetadata's 8th argument", async () => {
+    const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null });
+    fetchVideoListPageMock.mockResolvedValueOnce({
+      page: { data: [{ id: "v1" }], nextCursor: undefined, hasMore: false },
+      rateLimited: false,
+    });
+
+    await runTikTokContentPoller({
+      channelId: "chan-1",
+      accessToken: "tok",
+      linkDb: linkDb as any,
+      tenantDb: {} as any,
+      tenantId: 1,
+      ai: {} as any,
+      vectorize: {} as any,
+      deadline: Date.now() + 20_000,
+    });
+
+    expect(upsertContentFromMetadataMock.mock.calls[0][7]).toBe("content");
+  });
+
   it("stops backfill without setting backfill_complete when rate limited", async () => {
     const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null });
     fetchVideoListPageMock.mockResolvedValueOnce({ page: { data: [], hasMore: false }, rateLimited: true });
@@ -143,7 +164,7 @@ describe("runTikTokContentPoller", () => {
       channelId: "chan-1",
       accessToken: "tok",
       linkDb: linkDb as any,
-      entityState: {} as any,
+      tenantDb: {} as any,
       tenantId: 1,
       ai: {} as any,
       vectorize: {} as any,
@@ -172,7 +193,7 @@ describe("runTikTokContentPoller", () => {
         channelId: "chan-1",
         accessToken: "tok",
         linkDb: linkDb as any,
-        entityState: {} as any,
+        tenantDb: {} as any,
         tenantId: 1,
         ai: {} as any,
         vectorize: {} as any,
@@ -197,7 +218,7 @@ describe("runTikTokContentPoller", () => {
         channelId: "chan-1",
         accessToken: "tok",
         linkDb: linkDb as any,
-        entityState: {} as any,
+        tenantDb: {} as any,
         tenantId: 1,
         ai: {} as any,
         vectorize: {} as any,

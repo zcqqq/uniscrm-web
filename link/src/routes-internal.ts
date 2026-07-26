@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "./types";
 import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
-import { EntityStateStore } from "./services/entity-state";
+import { TenantDataDB } from "../../shared/tenant-data-db";
 import { CreditService, getActiveSubscriptionTier } from "../../shared/credit-service";
 import { EventMetadata_X } from "../../metadata/x";
 import { dollarsToMicros } from "../../shared/credit";
@@ -443,18 +443,26 @@ export function internalRoutes() {
       return c.json({ ok: false, reason: `unsupported_channel_type: expected X, got ${channel.channel_type}` }, 200);
     }
     // channels.tenant_id is nullable in the schema even though `first<{tenant_id: number}>()`
-    // lies about it — a legacy or system-level channel row can have no tenant. The old
-    // `tenants.d1_database_id` lookup this route used to do incidentally guarded this (binding
-    // a null tenant_id matched no row, returning a graceful ok:false). EntityStateStore has no
-    // such guard: `entity_state.tenant_id` is NOT NULL, so claim()'s INSERT OR IGNORE would
-    // silently fail the constraint and the follow-up get() would never match, throwing "row
-    // vanished" — and only AFTER the tweet has already been posted to X. Guard explicitly,
+    // lies about it — a legacy or system-level channel row can have no tenant. Guard explicitly,
     // before any external work, so a misconfigured channel fails cleanly instead of posting
-    // and then losing the record.
+    // to X and only THEN discovering there's nowhere to record it.
     if (!channel.tenant_id) {
       console.error(JSON.stringify({ event: "create_post_no_tenant", contentId, channelId }));
       return c.json({ ok: false, reason: "tenant_not_set: channel has no tenant_id" }, 200);
     }
+
+    // Per-tenant D1 — the source of truth (2026-07-26 plan). Checked here, before the X post
+    // even goes out, so a tenant without a provisioned database fails cleanly instead of
+    // posting to X and then having recordPublishedContent throw further down.
+    const tenant = await c.env.WEB_DB
+      .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+      .bind(channel.tenant_id)
+      .first<{ d1_database_id: string | null }>();
+    if (!tenant?.d1_database_id) {
+      console.error(JSON.stringify({ event: "create_post_no_tenant_db", contentId, channelId }));
+      return c.json({ ok: false, reason: "tenant_db_not_provisioned" }, 200);
+    }
+    const tenantDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenant.d1_database_id);
 
     let text = interpolatedPrompt;
     if (provider !== "none") {
@@ -514,8 +522,7 @@ export function internalRoutes() {
       return c.json({ ok: false, reason: "x_api_error: create post rejected" }, 200);
     }
 
-    const entityState = new EntityStateStore(c.env.LINK_DB, channel.tenant_id);
-    const contentService = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, channel.tenant_id, c.env.PIPELINE_CONTENT, undefined, c.env);
+    const contentService = new ContentService(tenantDb, c.env.VECTORIZE, c.env.AI, channel.tenant_id, c.env.PIPELINE_CONTENT);
     await contentService.recordPublishedContent(channelId, "X", postResult.id, text, {
       generatedFromContentId: contentId,
       flowId: flowId || "",
@@ -542,6 +549,17 @@ export function internalRoutes() {
       console.error(JSON.stringify({ event: "x_video_status_no_tenant", contentId, channelId }));
       return c.json({ ok: false, reason: "tenant_not_set: channel has no tenant_id" }, 200);
     }
+
+    // Per-tenant D1 — the source of truth. See /content/create-post's identical guard comment.
+    const tenant = await c.env.WEB_DB
+      .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+      .bind(channel.tenant_id)
+      .first<{ d1_database_id: string | null }>();
+    if (!tenant?.d1_database_id) {
+      console.error(JSON.stringify({ event: "x_video_status_no_tenant_db", contentId, channelId }));
+      return c.json({ ok: false, reason: "tenant_db_not_provisioned" }, 200);
+    }
+    const tenantDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenant.d1_database_id);
 
     const tokenService = new XTokenService(c.env.LINK_DB, c.env.X_CLIENT_ID, c.env.X_CLIENT_SECRET);
     // Same guard as /content/create-post: an uncaught refresh throw would surface to the flow
@@ -581,8 +599,7 @@ export function internalRoutes() {
       return c.json({ ok: false, reason: "x_api_error: create post rejected" }, 200);
     }
 
-    const entityState = new EntityStateStore(c.env.LINK_DB, channel.tenant_id);
-    const contentService = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, channel.tenant_id, c.env.PIPELINE_CONTENT, undefined, c.env);
+    const contentService = new ContentService(tenantDb, c.env.VECTORIZE, c.env.AI, channel.tenant_id, c.env.PIPELINE_CONTENT);
     await contentService.recordPublishedContent(channelId, "X", postResult.id, text, {
       generatedFromContentId: contentId,
       flowId: flowId || "",
@@ -655,6 +672,17 @@ export function internalRoutes() {
 
     const tenantId = channel.tenant_id;
 
+    // Per-tenant D1 — the source of truth. See /content/create-post's identical guard comment.
+    const tenant = await c.env.WEB_DB
+      .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+      .bind(tenantId)
+      .first<{ d1_database_id: string | null }>();
+    if (!tenant?.d1_database_id) {
+      console.error(JSON.stringify({ event: "tiktok_photo_post_no_tenant_db", contentId, channelId }));
+      return c.json({ ok: false, reason: "tenant_db_not_provisioned" }, 200);
+    }
+    const tenantDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenant.d1_database_id);
+
     const generateText = async (prompt: string): Promise<string | null> => {
       if (textProvider === "none") return prompt;
       const res = await fetch(`${c.env.CONTENT_URL}/internal/generate`, {
@@ -711,8 +739,7 @@ export function internalRoutes() {
       return c.json({ ok: false, reason: publishResult.reason || "tiktok_api_error" }, 200);
     }
 
-    const entityState = new EntityStateStore(c.env.LINK_DB, tenantId);
-    const contentService = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT, undefined, c.env);
+    const contentService = new ContentService(tenantDb, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT);
     await contentService.recordPublishedContent(
       channelId, "TIKTOK", publishResult.publishId || crypto.randomUUID(), description,
       { generatedFromContentId: contentId, flowId: flowId || "" }, "PHOTO_POST"
@@ -745,6 +772,17 @@ export function internalRoutes() {
     }
 
     const tenantId = channel.tenant_id;
+
+    // Per-tenant D1 — the source of truth. See /content/create-post's identical guard comment.
+    const tenant = await c.env.WEB_DB
+      .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+      .bind(tenantId)
+      .first<{ d1_database_id: string | null }>();
+    if (!tenant?.d1_database_id) {
+      console.error(JSON.stringify({ event: "tiktok_video_post_no_tenant_db", contentId, channelId }));
+      return c.json({ ok: false, reason: "tenant_db_not_provisioned" }, 200);
+    }
+    const tenantDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenant.d1_database_id);
 
     const generateText = async (prompt: string): Promise<string | null> => {
       if (textProvider === "none") return prompt;
@@ -782,8 +820,7 @@ export function internalRoutes() {
       return c.json({ ok: false, reason: publishResult.reason || "tiktok_api_error" }, 200);
     }
 
-    const entityState = new EntityStateStore(c.env.LINK_DB, tenantId);
-    const contentService = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT, undefined, c.env);
+    const contentService = new ContentService(tenantDb, c.env.VECTORIZE, c.env.AI, tenantId, c.env.PIPELINE_CONTENT);
     await contentService.recordPublishedContent(
       channelId, "TIKTOK", publishResult.publishId || crypto.randomUUID(), description,
       { generatedFromContentId: contentId, flowId: flowId || "" }, "VIDEO_POST"
@@ -811,12 +848,21 @@ export function internalRoutes() {
       return c.json({ error: "Tenant not set for this channel" }, 500);
     }
 
-    const entityState = new EntityStateStore(c.env.LINK_DB, channel.tenant_id);
+    // Per-tenant D1 — the source of truth. Same {error}/500 convention as the guard above.
+    const tenant = await c.env.WEB_DB
+      .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+      .bind(channel.tenant_id)
+      .first<{ d1_database_id: string | null }>();
+    if (!tenant?.d1_database_id) {
+      return c.json({ error: "Tenant DB not provisioned" }, 500);
+    }
+    const tenantDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenant.d1_database_id);
+
     const tiktok = new TikTokChannel(config.access_token);
     const items = await tiktok.fetchItems({});
     if (items.length === 0) return c.json({ status: "ok", added: 0, updated: 0, skipped: 0 });
 
-    const contentService = new ContentService(entityState, c.env.VECTORIZE, c.env.AI, channel.tenant_id, c.env.PIPELINE_CONTENT, undefined, c.env);
+    const contentService = new ContentService(tenantDb, c.env.VECTORIZE, c.env.AI, channel.tenant_id, c.env.PIPELINE_CONTENT);
     const result = await contentService.syncBatch("TIKTOK", items);
     return c.json({ status: "ok", ...result });
   });

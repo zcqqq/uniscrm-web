@@ -1,6 +1,5 @@
 import type { Pipeline } from "../../types";
-import type { R2SqlEnv } from "../../../../shared/r2-sql";
-import { EntityStateStore } from "../entity-state";
+import type { TenantDataDB } from "../../../../shared/tenant-data-db";
 import { ContentService, CONTENT_MAPPED_PROP_IDS } from "../content";
 import { fetchPostsPage } from "../x-posts-api";
 import { resolveProps, consumedPaths } from "./resolve-props";
@@ -13,13 +12,17 @@ export interface PostsPollerContext {
   xUserId: string;
   accessToken: string;
   linkDb: D1Database;
-  entityState: EntityStateStore;
+  // Per-tenant D1 — the source of truth (2026-07-26 plan). poll-channel.ts resolves this once
+  // per channel and skips the whole poll before it ever gets here when the tenant has no
+  // provisioned database, so it is always real by the time runPostsPoller runs. No entityState
+  // field here (unlike x-followers.ts / x-list-posts.ts): upsertContentFromMetadata's D1
+  // column-compare replaced the entity_state fingerprint on this path entirely.
+  tenantDb: TenantDataDB;
   tenantId: number;
   ai: Ai;
   vectorize: VectorizeIndex;
   pipelineContent?: Pipeline;
   flowQueue?: Queue;
-  r2Env?: R2SqlEnv;
   deadline: number;
 }
 
@@ -40,7 +43,7 @@ export async function runPostsPoller(ctx: PostsPollerContext): Promise<void> {
     return;
   }
 
-  const contentService = new ContentService(ctx.entityState, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue, ctx.r2Env);
+  const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue);
   const phase = state.backfill_complete ? "incremental" : "backfill";
   console.log(JSON.stringify({ event: "posts_poll_started", channel_id: ctx.channelId, phase, cursor: state.cursor }));
 
@@ -74,7 +77,9 @@ async function upsertPage(
     // CONTENT_MAPPED_PROP_IDS restricts to propIds that actually land in a named R2 `content`
     // column, so a mapped-but-columnless prop isn't stripped with nowhere else to land.
     const paths = consumedPaths(POSTS_METADATA.contentProps, POSTS_METADATA.linkPrefix, CONTENT_MAPPED_PROP_IDS);
-    const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "X", emitFlowEvent, undefined, paths);
+    // flowType comes from the metadata entry itself (spec's flowType table: own:get-posts is
+    // "content"), never a literal — see content.ts's upsertContentFromMetadata gate.
+    const isNew = await contentService.upsertContentFromMetadata(item, props, channelId, "X", emitFlowEvent, undefined, paths, POSTS_METADATA.flowType);
     if (isNew) newCount++;
   }
   return newCount;

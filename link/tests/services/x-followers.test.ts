@@ -10,12 +10,11 @@ function createMockLinkDb(initialState: { cursor: string | null; backfill_comple
   return { prepare, _state: state, _run: run, _bind: bind };
 }
 
-// XUsersService's first constructor argument is now the per-tenant D1 (TenantDataDB) — the
-// source of truth for `user` (2026-07-26 plan). runFollowersPoller forwards whatever it is
-// handed as `ctx.entityState` straight into `new XUsersService(...)`'s first slot, so until
-// task 7 rewires the poller's context this stand-in has to be D1-shaped. Whether a follower
-// counts as "new" — what upsertPage tallies, and what stops the incremental poll — is now
-// decided by the D1 probe, not by an entity_state claim.
+// XUsersService's first constructor argument is the per-tenant D1 (TenantDataDB) — the source
+// of truth for `user` (2026-07-26 plan). runFollowersPoller forwards ctx.tenantDb straight into
+// `new XUsersService(...)`'s first slot. Whether a follower counts as "new" — what upsertPage
+// tallies, and what stops the incremental poll — is decided by the D1 probe, not by an
+// entity_state claim.
 function createMockTenantDb(existingBySourceId: Record<string, Record<string, unknown>> = {}) {
   const query = vi.fn(async (sql: string, params: unknown[] = []) => {
     if (sql.includes("INSERT INTO user")) {
@@ -34,6 +33,16 @@ function createMockTenantDb(existingBySourceId: Record<string, Record<string, un
     return prior ? [prior] : [];
   });
   return { query, run: vi.fn(), batch: vi.fn(), getDbId: () => "db-1" };
+}
+
+// LINK_DB-backed dedup/follow-mirror index (ctx.entityState, opts.entityState) — separate from
+// tenantDb now that content/x-users.ts have their own D1 truth store. Only mirrorFollowState's
+// ensureEntity/setFollow are exercised by this poller.
+function createMockEntityState() {
+  return {
+    ensureEntity: vi.fn().mockResolvedValue(undefined),
+    setFollow: vi.fn().mockResolvedValue(undefined),
+  };
 }
 
 // A follower already stored in D1 — the probe finds it, so upsertUserFromMetadata returns false.
@@ -72,7 +81,7 @@ describe("runFollowersPoller", () => {
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, entityState: tenantDb as any, tenantId: 1,
+      linkDb: linkDb as any, tenantDb: tenantDb as any, entityState: createMockEntityState() as any, tenantId: 1,
       deadline: Date.now() + 20_000,
     });
 
@@ -89,7 +98,7 @@ describe("runFollowersPoller", () => {
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, entityState: tenantDb as any, tenantId: 1,
+      linkDb: linkDb as any, tenantDb: tenantDb as any, entityState: createMockEntityState() as any, tenantId: 1,
       deadline: Date.now() + 20_000,
     });
 
@@ -110,7 +119,7 @@ describe("runFollowersPoller", () => {
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, entityState: tenantDb as any, tenantId: 1,
+      linkDb: linkDb as any, tenantDb: tenantDb as any, entityState: createMockEntityState() as any, tenantId: 1,
       deadline: Date.now() + 20_000,
     });
 
@@ -127,7 +136,7 @@ describe("runFollowersPoller", () => {
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, entityState: tenantDb as any, tenantId: 1,
+      linkDb: linkDb as any, tenantDb: tenantDb as any, entityState: createMockEntityState() as any, tenantId: 1,
       deadline: Date.now() - 1, // already past
     });
 
@@ -145,7 +154,7 @@ describe("runFollowersPoller", () => {
 
     await runFollowersPoller({
       channelId: "chan1", xUserId: "x1", accessToken: "tok",
-      linkDb: linkDb as any, entityState: tenantDb as any, tenantId: 1,
+      linkDb: linkDb as any, tenantDb: tenantDb as any, entityState: createMockEntityState() as any, tenantId: 1,
       deadline: Date.now() + 20_000,
     });
 

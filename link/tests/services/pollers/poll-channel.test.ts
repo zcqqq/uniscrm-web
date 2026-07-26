@@ -41,15 +41,19 @@ vi.mock("../../../src/services/tiktok-token", () => ({
 }));
 import { pollChannelOnce, pollXListPosts } from "../../../src/services/pollers/poll-channel";
 
-// EntityStateStore is constructed directly from env.LINK_DB now (no per-tenant D1 lookup
-// against WEB_DB) — its constructor is lazy (no DB access until a method is called), and
-// every poller call in this file is mocked wholesale, so LINK_DB's mock double is enough on
-// its own; WEB_DB is no longer read by poll-channel.ts at all.
+// resolveTenantDb (poll-channel.ts) reads tenants.d1_database_id off WEB_DB once per channel,
+// before any poller runs — a tenant with no provisioned D1 is skipped entirely, before the
+// token service ever makes an external call (2026-07-26 plan, last round's I1 lesson). Every
+// poller call in this file is mocked wholesale, so the returned TenantDataDB only needs to be
+// truthy for the "provisioned" path; mockWebDb() defaults to that so the existing
+// poller-forwarding assertions below don't have to know about this guard. The dedicated
+// "no provisioned D1" tests further down override it with mockWebDb(null).
 function baseEnv(linkDb: unknown, webDb: unknown) {
   return {
     LINK_DB: linkDb,
     WEB_DB: webDb,
     CF_ACCOUNT_ID: "acct",
+    CF_D1_API_TOKEN: "tok",
     TIKTOK_CLIENT_KEY: "tt-key",
     TIKTOK_CLIENT_SECRET: "tt-secret",
     PIPELINE_USER: undefined,
@@ -59,10 +63,10 @@ function baseEnv(linkDb: unknown, webDb: unknown) {
   } as any;
 }
 
-function mockWebDb() {
+function mockWebDb(d1DatabaseId: string | null = "tenant-db-1") {
   return {
     prepare: vi.fn().mockReturnValue({
-      bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(null) }),
+      bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(d1DatabaseId ? { d1_database_id: d1DatabaseId } : null) }),
     }),
   };
 }
@@ -212,6 +216,40 @@ describe("pollChannelOnce", () => {
     expect(postsDeadline - Date.now()).toBeGreaterThan(15_000);
     vi.useRealTimers();
   });
+
+  it("X: skips entirely (no token fetched, no poller run) when the tenant has no provisioned D1 database", async () => {
+    const linkDb = {
+      prepare: vi.fn().mockReturnValue({
+        bind: vi.fn().mockReturnValue({
+          first: vi.fn().mockResolvedValue({
+            id: "chan-1", tenant_id: 1, config: JSON.stringify({ is_byok: true, x_user_id: "u1" }),
+          }),
+        }),
+      }),
+    };
+    await pollChannelOnce(baseEnv(linkDb, mockWebDb(null)), "X", "chan-1");
+    // The guard runs before the token service — burning a refresh for a tenant that can't
+    // persist anything would be exactly last round's I1 lesson.
+    expect(getAppCredentialsMock).not.toHaveBeenCalled();
+    expect(getValidTokenMock).not.toHaveBeenCalled();
+    expect(runFollowersPollerMock).not.toHaveBeenCalled();
+    expect(runPostsPollerMock).not.toHaveBeenCalled();
+  });
+
+  it("TIKTOK: skips entirely (no token fetched, no poller run) when the tenant has no provisioned D1 database", async () => {
+    const linkDb = {
+      prepare: vi.fn().mockReturnValue({
+        bind: vi.fn().mockReturnValue({
+          first: vi.fn().mockResolvedValue({
+            id: "chan-tt", tenant_id: 1, config: JSON.stringify({ access_token: "a", refresh_token: "r" }),
+          }),
+        }),
+      }),
+    };
+    await pollChannelOnce(baseEnv(linkDb, mockWebDb(null)), "TIKTOK", "chan-tt");
+    expect(tiktokGetValidTokenMock).not.toHaveBeenCalled();
+    expect(runTikTokContentPollerMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("pollXListPosts", () => {
@@ -303,5 +341,26 @@ describe("pollXListPosts", () => {
     expect(refreshAccessTokenMock).toHaveBeenCalledWith("chan1");
     expect(runListPostsPollerMock).toHaveBeenCalledTimes(2);
     expect(runListPostsPollerMock.mock.calls[1][0]).toMatchObject({ accessToken: "refreshed-tok" });
+  });
+
+  it("skips entirely (no token fetched, no poller run) when the tenant has no provisioned D1 database", async () => {
+    const linkDb = {
+      prepare: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes("FROM channels")) {
+          return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({
+            id: "chan1", tenant_id: 1, config: JSON.stringify({ is_byok: true, x_user_id: "xu1" }),
+          }) }) };
+        }
+        if (sql.includes("INSERT OR IGNORE INTO channel_poll_state")) {
+          return { bind: vi.fn().mockReturnValue({ run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }) }) };
+        }
+        return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({ backfill_complete: 0, last_polled_at: null }) }) };
+      }),
+    };
+
+    await pollXListPosts(baseEnv(linkDb, mockWebDb(null)), "chan1", "listA");
+
+    expect(getValidTokenMock).not.toHaveBeenCalled();
+    expect(runListPostsPollerMock).not.toHaveBeenCalled();
   });
 });

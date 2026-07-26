@@ -1,6 +1,6 @@
 import type { Pipeline } from "../../types";
-import type { R2SqlEnv } from "../../../../shared/r2-sql";
-import { EntityStateStore } from "../entity-state";
+import type { TenantDataDB } from "../../../../shared/tenant-data-db";
+import type { EntityStateStore } from "../entity-state";
 import { XUsersService } from "../x-users";
 import { fetchFollowersPage } from "../x-followers-api";
 import { resolveProps } from "./resolve-props";
@@ -13,10 +13,15 @@ export interface FollowersPollerContext {
   xUserId: string;
   accessToken: string;
   linkDb: D1Database;
+  // Per-tenant D1 — the source of truth (2026-07-26 plan). poll-channel.ts resolves this once
+  // per channel and skips the whole poll before it ever gets here when the tenant has no
+  // provisioned database, so it is always real by the time runFollowersPoller runs.
+  tenantDb: TenantDataDB;
+  // LINK_DB-backed dedup/follow-mirror index — still needed here (unlike x-posts.ts) because
+  // XUsersService.mirrorFollowState writes the flow-facing follow bit into entity_state.
   entityState: EntityStateStore;
   tenantId: number;
   pipelineUser?: Pipeline;
-  r2Env?: R2SqlEnv;
   deadline: number;
 }
 
@@ -37,7 +42,7 @@ export async function runFollowersPoller(ctx: FollowersPollerContext): Promise<v
     return; // not seeded yet — channel isn't authorized
   }
 
-  const usersService = new XUsersService(ctx.entityState, { pipelineUser: ctx.pipelineUser, tenantId: ctx.tenantId }, ctx.r2Env);
+  const usersService = new XUsersService(ctx.tenantDb, { pipelineUser: ctx.pipelineUser, tenantId: ctx.tenantId, entityState: ctx.entityState });
   const phase = state.backfill_complete ? "incremental" : "backfill";
   console.log(JSON.stringify({ event: "followers_poll_started", channel_id: ctx.channelId, phase, cursor: state.cursor }));
 

@@ -2,6 +2,7 @@ import { getCookie } from "hono/cookie";
 import type { Context, Next } from "hono";
 import type { Env, Session } from "./types";
 import { EntityStateStore } from "./services/entity-state";
+import { TenantDataDB } from "../../shared/tenant-data-db";
 
 export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
   const sessionId = getCookie(c, "session");
@@ -36,6 +37,17 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
   // `tenants.d1_database_id` and is always available once tenant_id is known. Real entity rows
   // (user/content) now live in R2 Data Catalog, read via shared/r2-sql.ts at the route level.
   c.set("entityState" as never, new EntityStateStore(c.env.LINK_DB, session.tenant_id));
+
+  // Per-tenant D1 (task 4 of user/content-back-to-tenant-d1): only injected when the tenant
+  // has been provisioned with its own D1 database. Consumers that need it must treat absence
+  // as "not provisioned" and respond 503 rather than assuming it is always set.
+  const row = await c.env.WEB_DB
+    .prepare("SELECT d1_database_id FROM tenants WHERE tenant_id = ?")
+    .bind(session.tenant_id)
+    .first<{ d1_database_id: string | null }>();
+  if (row?.d1_database_id) {
+    c.set("tenantDataDb" as never, new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, row.d1_database_id));
+  }
 
   await next();
 }

@@ -10,14 +10,25 @@ const SCHEMA_FIELD_NAMES = (contentSchema as { fields: { name: string }[] }).fie
   .map((f) => f.name)
   .sort();
 
-function createMockEntityState(overrides: Partial<{ entityId: string; isNew: boolean; unchanged: boolean }> = {}) {
+// D1 (per-tenant, via TenantDataDB) is the source of truth now — every read/dedup/UPDATE/DELETE
+// goes through this mock. `query` defaults to "no existing row" so the common case is an insert.
+function createMockTenantDb() {
   return {
-    claim: vi.fn().mockResolvedValue({ entityId: "c-uuid", isNew: true, unchanged: false, ...overrides }),
+    query: vi.fn().mockResolvedValue([]),
+    run: vi.fn().mockResolvedValue({ changes: 1 }),
+    batch: vi.fn(),
+    getDbId: vi.fn().mockReturnValue("db-1"),
+  };
+}
+
+function createMockEntityState() {
+  return {
+    claim: vi.fn(),
     markSeen: vi.fn().mockResolvedValue(true),
     get: vi.fn().mockResolvedValue(null),
     setFollow: vi.fn(),
     getFollowByEntityId: vi.fn(),
-    rollbackFingerprint: vi.fn().mockResolvedValue(undefined),
+    rollbackFingerprint: vi.fn(),
   };
 }
 
@@ -29,45 +40,70 @@ function createMockVectorize() {
   return { upsert: vi.fn().mockResolvedValue(undefined), deleteByIds: vi.fn() };
 }
 
+// Only the D1 statements that actually mutate — the probe SELECT goes through query(), so
+// "no D1 write" is simply run() never being called.
+function writeCalls(db: ReturnType<typeof createMockTenantDb>) {
+  return db.run.mock.calls;
+}
+
 describe("ContentService.upsertContentFromMetadata", () => {
-  let entityState: ReturnType<typeof createMockEntityState>;
+  let tenantDb: ReturnType<typeof createMockTenantDb>;
   let ai: ReturnType<typeof createMockAi>;
   let vectorize: ReturnType<typeof createMockVectorize>;
   let service: ContentService;
 
   beforeEach(() => {
-    entityState = createMockEntityState();
+    tenantDb = createMockTenantDb();
     ai = createMockAi();
     vectorize = createMockVectorize();
-    service = new ContentService(entityState as any, vectorize as any, ai as any, 42);
+    service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42);
   });
 
-  it("claims an entity_state id and returns isNew from the claim", async () => {
+  it("inserts a new D1 row and returns true when none exists for channel+source_content_id", async () => {
     const rawItem = { id: "t1", text: "hello world" };
     const resolvedProps = { source_content_id: "t1", content_type: "TWEET", content_text: "hello world" };
 
     const isNew = await service.upsertContentFromMetadata(rawItem, resolvedProps, "chan1", "X", false);
 
     expect(isNew).toBe(true);
-    expect(entityState.claim).toHaveBeenCalledWith(
-      { entity: "content", channelId: "chan1", secondaryId: "", sourceId: "t1" },
-      expect.any(String)
+    expect(tenantDb.query).toHaveBeenCalledWith(
+      expect.stringContaining("FROM content WHERE channel_id = ? AND source_content_id = ? AND list_id IS NULL"),
+      ["chan1", "t1"]
+    );
+    expect(tenantDb.run).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO content"),
+      expect.arrayContaining(["chan1", "t1", "X"])
     );
   });
 
-  it("returns false when entity_state reports an existing (non-new) entity", async () => {
-    entityState = createMockEntityState({ isNew: false, unchanged: false });
-    service = new ContentService(entityState as any, vectorize as any, ai as any, 42);
+  it("upserts through the list-less partial unique index and returns false when a row already exists", async () => {
+    tenantDb.query.mockResolvedValue([{ id: "existing-uuid", created_at: "2026-01-01T00:00:00.000Z", content_text: "old text" }]);
     const resolvedProps = { source_content_id: "t1", content_text: "updated text" };
 
     const isNew = await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X", false);
 
     expect(isNew).toBe(false);
+    const [sql] = tenantDb.run.mock.calls[0];
+    expect(sql).toContain("ON CONFLICT(channel_id, source_content_id) WHERE list_id IS NULL DO UPDATE SET");
+    // raw_data must MERGE, not replace: a partial payload can't be allowed to wipe keys an
+    // earlier fuller write stored.
+    expect(sql).toContain("raw_data = json_patch(content.raw_data, excluded.raw_data)");
+  });
+
+  it("uses the list-scoped probe and conflict target when listId is given", async () => {
+    await service.upsertContentFromMetadata({ id: "t2" }, { source_content_id: "t2" }, "chan1", "X", false, "listA");
+
+    expect(tenantDb.query).toHaveBeenCalledWith(
+      expect.stringContaining("AND list_id = ?"),
+      ["chan1", "t2", "listA"]
+    );
+    const [sql] = tenantDb.run.mock.calls[0];
+    expect(sql).toContain("ON CONFLICT(channel_id, list_id, source_content_id) WHERE list_id IS NOT NULL DO UPDATE SET");
   });
 
   it("sends a complete row to the content pipeline — every schema column present, null when absent", async () => {
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
     await service.upsertContentFromMetadata(
       { id: "t1", text: "hi" },
@@ -83,27 +119,174 @@ describe("ContentService.upsertContentFromMetadata", () => {
     expect(record.tenant_id).toBe(42);
   });
 
-  it("does not send to the pipeline when entity_state reports the fingerprint unchanged", async () => {
+  // id-domain discipline: the D1 row's id IS the R2 copy's id. If these ever diverge, flow logs,
+  // Vectorize entries and generatedFromContentId references all point at a row nobody can find.
+  it("gives the R2 copy the exact id D1 minted for the new row", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
+
+    await service.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1", content_text: "hi" }, "chan1", "X", false);
+
+    const [, insertParams] = tenantDb.run.mock.calls[0] as [string, unknown[]];
+    const d1Id = insertParams[0];
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(typeof d1Id).toBe("string");
+    expect((d1Id as string).length).toBeGreaterThan(0);
+    expect(record.id).toBe(d1Id);
+    // ...and the same id is what Vectorize is keyed by.
+    const [[embedRecord]] = vectorize.upsert.mock.calls[0];
+    expect(embedRecord.id).toBe(d1Id);
+  });
+
+  it("reuses the existing D1 row's id (and its created_at) for the R2 copy", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    tenantDb.query.mockResolvedValue([{ id: "existing-uuid", created_at: "2026-01-01T00:00:00.000Z", content_text: "old" }]);
+    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
+
+    await service.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1", content_text: "new" }, "chan1", "X", false);
+
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.id).toBe("existing-uuid");
+    expect(record.created_at).toBe("2026-01-01T00:00:00.000Z");
+    expect(record.updated_at).not.toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  // Replaces the entity_state fingerprint check: the previous values live in D1, so "did
+  // anything change" is a column compare against the probed row.
+  it("skips BOTH the D1 write and the R2 send when every mapped column already matches", async () => {
     const pipeline = { send: vi.fn() };
-    const service = new ContentService(
-      createMockEntityState({ isNew: false, unchanged: true }) as any,
-      vectorize as any, ai as any, 42, pipeline as any
+    tenantDb.query.mockResolvedValue([{ id: "c1", created_at: "2026-01-01T00:00:00.000Z", content_text: "hi", view_count: 100 }]);
+    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
+
+    const isNew = await service.upsertContentFromMetadata(
+      { id: "t1" }, { source_content_id: "t1", content_text: "hi", view_count: 100 }, "chan1", "X", false
     );
 
+    expect(isNew).toBe(false);
+    expect(writeCalls(tenantDb)).toHaveLength(0); // probe SELECT only
+    expect(pipeline.send).not.toHaveBeenCalled();
+  });
+
+  it("writes and sends again as soon as one mapped column differs", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    tenantDb.query.mockResolvedValue([{ id: "c1", created_at: "2026-01-01T00:00:00.000Z", content_text: "hi", view_count: 100 }]);
+    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
+
     await service.upsertContentFromMetadata(
+      { id: "t1" }, { source_content_id: "t1", content_text: "hi", view_count: 101 }, "chan1", "X", false
+    );
+
+    expect(writeCalls(tenantDb)).toHaveLength(1);
+    expect(pipeline.send).toHaveBeenCalledTimes(1);
+  });
+
+  // R2 is a copy, D1 is the truth: a failed analytics send must not fail the caller and must not
+  // undo anything. It logs and moves on — a deliberate, accepted downgrade.
+  it("resolves normally and logs when the R2 send fails, leaving the D1 write intact", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const pipeline = { send: vi.fn().mockRejectedValue(new Error("transient R2 error")) };
+    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
+
+    const isNew = await service.upsertContentFromMetadata(
       { id: "t1" }, { source_content_id: "t1", content_text: "hi" }, "chan1", "X", false
     );
 
-    expect(pipeline.send).not.toHaveBeenCalled();
+    expect(isNew).toBe(true);
+    expect(writeCalls(tenantDb)).toHaveLength(1);
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("pipeline_content_error"));
+    errSpy.mockRestore();
+  });
+
+  it("throws a clear error when the tenant DB is not provisioned", async () => {
+    const service = new ContentService(null, vectorize as any, ai as any, 42);
+
+    await expect(
+      service.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1" }, "chan1", "X", false)
+    ).rejects.toThrow("ContentService.upsertContentFromMetadata: tenantDb is required");
+  });
+
+  // The flowType gate: only metadata entries declaring flowType:"content" may be persisted.
+  // Trigger sources go through recordTriggerContentSeen/emitContentTriggerEvent instead; this is
+  // the defense line behind the caller's own routing, and it must branch on the metadata VALUE.
+  describe("flowType persistence gate", () => {
+    it('refuses flowType "trigger" — throws, with zero D1 writes and zero R2 sends', async () => {
+      const pipeline = { send: vi.fn() };
+      const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
+
+      await expect(
+        service.upsertContentFromMetadata(
+          { id: "t1" }, { source_content_id: "t1", content_text: "hi" }, "chan1", "X", true, undefined, ["text"], "trigger"
+        )
+      ).rejects.toThrow("upsertContentFromMetadata: refusing to persist non-content flowType: trigger");
+
+      expect(tenantDb.query).not.toHaveBeenCalled();
+      expect(writeCalls(tenantDb)).toHaveLength(0);
+      expect(pipeline.send).not.toHaveBeenCalled();
+      expect(vectorize.upsert).not.toHaveBeenCalled();
+    });
+
+    it('refuses flowType "action" too — the gate rejects every known non-content value', async () => {
+      const pipeline = { send: vi.fn() };
+      const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
+
+      await expect(
+        service.upsertContentFromMetadata(
+          { id: "t1" }, { source_content_id: "t1" }, "chan1", "X", false, undefined, undefined, "action"
+        )
+      ).rejects.toThrow("refusing to persist non-content flowType: action");
+      expect(writeCalls(tenantDb)).toHaveLength(0);
+      expect(pipeline.send).not.toHaveBeenCalled();
+    });
+
+    it('persists flowType "content" to BOTH D1 and the R2 copy', async () => {
+      const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+      const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
+
+      const isNew = await service.upsertContentFromMetadata(
+        { id: "t1", text: "hi" }, { source_content_id: "t1", content_text: "hi" }, "chan1", "X", false, undefined, ["text"], "content"
+      );
+
+      expect(isNew).toBe(true);
+      expect(tenantDb.run).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO content"), expect.any(Array));
+      expect(pipeline.send).toHaveBeenCalledTimes(1);
+    });
+
+    it("still persists when flowType is omitted — the gate only REFUSES known non-content values", async () => {
+      const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+      const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
+
+      await service.upsertContentFromMetadata(
+        { id: "t1" }, { source_content_id: "t1", content_text: "hi" }, "chan1", "X", false
+      );
+
+      expect(tenantDb.run).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO content"), expect.any(Array));
+      expect(pipeline.send).toHaveBeenCalledTimes(1);
+    });
+
+    // Guards the gate against being reintroduced as a poller/channel-name branch: the values
+    // below come straight off the metadata registry, which is the only allowed input.
+    it("agrees with the metadata registry: x-byok's content entry persists, its trigger entry does not", async () => {
+      const contentEntry = ContentMetadata_X.find((m) => m.flowType === "content")!;
+      const triggerEntry = ContentMetadata_X.find((m) => m.flowType === "trigger")!;
+      expect(contentEntry).toBeDefined();
+      expect(triggerEntry).toBeDefined();
+
+      await expect(
+        service.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1" }, "chan1", "X", false, undefined, undefined, contentEntry.flowType)
+      ).resolves.toBe(true);
+      await expect(
+        service.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1" }, "chan1", "X", false, undefined, undefined, triggerEntry.flowType)
+      ).rejects.toThrow("refusing to persist non-content flowType");
+    });
   });
 
   // I5: propId ≠ payload field name (e.g. view_count ← public_metrics.impression_count), so
   // filtering raw_data by propId strings (the old behavior) stripped nothing for X content —
-  // it shipped the entire tweet payload to R2. consumedPaths must be actual payload paths.
+  // it shipped the entire tweet payload downstream. consumedPaths must be actual payload paths.
   describe("raw_data filtering via consumedPaths (I5)", () => {
     it("strips exactly the given consumedPaths, keeping everything else", async () => {
       const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-      const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+      const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
       await service.upsertContentFromMetadata(
         { id: "t1", text: "hi", weird_field: 1 },
@@ -118,9 +301,27 @@ describe("ContentService.upsertContentFromMetadata", () => {
       expect(raw).not.toHaveProperty("text");
     });
 
+    it("stores the same stripped remainder in D1 as in the R2 copy", async () => {
+      const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+      const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
+
+      await service.upsertContentFromMetadata(
+        { id: "t1", text: "hi", weird_field: 1 },
+        { source_content_id: "t1", content_text: "hi" },
+        "chan1", "X", false, undefined, ["text"]
+      );
+
+      const [sql, params] = tenantDb.run.mock.calls[0] as [string, unknown[]];
+      const insertCols = sql.slice(sql.indexOf("(") + 1, sql.indexOf(")")).split(",").map((c) => c.trim());
+      const d1RawData = params[insertCols.indexOf("raw_data")] as string;
+      const [[record]] = pipeline.send.mock.calls[0];
+      expect(JSON.parse(d1RawData)).toEqual({ id: "t1", weird_field: 1 });
+      expect(d1RawData).toBe(record.raw_data);
+    });
+
     it("strips a nested path and leaves the parent object in place", async () => {
       const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-      const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+      const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
       await service.upsertContentFromMetadata(
         { id: "t1", public_metrics: { impression_count: 100, like_count: 1 } },
@@ -135,7 +336,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     it("tolerates a consumedPaths entry that does not exist in the payload", async () => {
       const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-      const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+      const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
       await expect(service.upsertContentFromMetadata(
         { id: "t1" },
@@ -147,7 +348,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
     it("falls back to storing the entire payload and warns once when consumedPaths is omitted", async () => {
       const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+      const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
       await service.upsertContentFromMetadata(
         { id: "t1", text: "hi", weird_field: 1 },
@@ -181,7 +382,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
     // guard mechanism itself rather than asserting on a specific field name.
     it("a mapped-but-columnless prop survives in raw_data when consumedPaths is filtered by CONTENT_MAPPED_PROP_IDS (Important 1)", async () => {
       const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-      const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+      const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
       // "some_future_field" has a dataId (so a naive caller would compute a path for it) but
       // is deliberately NOT a key of CONTENT_COLUMN_MAP.
@@ -207,10 +408,10 @@ describe("ContentService.upsertContentFromMetadata", () => {
     // Minor 2 (task-7 fix round 1): CONTENT_MAPPED_PROP_IDS omitted source_content_id, so
     // {linkPrefix}.id was never stripped and every tweet/video id was duplicated into
     // raw_data despite already having a named column (source_content_id is the entity key,
-    // passed separately — not a CONTENT_COLUMN_MAP entry — but it IS a real R2 column).
+    // passed separately — not a CONTENT_COLUMN_MAP entry — but it IS a real column).
     it("strips source_content_id's payload path from raw_data (Minor 2) and writes content_url to the source_url column (Minor 3)", async () => {
       const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-      const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+      const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
       const props: PropMapping[] = [
         { propId: "source_content_id", dataId: "{linkPrefix}.id" },
@@ -233,9 +434,9 @@ describe("ContentService.upsertContentFromMetadata", () => {
     });
   });
 
-  it("writes content_type/content_text/source_created_at to their mapped columns", async () => {
+  it("writes content_type/content_text/source_created_at to their mapped columns in D1 and R2", async () => {
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
     const resolvedProps = {
       source_content_id: "t1",
       content_type: "TWEET",
@@ -245,6 +446,12 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X", false);
 
+    const [sql, params] = tenantDb.run.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("content_type");
+    expect(sql).toContain("content_text");
+    expect(sql).toContain("source_created_at");
+    expect(params).toEqual(expect.arrayContaining(["TWEET", "hello world", "2026-07-11T00:00:00.000Z"]));
+
     const [[record]] = pipeline.send.mock.calls[0];
     expect(record.content_type).toBe("TWEET");
     expect(record.content_text).toBe("hello world");
@@ -253,7 +460,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
   it("writes title and the engagement metric props to their mapped columns", async () => {
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
     const resolvedProps = {
       source_content_id: "t1",
       title: "Free Skill - some article",
@@ -281,7 +488,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
   it("leaves an unresolved column-mapped field as null in the pipeline row", async () => {
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
     const resolvedProps = { source_content_id: "t1" }; // no content_type/content_text/source_created_at resolved
 
     await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X", false);
@@ -312,7 +519,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     it("sends content.created when isNew and emitFlowEvent is true", async () => {
       const flowQueue = createMockFlowQueue();
-      const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
+      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
 
       await svc.upsertContentFromMetadata(
         { id: "t1" },
@@ -336,7 +543,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     it("does not send content.created when emitFlowEvent is false (backfill phase)", async () => {
       const flowQueue = createMockFlowQueue();
-      const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
+      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
 
       await svc.upsertContentFromMetadata(
         { id: "t1" },
@@ -351,10 +558,8 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     it("does not send content.created when the row already existed (isNew false), even if emitFlowEvent is true", async () => {
       const flowQueue = createMockFlowQueue();
-      const svc = new ContentService(
-        createMockEntityState({ isNew: false, unchanged: false }) as any,
-        vectorize as any, ai as any, 42, undefined, flowQueue as any
-      );
+      tenantDb.query.mockResolvedValue([{ id: "existing-uuid", created_at: "2026-01-01T00:00:00.000Z", content_text: "old" }]);
+      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
 
       await svc.upsertContentFromMetadata(
         { id: "t1" },
@@ -368,7 +573,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
     });
 
     it("does not throw when no flowQueue was provided at all", async () => {
-      const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42);
+      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42);
 
       await expect(
         svc.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1" }, "chan1", "X", true)
@@ -377,48 +582,41 @@ describe("ContentService.upsertContentFromMetadata", () => {
   });
 
   describe("per-list dedup (listId param)", () => {
-    it("keys the entity_state claim with an empty secondaryId when listId is not passed", async () => {
+    it("probes the list-less key space when listId is not passed", async () => {
       await service.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1" }, "chan1", "X", false);
 
-      expect(entityState.claim).toHaveBeenCalledWith(
-        { entity: "content", channelId: "chan1", secondaryId: "", sourceId: "t1" },
-        expect.any(String)
+      expect(tenantDb.query).toHaveBeenCalledWith(
+        expect.stringContaining("list_id IS NULL"),
+        ["chan1", "t1"]
       );
     });
 
-    it("keys the entity_state claim and the R2 record's list_id by listId when provided", async () => {
-      const svcEntityState = createMockEntityState();
+    it("writes list_id into both the D1 row and the R2 copy when provided", async () => {
       const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-      const svc = new ContentService(svcEntityState as any, vectorize as any, ai as any, 42, pipeline as any);
+      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
       await svc.upsertContentFromMetadata({ id: "t2" }, { source_content_id: "t2" }, "chan1", "X", false, "listA");
 
-      expect(svcEntityState.claim).toHaveBeenCalledWith(
-        { entity: "content", channelId: "chan1", secondaryId: "listA", sourceId: "t2" },
-        expect.any(String)
-      );
+      const [, params] = tenantDb.run.mock.calls[0] as [string, unknown[]];
+      expect(params).toContain("listA");
       const [[record]] = pipeline.send.mock.calls[0];
       expect(record.list_id).toBe("listA");
     });
 
-    it("treats the same source_content_id in two different lists as two separate claims", async () => {
+    it("treats the same source_content_id in two different lists as two separate rows", async () => {
       await service.upsertContentFromMetadata({ id: "t3" }, { source_content_id: "t3" }, "chan1", "X", false, "listA");
       await service.upsertContentFromMetadata({ id: "t3" }, { source_content_id: "t3" }, "chan1", "X", false, "listB");
 
-      expect(entityState.claim).toHaveBeenCalledTimes(2);
-      expect(entityState.claim).toHaveBeenNthCalledWith(1,
-        { entity: "content", channelId: "chan1", secondaryId: "listA", sourceId: "t3" },
-        expect.any(String)
-      );
-      expect(entityState.claim).toHaveBeenNthCalledWith(2,
-        { entity: "content", channelId: "chan1", secondaryId: "listB", sourceId: "t3" },
-        expect.any(String)
-      );
+      expect(tenantDb.query).toHaveBeenNthCalledWith(1, expect.stringContaining("AND list_id = ?"), ["chan1", "t3", "listA"]);
+      expect(tenantDb.query).toHaveBeenNthCalledWith(2, expect.stringContaining("AND list_id = ?"), ["chan1", "t3", "listB"]);
+      const idA = (tenantDb.run.mock.calls[0][1] as unknown[])[0];
+      const idB = (tenantDb.run.mock.calls[1][1] as unknown[])[0];
+      expect(idA).not.toBe(idB);
     });
 
     it("includes listId in the emitted content.created message when provided", async () => {
       const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
-      const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
+      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
 
       await svc.upsertContentFromMetadata({ id: "t4" }, { source_content_id: "t4" }, "chan1", "X", true, "listA");
 
@@ -429,7 +627,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     it("omits listId from the emitted message entirely when not provided (not just undefined)", async () => {
       const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
-      const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
+      const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, undefined, flowQueue as any);
 
       await svc.upsertContentFromMetadata({ id: "t5" }, { source_content_id: "t5" }, "chan1", "X", true);
 
@@ -439,8 +637,6 @@ describe("ContentService.upsertContentFromMetadata", () => {
   });
 });
 
-// M1: syncBatch gained a claim key, a fingerprint, a pipeline send, and reworked
-// added/updated/skipped accounting in this migration, none of it previously covered.
 describe("ContentService.syncBatch", () => {
   function makeItem(overrides: Partial<{
     source_content_id: string;
@@ -460,81 +656,105 @@ describe("ContentService.syncBatch", () => {
     };
   }
 
-  it("counts a new item as added and sends a complete row", async () => {
+  it("inserts a new item into D1, counts it as added, and sends a complete R2 row", async () => {
+    const tenantDb = createMockTenantDb();
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const entityState = createMockEntityState({ isNew: true, unchanged: false });
-    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+    const service = new ContentService(tenantDb as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
 
     const result = await service.syncBatch("LOCAL", [makeItem()]);
 
     expect(result).toEqual({ added: 1, updated: 0, skipped: 0 });
+    expect(tenantDb.run).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO content"), expect.any(Array));
     expect(pipeline.send).toHaveBeenCalledTimes(1);
     const [[record]] = pipeline.send.mock.calls[0];
     expect(Object.keys(record).sort()).toEqual(SCHEMA_FIELD_NAMES);
   });
 
-  it("counts an unchanged item as skipped and sends nothing", async () => {
+  it("counts an unchanged item as skipped, writing nothing to either store", async () => {
+    const tenantDb = createMockTenantDb();
+    tenantDb.query.mockResolvedValue([{
+      id: "c1", source_content_id: "s1", title: "T", summary: null, source_url: null,
+      source_updated_at: "2026-01-01T00:00:00.000Z", created_at: "2026-01-01T00:00:00.000Z",
+    }]);
     const pipeline = { send: vi.fn() };
-    const entityState = createMockEntityState({ isNew: false, unchanged: true });
-    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+    const service = new ContentService(tenantDb as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
 
     const result = await service.syncBatch("LOCAL", [makeItem()]);
 
     expect(result).toEqual({ added: 0, updated: 0, skipped: 1 });
+    expect(writeCalls(tenantDb)).toHaveLength(0);
     expect(pipeline.send).not.toHaveBeenCalled();
   });
 
-  it("counts a changed existing item as updated", async () => {
+  // 461d039 compared source_updated_at alone, which would freeze a source that never sets it.
+  it("counts a title-only change as updated even when source_updated_at is unchanged", async () => {
+    const tenantDb = createMockTenantDb();
+    tenantDb.query.mockResolvedValue([{
+      id: "c1", source_content_id: "s1", title: "old", summary: null, source_url: null,
+      source_updated_at: null, created_at: "2026-01-01T00:00:00.000Z",
+    }]);
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const entityState = createMockEntityState({ isNew: false, unchanged: false });
-    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+    const service = new ContentService(tenantDb as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
 
-    const result = await service.syncBatch("LOCAL", [makeItem()]);
+    const result = await service.syncBatch("LOCAL", [makeItem({ title: "new", source_updated_at: null })]);
 
     expect(result).toEqual({ added: 0, updated: 1, skipped: 0 });
+    expect(tenantDb.run).toHaveBeenCalledWith(expect.stringContaining("UPDATE content SET"), expect.arrayContaining(["new", "c1"]));
     expect(pipeline.send).toHaveBeenCalledTimes(1);
   });
 
-  // I2 + I3 regression test: channel-less imports must key on channel_type, not "". Keying on
-  // "" made the R2 record's channel_id null (violating the schema's required column — R2
-  // Pipelines silently drops such records) AND made two different channel types collide on the
-  // same entity_state/partition key.
-  it("keys the entity_state claim (and R2 channel_id) by channel_type, so the same source_content_id under two channel types is not the same entity", async () => {
-    const entityState = createMockEntityState();
-    entityState.claim
-      .mockResolvedValueOnce({ entityId: "local-id", isNew: true, unchanged: false })
-      .mockResolvedValueOnce({ entityId: "notion-id", isNew: true, unchanged: false });
+  it("reuses the existing D1 row's id and created_at for the R2 copy on update", async () => {
+    const tenantDb = createMockTenantDb();
+    tenantDb.query.mockResolvedValue([{
+      id: "c1", source_content_id: "s1", title: "old", summary: null, source_url: null,
+      source_updated_at: null, created_at: "2026-01-01T00:00:00.000Z",
+    }]);
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+    const service = new ContentService(tenantDb as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+
+    await service.syncBatch("LOCAL", [makeItem({ title: "new" })]);
+
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.id).toBe("c1");
+    expect(record.created_at).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  // I2 + I3 regression test: channel-less imports must key on channel_type, not "". A null
+  // channel_id violates the R2 schema's required column (Pipelines silently drops such records)
+  // AND would make delete()'s tombstone — built straight from the D1 row — undeliverable.
+  it("stores channel_type as channel_id in BOTH stores, so two channel types can't collide", async () => {
+    const tenantDb = createMockTenantDb();
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const service = new ContentService(tenantDb as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
 
     await service.syncBatch("LOCAL", [makeItem({ source_content_id: "1" })]);
     await service.syncBatch("NOTION", [makeItem({ source_content_id: "1" })]);
 
-    expect(entityState.claim).toHaveBeenNthCalledWith(1,
-      { entity: "content", channelId: "LOCAL", secondaryId: "", sourceId: "1" },
-      expect.any(String)
-    );
-    expect(entityState.claim).toHaveBeenNthCalledWith(2,
-      { entity: "content", channelId: "NOTION", secondaryId: "", sourceId: "1" },
-      expect.any(String)
-    );
-
     const [[recordA]] = pipeline.send.mock.calls[0];
     const [[recordB]] = pipeline.send.mock.calls[1];
-    expect(recordA.id).toBe("local-id");
-    expect(recordB.id).toBe("notion-id");
     expect(recordA.channel_id).toBe("LOCAL");
     expect(recordB.channel_id).toBe("NOTION");
+    expect(recordA.id).not.toBe(recordB.id);
+
+    // ...and the D1 INSERT carries the same channel_id (params: id, channel_id, channel_type, ...)
+    const [, paramsA] = tenantDb.run.mock.calls[0] as [string, unknown[]];
+    expect(paramsA[1]).toBe("LOCAL");
+    expect(paramsA[2]).toBe("LOCAL");
+  });
+
+  it("throws a clear error when the tenant DB is not provisioned", async () => {
+    const service = new ContentService(null, createMockVectorize() as any, createMockAi() as any, 42);
+    await expect(service.syncBatch("LOCAL", [makeItem()])).rejects.toThrow("ContentService.syncBatch: tenantDb is required");
   });
 });
 
 describe("CONTENT_COLUMN_MAP coverage", () => {
   it("maps view_count, share_count, cover_image_url, duration, height, width, has_face to matching columns", async () => {
-    const entityState = createMockEntityState();
+    const tenantDb = createMockTenantDb();
     const ai = createMockAi();
     const vectorize = createMockVectorize();
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService(entityState as any, vectorize as any, ai as any, 1, pipeline as any);
+    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 1, pipeline as any);
 
     await service.upsertContentFromMetadata(
       { id: "v1" },
@@ -573,12 +793,13 @@ describe("CONTENT_COLUMN_MAP coverage", () => {
 // from any of those three call sites only emitted a console.warn, no test failed. These tests
 // exercise the exact resolveProps -> consumedPaths -> upsertContentFromMetadata composition
 // each poller performs (same metadata entries, same CONTENT_MAPPED_PROP_IDS filter), asserting
-// on the emitted record's raw_data content — not on the paths argument being passed.
+// on the emitted record's raw_data content — not on the paths argument being passed. They also
+// thread the metadata entry's own flowType, i.e. the exact shape task 7 will call with.
 describe("consumedPaths threading — end-to-end raw_data stripping per poller (task-7 fix round 1, Important 3)", () => {
   it("x-posts.ts's own:get-posts composition strips mapped payload fields from raw_data, keeping unmapped ones", async () => {
     const POSTS_METADATA = ContentMetadata_X.find((m) => m.sourceContentType === "own:get-posts")!;
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService(createMockEntityState() as any, createMockVectorize() as any, createMockAi() as any, 1, pipeline as any);
+    const service = new ContentService(createMockTenantDb() as any, createMockVectorize() as any, createMockAi() as any, 1, pipeline as any);
 
     // Mirrors x-posts.ts's upsertPage exactly: resolveProps -> consumedPaths -> upsert.
     const item = {
@@ -591,7 +812,7 @@ describe("consumedPaths threading — end-to-end raw_data stripping per poller (
     const props = resolveProps(item, POSTS_METADATA.contentProps, POSTS_METADATA.linkPrefix);
     const paths = consumedPaths(POSTS_METADATA.contentProps, POSTS_METADATA.linkPrefix, CONTENT_MAPPED_PROP_IDS);
 
-    await service.upsertContentFromMetadata(item, props, "chan1", "X", false, undefined, paths);
+    await service.upsertContentFromMetadata(item, props, "chan1", "X", false, undefined, paths, POSTS_METADATA.flowType);
 
     const [[record]] = pipeline.send.mock.calls[0];
     const raw = JSON.parse(record.raw_data as string);
@@ -605,7 +826,7 @@ describe("consumedPaths threading — end-to-end raw_data stripping per poller (
   it("tiktok-content.ts's video.list composition strips mapped payload fields (including content_url's share_url) from raw_data", async () => {
     const VIDEO_METADATA = ContentMetadata_TikTok.find((m) => m.sourceContentType === "video.list")!;
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService(createMockEntityState() as any, createMockVectorize() as any, createMockAi() as any, 1, pipeline as any);
+    const service = new ContentService(createMockTenantDb() as any, createMockVectorize() as any, createMockAi() as any, 1, pipeline as any);
 
     const item = {
       id: "v1",
@@ -636,7 +857,7 @@ describe("consumedPaths threading — end-to-end raw_data stripping per poller (
     expect(paths).toContain("id");
     expect(paths).toContain("share_url");
 
-    await service.upsertContentFromMetadata(item, props, "chan1", "TIKTOK", false, undefined, paths);
+    await service.upsertContentFromMetadata(item, props, "chan1", "TIKTOK", false, undefined, paths, VIDEO_METADATA.flowType);
 
     const [[record]] = pipeline.send.mock.calls[0];
     expect(record.source_url).toBe("https://tiktok.example/share/v1"); // Minor 3: content_url -> source_url column
@@ -653,10 +874,9 @@ describe("consumedPaths threading — end-to-end raw_data stripping per poller (
 
 describe("ContentService.buildEmbeddingText fallback (via embedContents through upsertContentFromMetadata)", () => {
   it("falls back to content_text when title is null", async () => {
-    const entityState = createMockEntityState();
     const ai = createMockAi();
     const vectorize = createMockVectorize();
-    const service = new ContentService(entityState as any, vectorize as any, ai as any, 42);
+    const service = new ContentService(createMockTenantDb() as any, vectorize as any, ai as any, 42);
 
     await service.upsertContentFromMetadata(
       { id: "t1", text: "tweet body text" },
@@ -672,23 +892,29 @@ describe("ContentService.buildEmbeddingText fallback (via embedContents through 
 });
 
 describe("recordPublishedContent", () => {
+  let tenantDb: ReturnType<typeof createMockTenantDb>;
   let ai: ReturnType<typeof createMockAi>;
   let vectorize: ReturnType<typeof createMockVectorize>;
 
   beforeEach(() => {
+    tenantDb = createMockTenantDb();
     ai = createMockAi();
     vectorize = createMockVectorize();
   });
 
-  it("sends a full content row referencing the source content and flow, without a status field", async () => {
+  it("writes the D1 row and sends a full R2 row referencing the source content and flow, without a status field", async () => {
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
     await svc.recordPublishedContent("target-chan-1", "X", "tweet-123", "generated post text", {
       generatedFromContentId: "source-content-1",
       flowId: "flow-1",
     });
 
+    expect(tenantDb.run).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO content"),
+      expect.arrayContaining(["target-chan-1", "X", "TWEET", "tweet-123", "generated post text"])
+    );
     expect(pipeline.send).toHaveBeenCalledTimes(1);
     const [[record]] = pipeline.send.mock.calls[0];
     expect(record).toMatchObject({
@@ -707,7 +933,7 @@ describe("recordPublishedContent", () => {
 
   it("sends every schema column (I4)", async () => {
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
     await svc.recordPublishedContent("target-chan-1", "X", "tweet-123", "generated post text", {
       generatedFromContentId: "source-content-1",
@@ -718,31 +944,33 @@ describe("recordPublishedContent", () => {
     expect(Object.keys(record).sort()).toEqual(SCHEMA_FIELD_NAMES);
   });
 
-  // 7.2: under D1 a bare crypto.randomUUID() was harmless (id was the PK). Under R2 this method
-  // writes into the same (channel_id, list_id, source_content_id) business key every other
-  // writer uses, so it must mint the id the same way — via entity_state.claim — or republishing
-  // the same sourceContentId would produce two different ids in one partition.
-  it("routes through entity_state.claim, keyed by sourceContentId, so the row id is stable per business key", async () => {
+  // 7.2: this method writes into the same (channel_id, source_content_id) key space every other
+  // writer uses — a key backed by a UNIQUE index. A bare INSERT with a fresh uuid would both
+  // throw on a republish and produce two ids for one logical row.
+  it("reuses the existing D1 row's id on a republish, and upserts rather than plain-inserting", async () => {
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const entityState = createMockEntityState({ entityId: "stable-id" });
-    const svc = new ContentService(entityState as any, vectorize as any, ai as any, 42, pipeline as any);
+    tenantDb.query.mockResolvedValue([{ id: "stable-id", created_at: "2026-01-01T00:00:00.000Z" }]);
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
     await svc.recordPublishedContent("chan1", "X", "tweet-1", "hello", {
       generatedFromContentId: "c1",
       flowId: "f1",
     });
 
-    expect(entityState.claim).toHaveBeenCalledWith(
-      { entity: "content", channelId: "chan1", secondaryId: "", sourceId: "tweet-1" },
-      expect.any(String)
+    expect(tenantDb.query).toHaveBeenCalledWith(
+      expect.stringContaining("WHERE channel_id = ? AND source_content_id = ? AND list_id IS NULL"),
+      ["chan1", "tweet-1"]
     );
+    const [sql] = tenantDb.run.mock.calls[0];
+    expect(sql).toContain("ON CONFLICT(channel_id, source_content_id) WHERE list_id IS NULL DO UPDATE SET");
     const [[record]] = pipeline.send.mock.calls[0];
     expect(record.id).toBe("stable-id");
+    expect(record.created_at).toBe("2026-01-01T00:00:00.000Z");
   });
 
   it("stores an explicit contentType when given (e.g. TikTok's PHOTO_POST), instead of the hardcoded TWEET default", async () => {
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
     await svc.recordPublishedContent(
       "channel-1", "TIKTOK", "publish-id-1", "a caption",
@@ -756,7 +984,7 @@ describe("recordPublishedContent", () => {
 
   it("still defaults to TWEET when contentType is omitted (existing X call sites unaffected)", async () => {
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any);
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
     await svc.recordPublishedContent("channel-2", "X", "tweet-id-1", "a tweet", {
       generatedFromContentId: "content-2",
@@ -767,8 +995,8 @@ describe("recordPublishedContent", () => {
     expect(record.content_type).toBe("TWEET");
   });
 
-  it("does nothing when no pipelineContent was provided", async () => {
-    const svc = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42);
+  it("still writes D1 when no pipelineContent was provided", async () => {
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42);
 
     await expect(
       svc.recordPublishedContent("channel-2", "X", "tweet-id-1", "a tweet", {
@@ -776,13 +1004,22 @@ describe("recordPublishedContent", () => {
         flowId: "flow-1",
       })
     ).resolves.not.toThrow();
+    expect(tenantDb.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws a clear error when the tenant DB is not provisioned", async () => {
+    const svc = new ContentService(null, vectorize as any, ai as any, 42);
+    await expect(
+      svc.recordPublishedContent("c", "X", "t", "x", { generatedFromContentId: "a", flowId: "b" })
+    ).rejects.toThrow("ContentService.recordPublishedContent: tenantDb is required");
   });
 });
 
+// Trigger content is the other side of the flowType gate: never persisted, only deduped.
 describe("ContentService.recordTriggerContentSeen", () => {
   it("delegates to entityState.markSeen with the content_trigger entity kind", async () => {
     const entityState = createMockEntityState();
-    const service = new ContentService(entityState as any, {} as any, {} as any, 42);
+    const service = new ContentService(null, {} as any, {} as any, 42, undefined, undefined, entityState as any);
 
     const isNew = await service.recordTriggerContentSeen("chan1", "listA", "t1");
 
@@ -798,7 +1035,7 @@ describe("ContentService.recordTriggerContentSeen", () => {
   it("returns false when markSeen reports the row already existed", async () => {
     const entityState = createMockEntityState();
     entityState.markSeen.mockResolvedValue(false);
-    const service = new ContentService(entityState as any, {} as any, {} as any, 42);
+    const service = new ContentService(null, {} as any, {} as any, 42, undefined, undefined, entityState as any);
 
     const isNew = await service.recordTriggerContentSeen("chan1", "listA", "t1");
 
@@ -807,7 +1044,7 @@ describe("ContentService.recordTriggerContentSeen", () => {
 
   it("accepts an empty secondaryId for trigger types with no secondary dimension", async () => {
     const entityState = createMockEntityState();
-    const service = new ContentService(entityState as any, {} as any, {} as any, 42);
+    const service = new ContentService(null, {} as any, {} as any, 42, undefined, undefined, entityState as any);
 
     await service.recordTriggerContentSeen("chan1", "", "t1");
 
@@ -819,22 +1056,33 @@ describe("ContentService.recordTriggerContentSeen", () => {
     });
   });
 
-  it("does not touch pipelineContent", async () => {
+  it("touches neither the tenant DB nor pipelineContent — trigger content is never persisted", async () => {
     const entityState = createMockEntityState();
+    const tenantDb = createMockTenantDb();
     const pipelineContent = { send: vi.fn() };
-    const service = new ContentService(entityState as any, {} as any, {} as any, 42, pipelineContent as any);
+    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42, pipelineContent as any, undefined, entityState as any);
 
     await service.recordTriggerContentSeen("chan1", "listA", "t1");
 
+    expect(tenantDb.run).not.toHaveBeenCalled();
+    expect(tenantDb.query).not.toHaveBeenCalled();
     expect(pipelineContent.send).not.toHaveBeenCalled();
   });
 
   it("throws for an empty sourceContentId", async () => {
     const entityState = createMockEntityState();
-    const service = new ContentService(entityState as any, {} as any, {} as any, 42);
+    const service = new ContentService(null, {} as any, {} as any, 42, undefined, undefined, entityState as any);
 
     await expect(service.recordTriggerContentSeen("chan1", "listA", "")).rejects.toThrow(
       "recordTriggerContentSeen: missing source_content_id"
+    );
+  });
+
+  it("throws a clear error when no entityState was supplied", async () => {
+    const service = new ContentService(null, {} as any, {} as any, 42);
+
+    await expect(service.recordTriggerContentSeen("chan1", "listA", "t1")).rejects.toThrow(
+      "ContentService.recordTriggerContentSeen: entityState is required"
     );
   });
 });
@@ -842,7 +1090,7 @@ describe("ContentService.recordTriggerContentSeen", () => {
 describe("ContentService.emitContentTriggerEvent", () => {
   it("sends content.created with a freshly generated contentId and the named secondary field", async () => {
     const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42, undefined, flowQueue as any);
+    const service = new ContentService(null, {} as any, {} as any, 42, undefined, flowQueue as any);
 
     await service.emitContentTriggerEvent("chan1", "X", "listId", "listA", { content_type: "TWEET" });
 
@@ -861,7 +1109,7 @@ describe("ContentService.emitContentTriggerEvent", () => {
 
   it("omits the secondary field entirely when secondaryValue is empty (not just undefined)", async () => {
     const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42, undefined, flowQueue as any);
+    const service = new ContentService(null, {} as any, {} as any, 42, undefined, flowQueue as any);
 
     await service.emitContentTriggerEvent("chan1", "YOUTUBE", "subscriptionChannelId", "", { content_type: "VIDEO" });
 
@@ -870,7 +1118,7 @@ describe("ContentService.emitContentTriggerEvent", () => {
   });
 
   it("does not throw when no flowQueue was provided", async () => {
-    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42);
+    const service = new ContentService(null, {} as any, {} as any, 42);
 
     await expect(
       service.emitContentTriggerEvent("chan1", "X", "listId", "listA", {})
@@ -878,87 +1126,123 @@ describe("ContentService.emitContentTriggerEvent", () => {
   });
 });
 
-describe("ContentService.list / get (R2-backed reads)", () => {
-  it("list() throws a clear error when r2Env was not supplied", async () => {
-    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42);
-    await expect(service.list()).rejects.toThrow("ContentService.list: r2Env is required");
+describe("ContentService.list / get (D1-backed reads)", () => {
+  it("list() reads D1, newest-first by COALESCE(source_updated_at, source_created_at, created_at)", async () => {
+    const tenantDb = createMockTenantDb();
+    tenantDb.query.mockResolvedValue([{ id: "c1" }]);
+    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42);
+
+    const rows = await service.list();
+
+    expect(rows).toEqual([{ id: "c1" }]);
+    const [sql] = tenantDb.query.mock.calls[0];
+    expect(sql).toContain("FROM content");
+    expect(sql).toContain("ORDER BY COALESCE(source_updated_at, source_created_at, created_at) DESC");
   });
 
-  it("get() throws a clear error when r2Env was not supplied", async () => {
-    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42);
-    await expect(service.get("c1")).rejects.toThrow("ContentService.get: r2Env is required");
+  it("list(channelType) filters by channel_type", async () => {
+    const tenantDb = createMockTenantDb();
+    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42);
+
+    await service.list("TIKTOK");
+
+    expect(tenantDb.query).toHaveBeenCalledWith(expect.stringContaining("WHERE channel_type = ?"), ["TIKTOK"]);
+  });
+
+  // impression_count and is_deleted are not D1 columns: the projection supplies them as
+  // constants so a D1 read still satisfies ContentRow.
+  it("projects impression_count as NULL and is_deleted as 0", async () => {
+    const tenantDb = createMockTenantDb();
+    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42);
+
+    await service.list();
+
+    const [sql] = tenantDb.query.mock.calls[0];
+    expect(sql).toContain("NULL AS impression_count");
+    expect(sql).toContain("0 AS is_deleted");
+  });
+
+  it("get() returns the row when found and null when not", async () => {
+    const tenantDb = createMockTenantDb();
+    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42);
+
+    expect(await service.get("c1")).toBeNull();
+
+    tenantDb.query.mockResolvedValue([{ id: "c1" }]);
+    expect(await service.get("c1")).toEqual({ id: "c1" });
+    expect(tenantDb.query).toHaveBeenLastCalledWith(expect.stringContaining("WHERE id = ?"), ["c1"]);
+  });
+
+  it("list()/get() throw a clear error when the tenant DB is not provisioned", async () => {
+    const service = new ContentService(null, {} as any, {} as any, 42);
+    await expect(service.list()).rejects.toThrow("ContentService.list: tenantDb is required");
+    await expect(service.get("c1")).rejects.toThrow("ContentService.get: tenantDb is required");
   });
 });
 
-const R2_ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_CATALOG_TOKEN: "t" };
-
-function stubR2Rows(rows: unknown[]) {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
-    new Response(JSON.stringify({ result: { rows } }), { status: 200 })
-  ));
-}
+// A full D1 row as CONTENT_READ_PROJECTION returns it — what update()/delete() re-read and
+// hand to buildContentRecord.
+const D1_ROW = {
+  id: "c1", channel_id: "chan1", channel_type: "X", content_type: "TWEET", source_content_id: "t1",
+  list_id: null, title: "old title", content_text: "body", summary: "old summary", source_url: null,
+  source_updated_at: null, source_created_at: null, cover_image_url: null, duration: null,
+  height: null, width: null, has_face: null, bookmark_count: null, impression_count: null,
+  view_count: 5, like_count: null, quote_count: null, reply_count: null, repost_count: null,
+  share_count: null, raw_data: "{}", created_at: "2026-01-01T00:00:00.000Z",
+  updated_at: "2026-02-01T00:00:00.000Z", is_deleted: 0,
+};
 
 describe("ContentService.update", () => {
-  it("throws a clear error when r2Env was not supplied", async () => {
-    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42);
-    await expect(service.update("c1", { title: "x" })).rejects.toThrow("ContentService.update: r2Env is required");
+  it("throws a clear error when the tenant DB is not provisioned", async () => {
+    const service = new ContentService(null, {} as any, {} as any, 42);
+    await expect(service.update("c1", { title: "x" })).rejects.toThrow("ContentService.update: tenantDb is required");
   });
 
-  it("reads the full row, overwrites only the given fields, and writes the row back complete", async () => {
+  it("UPDATEs D1 in place, then sends the complete re-read row to the R2 copy", async () => {
+    const tenantDb = createMockTenantDb();
+    tenantDb.query.mockResolvedValue([{ ...D1_ROW, title: "new title" }]);
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    stubR2Rows([{ id: "c1", channel_id: "chan1", channel_type: "X", source_content_id: "t1", title: "old title", summary: "old summary", view_count: 5, is_deleted: 0 }]);
     const service = new ContentService(
-      createMockEntityState() as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any, undefined, R2_ENV
+      tenantDb as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any
     );
 
     await service.update("c1", { title: "new title" });
 
+    expect(tenantDb.run).toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE content SET title = ?"),
+      expect.arrayContaining(["new title", "c1"])
+    );
     const [[record]] = pipeline.send.mock.calls[0];
     expect(record.title).toBe("new title");
-    expect(record.summary).toBe("old summary"); // untouched field preserved from the read
-    expect(record.view_count).toBe(5); // untouched field preserved from the read
+    expect(record.summary).toBe("old summary"); // untouched field preserved from the D1 read
+    expect(record.view_count).toBe(5); // untouched field preserved from the D1 read
     expect(record.tenant_id).toBe(42);
     expect(record.is_deleted).toBe(0);
+    expect(record.created_at).toBe("2026-01-01T00:00:00.000Z");
     // I4: buildContentRecord is now the single source of the column set for update() too.
     expect(Object.keys(record).sort()).toEqual(SCHEMA_FIELD_NAMES);
-    vi.unstubAllGlobals();
   });
 
-  it("throws when the content row does not exist", async () => {
-    stubR2Rows([]);
-    const service = new ContentService(createMockEntityState() as any, {} as any, {} as any, 42, undefined, undefined, R2_ENV);
+  it("throws when the content row does not exist (D1 UPDATE matched nothing)", async () => {
+    const tenantDb = createMockTenantDb();
+    tenantDb.run.mockResolvedValue({ changes: 0 });
+    const pipeline = { send: vi.fn() };
+    const service = new ContentService(tenantDb as any, {} as any, {} as any, 42, pipeline as any);
 
     await expect(service.update("missing", { title: "x" })).rejects.toThrow("ContentService.update: content missing not found");
-    vi.unstubAllGlobals();
-  });
-
-  // I1: getContent had no is_deleted filter at all, and update() forced is_deleted back to 0
-  // on every write — so DELETE c1 followed by PATCH /items/c1 silently undeleted it. update()
-  // must instead refuse to edit a deleted row. This also proves update() passes
-  // includeDeleted: true to getContent — without it, a deleted row would come back as "not
-  // found" (wrong error) instead of "is deleted" (right error).
-  it("throws when the row is already deleted, instead of silently resurrecting it (I1)", async () => {
-    const pipeline = { send: vi.fn() };
-    stubR2Rows([{ id: "c1", channel_id: "chan1", channel_type: "X", source_content_id: "t1", is_deleted: 1 }]);
-    const service = new ContentService(
-      createMockEntityState() as any, {} as any, {} as any, 42, pipeline as any, undefined, R2_ENV
-    );
-
-    await expect(service.update("c1", { title: "x" })).rejects.toThrow("ContentService.update: content c1 is deleted");
     expect(pipeline.send).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
   });
 
-  // 7.3: the old D1-backed update() re-embedded on title/summary change; the R2 rewrite
-  // dropped that call. Vectorize is still live (delete() below still calls deleteByIds), so a
-  // silently-stale embedding would leave semantic search ranking on text the user replaced,
-  // with no path to ever catch up.
+  // 7.3: the R2 rewrite once dropped the re-embed. Vectorize is still live (delete() below still
+  // calls deleteByIds), so a silently-stale embedding would leave semantic search ranking on
+  // text the user replaced, with no path to ever catch up.
   it("re-embeds Vectorize when title or summary changes (7.3)", async () => {
+    const tenantDb = createMockTenantDb();
+    tenantDb.query.mockResolvedValue([{ ...D1_ROW, title: "new title" }]);
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
     const vectorize = createMockVectorize();
     const ai = createMockAi();
-    stubR2Rows([{ id: "c1", channel_id: "chan1", channel_type: "X", source_content_id: "t1", title: "old", summary: null, is_deleted: 0 }]);
-    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any, undefined, R2_ENV);
+    const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
 
     await service.update("c1", { title: "new title" });
 
@@ -967,203 +1251,98 @@ describe("ContentService.update", () => {
     const [[embedRecord]] = vectorize.upsert.mock.calls[0];
     expect(embedRecord.id).toBe("c1");
     expect(embedRecord.metadata.title).toBe("new title");
-    vi.unstubAllGlobals();
   });
 
   it("does not re-embed when fields is empty", async () => {
+    const tenantDb = createMockTenantDb();
+    tenantDb.query.mockResolvedValue([D1_ROW]);
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
     const vectorize = createMockVectorize();
-    const ai = createMockAi();
-    stubR2Rows([{ id: "c1", channel_id: "chan1", channel_type: "X", source_content_id: "t1", is_deleted: 0 }]);
-    const service = new ContentService(createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any, undefined, R2_ENV);
+    const service = new ContentService(tenantDb as any, vectorize as any, createMockAi() as any, 42, pipeline as any);
 
     await service.update("c1", {});
 
     expect(vectorize.upsert).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
+  });
+
+  it("resolves even when the R2 copy send fails — D1 already holds the truth", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const tenantDb = createMockTenantDb();
+    tenantDb.query.mockResolvedValue([D1_ROW]);
+    const pipeline = { send: vi.fn().mockRejectedValue(new Error("transient R2 error")) };
+    const service = new ContentService(tenantDb as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+
+    await expect(service.update("c1", { title: "x" })).resolves.not.toThrow();
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("pipeline_content_error"));
+    errSpy.mockRestore();
   });
 });
 
 describe("ContentService.delete", () => {
-  it("throws a clear error when r2Env was not supplied", async () => {
-    const service = new ContentService(createMockEntityState() as any, createMockVectorize() as any, {} as any, 42);
-    await expect(service.delete("c1")).rejects.toThrow("ContentService.delete: r2Env is required");
+  it("throws a clear error when the tenant DB is not provisioned", async () => {
+    const service = new ContentService(null, createMockVectorize() as any, {} as any, 42);
+    await expect(service.delete("c1")).rejects.toThrow("ContentService.delete: tenantDb is required");
   });
 
-  it("delete() writes a full row with is_deleted = 1 instead of removing anything", async () => {
+  it("hard-deletes the D1 row, tombstones the R2 copy with is_deleted = 1, and drops the vector", async () => {
+    const tenantDb = createMockTenantDb();
+    tenantDb.query.mockResolvedValue([D1_ROW]);
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
     const vectorize = createMockVectorize();
-    const ai = createMockAi();
-    stubR2Rows([{ id: "c1", channel_id: "chan1", channel_type: "X", source_content_id: "t1", title: "t", is_deleted: 0 }]);
-    const service = new ContentService(
-      createMockEntityState() as any, vectorize as any, ai as any, 42, pipeline as any, undefined, R2_ENV
-    );
+    const service = new ContentService(tenantDb as any, vectorize as any, createMockAi() as any, 42, pipeline as any);
 
     await service.delete("c1");
 
+    expect(tenantDb.run).toHaveBeenCalledWith("DELETE FROM content WHERE id = ?", ["c1"]);
     const [[record]] = pipeline.send.mock.calls[0];
     expect(record.is_deleted).toBe(1);
     expect(record.id).toBe("c1");
+    expect(record.channel_id).toBe("chan1");
+    expect(record.title).toBe("old title"); // built from the pre-delete D1 row, not a stub
     // I4: buildContentRecord is now the single source of the column set for delete() too.
     expect(Object.keys(record).sort()).toEqual(SCHEMA_FIELD_NAMES);
     expect(vectorize.deleteByIds).toHaveBeenCalledWith(["c1"]);
-    vi.unstubAllGlobals();
   });
 
-  it("throws when the content row does not exist", async () => {
-    stubR2Rows([]);
-    const service = new ContentService(createMockEntityState() as any, createMockVectorize() as any, {} as any, 42, undefined, undefined, R2_ENV);
+  it("reads the row BEFORE deleting it, so the tombstone can be a complete row", async () => {
+    const order: string[] = [];
+    const tenantDb = createMockTenantDb();
+    tenantDb.query.mockImplementation(async () => { order.push("select"); return [D1_ROW]; });
+    tenantDb.run.mockImplementation(async () => { order.push("delete"); return { changes: 1 }; });
+    const service = new ContentService(tenantDb as any, createMockVectorize() as any, {} as any, 42);
+
+    await service.delete("c1");
+
+    expect(order).toEqual(["select", "delete"]);
+  });
+
+  it("throws when the content row does not exist, without deleting or sending anything", async () => {
+    const tenantDb = createMockTenantDb();
+    const pipeline = { send: vi.fn() };
+    const vectorize = createMockVectorize();
+    const service = new ContentService(tenantDb as any, vectorize as any, {} as any, 42, pipeline as any);
 
     await expect(service.delete("missing")).rejects.toThrow("ContentService.delete: content missing not found");
-    vi.unstubAllGlobals();
-  });
-
-  it("is idempotent against a row that is already deleted", async () => {
-    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const vectorize = createMockVectorize();
-    stubR2Rows([{ id: "c1", channel_id: "chan1", channel_type: "X", source_content_id: "t1", is_deleted: 1 }]);
-    const service = new ContentService(
-      createMockEntityState() as any, vectorize as any, {} as any, 42, pipeline as any, undefined, R2_ENV
-    );
-
-    await expect(service.delete("c1")).resolves.not.toThrow();
-    const [[record]] = pipeline.send.mock.calls[0];
-    expect(record.is_deleted).toBe(1);
-    vi.unstubAllGlobals();
+    expect(tenantDb.run).not.toHaveBeenCalled();
+    expect(pipeline.send).not.toHaveBeenCalled();
+    expect(vectorize.deleteByIds).not.toHaveBeenCalled();
   });
 });
 
-// Final review I4: claim() commits the new fingerprint durably BEFORE the R2 pipeline send is
-// even attempted. If that send fails transiently, the old code (sendContentRecord's internal
-// .catch()) just logged and returned — leaving the fingerprint claiming success while the row
-// never reached R2. The next poll/webhook computes the SAME fingerprint, sees it already
-// matches, and skips resending forever (content.ts's `unchanged` early return at the top of
-// upsertContentFromMetadata). The fix rolls the fingerprint back to NULL on a failed send, so the
-// NEXT claim() call for that key is guaranteed to report unchanged: false.
-describe("pipeline send failure rolls back the entity_state fingerprint (final review I4)", () => {
-  it("upsertContentFromMetadata: rolls back the exact claimed key when the pipeline send rejects", async () => {
-    const entityState = createMockEntityState({ entityId: "c-uuid", isNew: true, unchanged: false });
-    const pipeline = { send: vi.fn().mockRejectedValue(new Error("transient R2 error")) };
-    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
-
-    await service.upsertContentFromMetadata(
-      { id: "t1", text: "hi" },
-      { source_content_id: "t1", content_text: "hi" },
-      "chan1", "X", false, "list1"
-    );
-
-    expect(pipeline.send).toHaveBeenCalledTimes(1);
-    expect(entityState.rollbackFingerprint).toHaveBeenCalledWith(
-      { entity: "content", channelId: "chan1", secondaryId: "list1", sourceId: "t1" }
-    );
-  });
-
-  it("upsertContentFromMetadata: does NOT roll back when the send succeeds", async () => {
-    const entityState = createMockEntityState({ entityId: "c-uuid", isNew: true, unchanged: false });
+// Kept as webhook.ts's fallback for a delete whose row is not in D1 (a historical row that only
+// ever existed during the R2-as-truth phase). R2-only by design — there is nothing in D1 to remove.
+describe("ContentService.deleteByKnownIdentity", () => {
+  it("writes an R2 tombstone from caller-known identity without touching D1", async () => {
+    const tenantDb = createMockTenantDb();
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+    const service = new ContentService(tenantDb as any, createMockVectorize() as any, {} as any, 42, pipeline as any);
 
-    await service.upsertContentFromMetadata(
-      { id: "t1" }, { source_content_id: "t1" }, "chan1", "X", false
-    );
+    await service.deleteByKnownIdentity("c9", "chan1", "X", "t9");
 
-    expect(entityState.rollbackFingerprint).not.toHaveBeenCalled();
-  });
-
-  it("syncBatch: rolls back the claimed key when the pipeline send rejects", async () => {
-    const entityState = createMockEntityState({ entityId: "c-uuid", isNew: true, unchanged: false });
-    const pipeline = { send: vi.fn().mockRejectedValue(new Error("transient R2 error")) };
-    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
-
-    await service.syncBatch("LOCAL", [{ source_content_id: "s1", title: "T", summary: null, source_url: null, source_updated_at: null }]);
-
-    expect(entityState.rollbackFingerprint).toHaveBeenCalledWith(
-      { entity: "content", channelId: "LOCAL", secondaryId: "", sourceId: "s1" }
-    );
-  });
-
-  it("recordPublishedContent: rolls back the claimed key when the pipeline send rejects", async () => {
-    const entityState = createMockEntityState({ entityId: "c-uuid" });
-    const pipeline = { send: vi.fn().mockRejectedValue(new Error("transient R2 error")) };
-    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
-
-    await service.recordPublishedContent("chan1", "X", "t1", "hello", { generatedFromContentId: "src1", flowId: "flow1" });
-
-    expect(entityState.rollbackFingerprint).toHaveBeenCalledWith(
-      { entity: "content", channelId: "chan1", secondaryId: "", sourceId: "t1" }
-    );
-  });
-
-  // Integration-level proof (real EntityStateStore, not a mock that just echoes calls back):
-  // after a failed send, the SAME logical write retried later must report `unchanged: false` and
-  // actually reach the pipeline — the exact property the ledger's Definition of Done asks for.
-  it("a failed send leaves the next call for the same key reporting unchanged: false and resending", async () => {
-    // Minimal in-memory D1 stub covering exactly what ContentService's claim-then-send path
-    // uses: INSERT OR IGNORE (claim's first attempt), the two UPDATE forms claim()/
-    // rollbackFingerprint() issue, and the plain SELECT claim() falls back to on a PK conflict.
-    const rows = new Map<string, Record<string, unknown>>();
-    const keyOf = (p: unknown[]) => p.slice(0, 5).join("\x1f");
-    const fakeDb = {
-      prepare(sql: string) {
-        return {
-          bind(...params: unknown[]) {
-            return {
-              async run() {
-                if (sql.includes("INSERT OR IGNORE INTO entity_state")) {
-                  const k = keyOf(params);
-                  if (rows.has(k)) return { meta: { changes: 0 } };
-                  rows.set(k, {
-                    tenant_id: params[0], entity: params[1], channel_id: params[2],
-                    secondary_id: params[3], source_id: params[4],
-                    entity_id: params[5], fingerprint: params[6],
-                  });
-                  return { meta: { changes: 1 } };
-                }
-                if (sql.includes("SET fingerprint = NULL")) {
-                  // rollbackFingerprint: (updatedAt, tenantId, entity, channelId, secondaryId, sourceId)
-                  const k = [params[1], params[2], params[3], params[4], params[5]].join("\x1f");
-                  const row = rows.get(k);
-                  if (row) row.fingerprint = null;
-                  return { meta: { changes: row ? 1 : 0 } };
-                }
-                if (sql.includes("UPDATE entity_state SET fingerprint")) {
-                  // claim()'s changed-branch: (fingerprint, updatedAt, tenantId, entity, channelId, secondaryId, sourceId)
-                  const k = [params[2], params[3], params[4], params[5], params[6]].join("\x1f");
-                  const row = rows.get(k);
-                  if (row) row.fingerprint = params[0];
-                  return { meta: { changes: row ? 1 : 0 } };
-                }
-                throw new Error(`fake D1: unhandled run() for ${sql}`);
-              },
-              async first() {
-                return rows.get(keyOf(params)) ?? null;
-              },
-            };
-          },
-        };
-      },
-    };
-
-    const { EntityStateStore } = await import("../../src/services/entity-state");
-    const entityState = new EntityStateStore(fakeDb as any, 42);
-
-    const pipeline = { send: vi.fn() };
-    pipeline.send.mockRejectedValueOnce(new Error("transient R2 error"));
-    pipeline.send.mockResolvedValueOnce(undefined);
-    const service = new ContentService(entityState as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
-
-    const rawItem = { id: "t1", text: "hi" };
-    const resolvedProps = { source_content_id: "t1", content_text: "hi" };
-
-    // First call: claim() commits fingerprint F, send fails, rollback sets fingerprint back to NULL.
-    await service.upsertContentFromMetadata(rawItem, resolvedProps, "chan1", "X", false);
-    expect(pipeline.send).toHaveBeenCalledTimes(1);
-
-    // Second call with the IDENTICAL data: without the rollback, claim() would see the same
-    // fingerprint F already stored and report unchanged: true, so the pipeline would never be
-    // called again — this is the bug the fix closes. With the rollback, fingerprint is NULL,
-    // so claim() reports unchanged: false and the send is retried.
-    await service.upsertContentFromMetadata(rawItem, resolvedProps, "chan1", "X", false);
-    expect(pipeline.send).toHaveBeenCalledTimes(2);
+    expect(tenantDb.query).not.toHaveBeenCalled();
+    expect(tenantDb.run).not.toHaveBeenCalled();
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record).toMatchObject({ id: "c9", channel_id: "chan1", source_content_id: "t9", is_deleted: 1, raw_data: "{}" });
+    expect(Object.keys(record).sort()).toEqual(SCHEMA_FIELD_NAMES);
   });
 });

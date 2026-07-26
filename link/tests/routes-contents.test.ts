@@ -268,4 +268,22 @@ describe("DELETE /api/contents/items/:id", () => {
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: "Error: vectorize delete failed" });
   });
+
+  // Fix round 1, Important finding: TenantDataDB.query/run/batch (shared/tenant-data-db.ts)
+  // wraps ANY Cloudflare D1 API failure as "D1 query failed: <cloudflare message>". A stale or
+  // deleted tenant D1 database (this exact class of incident has already happened twice, per
+  // project memory) can easily produce a Cloudflare-side message that happens to contain the
+  // substring "not found" — a bare `.includes("not found")` match would report that
+  // infrastructure failure to the client as a 404 "item doesn't exist", masking a real failure
+  // as a false absence. This pins the fix: only the service's own
+  // "ContentService.<method>: content <id> not found" shape may map to 404.
+  it("returns 500, not 404, when a D1 infrastructure failure's message happens to contain \"not found\"", async () => {
+    deleteMock.mockRejectedValue(new Error("D1 query failed: table user not found"));
+    const app = await buildApp({ tenantDb: FAKE_DB });
+
+    const res = await app.request("/api/contents/items/c1", { method: "DELETE" }, ENV);
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Error: D1 query failed: table user not found" });
+  });
 });

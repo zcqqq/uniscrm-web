@@ -7,14 +7,22 @@ import type { TenantDataDB } from "../../shared/tenant-data-db";
 type ChannelType = "LOCAL" | "NOTION" | "TIKTOK";
 const VALID_CHANNELS: ChannelType[] = ["LOCAL", "NOTION", "TIKTOK"];
 
-// Maps a ContentService throw to an HTTP response. Every method these routes call
-// (syncBatch/list/update/delete) throws plain Errors — "<method>: content <id> not found" for
-// a missing row (see task-5-report.md's Method-by-method section), anything else is an
-// unexpected failure. Neither case may collapse into a silent 200 —
+// Maps a ContentService throw to an HTTP response. `update`/`delete` throw exactly
+// "ContentService.<method>: content <id> not found" for a missing row (see
+// task-5-report.md's Method-by-method section) — that's the only genuine not-found shape.
+// The match is anchored to the `ContentService.` prefix rather than a bare `.includes("not
+// found")": TenantDataDB.query/run/batch (shared/tenant-data-db.ts) wrap ANY Cloudflare D1 API
+// failure as "D1 query failed: <cloudflare message>" — a stale/deleted tenant D1 database (this
+// class of incident has already happened twice, per project memory) could easily produce a
+// message containing "not found" from Cloudflare's side, and a loose match would report that
+// infrastructure failure to the client as "item doesn't exist", masking a real failure as a
+// false absence. Neither case may collapse into a silent 200 —
 // 数据准确性 > 系统稳定性 > 功能 > UI 界面.
+const NOT_FOUND_RE = /^ContentService\.\w+: content .+ not found$/;
+
 function errorResponse(err: unknown): { body: { error: string }; status: 404 | 500 } {
   const message = String(err);
-  if (message.includes("not found")) {
+  if (err instanceof Error && NOT_FOUND_RE.test(err.message)) {
     return { body: { error: message }, status: 404 };
   }
   return { body: { error: message }, status: 500 };

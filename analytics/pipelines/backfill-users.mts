@@ -1,35 +1,51 @@
 // One-off backfill: rebuild R2 user-pipeline records from a tenant D1 `user` table dump.
 //
-// Used after the 2026-07-25 user-table rebuild (tweet_count -> post_count). The R2 table
-// only ever receives users whose props changed, so it lags D1 badly; replaying the D1 rows
-// restores the full population in one pass. D1 is the authoritative store, so its column
-// values are copied straight across — no payload re-resolution is involved here (unlike
-// backfill-events.mts, which has to walk metadata dataId paths into a raw payload).
+// Used after the 2026-07-25 user-table rebuild (tweet_count -> post_count), and again for the
+// steady-state gap task 9b closed: the write path skips the R2 send when a row is `unchanged`
+// vs D1, so rows that never change after their first write never reach R2. Replaying every D1
+// row through the stream once catches both cases in one pass. D1 is the authoritative store, so
+// its column values are copied straight across — no payload re-resolution is involved here
+// (unlike backfill-events.mts, which has to walk metadata dataId paths into a raw payload).
+//
+// REQUIRED/OPTIONAL below are derived from user-stream-schema.json itself (not hand-maintained)
+// so this script can't drift from the schema the way it did before: the first version hardcoded
+// a field list that still had `profile_id` (dropped from the schema) and was missing
+// `is_deleted` (added as required), and `verified_type` used to live only in D1's `raw_data`
+// blob and had to be extracted — it is a real D1 column now, so that extraction is gone too.
 //
 // Usage: npx tsx backfill-users.mts <d1-dump.json> <tenant_id> > records.json
 //   d1-dump.json = output of `wrangler d1 execute <db> --remote --json --command
-//   "SELECT id, channel_id, source_user_id, channel_type, name, username, is_active,
-//    is_follow, is_followed, created_at, updated_at, profile_id, followers_count,
-//    following_count, post_count, listed_count, like_count, media_count FROM user"`
+//   "SELECT id, channel_id, source_user_id, channel_type, name, username, is_active, is_follow,
+//    is_followed, created_at, updated_at, followers_count, following_count, verified_type,
+//    post_count, listed_count, like_count, media_count, profile_image_url, description, raw_data
+//    FROM user"`
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 const [dumpPath, tenantId] = process.argv.slice(2);
 
-// Must match analytics/pipelines/user-stream-schema.json: a field the stream doesn't
-// declare is dropped, and a missing required field drops the whole record.
-const REQUIRED = ["id", "channel_id", "source_user_id", "is_active", "is_follow", "is_followed", "created_at", "updated_at"];
-const OPTIONAL = ["channel_type", "name", "username", "profile_id",
-  "followers_count", "following_count", "post_count", "listed_count", "like_count", "media_count"];
-// The only R2 user column with no D1 column behind it — pickDbFields keeps it inside
-// raw_data, so it has to be read back out or every backfilled row lands with it null.
-const FROM_RAW_DATA = ["verified_type"];
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+type SchemaField = { name: string; required: boolean };
+const schema = JSON.parse(
+  readFileSync(join(SCRIPT_DIR, "user-stream-schema.json"), "utf-8"),
+) as { fields: SchemaField[] };
+
+// tenant_id comes from argv (it isn't a D1 column) and is_deleted is a constant — every row a D1
+// dump can produce is by definition live (D1 deletes are physical) — so both are set explicitly
+// below rather than derived from the schema like everything else.
+const SYNTHETIC = new Set(["tenant_id", "is_deleted"]);
+// A field the schema doesn't declare (e.g. the now-dropped profile_id) is simply absent from
+// both lists below and gets dropped; a row missing a REQUIRED field gets dropped whole.
+const REQUIRED = schema.fields.filter((f) => f.required && !SYNTHETIC.has(f.name)).map((f) => f.name);
+const OPTIONAL = schema.fields.filter((f) => !f.required).map((f) => f.name);
 
 const rows = JSON.parse(readFileSync(dumpPath, "utf-8"))[0].results as Array<Record<string, unknown>>;
-const records = [];
+const records: Record<string, unknown>[] = [];
 const skipped: string[] = [];
 
 for (const r of rows) {
-  const rec: Record<string, unknown> = { tenant_id: Number(tenantId) };
+  const rec: Record<string, unknown> = { tenant_id: Number(tenantId), is_deleted: 0 };
   let missing = false;
   for (const col of REQUIRED) {
     const v = r[col];
@@ -39,12 +55,6 @@ for (const r of rows) {
   if (missing) { skipped.push(String(r.id)); continue; }
   for (const col of OPTIONAL) {
     const v = r[col];
-    if (v !== null && v !== undefined && v !== "") rec[col] = v;
-  }
-  let raw: Record<string, unknown> = {};
-  try { raw = JSON.parse(String(r.raw_data ?? "{}")); } catch { /* keep {} */ }
-  for (const col of FROM_RAW_DATA) {
-    const v = raw[col];
     if (v !== null && v !== undefined && v !== "") rec[col] = v;
   }
   records.push(rec);

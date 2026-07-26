@@ -33,31 +33,6 @@ export interface UserDisplayName {
   username: string | null;
 }
 
-// Batch id -> {name, username} lookup for rendering a list of users without a full row read
-// per id (e.g. list-membership pages). Renamed from getUserNames (task-6 fix round 1,
-// Important 2): the old version only projected `name`, so every caller silently rendered
-// `username` as null — a real UI regression, not a stylistic gap. General-purpose enough to
-// reuse from flow (Task 8) without another rename: add fields here, not a second function.
-export async function getUserDisplayNames(
-  env: R2SqlEnv,
-  tenantId: number,
-  ids: string[]
-): Promise<Map<string, UserDisplayName>> {
-  if (ids.length === 0) return new Map();
-  const list = ids.map(sqlStr).join(", ");
-  const rows = await r2Query<{ id: string; name: string | null; username: string | null }>(
-    env,
-    latestRowsSql({
-      table: "uniscrm.user",
-      columns: ["id", "name", "username", "is_deleted"],
-      partitionBy: USER_PARTITION,
-      where: [`tenant_id = ${sqlInt(tenantId)}`, `id IN (${list})`],
-      outerWhere: ["is_deleted = 0"],
-    })
-  );
-  return new Map(rows.map((r) => [r.id, { name: r.name ?? null, username: r.username ?? null }]));
-}
-
 // list_users.user_id is a MIXED population of two id domains (final review I3): a member added
 // through the UI (POST /api/lists/:id/users) carries `uniscrm.user.id` — the uuid per-tenant
 // D1's INSERT ... RETURNING mints (2026-07-26 plan; entity_state.ts's EntityStateStore.claim()
@@ -66,8 +41,10 @@ export async function getUserDisplayNames(
 // from flow/src/index.ts's
 // executeActions) carries flow's own user identity: the EXTERNAL platform id (X's numeric user
 // id — see routes-internal.ts's body.userId, sourced from webhook.ts's `userId: userData.id`).
-// A single `id IN (...)` lookup (getUserDisplayNames above) only ever resolves the first kind,
-// leaving every flow-added row blank.
+// A single `id IN (...)` lookup (this module's now-deleted getUserDisplayNames — task 9b, zero
+// production callers; flow/src/index.ts's getUserNames mirrors its old column set independently
+// instead of importing across the module boundary) only ever resolves the first kind, leaving
+// every flow-added row blank.
 //
 // Resolution strategy (deliberate choice, not a fallback-to-empty): query BOTH id domains in one
 // round trip — `id IN (...) OR source_user_id IN (...)` — then for each requested value prefer an

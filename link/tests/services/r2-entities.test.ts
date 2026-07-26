@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getUserDisplayNames, getUserDisplayNamesMixed, listUsers } from "../../src/services/r2-entities";
+import { getUserDisplayNamesMixed, listUsers } from "../../src/services/r2-entities";
 
 const ENV = { CF_ACCOUNT_ID: "a", R2_BUCKET: "b", R2_WAREHOUSE: "w", R2_CATALOG_TOKEN: "t" };
 
@@ -26,39 +26,10 @@ describe("listUsers", () => {
   });
 });
 
-describe("getUserDisplayNames", () => {
-  it("returns an empty map without querying when given no ids", async () => {
-    const fetchMock = stubR2([]);
-    const map = await getUserDisplayNames(ENV, 7, []);
-    expect(map.size).toBe(0);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("maps id to both name and username", async () => {
-    stubR2([{ id: "u1", name: "Ann", username: "ann_x" }]);
-    const map = await getUserDisplayNames(ENV, 7, ["u1"]);
-    expect(map.get("u1")).toEqual({ name: "Ann", username: "ann_x" });
-  });
-
-  it("selects username, not just name, in the R2 query", async () => {
-    const fetchMock = stubR2([{ id: "u1", name: "Ann", username: "ann_x" }]);
-    await getUserDisplayNames(ENV, 7, ["u1"]);
-    const q = sentQuery(fetchMock);
-    expect(q).toContain("username");
-  });
-
-  it("filters out logically deleted users after the dedup window", async () => {
-    const fetchMock = stubR2([{ id: "u1", name: "Ann", username: "ann_x" }]);
-    await getUserDisplayNames(ENV, 7, ["u1"]);
-    const q = sentQuery(fetchMock);
-    expect(q.indexOf("is_deleted = 0")).toBeGreaterThan(q.indexOf("QUALIFY"));
-  });
-});
-
 // list_users.user_id (link/src/routes-lists.ts) is a MIXED population: a uuid for UI-added
 // members, an X numeric id for members flow's addToList action added — see this function's own
-// doc comment in r2-entities.ts (final review I3) for why getUserDisplayNames's single
-// `id IN (...)` lookup left flow-added rows blank.
+// doc comment in r2-entities.ts (final review I3) for why the now-deleted single-domain
+// getUserDisplayNames's `id IN (...)` lookup left flow-added rows blank.
 describe("getUserDisplayNamesMixed", () => {
   it("returns an empty map without querying when given no ids", async () => {
     const fetchMock = stubR2([]);

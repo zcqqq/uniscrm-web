@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { EntityStateStore } from "../../src/services/entity-state";
 
-// 内存版 D1 stub:只实现 entity_state 用到的语句形态(INSERT OR IGNORE / SELECT / UPDATE),
-// 语义与 SQLite 一致。fingerprint 相关分支(claim/rollbackFingerprint)随 task 9 删除而移除。
+// 内存版 D1 stub:只实现 entity_state 用到的语句形态(INSERT OR IGNORE / UPDATE),
+// 语义与 SQLite 一致。fingerprint 相关分支(claim/rollbackFingerprint)随 task 9 删除而移除;
+// get()/getFollowByEntityId() 随 task 9b 删除(零生产调用方,flow 直接 SQL 读 entity_state,
+// 不经这个类)—— 所以 first() 也一并去掉,测试改为直接看 rows 断言。
 function createFakeD1() {
   const rows = new Map<string, Record<string, unknown>>();
   const keyOf = (p: unknown[]) => p.slice(0, 5).join("\x1f");
@@ -43,25 +45,26 @@ function createFakeD1() {
               }
               throw new Error(`fake D1: unhandled run() for ${sql}`);
             },
-            async first() {
-              if (sql.includes("WHERE tenant_id = ? AND entity_id = ?")) {
-                // Real D1 projects only the selected columns; this branch is only
-                // ever hit by getFollowByEntityId's two-column SELECT, so mirror that
-                // instead of leaking the whole stored row into the assertion.
-                for (const row of rows.values()) {
-                  if (row.tenant_id === params[0] && row.entity_id === params[1]) {
-                    return { is_follow: row.is_follow, is_followed: row.is_followed };
-                  }
-                }
-                return null;
-              }
-              return rows.get(keyOf(params)) ?? null;
-            },
           };
         },
       };
     },
   };
+}
+
+// Test-only row lookup mirroring the composite key the real writes bind on — replaces the
+// deleted get()/getFollowByEntityId() as the way these tests verify what ensureEntity/setFollow
+// actually wrote, now that entity_state's own row is the only source of truth left to assert on.
+function findRow(db: ReturnType<typeof createFakeD1>, key: { entity: string; channelId: string; secondaryId?: string; sourceId: string }, tenantId = 7) {
+  for (const row of db.rows.values()) {
+    if (
+      row.tenant_id === tenantId && row.entity === key.entity && row.channel_id === key.channelId &&
+      row.secondary_id === (key.secondaryId ?? "") && row.source_id === key.sourceId
+    ) {
+      return row as { entity_id: string; is_follow: number | null; is_followed: number | null };
+    }
+  }
+  return null;
 }
 
 describe("EntityStateStore.markSeen", () => {
@@ -85,7 +88,7 @@ describe("EntityStateStore.ensureEntity", () => {
 
     await store.ensureEntity(key, "d1-minted-id");
 
-    expect((await store.get(key))?.entity_id).toBe("d1-minted-id");
+    expect(findRow(db, key)?.entity_id).toBe("d1-minted-id");
   });
 
   it("is idempotent — a second call never churns the stored entity_id", async () => {
@@ -95,7 +98,7 @@ describe("EntityStateStore.ensureEntity", () => {
     await store.ensureEntity(key, "first-id");
     await store.ensureEntity(key, "second-id");
 
-    expect((await store.get(key))?.entity_id).toBe("first-id");
+    expect(findRow(db, key)?.entity_id).toBe("first-id");
   });
 
   it("leaves a row created by ensureEntity writable by setFollow — the whole point of creating it", async () => {
@@ -105,7 +108,7 @@ describe("EntityStateStore.ensureEntity", () => {
     await store.ensureEntity(key, "d1-minted-id");
     await store.setFollow(key, "is_followed", 1);
 
-    expect(await store.getFollowByEntityId("d1-minted-id")).toEqual({ is_follow: null, is_followed: 1 });
+    expect(findRow(db, key)).toMatchObject({ is_follow: null, is_followed: 1 });
   });
 });
 
@@ -119,11 +122,6 @@ describe("EntityStateStore follow state", () => {
 
     await store.setFollow(key, "is_follow", 1);
 
-    expect(await store.getFollowByEntityId(entityId)).toEqual({ is_follow: 1, is_followed: null });
-  });
-
-  it("returns null for an unknown entity_id rather than throwing", async () => {
-    const store = new EntityStateStore(createFakeD1() as any, 7);
-    expect(await store.getFollowByEntityId("nope")).toBeNull();
+    expect(findRow(db, key)).toMatchObject({ is_follow: 1, is_followed: null });
   });
 });

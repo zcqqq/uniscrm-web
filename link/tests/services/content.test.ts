@@ -31,9 +31,7 @@ function createMockTenantDb() {
 function createMockEntityState() {
   return {
     markSeen: vi.fn().mockResolvedValue(true),
-    get: vi.fn().mockResolvedValue(null),
     setFollow: vi.fn(),
-    getFollowByEntityId: vi.fn(),
   };
 }
 

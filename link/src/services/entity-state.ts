@@ -7,13 +7,6 @@ export interface EntityStateKey {
   sourceId: string;
 }
 
-export interface EntityStateRow {
-  entity_id: string;
-  fingerprint: string | null;
-  is_follow: number | null;
-  is_followed: number | null;
-}
-
 // R2 Data Catalog 是 append-only、无唯一索引、无原子插入,所以这两件事只能落在 D1:
 //   1. 「见过吗」—— flow trigger 去重(靠 PK + INSERT OR IGNORE 的原子性,markSeen)
 //   2. follow 位镜像 —— flow 每次 action 都热读 is_follow/is_followed(ensureEntity/setFollow)
@@ -60,16 +53,6 @@ export class EntityStateStore {
     return res.meta.changes > 0;
   }
 
-  async get(key: EntityStateKey): Promise<EntityStateRow | null> {
-    return await this.db
-      .prepare(
-        `SELECT entity_id, fingerprint, is_follow, is_followed FROM entity_state
-         WHERE tenant_id = ? AND entity = ? AND channel_id = ? AND secondary_id = ? AND source_id = ?`
-      )
-      .bind(this.tenantId, key.entity, key.channelId, this.sec(key), key.sourceId)
-      .first<EntityStateRow>();
-  }
-
   async setFollow(key: EntityStateKey, field: "is_follow" | "is_followed", value: 0 | 1): Promise<void> {
     // field 是联合类型,不是外部输入,拼进 SQL 安全。
     const sql =
@@ -82,14 +65,5 @@ export class EntityStateStore {
       .prepare(sql)
       .bind(value, new Date().toISOString(), this.tenantId, key.entity, key.channelId, this.sec(key), key.sourceId)
       .run();
-  }
-
-  async getFollowByEntityId(
-    entityId: string
-  ): Promise<{ is_follow: number | null; is_followed: number | null } | null> {
-    return await this.db
-      .prepare(`SELECT is_follow, is_followed FROM entity_state WHERE tenant_id = ? AND entity_id = ?`)
-      .bind(this.tenantId, entityId)
-      .first<{ is_follow: number | null; is_followed: number | null }>();
   }
 }

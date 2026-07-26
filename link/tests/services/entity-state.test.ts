@@ -42,16 +42,19 @@ function createFakeD1() {
                 if (row) { row.fingerprint = params[0]; row.updated_at = params[1]; }
                 return { meta: { changes: row ? 1 : 0 } };
               }
-              if (sql.includes("UPDATE entity_state SET is_follow")) {
-                const k = [params[2], params[3], params[4], params[5], params[6]].join("\x1f");
-                const row = rows.get(k);
-                if (row) { row.is_follow = params[0]; row.updated_at = params[1]; }
-                return { meta: { changes: row ? 1 : 0 } };
-              }
+              // is_followed FIRST: "UPDATE entity_state SET is_follow" is a prefix of
+              // "...SET is_followed", so testing the shorter form first would swallow every
+              // is_followed write and silently store it in the wrong column.
               if (sql.includes("UPDATE entity_state SET is_followed")) {
                 const k = [params[2], params[3], params[4], params[5], params[6]].join("\x1f");
                 const row = rows.get(k);
                 if (row) { row.is_followed = params[0]; row.updated_at = params[1]; }
+                return { meta: { changes: row ? 1 : 0 } };
+              }
+              if (sql.includes("UPDATE entity_state SET is_follow")) {
+                const k = [params[2], params[3], params[4], params[5], params[6]].join("\x1f");
+                const row = rows.get(k);
+                if (row) { row.is_follow = params[0]; row.updated_at = params[1]; }
                 return { meta: { changes: row ? 1 : 0 } };
               }
               throw new Error(`fake D1: unhandled run() for ${sql}`);
@@ -201,6 +204,42 @@ describe("EntityStateStore.markSeen", () => {
     const key = { entity: "content_trigger" as const, channelId: "c1", secondaryId: "list1", sourceId: "t1" };
     expect(await store.markSeen(key)).toBe(true);
     expect(await store.markSeen(key)).toBe(false);
+  });
+});
+
+// The `user` path no longer takes its identity from claim(): per-tenant D1's
+// INSERT ... RETURNING decides the uuid, and entity_state only mirrors the two follow columns
+// flow hot-reads. ensureEntity is how that row gets created carrying the id D1 chose.
+describe("EntityStateStore.ensureEntity", () => {
+  const key = { entity: "user" as const, channelId: "c1", sourceId: "s1" };
+
+  it("creates the row with the caller's entity_id so both stores agree on the uuid", async () => {
+    const db = createFakeD1();
+    const store = new EntityStateStore(db as any, 7);
+
+    await store.ensureEntity(key, "d1-minted-id");
+
+    expect((await store.get(key))?.entity_id).toBe("d1-minted-id");
+  });
+
+  it("is idempotent — a second call never churns the stored entity_id", async () => {
+    const db = createFakeD1();
+    const store = new EntityStateStore(db as any, 7);
+
+    await store.ensureEntity(key, "first-id");
+    await store.ensureEntity(key, "second-id");
+
+    expect((await store.get(key))?.entity_id).toBe("first-id");
+  });
+
+  it("leaves a row created by ensureEntity writable by setFollow — the whole point of creating it", async () => {
+    const db = createFakeD1();
+    const store = new EntityStateStore(db as any, 7);
+
+    await store.ensureEntity(key, "d1-minted-id");
+    await store.setFollow(key, "is_followed", 1);
+
+    expect(await store.getFollowByEntityId("d1-minted-id")).toEqual({ is_follow: null, is_followed: 1 });
   });
 });
 

@@ -84,6 +84,24 @@ export class EntityStateStore {
     return { entityId: row.entity_id, isNew: false, unchanged: false };
   }
 
+  // 用调用方给定的 entity_id 建行(已存在则原样保留)。claim() 自己 mint uuid,而
+  // user 的 id 现在由 per-tenant D1 的 INSERT ... RETURNING 决定(2026-07-26 计划:
+  // user/content 真相回到 D1),两边必须是同一个 uuid,所以需要这条「按给定 id 建行」。
+  // 建行本身是为了 setFollow —— 它是 UPDATE,行不存在就静默改 0 行,而 flow 每次 action
+  // 都热读这两列(flow/src/index.ts resolveUserPropsForFilter)。fingerprint 留 NULL:
+  // 变更检测已经改成 D1 列比对,这张表在 user 路径上只剩 follow 镜像这一个职责。
+  async ensureEntity(key: EntityStateKey, entityId: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this.db
+      .prepare(
+        `INSERT OR IGNORE INTO entity_state
+           (tenant_id, entity, channel_id, secondary_id, source_id, entity_id, fingerprint, seen_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(this.tenantId, key.entity, key.channelId, this.sec(key), key.sourceId, entityId, null, now, now)
+      .run();
+  }
+
   // 纯去重:第一次见到返回 true。取代原来的 content_trigger_dedup 表。
   async markSeen(key: EntityStateKey): Promise<boolean> {
     const now = new Date().toISOString();

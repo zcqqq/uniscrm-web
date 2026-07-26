@@ -26,6 +26,7 @@ export const UserMetadata_X: UserMetadata[] = [
 export const ContentMetadata_X: ContentMetadata[] = [
   {
     sourceContentType: "own:get-posts", // https://docs.x.com/x-api/users/get-posts author_id=source_channel_id
+    flowType: "content",
     linkPrefix: "data[]",
     price:0.001,
     label: {"en":"Own Posts", "zh":"自己的推文"},
@@ -50,7 +51,6 @@ export const ContentMetadata_X: ContentMetadata[] = [
     price:0.005,
     label: {"en":"List Posts", "zh":"列表的推文"},
     contentProps: [
-      { propId: "content_type", value: "TWEET" },
       { propId: "source_content_id", dataId: "{linkPrefix}.id" },
       { propId: "source_created_at", dataId: "{linkPrefix}.created_at" },
       { propId: "title", dataId: "{linkPrefix}.article.title" },

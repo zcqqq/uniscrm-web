@@ -4,12 +4,13 @@ import type { ContentMetadata } from "./dataTypes";
 export const ContentMetadata_TikTok: ContentMetadata[] = [
   {
     sourceContentType: "video.list", // https://developers.tiktok.com/doc/tiktok-api-v2-video-list
+    flowType: "content",
     linkPrefix: "data.videos[]",
     contentProps: [
       { propId: "content_type", value: "VIDEO" },
       { propId: "source_content_id", dataId: "{linkPrefix}.id" },
       { propId: "source_created_at", dataId: "{linkPrefix}.create_time" },
-      { propId: "cover_image_url", dataId: "{linkPrefix}.cover_image_url" },
+      // { propId: "cover_image_url", dataId: "{linkPrefix}.cover_image_url" }, //tiktok的封面图url一直会变，造成重复推送
       { propId: "content_text", dataId: "{linkPrefix}.video_description" },
       { propId: "content_url", dataId: "{linkPrefix}.share_url" },
       { propId: "duration", dataId: "{linkPrefix}.duration" },

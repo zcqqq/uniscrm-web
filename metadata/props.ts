@@ -61,6 +61,7 @@ export const PROPS = definePropDefinitions([
   },
   {
     propId: "description",
+    isList: false,
     dataType: "TEXT",
     entity: ["user"],
     label: { en: "Description", zh: "描述" },

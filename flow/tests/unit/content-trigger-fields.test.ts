@@ -27,10 +27,8 @@ describe("getContentTriggerFields", () => {
     expect(getContentTriggerFields(ContentMetadata_X, "not-a-real-mode", "en")).toEqual([]);
   });
 
-  it("gives ENUM_INT/ENUM_TEXT content props enum operators and options", () => {
+  it("no longer offers content_type on list posts — a fixed value:\"TWEET\" filter filters nothing", () => {
     const fields = getContentTriggerFields(ContentMetadata_X, "get-list-posts", "en");
-    const contentType = fields.find((f) => f.id === "content_type");
-    expect(contentType?.dataType).toBe("enum");
-    expect(contentType?.operators).toEqual(["==", "!="]);
+    expect(fields.find((f) => f.id === "content_type")).toBeUndefined();
   });
 });

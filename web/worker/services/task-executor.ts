@@ -18,7 +18,15 @@ export async function executePendingTask(
 
   try {
     let res: Response;
-    if (task.task_type === "activate-trial") {
+    if (task.task_type === "provision-db") {
+      res = await fetch(
+        `${env.ADMIN_URL}/internal/tenants/${payload.tenant_id}/provision-db`,
+        {
+          method: "POST",
+          headers: { "X-Internal-Secret": env.INTERNAL_SECRET },
+        }
+      );
+    } else if (task.task_type === "activate-trial") {
       res = await fetch(
         `${env.ADMIN_URL}/internal/subscriptions/activate-trial`,
         {

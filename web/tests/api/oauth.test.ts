@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
 import { createOAuthRouter } from "../../worker/api/oauth";
 import { OAuthService } from "../../worker/services/oauth";
+import { PendingTaskService } from "../../worker/services/pending-tasks";
+import * as taskExecutor from "../../worker/services/task-executor";
 
 // X never returns an email from /2/users/me (it needs elevated access), so every X signup
 // lands in the no-email branch: callback -> /auth/complete-profile -> POST /auth/verify-code.
@@ -86,5 +88,24 @@ describe("POST /auth/verify-code", () => {
     await post();
 
     expect(resolveUser).toHaveBeenCalledWith("x", "x-123", "new@example.com", "UTC");
+  });
+
+  it("kicks off provision-db and activate-trial tasks when the signup is brand-new", async () => {
+    resolveUser.mockResolvedValue({ memberId: "member-2", tenantId: 99, isNew: true });
+    const createCalls: [string, object][] = [];
+    vi.spyOn(PendingTaskService.prototype, "create").mockImplementation(async (taskType: string, payload: object) => {
+      createCalls.push([taskType, payload]);
+      return `task-${taskType}`;
+    });
+    const execSpy = vi.spyOn(taskExecutor, "executePendingTask").mockResolvedValue(undefined);
+
+    await post();
+
+    expect(createCalls).toEqual([
+      ["provision-db", { tenant_id: 99 }],
+      ["activate-trial", { tenant_id: 99, tier: "basic", days: 30 }],
+    ]);
+    expect(execSpy).toHaveBeenCalledTimes(2);
+    expect(ctx.waitUntil).toHaveBeenCalledTimes(2);
   });
 });

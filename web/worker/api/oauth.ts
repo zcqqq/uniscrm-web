@@ -73,10 +73,10 @@ export function createOAuthRouter() {
     const { memberId, tenantId, isNew } = await oauthService.resolveUser("google", sub, email, resolveSignupTimezone(stored.timezone, cfTimezone(c.req.raw)));
     const lang = await memberLanguage(c.env.WEB_DB, memberId, isNew);
     if (isNew) {
-      // Onboarding is just billing init — no per-tenant D1 provisioning step any more
-      // (tenant-db-removal task 11).
       const tasks = new PendingTaskService(c.env.WEB_DB);
+      const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
       const t2 = await tasks.create("activate-trial", { tenant_id: tenantId, tier: "basic", days: 30 });
+      c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t1));
       c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t2));
     }
     const sessions = new SessionService(c.env.WEB_DB);
@@ -164,10 +164,10 @@ export function createOAuthRouter() {
       const { memberId, tenantId, isNew } = await oauthService.resolveUser("x", xUserId, email, resolveSignupTimezone(stored.timezone, cfTimezone(c.req.raw)));
       const lang = await memberLanguage(c.env.WEB_DB, memberId, isNew);
       if (isNew) {
-        // Onboarding is just billing init — no per-tenant D1 provisioning step any more
-        // (tenant-db-removal task 11).
         const tasks = new PendingTaskService(c.env.WEB_DB);
+        const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
         const t2 = await tasks.create("activate-trial", { tenant_id: tenantId, tier: "basic", days: 30 });
+        c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t1));
         c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t2));
       }
 
@@ -260,10 +260,10 @@ export function createOAuthRouter() {
     const { memberId, tenantId, isNew } = await oauthService.resolveUser(pending.provider, pending.providerUserId, email, resolveSignupTimezone(pending.timezone, cfTimezone(c.req.raw)));
     await oauthService.deletePendingOAuth(pendingId);
     if (isNew) {
-      // Onboarding is just billing init — no per-tenant D1 provisioning step any more
-      // (tenant-db-removal task 11).
       const tasks = new PendingTaskService(c.env.WEB_DB);
+      const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
       const t2 = await tasks.create("activate-trial", { tenant_id: tenantId, tier: "basic", days: 30 });
+      c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t1));
       c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t2));
     }
 

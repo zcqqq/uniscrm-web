@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
 import { createAuthRouter } from "../../worker/api/auth";
+import { PendingTaskService } from "../../worker/services/pending-tasks";
+import * as taskExecutor from "../../worker/services/task-executor";
 
 describe("auth routes", () => {
   let db: any;
@@ -27,6 +29,10 @@ describe("auth routes", () => {
       return next();
     });
     app.route("/auth", createAuthRouter());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   describe("POST /auth/login", () => {
@@ -93,6 +99,41 @@ describe("auth routes", () => {
       expect(res.status).toBe(200);
       expect(res.headers.get("set-cookie")).toContain("session=");
       expect(res.headers.get("set-cookie")).toContain("lang=en");
+    });
+
+    it("kicks off provision-db and activate-trial tasks for a brand-new tenant", async () => {
+      const future = new Date(Date.now() + 900000).toISOString();
+      const createCalls: [string, object][] = [];
+      vi.spyOn(PendingTaskService.prototype, "create").mockImplementation(async (taskType: string, payload: object) => {
+        createCalls.push([taskType, payload]);
+        return `task-${taskType}`;
+      });
+      const execSpy = vi.spyOn(taskExecutor, "executePendingTask").mockResolvedValue(undefined);
+
+      db.prepare.mockImplementation((sql: string) => ({
+        bind: vi.fn().mockReturnValue({
+          first: vi.fn(async () => {
+            if (sql.includes("FROM magic_links")) {
+              return { token: "tok", email: "new@example.com", expires_at: future, used: 0, trial: null, timezone: null };
+            }
+            if (sql.includes("FROM members WHERE email")) return null; // no existing member — new signup
+            if (sql.includes("SELECT tenant_id FROM tenants WHERE email")) return { tenant_id: 55 };
+            return null;
+          }),
+          run: vi.fn().mockResolvedValue({}),
+        }),
+      }));
+
+      const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() };
+      const res = await app.request("/auth/verify?token=tok", {}, undefined, ctx as any);
+
+      expect(res.status).toBe(200);
+      expect(createCalls).toEqual([
+        ["provision-db", { tenant_id: 55 }],
+        ["activate-trial", { tenant_id: 55, tier: "basic", days: 30 }],
+      ]);
+      expect(execSpy).toHaveBeenCalledTimes(2);
+      expect(ctx.waitUntil).toHaveBeenCalledTimes(2);
     });
   });
 

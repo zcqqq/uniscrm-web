@@ -7,8 +7,10 @@ describe("TENANT_DB_INIT_SQL", () => {
   it("creates exactly the user and content tables — the deleted features stay deleted", () => {
     const tables = [...all.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]);
     expect(tables.sort()).toEqual(["content", "user"]);
-    for (const gone of ["profile", "segment_profiles", "event", "content_trigger_dedup"]) {
-      expect(all).not.toContain(gone);
+    // deleted-feature TABLES must not return; word-boundary regexes so that the
+    // profile_image_url COLUMN (a real user field) cannot false-positive.
+    for (const gone of [/\bprofile\b(?!_image_url)/, /\bsegment_profiles\b/, /\bevent\b/, /\bcontent_trigger_dedup\b/]) {
+      expect(all).not.toMatch(gone);
     }
   });
 
@@ -26,5 +28,11 @@ describe("TENANT_DB_INIT_SQL", () => {
     expect(all).toContain("idx_user_channel_source");
     expect(all).toContain("idx_content_channel_source");
     expect(all).toContain("idx_content_channel_list_source");
+  });
+
+  it("user keeps the display columns the R2 copy projects (avatar/description/verified_type)", () => {
+    for (const col of ["profile_image_url", "description", "verified_type"]) {
+      expect(all).toContain(col);
+    }
   });
 });

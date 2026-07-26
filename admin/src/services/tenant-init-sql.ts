@@ -6,6 +6,7 @@ export const TENANT_DB_INIT_SQL = [
     channel_type TEXT,
     name TEXT,
     username TEXT,
+    profile_image_url TEXT,
     description TEXT,
     followers_count INTEGER,
     following_count INTEGER,

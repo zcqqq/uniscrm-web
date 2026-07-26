@@ -204,7 +204,7 @@ describe("XUsersService.upsertUser", () => {
     expect(record.is_followed).toBe(0);
   });
 
-  it("strips consumed payload paths from raw_data but keeps unmapped and mapped-but-columnless fields", async () => {
+  it("strips every column-mapped payload path from raw_data and keeps only the unmapped remainder", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
     const service = new XUsersService(createMockEntityState() as any, { pipelineUser: pipelineUser as any, tenantId: 42 });
 
@@ -226,9 +226,10 @@ describe("XUsersService.upsertUser", () => {
     // unconsumed (no column at all) — must survive in raw_data.
     expect(raw.location).toBe("Earth");
     expect(raw.verified).toBe(true);
-    // Important 1 (task-5 fix round): profile_image_url has a dataId in X_USER_MAPPINGS but no
-    // R2 `user` column — treating it as "consumed" would destroy it with nowhere else to land.
-    expect(raw.profile_image_url).toBe("https://x/pic.jpg");
+    // profile_image_url became a real R2 column once the Users list was seen rendering it blank,
+    // so it is now consumed like any other mapped prop: it belongs in the column, not raw_data.
+    expect(record.profile_image_url).toBe("https://x/pic.jpg");
+    expect(raw).not.toHaveProperty("profile_image_url");
   });
 
   // --- Important 2 (task-5 fix round): read-modify-write for existing users ---
@@ -446,7 +447,9 @@ describe("XUsersService.upsertUserFromMetadata", () => {
     const [[record]] = pipelineUser.send.mock.calls[0];
     expect(record.followers_count).toBe(123);
     expect(record.post_count).toBe(456);
-    expect(record).not.toHaveProperty("description");
+    // description used to have no R2 column, so a resolved value was silently dropped and the
+    // Users list rendered the cell blank. It is a real column now and must reach it.
+    expect(record.description).toBe("bio text");
   });
 
   it("leaves an unresolved column-mapped field as null in the pipeline row, not omitted", async () => {
@@ -542,7 +545,7 @@ describe("XUsersService.upsertUserFromMetadata", () => {
     expect(pipelineUser.send).not.toHaveBeenCalled();
   });
 
-  it("strips consumed payload paths from raw_data via consumedPaths, keeping unmapped and mapped-but-columnless fields", async () => {
+  it("strips consumed payload paths from raw_data via consumedPaths, keeping the unmapped remainder", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
     const service = new XUsersService(createMockEntityState() as any, { pipelineUser: pipelineUser as any, tenantId: 42 });
 
@@ -560,8 +563,8 @@ describe("XUsersService.upsertUserFromMetadata", () => {
     expect(raw).not.toHaveProperty("name");
     expect(raw.public_metrics).toEqual({});
     expect(raw.weird_field).toBe("keep-me");
-    // Important 1: profile_image_url has a dataId but no R2 column — must survive.
-    expect(raw.profile_image_url).toBe("https://x/pic.jpg");
+    // profile_image_url is a real column now — consumed, so stripped from raw_data.
+    expect(raw).not.toHaveProperty("profile_image_url");
   });
 
   it("throws when source_user_id is missing", async () => {

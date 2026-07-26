@@ -1,5 +1,5 @@
 {
-  "_comment": "raw_data holds only the payload fields that didn't map to a named column above (never the full API payload — see 调用外部API返回的payload全量数据不要存在数据库中). is_deleted is a logical-delete flag: 0 = present, 1 = deleted; every read path filters AND is_deleted = 0. profile_id was dropped with the cross-channel profile feature.",
+  "_comment": "raw_data holds only the payload fields that didn't map to a named column above (never the full API payload — see 调用外部API返回的payload全量数据不要存在数据库中). is_deleted is a logical-delete flag: 0 = present, 1 = deleted; every read path filters AND is_deleted = 0. profile_id was dropped with the cross-channel profile feature. profile_image_url and description are real columns: the Users list renders both, and keeping them only in raw_data left those cells blank after the D1 cutover.",
   "fields": [
     { "name": "tenant_id", "type": "int32", "required": true },
     { "name": "id", "type": "string", "required": true },
@@ -20,6 +20,8 @@
     { "name": "listed_count", "type": "int32", "required": false },
     { "name": "like_count", "type": "int32", "required": false },
     { "name": "media_count", "type": "int32", "required": false },
+    { "name": "profile_image_url", "type": "string", "required": false },
+    { "name": "description", "type": "string", "required": false },
     { "name": "raw_data", "type": "string", "required": false },
     { "name": "is_deleted", "type": "int32", "required": true }
   ]

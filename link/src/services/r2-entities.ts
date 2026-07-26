@@ -16,7 +16,7 @@ export const CONTENT_COLUMNS = [
 
 export const USER_COLUMNS = [
   "id", "channel_id", "channel_type", "source_user_id", "name", "username",
-  "is_active", "is_follow", "is_followed", "verified_type",
+  "is_active", "is_follow", "is_followed", "verified_type", "profile_image_url", "description",
   "followers_count", "following_count", "post_count", "listed_count", "like_count", "media_count",
   "raw_data", "created_at", "updated_at", "is_deleted",
 ];

@@ -16,27 +16,25 @@ const X_USER_MAPPINGS = (X_USER_META?.userProps || []).filter((m) => m.dataId);
 // Full set of the R2 `user` table's value columns, i.e. everything except the key/audit
 // columns every write builds explicitly (tenant_id, id, channel_id, channel_type,
 // source_user_id, is_active, is_follow, is_followed, raw_data, is_deleted, created_at,
-// updated_at). profile_image_url and description are real X user fields but have no R2
-// column — they only ever land in raw_data. Keep in sync with
-// analytics/pipelines/user-stream-schema.json.
+// updated_at). Keep in sync with analytics/pipelines/user-stream-schema.json.
 //
 // This is ALSO the one shared fingerprint field list for both upsertUser and
 // upsertUserFromMetadata (task-5 fix round, Important 2). The two writers know different
-// subsets of it (the webhook knows name/username; the poller knows all nine), so if each
+// subsets of it (the webhook knows name/username/profile_image_url; the poller knows all eleven), so if each
 // fingerprinted its own subset the two fingerprints would never agree — every poll tick and
 // every webhook touch would look "changed" to the other and resend into the append-only
 // sink forever. Fingerprinting the same field list, over the MERGED row for an existing
 // user (see upsertUser's read-modify-write), is what makes them agree.
 const R2_USER_VALUE_COLUMNS = [
-  "name", "username", "verified_type",
+  "name", "username", "verified_type", "profile_image_url", "description",
   "followers_count", "following_count", "post_count", "listed_count", "like_count", "media_count",
 ];
 
 // propIds that land in a named R2 column — source_user_id (the entity key itself) plus every
-// R2_USER_VALUE_COLUMNS entry. Used to filter consumedPaths() so a mapped-but-columnless prop
-// (profile_image_url, description — real X_USER_MAPPINGS entries with no R2 column) is never
-// treated as "consumed" and stripped out of raw_data, which would destroy it with nowhere else
-// to land (task-5 fix round, Important 1).
+// R2_USER_VALUE_COLUMNS entry. Used to filter consumedPaths() so a mapped-but-columnless prop is
+// never treated as "consumed" and stripped out of raw_data, which would destroy it with nowhere
+// else to land (task-5 fix round, Important 1). profile_image_url and description USED to be in
+// that category; they became real columns once the Users list was seen rendering both as blank.
 const MAPPED_USER_PROP_IDS = new Set<string>(["source_user_id", ...R2_USER_VALUE_COLUMNS]);
 
 // R2 event pipeline's value columns beyond the fixed identity/time columns every write

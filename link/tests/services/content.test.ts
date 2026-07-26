@@ -11,10 +11,17 @@ const SCHEMA_FIELD_NAMES = (contentSchema as { fields: { name: string }[] }).fie
   .sort();
 
 // D1 (per-tenant, via TenantDataDB) is the source of truth now — every read/dedup/UPDATE/DELETE
-// goes through this mock. `query` defaults to "no existing row" so the common case is an insert.
+// goes through this mock. Probe SELECTs default to "no existing row" so the common case is an
+// insert. Upserts carry `RETURNING id, created_at` and go through query() too (run() discards
+// result rows), so the mock echoes back the bound id/created_at — i.e. "this writer won the
+// race". A test that wants the LOST race just overrides query for that call.
 function createMockTenantDb() {
   return {
-    query: vi.fn().mockResolvedValue([]),
+    query: vi.fn(async (sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> => {
+      if (!/^\s*INSERT/i.test(sql)) return [];
+      const cols = sql.slice(sql.indexOf("(") + 1, sql.indexOf(")")).split(",").map((c) => c.trim());
+      return [{ id: params[cols.indexOf("id")], created_at: params[cols.indexOf("created_at")] }];
+    }),
     run: vi.fn().mockResolvedValue({ changes: 1 }),
     batch: vi.fn(),
     getDbId: vi.fn().mockReturnValue("db-1"),
@@ -40,10 +47,22 @@ function createMockVectorize() {
   return { upsert: vi.fn().mockResolvedValue(undefined), deleteByIds: vi.fn() };
 }
 
-// Only the D1 statements that actually mutate — the probe SELECT goes through query(), so
-// "no D1 write" is simply run() never being called.
+// Only the D1 statements that actually mutate. Writes are split across both methods: syncBatch's
+// plain INSERT/UPDATE and delete()'s DELETE use run(), while the RETURNING upserts use query()
+// alongside the read-only probes — so "no D1 write" means neither, filtered by statement kind.
+// (`\b` keeps `is_deleted` in the read projection from counting as a DELETE.)
 function writeCalls(db: ReturnType<typeof createMockTenantDb>) {
-  return db.run.mock.calls;
+  return [
+    ...db.query.mock.calls.filter(([sql]) => /\b(INSERT|UPDATE|DELETE)\b/i.test(sql as string)),
+    ...db.run.mock.calls,
+  ];
+}
+
+// The [sql, params] of the upsert statement (the one carrying RETURNING), as distinct from the
+// probe SELECT that precedes it on the same mock method.
+function upsertCall(db: ReturnType<typeof createMockTenantDb>, nth = 0): [string, unknown[]] {
+  const calls = db.query.mock.calls.filter(([sql]) => /^\s*INSERT/i.test(sql as string));
+  return calls[nth] as [string, unknown[]];
 }
 
 describe("ContentService.upsertContentFromMetadata", () => {
@@ -70,7 +89,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
       expect.stringContaining("FROM content WHERE channel_id = ? AND source_content_id = ? AND list_id IS NULL"),
       ["chan1", "t1"]
     );
-    expect(tenantDb.run).toHaveBeenCalledWith(
+    expect(tenantDb.query).toHaveBeenCalledWith(
       expect.stringContaining("INSERT INTO content"),
       expect.arrayContaining(["chan1", "t1", "X"])
     );
@@ -83,7 +102,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
     const isNew = await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X", false);
 
     expect(isNew).toBe(false);
-    const [sql] = tenantDb.run.mock.calls[0];
+    const [sql] = upsertCall(tenantDb);
     expect(sql).toContain("ON CONFLICT(channel_id, source_content_id) WHERE list_id IS NULL DO UPDATE SET");
     // raw_data must MERGE, not replace: a partial payload can't be allowed to wipe keys an
     // earlier fuller write stored.
@@ -97,7 +116,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
       expect.stringContaining("AND list_id = ?"),
       ["chan1", "t2", "listA"]
     );
-    const [sql] = tenantDb.run.mock.calls[0];
+    const [sql] = upsertCall(tenantDb);
     expect(sql).toContain("ON CONFLICT(channel_id, list_id, source_content_id) WHERE list_id IS NOT NULL DO UPDATE SET");
   });
 
@@ -127,7 +146,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     await service.upsertContentFromMetadata({ id: "t1" }, { source_content_id: "t1", content_text: "hi" }, "chan1", "X", false);
 
-    const [, insertParams] = tenantDb.run.mock.calls[0] as [string, unknown[]];
+    const [, insertParams] = upsertCall(tenantDb);
     const d1Id = insertParams[0];
     const [[record]] = pipeline.send.mock.calls[0];
     expect(typeof d1Id).toBe("string");
@@ -136,6 +155,40 @@ describe("ContentService.upsertContentFromMetadata", () => {
     // ...and the same id is what Vectorize is keyed by.
     const [[embedRecord]] = vectorize.upsert.mock.calls[0];
     expect(embedRecord.id).toBe(d1Id);
+  });
+
+  // The probe→mint→upsert sequence is not atomic (entityState.claim, which this replaced, was).
+  // Two writers of the same (channel_id, source_content_id) — webhook post.create and the
+  // poller's re-walk — can interleave: the poller probes, sees nothing, mints B; the webhook
+  // inserts A first; the poller's upsert hits the conflict and D1 keeps A, because `id` is not in
+  // the DO UPDATE set. Carrying B forward would put an id in the R2 copy and in Vectorize that
+  // matches no D1 row, and fire a second content.created with a dangling contentId. RETURNING
+  // makes the write authoritative, so this asserts on the RETURNED id — which the probe-derived
+  // structure could not do.
+  it("uses the id D1 RETURNED, not the one the probe minted, when a concurrent writer wins the race", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+    tenantDb.query
+      .mockResolvedValueOnce([]) // probe: key not there yet -> a fresh uuid is minted
+      .mockResolvedValueOnce([{ id: "winner-id", created_at: "2026-01-01T00:00:00.000Z" }]); // upsert hit the conflict
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any, flowQueue as any);
+
+    const isNew = await svc.upsertContentFromMetadata(
+      { id: "t1" }, { source_content_id: "t1", content_text: "hi" }, "chan1", "X", true
+    );
+
+    const [sql, insertParams] = upsertCall(tenantDb);
+    expect(sql).toContain("RETURNING id, created_at");
+    expect(insertParams[0]).not.toBe("winner-id"); // the probe really did propose a different id
+
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.id).toBe("winner-id");
+    expect(record.created_at).toBe("2026-01-01T00:00:00.000Z");
+    const [[embedRecord]] = vectorize.upsert.mock.calls[0];
+    expect(embedRecord.id).toBe("winner-id");
+    // The row was not new to the system, so no second content.created may fire for it.
+    expect(isNew).toBe(false);
+    expect(flowQueue.send).not.toHaveBeenCalled();
   });
 
   it("reuses the existing D1 row's id (and its created_at) for the R2 copy", async () => {
@@ -247,7 +300,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
       );
 
       expect(isNew).toBe(true);
-      expect(tenantDb.run).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO content"), expect.any(Array));
+      expect(tenantDb.query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO content"), expect.any(Array));
       expect(pipeline.send).toHaveBeenCalledTimes(1);
     });
 
@@ -259,7 +312,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
         { id: "t1" }, { source_content_id: "t1", content_text: "hi" }, "chan1", "X", false
       );
 
-      expect(tenantDb.run).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO content"), expect.any(Array));
+      expect(tenantDb.query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO content"), expect.any(Array));
       expect(pipeline.send).toHaveBeenCalledTimes(1);
     });
 
@@ -311,7 +364,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
         "chan1", "X", false, undefined, ["text"]
       );
 
-      const [sql, params] = tenantDb.run.mock.calls[0] as [string, unknown[]];
+      const [sql, params] = upsertCall(tenantDb);
       const insertCols = sql.slice(sql.indexOf("(") + 1, sql.indexOf(")")).split(",").map((c) => c.trim());
       const d1RawData = params[insertCols.indexOf("raw_data")] as string;
       const [[record]] = pipeline.send.mock.calls[0];
@@ -446,7 +499,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
     await service.upsertContentFromMetadata({ id: "t1" }, resolvedProps, "chan1", "X", false);
 
-    const [sql, params] = tenantDb.run.mock.calls[0] as [string, unknown[]];
+    const [sql, params] = upsertCall(tenantDb);
     expect(sql).toContain("content_type");
     expect(sql).toContain("content_text");
     expect(sql).toContain("source_created_at");
@@ -597,7 +650,7 @@ describe("ContentService.upsertContentFromMetadata", () => {
 
       await svc.upsertContentFromMetadata({ id: "t2" }, { source_content_id: "t2" }, "chan1", "X", false, "listA");
 
-      const [, params] = tenantDb.run.mock.calls[0] as [string, unknown[]];
+      const [, params] = upsertCall(tenantDb);
       expect(params).toContain("listA");
       const [[record]] = pipeline.send.mock.calls[0];
       expect(record.list_id).toBe("listA");
@@ -607,10 +660,12 @@ describe("ContentService.upsertContentFromMetadata", () => {
       await service.upsertContentFromMetadata({ id: "t3" }, { source_content_id: "t3" }, "chan1", "X", false, "listA");
       await service.upsertContentFromMetadata({ id: "t3" }, { source_content_id: "t3" }, "chan1", "X", false, "listB");
 
-      expect(tenantDb.query).toHaveBeenNthCalledWith(1, expect.stringContaining("AND list_id = ?"), ["chan1", "t3", "listA"]);
-      expect(tenantDb.query).toHaveBeenNthCalledWith(2, expect.stringContaining("AND list_id = ?"), ["chan1", "t3", "listB"]);
-      const idA = (tenantDb.run.mock.calls[0][1] as unknown[])[0];
-      const idB = (tenantDb.run.mock.calls[1][1] as unknown[])[0];
+      // query() now carries both the probes and the RETURNING upserts, so pick out the probes.
+      const probes = tenantDb.query.mock.calls.filter(([sql]) => /^\s*SELECT/i.test(sql as string));
+      expect(probes[0]).toEqual([expect.stringContaining("AND list_id = ?"), ["chan1", "t3", "listA"]]);
+      expect(probes[1]).toEqual([expect.stringContaining("AND list_id = ?"), ["chan1", "t3", "listB"]]);
+      const idA = upsertCall(tenantDb, 0)[1][0];
+      const idB = upsertCall(tenantDb, 1)[1][0];
       expect(idA).not.toBe(idB);
     });
 
@@ -673,8 +728,8 @@ describe("ContentService.syncBatch", () => {
   it("counts an unchanged item as skipped, writing nothing to either store", async () => {
     const tenantDb = createMockTenantDb();
     tenantDb.query.mockResolvedValue([{
-      id: "c1", source_content_id: "s1", title: "T", summary: null, source_url: null,
-      source_updated_at: "2026-01-01T00:00:00.000Z", created_at: "2026-01-01T00:00:00.000Z",
+      id: "c1", source_content_id: "s1", channel_id: "LOCAL", title: "T", summary: null,
+      source_url: null, source_updated_at: "2026-01-01T00:00:00.000Z", created_at: "2026-01-01T00:00:00.000Z",
     }]);
     const pipeline = { send: vi.fn() };
     const service = new ContentService(tenantDb as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
@@ -690,8 +745,8 @@ describe("ContentService.syncBatch", () => {
   it("counts a title-only change as updated even when source_updated_at is unchanged", async () => {
     const tenantDb = createMockTenantDb();
     tenantDb.query.mockResolvedValue([{
-      id: "c1", source_content_id: "s1", title: "old", summary: null, source_url: null,
-      source_updated_at: null, created_at: "2026-01-01T00:00:00.000Z",
+      id: "c1", source_content_id: "s1", channel_id: "LOCAL", title: "old", summary: null,
+      source_url: null, source_updated_at: null, created_at: "2026-01-01T00:00:00.000Z",
     }]);
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
     const service = new ContentService(tenantDb as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
@@ -706,8 +761,8 @@ describe("ContentService.syncBatch", () => {
   it("reuses the existing D1 row's id and created_at for the R2 copy on update", async () => {
     const tenantDb = createMockTenantDb();
     tenantDb.query.mockResolvedValue([{
-      id: "c1", source_content_id: "s1", title: "old", summary: null, source_url: null,
-      source_updated_at: null, created_at: "2026-01-01T00:00:00.000Z",
+      id: "c1", source_content_id: "s1", channel_id: "LOCAL", title: "old", summary: null,
+      source_url: null, source_updated_at: null, created_at: "2026-01-01T00:00:00.000Z",
     }]);
     const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
     const service = new ContentService(tenantDb as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
@@ -740,6 +795,62 @@ describe("ContentService.syncBatch", () => {
     const [, paramsA] = tenantDb.run.mock.calls[0] as [string, unknown[]];
     expect(paramsA[1]).toBe("LOCAL");
     expect(paramsA[2]).toBe("LOCAL");
+  });
+
+  // A pre-migration LOCAL/NOTION row has channel_id NULL (the old code never set it) while its
+  // R2 copies go out under channel_id = channelType. The probe matches on channel_type, so the
+  // row IS found — but the UPDATE branch used to omit channel_id, so the NULL survived every
+  // rewrite. delete() builds its R2 tombstone from the D1 row, and R2 Pipelines drops a record
+  // whose required channel_id is null, so such an item would stay visible in analytics forever.
+  describe("channel_id backfill on the UPDATE branch", () => {
+    function legacyRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: "c1", source_content_id: "s1", channel_id: null, title: "T", summary: null,
+        source_url: null, source_updated_at: "2026-01-01T00:00:00.000Z",
+        created_at: "2026-01-01T00:00:00.000Z", ...overrides,
+      };
+    }
+
+    it("puts channel_id in the UPDATE's SET list, bound to the channel type", async () => {
+      const tenantDb = createMockTenantDb();
+      tenantDb.query.mockResolvedValue([legacyRow({ title: "old" })]);
+      const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+      const service = new ContentService(tenantDb as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+
+      await service.syncBatch("LOCAL", [makeItem({ title: "new" })]);
+
+      const [sql, params] = tenantDb.run.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain("UPDATE content SET channel_id = ?");
+      expect(params[0]).toBe("LOCAL");
+    });
+
+    // Without this, the repair above is unreachable for the rows that need it most: an
+    // otherwise-unchanged legacy row skips out before any UPDATE can run.
+    it("rewrites an otherwise-unchanged row whose channel_id is NULL instead of skipping it forever", async () => {
+      const tenantDb = createMockTenantDb();
+      tenantDb.query.mockResolvedValue([legacyRow()]);
+      const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+      const service = new ContentService(tenantDb as any, createMockVectorize() as any, createMockAi() as any, 42, pipeline as any);
+
+      const result = await service.syncBatch("LOCAL", [makeItem()]);
+
+      expect(result).toEqual({ added: 0, updated: 1, skipped: 0 });
+      expect(tenantDb.run).toHaveBeenCalledWith(
+        expect.stringContaining("channel_id = ?"),
+        expect.arrayContaining(["LOCAL"])
+      );
+    });
+
+    it("still skips an unchanged row whose channel_id is already correct", async () => {
+      const tenantDb = createMockTenantDb();
+      tenantDb.query.mockResolvedValue([legacyRow({ channel_id: "LOCAL" })]);
+      const service = new ContentService(tenantDb as any, createMockVectorize() as any, createMockAi() as any, 42);
+
+      const result = await service.syncBatch("LOCAL", [makeItem()]);
+
+      expect(result).toEqual({ added: 0, updated: 0, skipped: 1 });
+      expect(writeCalls(tenantDb)).toHaveLength(0);
+    });
   });
 
   it("throws a clear error when the tenant DB is not provisioned", async () => {
@@ -911,7 +1022,7 @@ describe("recordPublishedContent", () => {
       flowId: "flow-1",
     });
 
-    expect(tenantDb.run).toHaveBeenCalledWith(
+    expect(tenantDb.query).toHaveBeenCalledWith(
       expect.stringContaining("INSERT INTO content"),
       expect.arrayContaining(["target-chan-1", "X", "TWEET", "tweet-123", "generated post text"])
     );
@@ -961,10 +1072,31 @@ describe("recordPublishedContent", () => {
       expect.stringContaining("WHERE channel_id = ? AND source_content_id = ? AND list_id IS NULL"),
       ["chan1", "tweet-1"]
     );
-    const [sql] = tenantDb.run.mock.calls[0];
+    const [sql] = upsertCall(tenantDb);
     expect(sql).toContain("ON CONFLICT(channel_id, source_content_id) WHERE list_id IS NULL DO UPDATE SET");
     const [[record]] = pipeline.send.mock.calls[0];
     expect(record.id).toBe("stable-id");
+    expect(record.created_at).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  // Same non-atomic probe→mint→upsert race as upsertContentFromMetadata.
+  it("uses the id D1 RETURNED for the R2 copy when a concurrent writer wins the race", async () => {
+    const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
+    tenantDb.query
+      .mockResolvedValueOnce([]) // probe: nothing there yet
+      .mockResolvedValueOnce([{ id: "winner-id", created_at: "2026-01-01T00:00:00.000Z" }]);
+    const svc = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
+
+    await svc.recordPublishedContent("chan1", "X", "tweet-1", "hello", {
+      generatedFromContentId: "c1",
+      flowId: "f1",
+    });
+
+    const [sql, params] = upsertCall(tenantDb);
+    expect(sql).toContain("RETURNING id, created_at");
+    expect(params[0]).not.toBe("winner-id");
+    const [[record]] = pipeline.send.mock.calls[0];
+    expect(record.id).toBe("winner-id");
     expect(record.created_at).toBe("2026-01-01T00:00:00.000Z");
   });
 
@@ -1004,7 +1136,7 @@ describe("recordPublishedContent", () => {
         flowId: "flow-1",
       })
     ).resolves.not.toThrow();
-    expect(tenantDb.run).toHaveBeenCalledTimes(1);
+    expect(upsertCall(tenantDb)).toBeDefined();
   });
 
   it("throws a clear error when the tenant DB is not provisioned", async () => {

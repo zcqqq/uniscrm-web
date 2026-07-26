@@ -226,8 +226,8 @@ export class ContentService {
     const db = this.requireDb("syncBatch");
     const now = new Date().toISOString();
 
-    const existing = await db.query<Record<string, unknown> & { id: string; source_content_id: string; created_at: string }>(
-      `SELECT id, source_content_id, ${SYNC_COMPARE_COLUMNS.join(", ")}, created_at FROM content WHERE channel_type = ?`,
+    const existing = await db.query<Record<string, unknown> & { id: string; source_content_id: string; channel_id: string | null; created_at: string }>(
+      `SELECT id, source_content_id, channel_id, ${SYNC_COMPARE_COLUMNS.join(", ")}, created_at FROM content WHERE channel_type = ?`,
       [channelType]
     );
     const existingMap = new Map(existing.map((e) => [e.source_content_id, e]));
@@ -246,11 +246,20 @@ export class ContentService {
       };
       const ex = existingMap.get(item.source_content_id);
 
+      // A row written before this migration has channel_id NULL (the old code never set it),
+      // while its R2 copies go out under channel_id = channelType. Left alone it stays NULL
+      // forever — the probe matches on channel_type, so the row IS found, and an unchanged item
+      // would skip out before any UPDATE could heal it. deleting such a row later would then
+      // build its tombstone from a NULL channel_id and R2 Pipelines would drop it (required
+      // column), leaving the item visible in analytics permanently. So a channel_id that doesn't
+      // match counts as "changed": the write below repairs it through the normal path.
+      const needsChannelIdRepair = !!ex && ex.channel_id !== channelType;
+
       // 461d039 compared source_updated_at alone, which freezes a source that never publishes
       // that field (a plain LOCAL upload) at its first import forever. Comparing all four
       // business columns is the same D1-column-compare shape and happens to be exactly the field
       // set the R2-as-truth phase fingerprinted, so nothing regresses against either baseline.
-      if (ex && SYNC_COMPARE_COLUMNS.every((c) => String(values[c] ?? "") === String(ex[c] ?? ""))) {
+      if (ex && !needsChannelIdRepair && SYNC_COMPARE_COLUMNS.every((c) => String(values[c] ?? "") === String(ex[c] ?? ""))) {
         skipped++;
         continue;
       }
@@ -267,9 +276,10 @@ export class ContentService {
       // in D1 would produce a tombstone R2 throws away. Finally it stops {LOCAL, id:"1"} and
       // {NOTION, id:"1"} from colliding on one (channel_id, list_id, source_content_id) key.
       if (ex) {
+        // channel_id is in the SET list, not just the INSERT: see needsChannelIdRepair above.
         await db.run(
-          "UPDATE content SET title = ?, summary = ?, source_url = ?, source_updated_at = ?, raw_data = ?, updated_at = ? WHERE id = ?",
-          [item.title, item.summary, item.source_url, item.source_updated_at, rawData, now, id]
+          "UPDATE content SET channel_id = ?, title = ?, summary = ?, source_url = ?, source_updated_at = ?, raw_data = ?, updated_at = ? WHERE id = ?",
+          [channelType, item.title, item.summary, item.source_url, item.source_updated_at, rawData, now, id]
         );
         updated++;
       } else {
@@ -353,20 +363,26 @@ export class ContentService {
           `SELECT id, created_at, ${CONTENT_TABLE_COLUMNS.join(", ")} FROM content WHERE channel_id = ? AND source_content_id = ? AND list_id IS NULL`,
           [channelId, sourceContentId]
         );
-    const isNew = existing.length === 0;
-    // D1 mints the id, and the R2 copy reuses it verbatim (id-domain discipline: one id per
-    // logical row across both stores, so flow logs / Vectorize / generatedFromContentId resolve).
-    const id = isNew ? crypto.randomUUID() : existing[0].id;
+    // The probe only PROPOSES an id: between it and the upsert another writer for the same
+    // business key (webhook post.create vs. the poller's re-walk) can insert first, and the
+    // upsert's DO UPDATE deliberately does not touch `id`, so D1 keeps the winner's. The
+    // authoritative id therefore comes back from the write itself via RETURNING — see below.
+    const probeIsNew = existing.length === 0;
+    const candidateId = probeIsNew ? crypto.randomUUID() : existing[0].id;
     // Keep the copy's created_at equal to the truth's instead of stamping `now` on every
     // update — the R2 read path takes the newest row per key, so a re-stamped created_at would
     // make every row look as if it had been created at its last refresh.
-    const createdAt = isNew ? now : String(existing[0].created_at ?? now);
+    const candidateCreatedAt = probeIsNew ? now : String(existing[0].created_at ?? now);
 
     // Incremental pollers re-walk recently-seen posts every cron tick (see pollers/x-posts.ts's
     // runIncrementalPoll). Without this check every visit would burn a D1 write AND append an
     // identical row to the R2 copy, which has no dedup on write (append-only Iceberg sink; see
     // docs/adr/0002-r2-data-catalog-dedup-via-periodic-compaction.md).
-    const unchanged = !isNew && dynamicCols.every((c) => String(columnValues[c]) === String(existing[0][c] ?? ""));
+    const unchanged = !probeIsNew && dynamicCols.every((c) => String(columnValues[c]) === String(existing[0][c] ?? ""));
+
+    let id = candidateId;
+    let createdAt = candidateCreatedAt;
+    let isNew = probeIsNew;
 
     // raw_data 只保留没有被消费的字段 —— 全量 payload 进日志不进库
     // (uniscrm-web/CLAUDE.md「调用外部API返回的payload全量数据不要存在数据库中」)。
@@ -395,7 +411,7 @@ export class ContentService {
     if (!unchanged) {
       const insertCols = ["id", "channel_id", "channel_type", "source_content_id", "list_id", "raw_data", ...dynamicCols, "created_at", "updated_at"];
       const insertPlaceholders = insertCols.map(() => "?");
-      const insertParams = [id, channelId, channelType, sourceContentId, listId ?? null, rawData, ...dynamicCols.map((c) => columnValues[c]), createdAt, now];
+      const insertParams = [candidateId, channelId, channelType, sourceContentId, listId ?? null, rawData, ...dynamicCols.map((c) => columnValues[c]), candidateCreatedAt, now];
       const updateSets = [
         // json_patch merges the new remainder into the stored one instead of replacing it, so a
         // partial payload (a webhook carrying fewer fields than the poller) can't wipe raw_data
@@ -405,19 +421,42 @@ export class ContentService {
         ...dynamicCols.map((c) => `${c} = excluded.${c}`),
       ];
       // Atomic dedup lives in the partial unique index, not in the probe above: the probe is
-      // only a diff/id lookup, the index is what stops two concurrent pollers from creating two
+      // only a diff/id proposal, the index is what stops two concurrent pollers from creating two
       // rows for the same post.
       const conflictTarget = listId
         ? "(channel_id, list_id, source_content_id) WHERE list_id IS NOT NULL"
         : "(channel_id, source_content_id) WHERE list_id IS NULL";
 
-      await db.run(
+      // RETURNING makes the WRITE authoritative for the id, closing the probe→mint→upsert race:
+      // whether this statement inserted or hit the conflict, D1 hands back the id (and created_at)
+      // of the row that actually exists. Everything downstream — the R2 copy, Vectorize, the
+      // content.created event — must use that, or a lost race would ship an id matching no row in
+      // any store. Goes through query() rather than run(), because run() discards result rows.
+      const written = await db.query<{ id: string; created_at: string }>(
         `INSERT INTO content (${insertCols.join(", ")})
          VALUES (${insertPlaceholders.join(", ")})
          ON CONFLICT${conflictTarget} DO UPDATE SET
-           ${updateSets.join(",\n           ")}`,
+           ${updateSets.join(",\n           ")}
+         RETURNING id, created_at`,
         insertParams
       );
+
+      if (written.length > 0 && written[0].id) {
+        id = written[0].id;
+        createdAt = written[0].created_at ?? candidateCreatedAt;
+        // A returned id other than the one just proposed means another writer inserted this key
+        // first: the row is not new to the system, so no second content.created may fire for it.
+        isNew = probeIsNew && id === candidateId;
+      } else {
+        // Never expected — D1 returns a row for both the INSERT and the DO UPDATE branch. Log
+        // loudly rather than silently reverting to the pre-fix (unverified id) behaviour.
+        console.warn(JSON.stringify({
+          event: "upsertContentFromMetadata_upsert_returned_no_row",
+          message: "INSERT ... RETURNING gave no row; falling back to the probe's proposed id",
+          channelId,
+          sourceContentId,
+        }));
+      }
     }
 
     await this.embedContents([{
@@ -474,19 +513,36 @@ export class ContentService {
       "SELECT id, created_at FROM content WHERE channel_id = ? AND source_content_id = ? AND list_id IS NULL",
       [channelId, sourceContentId]
     );
-    const id = existing.length > 0 ? existing[0].id : crypto.randomUUID();
-    const createdAt = existing.length > 0 ? existing[0].created_at : now;
+    const candidateId = existing.length > 0 ? existing[0].id : crypto.randomUUID();
+    const candidateCreatedAt = existing.length > 0 ? existing[0].created_at : now;
 
-    await db.run(
+    // Same probe→mint→upsert race as upsertContentFromMetadata: RETURNING makes the write, not
+    // the probe, authoritative for the id the R2 copy is built with.
+    const written = await db.query<{ id: string; created_at: string }>(
       `INSERT INTO content (id, channel_id, channel_type, content_type, source_content_id, content_text, raw_data, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(channel_id, source_content_id) WHERE list_id IS NULL DO UPDATE SET
          content_type = excluded.content_type,
          content_text = excluded.content_text,
          raw_data = excluded.raw_data,
-         updated_at = excluded.updated_at`,
-      [id, channelId, channelType, contentType, sourceContentId, contentText, rawData, createdAt, now]
+         updated_at = excluded.updated_at
+       RETURNING id, created_at`,
+      [candidateId, channelId, channelType, contentType, sourceContentId, contentText, rawData, candidateCreatedAt, now]
     );
+
+    let id = candidateId;
+    let createdAt = candidateCreatedAt;
+    if (written.length > 0 && written[0].id) {
+      id = written[0].id;
+      createdAt = written[0].created_at ?? candidateCreatedAt;
+    } else {
+      console.warn(JSON.stringify({
+        event: "recordPublishedContent_upsert_returned_no_row",
+        message: "INSERT ... RETURNING gave no row; falling back to the probe's proposed id",
+        channelId,
+        sourceContentId,
+      }));
+    }
 
     // `status` no longer exists as a column in either store — the 2026-07-25 plan dropped the
     // concept outright rather than inventing a replacement (published-ness now lives only in

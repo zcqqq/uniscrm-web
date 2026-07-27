@@ -3,6 +3,19 @@
 来源:2026-07-26 迁移的最终整分支 review(含实测验证)。按阶段顺序执行,
 每个 Phase 的门禁不满足就停。dev 已全量验证;本文只覆盖 prod。
 
+> **执行状态(2026-07-27)**:Phase 0–3 已完成。
+> - 事故记录:07-27 直接手动触发 Deploy Production,`migrate` 把 0008/0009 跑了,
+>   `tenants.d1_database_id` 被清成 NULL;`migrate-tenant-dbs` 的零租户守卫拦下部署,
+>   随后按 Phase 2 回退方案用存档 UPDATE 回填并验证(=Phase 2 以破坏+回填方式完成)。
+> - Phase 1:旧表旁置为 `user/content/event_archive_20260727`;新 stream ID:
+>   user `139c7a953bb84f968362e6060cd9370b` / content `2b06985ae6974312a4108c66be4d4ae4` /
+>   event `c6ecee42c1c2467899a1c8990041ae26`(link/wrangler.toml 已同步,commit ebfda92);
+>   sink `user_sink`/`content_sink`/`event_sink` 与三条 pipeline 已重建。
+> - Phase 3:三库 `verified_type` 列 + `_tenant_migrations` 记 `0006-user-verified-type`,
+>   t1 验证通过。
+> - INTERNAL_SECRET bootstrap 已执行:五 worker 均有 `secret_text` 版本待 Phase 4 上线。
+> - 下一步:push to main → 手动触发 Deploy Production(Phase 4)→ Phase 5–7。
+
 ## Phase 0 — 预检(只读)
 
 ```bash

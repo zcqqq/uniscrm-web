@@ -135,15 +135,15 @@ queue = "uniscrm-event"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_EVENT"
-stream = "8a94ce74d7b9482d954beb03cd7719b5"
+stream = "c6ecee42c1c2467899a1c8990041ae26"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_USER"
-stream = "87e8afbbef4c4ccf93cb4c8777e61da7"
+stream = "139c7a953bb84f968362e6060cd9370b"
 
 [[env.production.pipelines]]
 binding = "PIPELINE_CONTENT"
-stream = "ee92f40c732c4b93ad509962cdc5cf64"
+stream = "2b06985ae6974312a4108c66be4d4ae4"
 
 [[env.production.secrets_store_secrets]]
 binding = "ENCRYPTION_KEY"

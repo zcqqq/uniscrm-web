@@ -405,7 +405,9 @@ interface QueueMessage {
   warehouse: string;
 }
 
-async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<void> {
+// Exported for tests/unit/report-status-update.test.ts — the D1 writes here decide what a
+// report row says after a run, and that is not observable through buildSQL alone.
+export async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<void> {
   const { report_id, type, params, tenant_id, warehouse } = msg;
 
   await env.ANALYTICS_DB.prepare(
@@ -449,8 +451,11 @@ async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<void> {
     resultsJson = JSON.stringify({ sql, data: result.data, summary });
   }
 
+  // error_message must be retired here, not only on the manual-recompute path: the cron
+  // re-queue sets status back to 'pending' without touching it, so a report that failed
+  // once and then succeeded kept serving the stale failure text alongside fresh results.
   await env.ANALYTICS_DB.prepare(
-    "UPDATE analytics_reports SET status = 'ready', results_json = ?, computed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
+    "UPDATE analytics_reports SET status = 'ready', results_json = ?, error_message = NULL, computed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
   ).bind(resultsJson, report_id).run();
 }
 

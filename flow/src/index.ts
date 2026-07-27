@@ -66,11 +66,13 @@ async function emitContentNodeLogs(
 ): Promise<void> {
   if (nodeLogs.length === 0) return;
   const timestamp = new Date().toISOString();
-  // processed_video_url (set once a videoAction node produces a new video) takes priority over
-  // the originating trigger's content_url — any node downstream of a resolved videoAction is
-  // now "about" that produced video, including a second chained videoAction (see engine.ts's
-  // videoAction handling in executeContentActions).
-  const contentUrl = (payload?.processed_video_url as string) || (payload?.content_url as string) || undefined;
+  // Always the originating post URL, never payload.processed_video_url. A processed video is an
+  // ephemeral intermediate: the media bucket expires objects after 48h (dev AND prod), so linking
+  // a node log to one guarantees a 404 for anyone opening analytics later. It is also the wrong
+  // subject on a videoAction node, whose drawer lists the content that ENTERED it — the produced
+  // video is that node's output. The originating URL is permanent and identifies the item at
+  // every node.
+  const contentUrl = (payload?.content_url as string) || undefined;
   const records = nodeLogs.map((log) => ({
     tenant_id: Number(tenantId),
     id: crypto.randomUUID(),

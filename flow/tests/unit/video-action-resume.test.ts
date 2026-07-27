@@ -207,6 +207,49 @@ describe("POST /internal/video-action/resume", () => {
     await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE flow_id = 'flow-resume-2'`).run();
   });
 
+  it("logs the originating content_url, not the processed video the node just produced", async () => {
+    await setupSchema();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-resume-url', 1, 'video action flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBranches).run();
+
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event)
+       VALUES ('pend-resume-url', 'flow-resume-url', 'a1', 'content-resume-url', 1, ?, ?, datetime('now'), 'video_action_complete')`
+    ).bind(
+      JSON.stringify({ channel_id: "src-chan", content_url: "https://www.youtube.com/watch?v=abc123" }),
+      past
+    ).run();
+
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const res = await worker.fetch(
+      req(
+        "/internal/video-action/resume",
+        {
+          pendingId: "pend-resume-url",
+          branch: "success",
+          props: { processed_video_url: "https://content.test/public/media/produced.mp4" },
+        },
+        { "X-Internal-Secret": (env as any).INTERNAL_SECRET }
+      ),
+      { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } } as any
+    );
+    expect(res.status).toBe(200);
+
+    // The media bucket expires objects after 48h, so a node log pointing at the produced video
+    // is a guaranteed 404 by the time anyone opens analytics — every row keeps the permanent
+    // originating post URL, including the very node that produced the new video.
+    const [records] = pipelineSend.mock.calls[0];
+    expect(records.length).toBeGreaterThan(0);
+    for (const r of records) {
+      expect(r.content_url).toBe("https://www.youtube.com/watch?v=abc123");
+    }
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-resume-url'`).run();
+  });
+
   it("is a no-op (200, does nothing) if the pending row was already claimed/deleted", async () => {
     await setupSchema();
     const res = await worker.fetch(

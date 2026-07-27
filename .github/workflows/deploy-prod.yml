@@ -51,6 +51,9 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          # Shared guard for /internal/* inter-worker calls (web/admin/content/link/flow).
+          # Prod value lives only in GitHub Secrets; dev keeps a plaintext var in wrangler.toml.
+          INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
           # Repository-level secret (like CF_API_TOKEN): one R2 Data Catalog token shared by
           # dev and production. Read by the analytics worker for R2 SQL queries AND by the
           # PyIceberg compactor, so it needs Admin Read & Write, not Read only.

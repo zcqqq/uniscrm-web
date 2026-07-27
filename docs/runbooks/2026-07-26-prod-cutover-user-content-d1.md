@@ -22,9 +22,23 @@ wrangler d1 execute uniscrm-web --env production --config web/wrangler.toml --re
 `channel_id IS NULL` 的 content 行为 0(旧计划里的一次性回填**不需要**)。
 缺口只有 `user.verified_type`(Phase 3 处理)。
 
-**带外确认(Phase 4 前必须)**:prod link worker 的 `INTERNAL_SECRET` 实际值——
-`link/wrangler.toml` 的 vars 里是占位符 `prod-internal-secret-change-me`;若线上就是它,先轮换。
-`/internal/backfill/pipeline` 依赖这一道门。
+**INTERNAL_SECRET 轮换(Phase 4 前必须,2026-07-27 代码侧已就绪)**:五个 worker
+(web/admin/content/link/flow)的 prod 明文占位符 var 已从 wrangler.toml 删除,改由
+GitHub Secrets 经 sync-secrets 下发(各模块 `.secrets.json` 已声明);守卫全部改为
+fail-closed(secret 未定义一律 403,堵住 `undefined !== undefined` 的 fail-open)。
+一次性 bootstrap(在本机手工执行一次;`wrangler secret put/bulk` 对已部署为明文 var
+的同名绑定报 10053 冲突,只有 `versions secret put` 能原位转换,已在临时 worker 实测):
+
+```bash
+V=$(openssl rand -base64 32) && echo "$V" | gh secret set INTERNAL_SECRET --repo zcqqq/uniscrm-web \
+  && for m in web admin content link flow; do \
+       echo "$V" | wrangler versions secret put INTERNAL_SECRET --env production --config $m/wrangler.toml --message "rotate INTERNAL_SECRET"; \
+     done; unset V
+```
+
+新版本不自动上线:线上继续用旧占位符直到 Phase 4 部署,部署时五个 worker 一起切换。
+以后再轮换只需:更新 GitHub Secret → 触发 Deploy Production(secret_text 绑定可被
+sync-secrets 的 bulk 直接覆盖,不再有 10053)。
 
 ## Phase 1 — 重建三张 prod R2 表(是**部署**的前置,不只是回填的)
 
@@ -64,7 +78,8 @@ CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… \
 
 手动触发 Deploy Production workflow。`migrate` 为 no-op,`migrate-tenant-dbs` 经
 `_tenant_migrations` 跳过三库。此步骤首次把 `/internal/backfill/pipeline` 发到 prod——
-INTERNAL_SECRET 未确认前不要进行。
+INTERNAL_SECRET bootstrap(见 Phase 0)未执行前不要进行,否则 sync-secrets 会报
+10053 冲突并卡住整条流水线。
 
 ## Phase 5 — 回填前先验证写路径
 

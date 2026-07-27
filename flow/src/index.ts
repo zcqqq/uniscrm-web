@@ -961,7 +961,8 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 // Internal: mock trigger event for testing
 app.post("/internal/trigger", async (c) => {
   const secret = c.req.header("X-Internal-Secret");
-  if (secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
+  // Fail closed: with INTERNAL_SECRET unset, `undefined !== undefined` would let header-less requests through.
+  if (!c.env.INTERNAL_SECRET || secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
   const { tenantId, eventType, userId, channelId, payload } = await c.req.json<any>();
   const flows = await c.env.FLOW_DB.prepare("SELECT id, graph_json FROM flows WHERE tenant_id = ? AND status = 'published'")
     .bind(tenantId).all<{ id: string; graph_json: string }>();
@@ -987,7 +988,8 @@ app.post("/internal/trigger", async (c) => {
 // arrives (queue consumer crash, dropped fetch, etc.) within the row's execute_at timeout.
 app.post("/internal/video-action/resume", async (c) => {
   const secret = c.req.header("X-Internal-Secret");
-  if (secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
+  // Fail closed: with INTERNAL_SECRET unset, `undefined !== undefined` would let header-less requests through.
+  if (!c.env.INTERNAL_SECRET || secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
 
   const { pendingId, branch, props, reason } = await c.req.json<{
     pendingId: string; branch: "success" | "failed"; props?: Record<string, unknown>; reason?: string;

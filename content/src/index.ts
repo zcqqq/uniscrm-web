@@ -4,7 +4,13 @@ import { Container } from "@cloudflare/containers";
 import type { Env } from "./types";
 import { internalRoutes } from "./routes-internal";
 import { setTenantLlmCredentials, listConfiguredProviders, deleteTenantLlmCredentials, getDefaultModel, setDefaultModel } from "./services/llm-credentials";
-import { listOpenAiModels, listAnthropicModels, listWorkersAiModels } from "./services/model-catalog";
+import {
+  listOpenAiModels,
+  listAnthropicModels,
+  listWorkersAiModels,
+  OPENAI_STATIC_MODELS,
+  ANTHROPIC_STATIC_MODELS,
+} from "./services/model-catalog";
 import { SKILL_CATALOG } from "./skills/catalog";
 import { processVideoActionJob, type VideoActionQueueMessage } from "./queue-video-action";
 
@@ -39,7 +45,9 @@ function getCookieValue(request: Request, name: string): string | null {
 
 async function internalAuthMiddleware(c: any, next: any) {
   const secret = c.req.header("X-Internal-Secret");
-  if (secret !== c.env.INTERNAL_SECRET) {
+  // Fail closed: with INTERNAL_SECRET unset, `undefined !== undefined` would let
+  // header-less requests through.
+  if (!c.env.INTERNAL_SECRET || secret !== c.env.INTERNAL_SECRET) {
     return c.json({ error: "Forbidden" }, 403);
   }
   await next();
@@ -117,16 +125,27 @@ app.post("/api/llm-models", async (c) => {
   const tenantId = Number(c.get("tenantId"));
   const { provider, apiKey } = await c.req.json<{ provider: "openai" | "anthropic" | "default"; apiKey?: string }>();
 
-  try {
-    if (provider === "default") {
-      return c.json({ models: await listWorkersAiModels(c.env) });
+  if (provider === "default") {
+    try {
+      return c.json({ models: await listWorkersAiModels(c.env), source: "live" });
+    } catch (err) {
+      console.error(JSON.stringify({ event: "llm_models_list_failed", tenantId, provider, error: String(err) }));
+      return c.json({ error: "Could not fetch model list" }, 502);
     }
-    if (!apiKey) return c.json({ error: "apiKey required for this provider" }, 400);
+  }
+
+  // BYOK providers: listing their actual models requires a valid key, so without one (or
+  // if the live call fails) fall back to the curated static catalog rather than erroring --
+  // the model dropdown should always be usable, key or no key.
+  const staticModels = provider === "openai" ? OPENAI_STATIC_MODELS : ANTHROPIC_STATIC_MODELS;
+  if (!apiKey) return c.json({ models: staticModels, source: "static" });
+
+  try {
     const models = provider === "openai" ? await listOpenAiModels(apiKey) : await listAnthropicModels(apiKey);
-    return c.json({ models });
+    return c.json({ models, source: "live" });
   } catch (err) {
-    console.error(JSON.stringify({ event: "llm_models_list_failed", tenantId, provider, error: String(err) }));
-    return c.json({ error: "Could not fetch model list" }, 502);
+    console.error(JSON.stringify({ event: "llm_models_live_fetch_failed", tenantId, provider, error: String(err) }));
+    return c.json({ models: staticModels, source: "static" });
   }
 });
 

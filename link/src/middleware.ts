@@ -58,7 +58,9 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
 
 export async function internalAuthMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
   const secret = c.req.header("X-Internal-Secret");
-  if (secret !== c.env.INTERNAL_SECRET) {
+  // Fail closed: with INTERNAL_SECRET unset, `undefined !== undefined` would let
+  // header-less requests through.
+  if (!c.env.INTERNAL_SECRET || secret !== c.env.INTERNAL_SECRET) {
     return c.json({ error: "Forbidden" }, 403);
   }
   await next();

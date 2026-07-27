@@ -61,7 +61,6 @@ X_CLIENT_ID = "cXVhYUNyWVJWSlFtdFdjekt3V1U6MTpjaQ"
 WEB_URL = "https://web.uni-scrm.com"
 LINK_URL = "https://link.uni-scrm.com"
 ADMIN_URL = "https://admin.uni-scrm.com"
-INTERNAL_SECRET = "prod-internal-secret-change-me"
 
 [[env.production.kv_namespaces]]
 binding = "KV"

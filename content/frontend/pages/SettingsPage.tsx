@@ -33,37 +33,65 @@ function ModelPicker({
   onChange: (model: string) => void;
 }) {
   const [options, setOptions] = useState<string[] | null>(null);
+  const [source, setSource] = useState<"static" | "live" | null>(null);
   const [fetchFailed, setFetchFailed] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
-    if (provider !== "default" && !apiKey) {
-      setOptions(null);
-      return;
-    }
     let cancelled = false;
-    setFetchFailed(false);
-    const timer = setTimeout(() => {
+    const load = () => {
+      setFetchFailed(false);
       api.llmModels.list(provider, apiKey || undefined)
-        .then((res) => { if (!cancelled) setOptions(res.models); })
+        .then((res) => { if (!cancelled) { setOptions(res.models); setSource(res.source); } })
         .catch(() => { if (!cancelled) { setOptions(null); setFetchFailed(true); } });
-    }, 500);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [provider, apiKey]);
+    };
 
-  if (options && options.length > 0) {
+    // No key yet (or just cleared) -- fetch the static/no-key list immediately, no debounce
+    // needed since it's a single lightweight call. Only debounce while actively typing a key.
+    if (!apiKey) {
+      load();
+      return () => { cancelled = true; };
+    }
+    const timer = setTimeout(load, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [provider, apiKey, retryNonce]);
+
+  if (fetchFailed) {
     return (
-      <Select value={model} onChange={(e: any) => onChange(e.target.value)} className="w-full text-sm">
-        {!options.includes(model) && model && <option value={model}>{model}</option>}
-        {options.map((m) => <option key={m} value={m}>{m}</option>)}
+      <div className="space-y-1">
+        <Select disabled value="" className="w-full text-sm">
+          <option value="">Unable to load models</option>
+        </Select>
+        <button
+          type="button"
+          onClick={() => setRetryNonce((n) => n + 1)}
+          className="text-[11px] text-primary hover:underline"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (!options) {
+    return (
+      <Select disabled value="" className="w-full text-sm">
+        <option value="">Loading models…</option>
       </Select>
     );
   }
 
-  // Graceful fallback: manual entry when the live list hasn't loaded, is empty, or failed.
   return (
     <div className="space-y-1">
-      <Input value={model} onChange={(e: any) => onChange(e.target.value)} placeholder="e.g. gpt-4o" className="w-full text-sm" />
-      {fetchFailed && <p className="text-[11px] text-muted-foreground">Couldn't load the live model list -- type the model id manually.</p>}
+      <Select value={model} onChange={(e: any) => onChange(e.target.value)} className="w-full text-sm">
+        {!options.includes(model) && model && <option value={model}>{model}</option>}
+        {options.map((m) => <option key={m} value={m}>{m}</option>)}
+      </Select>
+      {source === "static" && (
+        <p className="text-[11px] text-muted-foreground">
+          Showing common models — enter your API key to load models available to your account.
+        </p>
+      )}
     </div>
   );
 }
@@ -148,9 +176,9 @@ export function SettingsPage() {
   const providerOrder: ProviderName[] = ["openai", "anthropic", "default"];
 
   return (
-    <div className="max-w-3xl mx-auto p-6">
-      <h1 className="text-xl font-semibold mb-4">AI Content Settings</h1>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div className="px-8 py-10">
+      <h1 className="text-xl font-semibold mb-8">AI Content Settings</h1>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {providerOrder.map((provider) => {
           // "default" never appears in `providers` (BYOK-only, see this plan's Global
           // Constraints) -- its model comes from the separate `defaultModel` field.

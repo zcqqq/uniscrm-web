@@ -33,7 +33,7 @@ export const api = {
       request(`/api/llm-credentials/${provider}`, { method: "DELETE" }),
   },
   llmModels: {
-    list: (provider: ProviderName, apiKey?: string): Promise<{ models: string[] }> =>
+    list: (provider: ProviderName, apiKey?: string): Promise<{ models: string[]; source: "static" | "live" }> =>
       request("/api/llm-models", { method: "POST", body: JSON.stringify({ provider, apiKey }) }),
   },
 };

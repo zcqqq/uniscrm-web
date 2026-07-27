@@ -26,7 +26,7 @@ describe("POST /api/llm-models", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 400 when apiKey is missing for openai/anthropic", async () => {
+  it("returns the static catalog when apiKey is missing for openai/anthropic", async () => {
     vi.stubGlobal("fetch", authedFetchMock(new Response("unused", { status: 200 })));
     const res = await worker.fetch(
       new Request("https://content-dev.uni-scrm.com/api/llm-models", {
@@ -34,10 +34,13 @@ describe("POST /api/llm-models", () => {
       }),
       env
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { models: string[]; source: string };
+    expect(body.source).toBe("static");
+    expect(body.models.length).toBeGreaterThan(0);
   });
 
-  it("returns models on a successful openai fetch", async () => {
+  it("returns live models with source: live on a successful openai fetch", async () => {
     vi.stubGlobal("fetch", authedFetchMock(new Response(JSON.stringify({ data: [{ id: "gpt-4o" }] }), { status: 200 })));
     const res = await worker.fetch(
       new Request("https://content-dev.uni-scrm.com/api/llm-models", {
@@ -46,10 +49,10 @@ describe("POST /api/llm-models", () => {
       env
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ models: ["gpt-4o"] });
+    expect(await res.json()).toEqual({ models: ["gpt-4o"], source: "live" });
   });
 
-  it("returns 502 with an error message when the upstream fetch throws", async () => {
+  it("falls back to the static catalog (200, not an error) when the upstream fetch fails", async () => {
     vi.stubGlobal("fetch", authedFetchMock(new Response("bad key", { status: 401 })));
     const res = await worker.fetch(
       new Request("https://content-dev.uni-scrm.com/api/llm-models", {
@@ -57,11 +60,27 @@ describe("POST /api/llm-models", () => {
       }),
       env
     );
-    expect(res.status).toBe(502);
-    expect((await res.json() as any).error).toBeTruthy();
+    expect(res.status).toBe(200);
+    const body = await res.json() as { models: string[]; source: string };
+    expect(body.source).toBe("static");
+    expect(body.models.length).toBeGreaterThan(0);
   });
 
-  it("does not require apiKey for provider: 'default'", async () => {
+  it("returns the static catalog for anthropic when apiKey is missing", async () => {
+    vi.stubGlobal("fetch", authedFetchMock(new Response("unused", { status: 200 })));
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/api/llm-models", {
+        method: "POST", headers: { Cookie: "session=ok", "Content-Type": "application/json" }, body: JSON.stringify({ provider: "anthropic" }),
+      }),
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json() as { models: string[]; source: string };
+    expect(body.source).toBe("static");
+    expect(body.models.length).toBeGreaterThan(0);
+  });
+
+  it("does not require apiKey for provider: 'default', and reports source: live", async () => {
     vi.stubGlobal("fetch", authedFetchMock(new Response(JSON.stringify({ result: [{ name: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", task: { name: "Text Generation" } }] }), { status: 200 })));
     const testEnv = { ...env, CF_ACCOUNT_ID: "acct-1", CF_API_TOKEN: "cf-token" };
     const res = await worker.fetch(
@@ -71,6 +90,19 @@ describe("POST /api/llm-models", () => {
       testEnv
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ models: ["@cf/meta/llama-3.3-70b-instruct-fp8-fast"] });
+    expect(await res.json()).toEqual({ models: ["@cf/meta/llama-3.3-70b-instruct-fp8-fast"], source: "live" });
+  });
+
+  it("returns 502 when provider: 'default' upstream fetch fails (no static fallback for Workers AI)", async () => {
+    vi.stubGlobal("fetch", authedFetchMock(new Response("bad token", { status: 401 })));
+    const testEnv = { ...env, CF_ACCOUNT_ID: "acct-1", CF_API_TOKEN: "cf-token" };
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/api/llm-models", {
+        method: "POST", headers: { Cookie: "session=ok", "Content-Type": "application/json" }, body: JSON.stringify({ provider: "default" }),
+      }),
+      testEnv
+    );
+    expect(res.status).toBe(502);
+    expect((await res.json() as any).error).toBeTruthy();
   });
 });

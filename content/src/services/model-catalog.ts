@@ -1,5 +1,11 @@
 import type { Env } from "../types";
 
+// Curated fallback shown in the model dropdown before a BYOK key is entered (or when the
+// live fetch fails) -- listing a provider's actual models requires a valid key, so without
+// one this is the best we can offer. Update these IDs by hand as providers ship new models.
+export const OPENAI_STATIC_MODELS = ["gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"];
+export const ANTHROPIC_STATIC_MODELS = ["claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5-20251001"];
+
 // OpenAI's /v1/models returns an untyped superset of every model the account can see:
 // chat models, embeddings, whisper, tts, dall-e, moderation, and deprecated snapshots,
 // with no capability field to distinguish them. This is a best-effort prefix/keyword

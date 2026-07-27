@@ -8,7 +8,7 @@ import { getAppCredentials, X_BYOK_SCOPES, type ByokConfig } from "./services/ap
 import { pollChannelOnce } from "./services/pollers/poll-channel";
 import { syncYouTubeSubscriptions } from "./services/youtube-account";
 import { getActiveSubscriptionTier } from "../../shared/credit-service";
-import { canUseFeature } from "../../shared/plans";
+import { canUseFeature, LOWEST_TIER } from "../../shared/plans";
 
 import { X_CHANNEL_SCOPES } from "../../shared/x-scopes";
 export { X_CHANNEL_SCOPES };
@@ -244,7 +244,9 @@ export function oauthRoutes() {
       // because the Connect button is already disabled by tier in the frontend.
       if (tenantId) {
         const sub = await getActiveSubscriptionTier(c.env.ADMIN_DB, Number(tenantId));
-        if (sub && !canUseFeature(sub.tier, "link.x")) {
+        // No active subscription resolves to the cheapest plan, which excludes the official
+        // X channel. Previously an absent subscription short-circuited the gate entirely.
+        if (!canUseFeature(sub?.tier ?? LOWEST_TIER, "link.x")) {
           return c.json({ error: "forbidden" }, 403);
         }
       }

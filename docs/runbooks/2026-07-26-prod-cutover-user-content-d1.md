@@ -161,6 +161,9 @@ wrangler d1 execute <db> --remote --command \
 - 两 warehouse 现各剩 5 张活表:user、content、event、flow_log、content_flow_log。
 - dev 租户库(uniscrm-t1-dev)删除 6 张遗留表,现仅剩 user、content(+ _tenant_migrations 与
   D1 内部表)。
+- 2026-07-27 cutover 验证后:prod 的 `user/content/event_archive_20260727` 三张旁置表
+  已 purge 删除(1/0/8 行,user/content 已由 D1 回填取代)。两 warehouse 至此完全一致,
+  各剩 5 张活表:user、content、event、flow_log、content_flow_log。
 
 ## 备用:list_users 旧 uuid 孤儿(当前两环境均为 0 行,无需执行)
 

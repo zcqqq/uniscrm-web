@@ -14,7 +14,24 @@
 > - Phase 3:三库 `verified_type` 列 + `_tenant_migrations` 记 `0006-user-verified-type`,
 >   t1 验证通过。
 > - INTERNAL_SECRET bootstrap 已执行:五 worker 均有 `secret_text` 版本待 Phase 4 上线。
-> - 下一步:push to main → 手动触发 Deploy Production(Phase 4)→ Phase 5–7。
+>
+> **CUTOVER 完成(2026-07-27):Phase 4–7 全部执行完毕。**
+> - Phase 4:首次触发在 sync-secrets 撞上 **10215**(bootstrap 版本未部署,经典
+>   secrets-bulk 拒绝修改)——用 `wrangler versions deploy --version-id … --percentage 100`
+>   把五个 rotation 版本 promote 上线后重跑,run 30246040895 全绿。此坑一次性:
+>   此后"最新版本=已部署版本"恒成立。
+> - INTERNAL_SECRET 二次轮换:值同时写入 GitHub Secret、五个 prod worker(普通
+>   `secret put`,绑定已是 secret_text 无冲突)与本机 `~/.uniscrm-prod-internal-secret`
+>   (600 权限,供本地运维调用 /internal 路由;泄露即在此文件)。
+> - Phase 5(修正结论):cron 正常(整点 token 刷新可见);poller 自 07-21 静默是
+>   **预期行为**——唯一 active 的 X channel 是系统 channel(is_byok=0,webhook 驱动,
+>   poller 只轮询 BYOK),tenant 1 的 BYOK channel 07-22 已停用。D1 写路径与 dev
+>   验证代码相同,组织性写入待真实 X 活动验证。
+> - Phase 6:t1 355 user + 40 content、t100001 1 user 经 `/internal/backfill/pipeline`
+>   回填(4 批全部 `{"ok":true}`);R2 核对 `COUNT(DISTINCT id)`:user **356**、
+>   content **40**,与 D1 一致。t100000 空库跳过。
+> - Phase 7:三库的 profile/segment_profiles/event/content_trigger_dedup 已删除;
+>   三库现均只剩 `user`、`content`、`_tenant_migrations`(+ `_cf_KV`)。
 
 ## Phase 0 — 预检(只读)
 

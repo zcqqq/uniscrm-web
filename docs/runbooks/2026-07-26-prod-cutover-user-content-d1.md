@@ -91,10 +91,31 @@ wrangler r2 sql query b34f3ff4aec4c36584672d5bf1320757_uniscrm "SELECT COUNT(DIS
 
 一律 `COUNT(DISTINCT id)`(Pipelines at-least-once,少量超出正常且随 compaction 收敛)。
 
-## Phase 7 — 本 runbook 之后仍冻结
+## Phase 7 — cutover 之后的收尾删除
+
+**租户库遗留表**(2026-07-26 已删 dev 侧;prod 侧因当前部署的旧代码仍在使用而延迟):
+cutover(Phase 4 部署新代码)完成并验证后,对 `uniscrm-t1`/`uniscrm-t100000`/`uniscrm-t100001` 执行:
+
+```bash
+wrangler d1 execute <db> --remote --command \
+  "DROP TABLE IF EXISTS profile; DROP TABLE IF EXISTS segment_profiles; DROP TABLE IF EXISTS event; DROP TABLE IF EXISTS content_trigger_dedup"
+```
+
+(`flow_counts`/`content_flow_counts` 的租户库死副本已于 2026-07-26 从全部四库删除——
+真表在 FLOW_DB,新旧代码都不读租户库副本。)
 
 `profile` worker 与 `uniscrm-maigret` 队列的删除另行决定。
 **删除四个 uniscrm-t* 库:永久取消。**
+
+## 附:2026-07-26 已执行的清理(记录)
+
+- R2 dev 删除 10 张:user/content/event 的 `*_archive_20260722`、`user_v1`、`user_v2`、
+  `content_v1`、`event_v1`、`flow_log_archive_20260723`、`content_flow_log_archive_20260723`、
+  以及 ADR 0004 弃用的 `flow_node_log`(含孤儿 sink `flow_node_log_sink_dev`)。
+- R2 prod 删除 4 张:三张 `*_archive_20260722` + `flow_node_log`。
+- 两 warehouse 现各剩 5 张活表:user、content、event、flow_log、content_flow_log。
+- dev 租户库(uniscrm-t1-dev)删除 6 张遗留表,现仅剩 user、content(+ _tenant_migrations 与
+  D1 内部表)。
 
 ## 备用:list_users 旧 uuid 孤儿(当前两环境均为 0 行,无需执行)
 

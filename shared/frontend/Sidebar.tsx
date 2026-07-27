@@ -4,6 +4,7 @@ import type { Tier } from "../plans";
 import { UpgradeIcon } from "./UpgradeIcon";
 import { useTier } from "./useTier";
 import { authFetch } from "./lib/auth-fetch";
+import { resolveHref } from "./urls";
 
 export interface SidebarUrls {
   web: string;
@@ -155,9 +156,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
 
   const isItemActive = (href: string) => {
     if (!currentUrl) return false;
-    // Every module blanks out its own base URL in the `urls` it passes (see the per-module Nav
-    // wrappers), so an item pointing at that module's own root arrives here as "".
-    const target = href === "" ? "/" : href;
+    const target = resolveHref(href);
     const normalized = currentUrl.replace(/\/$/, "");
     const hrefNormalized = target.replace(/\/$/, "");
     if (normalized === hrefNormalized) return true;
@@ -216,7 +215,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
                       return (
                       <a
                         key={item.id}
-                        href={itemLocked ? `${urls.web}/billing` : item.href}
+                        href={itemLocked ? `${urls.web}/billing` : resolveHref(item.href)}
                         className={`flex items-center gap-1 py-1.5 px-2.5 text-[13px] rounded-md transition-colors ${itemLocked ? "opacity-40" : isItemActive(item.href) ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
                       >
                         <span className="flex-1">{item.label}</span>
@@ -294,7 +293,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
                     return (
                       <a
                         key={item.id}
-                        href={itemLocked ? `${urls.web}/billing` : item.href}
+                        href={itemLocked ? `${urls.web}/billing` : resolveHref(item.href)}
                         className={`block px-3 py-1.5 text-sm rounded-sm transition-colors ${itemLocked ? "opacity-40" : isItemActive(item.href) ? "text-primary font-medium bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-accent"}`}
                       >
                         {item.label}

@@ -904,8 +904,11 @@ export default {
   // this function) could read a still-duplicated R2 table if it processed a message
   // before compaction finished. See docs/adr/0002-r2-data-catalog-dedup-via-periodic-compaction.md.
   async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
-    await compactUserTable(env);
-    await compactContentTable(env);
+    await compactTable(env, "user");
+    // list_id must be part of the key: the same content can appear under multiple lists,
+    // and the read path partitions by channel_id, list_id, source_content_id — without
+    // list_id here, compaction would wrongly merge those rows into one.
+    await compactTable(env, "content", ["tenant_id", "channel_id", "list_id", "source_content_id"]);
 
     const { results } = await env.ANALYTICS_DB.prepare(
       `SELECT DISTINCT ar.id, ar.tenant_id, ar.type, ar.params_json
@@ -933,37 +936,37 @@ export default {
 // R2 Data Catalog's Pipeline sink is append-only (no upsert/merge on write) and R2 SQL
 // is read-only, so `uniscrm.user` accumulates one row per poll/webhook write instead of
 // one row per user. This periodically rewrites the table down to the latest row per
-// (tenant_id, channel_id, source_user_id) via the Iceberg REST catalog (PyIceberg), which
-// is the only interface in this stack that can actually write/overwrite Iceberg tables.
-async function compactUserTable(env: Env): Promise<void> {
-  try {
-    const instance = env.COMPACTOR_CONTAINER.getByName("singleton");
-    await instance.startAndWaitForPorts();
-    const res = await instance.fetch("http://container/compact", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        catalog_uri: env.R2_CATALOG_URI,
-        warehouse: env.R2_WAREHOUSE,
-        namespace: "uniscrm",
-        table: "user",
-        token: env.R2_CATALOG_TOKEN,
-      }),
-    });
-    const body = await res.text();
-    if (!res.ok) {
-      console.error(JSON.stringify({ event: "user_compaction_error", status: res.status, body }));
-    } else {
-      console.log(JSON.stringify({ event: "user_compaction_done", body }));
-    }
-  } catch (err) {
-    console.error(JSON.stringify({ event: "user_compaction_error", error: err instanceof Error ? err.message : String(err) }));
-  }
-}
+// business key via the Iceberg REST catalog (PyIceberg), which is the only interface in
+// this stack that can actually write/overwrite Iceberg tables. See
+// docs/adr/0002-r2-data-catalog-dedup-via-periodic-compaction.md.
+//
+// Every attempt is recorded in `compaction_runs`, because the compactor runs inside a
+// Cloudflare Container whose stdout is not queryable: when this silently stopped working,
+// the only visible symptom was uniscrm.user reaching 980 rows for 410 distinct users, and
+// the failure was invisible for days. Exported for tests.
+export async function compactTable(env: Env, table: string, keyColumns?: string[]): Promise<void> {
+  const startedAt = new Date().toISOString();
+  const t0 = Date.now();
+  let status = "error";
+  let rowsBefore: number | null = null;
+  let rowsAfter: number | null = null;
+  let errorMessage: string | null = null;
 
-// Same rationale as compactUserTable, applied to uniscrm.content (see
-// docs/adr/0002-r2-data-catalog-dedup-via-periodic-compaction.md).
-async function compactContentTable(env: Env): Promise<void> {
+  // Claim the row BEFORE calling the container. If this invocation is killed partway
+  // through — the suspected cause of the 2026-07-27 cron never reaching its dashboard
+  // re-queue — the row survives as 'running', which is positive evidence. A row written
+  // only after the container answers would leave nothing, indistinguishable from "the
+  // cron never fired at all".
+  let runId: number | null = null;
+  try {
+    const claim = await env.ANALYTICS_DB.prepare(
+      `INSERT INTO compaction_runs (table_name, status, duration_ms, started_at) VALUES (?, 'running', 0, ?)`
+    ).bind(table, startedAt).run();
+    runId = (claim.meta?.last_row_id as number | undefined) ?? null;
+  } catch (err) {
+    console.error(JSON.stringify({ event: "compaction_log_error", table, phase: "claim", error: String(err) }));
+  }
+
   try {
     const instance = env.COMPACTOR_CONTAINER.getByName("singleton");
     await instance.startAndWaitForPorts();
@@ -974,21 +977,48 @@ async function compactContentTable(env: Env): Promise<void> {
         catalog_uri: env.R2_CATALOG_URI,
         warehouse: env.R2_WAREHOUSE,
         namespace: "uniscrm",
-        table: "content",
-        // list_id must be part of the key: the same content can appear under multiple
-        // lists, and the read path partitions by channel_id, list_id, source_content_id —
-        // without list_id here, compaction would wrongly merge those rows into one.
-        key_columns: ["tenant_id", "channel_id", "list_id", "source_content_id"],
+        table,
+        ...(keyColumns ? { key_columns: keyColumns } : {}),
         token: env.R2_CATALOG_TOKEN,
       }),
     });
     const body = await res.text();
     if (!res.ok) {
-      console.error(JSON.stringify({ event: "content_compaction_error", status: res.status, body }));
+      errorMessage = `HTTP ${res.status}: ${body}`.slice(0, 1000);
+      console.error(JSON.stringify({ event: "compaction_error", table, status: res.status, body }));
     } else {
-      console.log(JSON.stringify({ event: "content_compaction_done", body }));
+      status = "ok";
+      // An unparseable 200 body still means the compaction itself ran; keep the counts
+      // null rather than reporting the whole run as failed.
+      try {
+        const parsed = JSON.parse(body) as { rows_before?: number; rows_after?: number };
+        rowsBefore = parsed.rows_before ?? null;
+        rowsAfter = parsed.rows_after ?? null;
+      } catch {
+        errorMessage = `unparseable body: ${body}`.slice(0, 1000);
+      }
+      console.log(JSON.stringify({ event: "compaction_done", table, body }));
     }
   } catch (err) {
-    console.error(JSON.stringify({ event: "content_compaction_error", error: err instanceof Error ? err.message : String(err) }));
+    errorMessage = (err instanceof Error ? err.message : String(err)).slice(0, 1000);
+    console.error(JSON.stringify({ event: "compaction_error", table, error: errorMessage }));
+  }
+
+  // Resolve the claimed row. Recording the outcome must never itself break the cron; if
+  // the claim above failed there is nothing to update, so fall back to a plain insert so
+  // the outcome is still recorded.
+  try {
+    if (runId !== null) {
+      await env.ANALYTICS_DB.prepare(
+        `UPDATE compaction_runs SET status = ?, rows_before = ?, rows_after = ?, duration_ms = ?, error_message = ? WHERE id = ?`
+      ).bind(status, rowsBefore, rowsAfter, Date.now() - t0, errorMessage, runId).run();
+    } else {
+      await env.ANALYTICS_DB.prepare(
+        `INSERT INTO compaction_runs (table_name, status, rows_before, rows_after, duration_ms, error_message, started_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(table, status, rowsBefore, rowsAfter, Date.now() - t0, errorMessage, startedAt).run();
+    }
+  } catch (err) {
+    console.error(JSON.stringify({ event: "compaction_log_error", table, phase: "resolve", error: String(err) }));
   }
 }

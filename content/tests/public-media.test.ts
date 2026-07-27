@@ -23,5 +23,23 @@ describe("GET /public/media/:key", () => {
       env
     );
     expect(res.status).toBe(404);
+    expect(await res.text()).toContain("48 hours");
+  });
+
+  // A browser opening an expired link (an analytics node log, a published post) sends
+  // Accept: text/html, which used to hit the SPA fallback in fetch() and silently render the
+  // app's default page instead of telling the visitor the video had expired.
+  it("tells a browser the video expired instead of falling back to the SPA", async () => {
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/public/media/also-gone", {
+        headers: { Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
+      }),
+      env
+    );
+    expect(res.status).toBe(404);
+    const body = await res.text();
+    expect(body).toContain("Video expired");
+    expect(body).toContain("48 hours");
+    expect(body).not.toContain("<div id=\"root\"");
   });
 });

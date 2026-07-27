@@ -68,9 +68,20 @@ app.route("/internal", internalRoutes());
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
+// The media bucket's lifecycle rule expires every object after 48h (dev and prod alike), so a
+// miss here is the EXPECTED state for any link older than that -- a Video Action node's analytics
+// row, a published post -- not a broken URL. Say which it is instead of returning a bare 404.
+const MEDIA_RETENTION_HOURS = 48;
+
 app.get("/public/media/:key", async (c) => {
   const object = await c.env.MEDIA_BUCKET.get(c.req.param("key"));
-  if (!object) return c.notFound();
+  if (!object) {
+    const message = `Videos produced by a flow are kept for ${MEDIA_RETENTION_HOURS} hours and then deleted, so this one is no longer available.`;
+    if ((c.req.header("Accept") || "").includes("text/html")) {
+      return c.html(`<!doctype html><meta charset="utf-8"><title>Video expired</title><h1>Video expired</h1><p>${message}</p>`, 404);
+    }
+    return c.text(message, 404);
+  }
   return new Response(object.body, {
     status: 200,
     headers: { "Content-Type": object.httpMetadata?.contentType || "application/octet-stream" },
@@ -175,7 +186,11 @@ export default {
     }
 
     const res = await app.fetch(request, env);
-    if (res.status === 404 && accept.includes("text/html") && env.ASSETS) {
+    // The SPA fallback is for client-routed app pages only. /public/* is a real resource
+    // namespace, so a 404 there is a real answer that must reach the visitor -- serving
+    // index.html instead silently dropped anyone opening an expired media link onto the app's
+    // default page (AI Content Settings), with no hint that the video had expired.
+    if (res.status === 404 && accept.includes("text/html") && !url.pathname.startsWith("/public") && env.ASSETS) {
       return env.ASSETS.fetch(new Request(new URL("/index.html", request.url)));
     }
     return res;

@@ -187,6 +187,18 @@ export function internalRoutes() {
     });
   });
 
+  // flow 用来判断一个 published flow 的 trigger 绑的 channel 是否还活着。只回 id 集合，
+  // 不回类型或名字 —— flow 只需要判断"在不在"，展示文案由它自己的 trigger 节点类型决定。
+  router.get("/channels/active", async (c) => {
+    const tenantId = Number(c.req.query("tenantId"));
+    if (!Number.isFinite(tenantId)) return c.json({ error: "tenantId required" }, 400);
+    const rows = await c.env.LINK_DB
+      .prepare("SELECT id FROM channels WHERE tenant_id = ? AND is_active = 1")
+      .bind(tenantId)
+      .all<{ id: string }>();
+    return c.json({ channelIds: rows.results.map((r) => r.id) });
+  });
+
   // Lists: add user (called by flow worker)
   router.post("/lists/:id/users", async (c) => {
     const tenantId = c.req.header("X-Tenant-Id");

@@ -7,7 +7,7 @@ import { passesPropsFilter } from "../../metadata/props-filter";
 import { r2Query, latestRowsSql, sqlStr, sqlInt } from "../../shared/r2-sql";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY } from "../nodeTypeRegistry";
-import { fetchActiveChannelIds, findBrokenTrigger } from "./trigger-health";
+import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage } from "./trigger-health";
 
 // node ids are NOT always UUIDs: flow/frontend/config/templates.ts hardcodes short ids like
 // "t1"/"w1"/"a1" for template-instantiated flows, and those ids persist forever unless the node
@@ -1455,6 +1455,24 @@ app.delete("/api/flows/:id", async (c) => {
 app.post("/api/flows/:id/publish", async (c) => {
   const tenantId = c.get("tenantId");
   const flowId = c.req.param("id");
+
+  const flow = await c.env.FLOW_DB.prepare(
+    `SELECT graph_json FROM flows WHERE id = ? AND tenant_id = ?`
+  ).bind(flowId, tenantId).first<{ graph_json: string }>();
+  if (!flow) return c.json({ error: "Not found" }, 404);
+
+  // cronTrigger 之类不绑 channel 的 flow 不问 link —— 它的可发布性与 link 无关，
+  // 不该因为 link 抖动就发布不了。
+  if (triggerBindsChannel(flow.graph_json)) {
+    const activeIds = await fetchActiveChannelIds(c.env, tenantId);
+    // 列表页在这里 fail-open，publish 不行：publish 是一次离散的用户动作，当场能提示重试，
+    // 而带着未经验证的状态发布出去正是这个 gate 要防的事。
+    if (!activeIds) {
+      return c.json({ error: "Cannot verify channel status right now. Please try again." }, 503);
+    }
+    const broken = findBrokenTrigger(flow.graph_json, activeIds);
+    if (broken) return c.json({ error: brokenTriggerMessage(broken.nodeType) }, 400);
+  }
 
   const result = await c.env.FLOW_DB.prepare(
     `UPDATE flows SET status = 'published', updated_at = ? WHERE id = ? AND tenant_id = ?`

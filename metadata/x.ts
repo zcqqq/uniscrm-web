@@ -139,9 +139,20 @@ export const EventMetadata_X: EventMetadata[] = [
   {
     eventType: "like.create",
     sourceEventType: "like.create",
-    label: { en: "Liked a post", zh: "点赞" },
+    // X 的 like.create 一个事件类型覆盖两个方向。只订阅 inbound（别人点赞本账号的帖子）——
+    // 本账号点赞别人对 CRM 没有价值，在订阅层就不要，省服务器压力（link/CLAUDE.md 白名单原则）。
+    direction: "inbound",
+    label: { en: "Post liked", zh: "被点赞" },
+    description: { en: "Someone liked the Account's Post", zh: "有人点赞账号的帖子" },
     userProps: [],
-    eventProps: [],
+    // dataId 相对于「点赞人」这个 user 对象——payload 里根本没有点赞人字段（只有
+    // liked_tweet_id / liked_tweet_author_id），对方只出现在 data.includes.users[]，
+    // 由 webhook.ts 解析后传进来，所以这里不写 linkPrefix。
+    eventProps: [
+      { propId: "followers_count", dataId: "public_metrics.followers_count" },
+      { propId: "following_count", dataId: "public_metrics.following_count" },
+      { propId: "verified_type", dataId: "verified_type" },
+    ],
   },
   {
     eventType: "follow-user", // https://docs.x.com/x-api/users/follow-user
@@ -192,9 +203,14 @@ export const EventMetadata_X: EventMetadata[] = [
   },
 ];
 
-export const XAA_SUBSCRIPTION_EVENTS = [...new Set(
+// 一个 sourceEventType 一条订阅（follow.follow 在 metadata 里拆成 follow/followed 两个
+// eventType，但对 X 只是一条订阅）。direction 取该 sourceEventType 下第一个声明了它的条目。
+export const XAA_SUBSCRIPTION_SPECS: Array<{ eventType: string; direction?: "inbound" | "outbound" }> =
   EventMetadata_X
     .filter(e => e.flowType !== "action")
-    .map(e => e.sourceEventType)
-)];
+    .reduce<Array<{ eventType: string; direction?: "inbound" | "outbound" }>>((acc, e) => {
+      if (acc.some(s => s.eventType === e.sourceEventType)) return acc;
+      acc.push({ eventType: e.sourceEventType, direction: e.direction });
+      return acc;
+    }, []);
 

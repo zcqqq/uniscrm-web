@@ -286,19 +286,100 @@ describe("webhookRoutes POST /webhook — follow events / resolveEventConsumedPa
   });
 
   // Minor 1 (task-7 fix round 1): an eventType with an EventMetadata_X entry but an empty
-  // eventProps array (post.create, like.create) produced consumedPaths === [] — truthy, which
-  // used to fool a bare `if (e.consumedPaths)` guard inside insertEvents. That guard lives in
-  // x-users.ts (covered by x-users.test.ts) — this test only proves webhook.ts's own
+  // eventProps array (post.create) produced consumedPaths === [] — truthy, which used to fool a
+  // bare `if (e.consumedPaths)` guard inside insertEvents. That guard lives in x-users.ts
+  // (covered by x-users.test.ts) — this test only proves webhook.ts's own
   // resolveEventConsumedPaths resolves to [] rather than undefined for such an event, which is
-  // the one part of that bug webhook.ts itself could reintroduce.
+  // the one part of that bug webhook.ts itself could reintroduce. (like.create used to be the
+  // other such event; it now declares eventProps for the liker's metrics.)
   it("resolves an empty (not absent) consumedPaths for an eventType whose metadata declares no eventProps", async () => {
     const env = baseEnv();
     const app = buildApp();
 
-    const res = await post(app, activityBody("like.create", { id: "like-1", tweet_id: "tweet1" }), env);
+    const res = await post(app, activityBody("post.create", { id: "tweet1", text: "hello" }), env);
     expect(res.status).toBe(200);
 
     const [events] = insertEventsMock.mock.calls[0];
     expect(events[0].consumedPaths).toEqual([]);
+  });
+});
+
+// X's like.create is one event type covering both directions, and its payload has no
+// "who liked it" field — only liked_tweet_id / liked_tweet_author_id. The liker is only ever in
+// data.includes.users[]. Subscriptions are now created with filter.direction "inbound", but
+// subscriptions made before that keep delivering outbound too, so both paths must hold.
+describe("webhookRoutes POST /webhook — like.create", () => {
+  const LIKER = {
+    id: "liker-1", name: "Liker", username: "liker_h",
+    verified_type: "blue",
+    public_metrics: { followers_count: 33, following_count: 7 },
+  };
+
+  function likeBody(opts: {
+    direction?: string;
+    likedAuthorId: string;
+    includeLiker?: boolean;
+  }) {
+    return {
+      data: {
+        event_type: "like.create",
+        filter: { user_id: "x-user-1", ...(opts.direction ? { direction: opts.direction } : {}) },
+        payload: { id: "like-1", liked_tweet_id: "tweet1", liked_tweet_author_id: opts.likedAuthorId },
+        includes: opts.includeLiker === false ? { users: [] } : { users: [LIKER] },
+      },
+    };
+  }
+
+  it("attributes an inbound like to the liker (not the Account) and upserts them as a user", async () => {
+    const env = baseEnv();
+    const app = buildApp();
+
+    const res = await post(app, likeBody({ direction: "inbound", likedAuthorId: "x-user-1" }), env);
+    expect(res.status).toBe(200);
+
+    expect(upsertUserMock).toHaveBeenCalledTimes(1);
+    expect(upsertUserMock.mock.calls[0][0].id).toBe("liker-1");
+
+    expect(insertEventsMock).toHaveBeenCalledTimes(1);
+    const [events] = insertEventsMock.mock.calls[0];
+    expect(events[0].userId).toBe("liker-1");
+    expect(events[0].eventType).toBe("like.create");
+    expect(events[0].eventProps.followers_count).toBe(33);
+    expect(events[0].eventProps.following_count).toBe(7);
+    expect(events[0].eventProps.verified_type).toBe("blue");
+    // raw_data keeps the like object, so which Post was liked survives.
+    expect(events[0].rawData.liked_tweet_id).toBe("tweet1");
+  });
+
+  it("treats a like on the Account's own Post as inbound even when the subscription echoes no direction", async () => {
+    const env = baseEnv();
+    const app = buildApp();
+
+    await post(app, likeBody({ likedAuthorId: "x-user-1" }), env);
+
+    const [events] = insertEventsMock.mock.calls[0];
+    expect(events[0].userId).toBe("liker-1");
+  });
+
+  it("leaves an outbound like (legacy directionless subscription) on the Account — includes.users holds the liked Post's author, not a liker", async () => {
+    const env = baseEnv();
+    const app = buildApp();
+
+    await post(app, likeBody({ direction: "outbound", likedAuthorId: "someone-else" }), env);
+
+    expect(upsertUserMock).not.toHaveBeenCalled();
+    const [events] = insertEventsMock.mock.calls[0];
+    expect(events[0].userId).toBe("x-user-1");
+  });
+
+  it("falls back to the old attribution when an inbound like carries no resolvable liker in includes", async () => {
+    const env = baseEnv();
+    const app = buildApp();
+
+    await post(app, likeBody({ direction: "inbound", likedAuthorId: "x-user-1", includeLiker: false }), env);
+
+    expect(upsertUserMock).not.toHaveBeenCalled();
+    const [events] = insertEventsMock.mock.calls[0];
+    expect(events[0].userId).toBe("x-user-1");
   });
 });

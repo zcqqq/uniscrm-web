@@ -81,6 +81,9 @@ export interface EventMetadata {
   sourceEventType: string;
   linkPrefix?: string; //返回body嵌套太复杂时使用，少点代码
   flowType?: string; //trigger or action
+  // 订阅方向过滤，仅对 directional 事件有意义（X 的 like.create 既覆盖“本账号点赞别人”
+  // 也覆盖“别人点赞本账号”）。省略即不带 direction，外部平台会两个方向都推。
+  direction?: "inbound" | "outbound";
   price?:number; //价格/官方费用
   label: LocalizedString;
   description?: LocalizedString;

@@ -50,6 +50,24 @@ function extractDmText(payload: Record<string, unknown>): string | undefined {
   return typeof msgData?.text === "string" ? msgData.text : undefined;
 }
 
+// like.create covers BOTH directions in one X event type, and its payload carries no "who
+// liked it" field at all — only the liked Post and that Post's author. The counterparty is
+// only ever in the event's `includes.users[]`. Prefer the `direction` X echoes back from the
+// subscription's filter; a subscription created before metadata declared direction echoes
+// nothing, so fall back to "was the liked Post mine".
+function isInboundLike(payload: Record<string, unknown>, filterUserId: string, direction?: string): boolean {
+  if (direction === "inbound") return true;
+  if (direction === "outbound") return false;
+  return typeof payload.liked_tweet_author_id === "string" && payload.liked_tweet_author_id === filterUserId;
+}
+
+// The other party in the event's includes — for an inbound like, the person who liked.
+function findCounterparty(includes: Record<string, unknown> | undefined, filterUserId: string): Record<string, unknown> | null {
+  const users = includes?.users as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(users)) return null;
+  return users.find((u) => typeof u?.id === "string" && u.id !== filterUserId) || null;
+}
+
 function flattenUserPayload(userData?: Record<string, unknown>): Record<string, unknown> {
   if (!userData) return {};
   const pm = userData.public_metrics as Record<string, unknown> | undefined;
@@ -155,8 +173,9 @@ async function handleXActivityEventByChannel(body: Record<string, unknown>, env:
 
   const data = (body["data"] || body) as {
     event_type?: string;
-    filter?: { user_id?: string };
+    filter?: { user_id?: string; direction?: string };
     payload?: Record<string, unknown>;
+    includes?: Record<string, unknown>;
   };
   const eventType = data.event_type;
   const filterUserId = data.filter?.user_id;
@@ -175,7 +194,10 @@ async function handleXActivityEventByChannel(body: Record<string, unknown>, env:
 
   // Reuse the same event processing logic
   const fakeChannelInfo: ChannelInfo = { channelId, tenantId: channel.tenant_id, d1DatabaseId: tenant.d1_database_id };
-  await processXEvent(eventType, filterUserId || "", payload, fakeChannelInfo, usersService, env);
+  await processXEvent(eventType, filterUserId || "", payload, fakeChannelInfo, usersService, env, {
+    includes: data.includes,
+    direction: data.filter?.direction,
+  });
 }
 
 async function processXEvent(
@@ -185,6 +207,7 @@ async function processXEvent(
   channelInfo: ChannelInfo,
   usersService: XUsersService,
   env: Env,
+  activity: { includes?: Record<string, unknown>; direction?: string } = {},
 ): Promise<void> {
   const { channelId, tenantId } = channelInfo;
 
@@ -248,6 +271,34 @@ async function processXEvent(
       }
     }
     return;
+  }
+
+  // Inbound like — someone liked one of the Account's Posts. The event belongs to THAT person,
+  // not to the Account: recording it under filterUserId (what the generic tail below does) would
+  // read as "the Account liked something", which is the opposite of what happened. Outbound
+  // likes can still arrive from a subscription created before metadata declared
+  // direction:"inbound" — there includes.users[] holds the liked Post's AUTHOR, not a liker, so
+  // nothing about it is safe to attribute and it falls through to the unchanged old behavior.
+  if (eventType === "like.create" && isInboundLike(payload, filterUserId, activity.direction)) {
+    const liker = findCounterparty(activity.includes, filterUserId);
+    if (liker?.id) {
+      await usersService.upsertUser(liker as XUserData, channelId, "X");
+      await usersService.insertEvents([{
+        userId: liker.id as string,
+        channelId,
+        eventType,
+        eventTime: new Date().toISOString(),
+        // raw_data keeps the like object (which Post was liked); the liker's own fields already
+        // landed in user_id and the event's metric columns, so consumedPaths strips nothing
+        // from it in practice — it is passed for the same reason every other branch passes it.
+        rawData: payload,
+        eventProps: resolveEventProps(eventType, liker),
+        consumedPaths: resolveEventConsumedPaths(eventType),
+      }]);
+      console.log(JSON.stringify({ event: "xaa_inbound_like_processed", channelId, userId: liker.id }));
+      return;
+    }
+    console.log(JSON.stringify({ event: "xaa_inbound_like_no_liker_in_includes", channelId }));
   }
 
   if (eventType === "dm.read" || eventType === "dm.received") {
@@ -335,8 +386,9 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
 
   const data = (body["data"] || body) as {
     event_type?: string;
-    filter?: { user_id?: string };
+    filter?: { user_id?: string; direction?: string };
     payload?: Record<string, unknown>;
+    includes?: Record<string, unknown>;
     tag?: string;
   };
 
@@ -430,7 +482,10 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
     }
   }
 
-  await processXEvent(eventType, filterUserId, payload, channelInfo, usersService, env);
+  await processXEvent(eventType, filterUserId, payload, channelInfo, usersService, env, {
+    includes: data.includes,
+    direction: data.filter?.direction,
+  });
 }
 
 export function webhookRoutes() {

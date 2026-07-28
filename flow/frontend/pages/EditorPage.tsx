@@ -6,7 +6,7 @@ import { validateFlowGraph } from "../lib/validate-flow-graph";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { api } from "../lib/api";
 import { FLOW_TEMPLATES } from "../config/templates";
-import { generatableKeysForDomain, type FlowDomain } from "../../nodeTypeRegistry";
+import { generatableKeysForDomain, NODE_TYPE_REGISTRY, type FlowDomain } from "../../nodeTypeRegistry";
 import AiGenerateBar from "../../../shared/frontend/components/BarAiGenerate";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
@@ -114,9 +114,20 @@ function EditorToolbar() {
           }
           await handleSave();
           const id = useFlowEditor.getState().flowId;
-          if (id) {
+          if (!id) return;
+          try {
             await api.flows.publish(id);
             navigate(`/flows/${id}/analytics`);
+          } catch (e) {
+            // 在这之前 api.flows.publish 抛错完全没人接：不跳转、也不提示，publish 失败是静默的。
+            // 后端把人话放在响应体的 error 里，request() 已经把它变成 Error.message。
+            toast({ title: (e as Error).message || "Publish failed", variant: "destructive" });
+            // 一个 flow 至多一个 trigger（store 的 addNode 拒绝第二个），所以直接找到它标红，
+            // 复用孤立节点那套高亮，不需要后端回传 nodeId。
+            const trigger = useFlowEditor.getState().nodes.find(
+              (n) => n.type && NODE_TYPE_REGISTRY[n.type]?.role === "trigger"
+            );
+            useFlowEditor.getState().setErrorNodeIds(trigger ? [trigger.id] : []);
           }
         }}
       >

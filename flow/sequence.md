@@ -3,15 +3,28 @@ sequenceDiagram
     participant LW as link Worker
     participant EQ as Queue: uniscrm-event
     participant FW as flow Worker
+    participant FP as flow_pending
     participant PLG as Pipeline: PIPELINE_FLOW_LOG
 
     LW->>EQ: 事件入队
     EQ->>FW: 消费事件，执行flow
     FW->>PLG: emitNodeLogs 直接写入 R2 Pipeline（节点日志）
+    FW->>LW: executeActions → /internal/x/action
+    alt rateLimited (429)
+        FW->>FP: INSERT retry_action 行（retryAt）
+        Note over FW,FP: scheduled() 重试；retry_count < 5 重排，<br/>>= 5 才 resumeFromNode(graph, nodeId, payload, "failed")<br/>（flow/CLAUDE.md「重试耗尽后才走failed分支」）
+    else 有结果
+        FW->>FW: resumeFromNode(graph, nodeId, payload, ok ? "success" : "failed")
+        FW->>PLG: emitNodeLogs（该节点 outcome + 下游 enter/exit）
+    end
 ```
 
 `FLOW_LOG_QUEUE`/`handleLogQueue`（批量写入租户 D1 `flow_log` 表）已移除 —
 `emitNodeLogs` 现在只调用 `env.PIPELINE_FLOW_LOG.send(...)`，不再有中间队列/D1落地这一跳。
+
+user 域的 action 分支解析与 content 域一致：`executeActions` 拿到 `graph` 后自己调
+`resumeFromNode` 继续走 success/failed 边（此前只记 outcome 日志、下游节点永不执行）。
+`abSplit`/`userPropsCondition` 仍未接线 —— 它们在 `executeActions` 里根本没有执行分支。
 
 ## Content-triggered flows
 

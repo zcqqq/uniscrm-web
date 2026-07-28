@@ -320,12 +320,17 @@ function shouldCronFire(data: Record<string, unknown>, now: Date): boolean {
 interface ActionExecResult {
   stmts: D1PreparedStatement[];
   rateLimited: { action: ActionResult; retryAt: string }[];
-  // User-domain actions are fire-and-forget: unlike content actions they have no success/failed
-  // branches in the graph and never call resumeFromNode, so nothing used to record whether they
-  // worked. These outcome-only logs give the analytics drawer a result to show WITHOUT changing
-  // the graph topology — they are never traversed, only written to flow_log.
-  outcomeLogs: NodeLog[];
+  // The action node's own outcome row PLUS every enter/exit reached by resolving its branch —
+  // resumeFromNode returns both in one list and the caller emits them together. Callers that
+  // pass no `graph` still get the outcome row alone (branch resolution is skipped, exactly as
+  // it behaved before).
+  nodeLogs: NodeLog[];
 }
+
+// Depth cap on branch-resolution recursion. The editor lets a user wire an action's success/failed
+// handle back into an upstream node, and executeActions -> resumeFromNode -> executeActions would
+// then never terminate. 10 is far past any real flow's action chain; hitting it means a cycle.
+const MAX_BRANCH_DEPTH = 10;
 
 // flow 唯一的 user props 热读是 metadata/x.ts 的 userPropsFilter,而它只用到 is_follow(/is_followed)。
 // 这两列常驻 entity_state(link 的 D1 index table,毫秒级),不走 R2 —— R2 单次查询 1-3s,
@@ -360,14 +365,64 @@ export async function resolveUserPropsForFilter(
   return { is_follow: row.is_follow, is_followed: row.is_followed };
 }
 
-async function executeActions(actions: ActionResult[], userId: string, tenantId: string, env: Env, payload?: Record<string, unknown>, flowId?: string): Promise<ActionExecResult> {
+// `graph` is what makes an action node's success/failed branch actually continue: without it the
+// node's outcome is only recorded for the analytics drawer and the flow stops there (which is how
+// a user-flow X Action's "failed" edge silently led nowhere — see flow/CLAUDE.md's rule that every
+// third-party-API action has success/failed branches). It stays optional so a caller that has no
+// graph in hand degrades to the old outcome-only behaviour rather than crashing.
+async function executeActions(
+  actions: ActionResult[],
+  userId: string,
+  tenantId: string,
+  env: Env,
+  payload?: Record<string, unknown>,
+  flowId?: string,
+  graph?: FlowGraph,
+  depth = 0
+): Promise<ActionExecResult> {
   const stmts: D1PreparedStatement[] = [];
   const rateLimited: { action: ActionResult; retryAt: string }[] = [];
-  const outcomeLogs: NodeLog[] = [];
-  const recordOutcome = (action: ActionResult, ok: boolean, failureReason?: string) => {
+  const nodeLogs: NodeLog[] = [];
+
+  // Resolves one action node's outcome. With a graph it walks the matching branch — the returned
+  // nodeLogs[0] IS the outcome row (resumeFromNode relabels the duplicate exit as direction
+  // "outcome"), so this must never also push its own, or every action would be counted twice.
+  const recordOutcome = async (action: ActionResult, ok: boolean, failureReason?: string) => {
     const nodeId = action.nodeId as string | undefined;
     if (!nodeId) return;
-    outcomeLogs.push({ nodeId, direction: "outcome", outcome: ok ? "success" : "failed", failureReason: ok ? undefined : failureReason });
+    const branch = ok ? "success" : "failed";
+    if (!graph || !action.hasBranches) {
+      nodeLogs.push({ nodeId, direction: "outcome", outcome: branch, failureReason: ok ? undefined : failureReason });
+      return;
+    }
+    if (depth >= MAX_BRANCH_DEPTH) {
+      console.error(JSON.stringify({ event: "flow_branch_depth_exceeded", flowId, nodeId, depth }));
+      nodeLogs.push({ nodeId, direction: "outcome", outcome: branch, failureReason: ok ? undefined : failureReason });
+      return;
+    }
+    const resumed = resumeFromNode(graph, nodeId, payload || {}, branch, failureReason);
+    nodeLogs.push(...resumed.nodeLogs);
+    if (resumed.actions.length > 0) {
+      const nested = await executeActions(resumed.actions, userId, tenantId, env, payload, flowId, graph, depth + 1);
+      stmts.push(...nested.stmts);
+      rateLimited.push(...nested.rateLimited);
+      nodeLogs.push(...nested.nodeLogs);
+    }
+    // Written directly rather than returned for the caller to batch: each call site persists its
+    // own top-level pendingWaits in its own shape, and a wait reached through a branch belongs to
+    // none of them. Mirrors executeContentActions, which likewise INSERTs its resumed waits inline.
+    for (const wait of resumed.pendingWaits) {
+      await env.FLOW_DB.prepare(
+        `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        crypto.randomUUID(), flowId || "", wait.nodeId, userId, tenantId,
+        JSON.stringify(payload || {}), new Date(Date.now() + wait.durationMs).toISOString(),
+        new Date().toISOString(), wait.awaitingEvent || "",
+        wait.conditions ? JSON.stringify(wait.conditions) : ""
+      ).run();
+      console.log(JSON.stringify({ event: "flow_wait_scheduled", flowId, nodeId: wait.nodeId, awaitingEvent: wait.awaitingEvent || "", viaBranch: branch }));
+    }
   };
 
   for (const action of actions) {
@@ -382,7 +437,7 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
         },
         body: JSON.stringify({ userId }),
       });
-      recordOutcome(action, listRes.ok, `list_add_failed: HTTP ${listRes.status}`);
+      await recordOutcome(action, listRes.ok, `list_add_failed: HTTP ${listRes.status}`);
     } else if (action.type === "xAction" && action.xEvent && action.channelId) {
       // Check userPropsFilter before executing action
       const meta = EventMetadata_X.find(m => m.eventType === action.xEvent);
@@ -431,7 +486,7 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
       // Credit exhausted: link declined to call the X API at all (non-BYOK channel, balance <= 0)
       if (body.insufficientCredit) {
         console.log(JSON.stringify({ event: "xaction_insufficient_credit", tenantId, xEvent: action.xEvent, channelId: action.channelId }));
-        recordOutcome(action, false, "insufficient_credit: no credit balance left on this non-BYOK channel");
+        await recordOutcome(action, false, "insufficient_credit: no credit balance left on this non-BYOK channel");
         continue;
       }
 
@@ -448,22 +503,27 @@ async function executeActions(actions: ActionResult[], userId: string, tenantId:
         // exhausted, so this reschedules without recording anything.
         rateLimited.push({ action: { ...action, userId }, retryAt: body.rateLimitReset || new Date(Date.now() + 15 * 60 * 1000).toISOString() });
       } else {
-        recordOutcome(action, body.ok, body.reason || "x_api_error");
+        await recordOutcome(action, body.ok, body.reason || "x_api_error");
       }
     } else if (action.type === "webhook" && action.url) {
       const method = (action.method as string) || "POST";
       const headers: Record<string, string> = { "Content-Type": "application/json", ...(action.headers as Record<string, string> || {}) };
       const bodyStr = action.body ? String(action.body).replace(/\$(user|event)\.(\w+)/g, (_, _p, field) => String(payload?.[field] ?? "")) : JSON.stringify({ userId, ...payload });
+      let ok = false;
+      let reason: string | undefined;
       try {
         const res = await fetch(action.url as string, { method, headers, body: method !== "GET" ? bodyStr : undefined });
-        (action as any).success = res.ok;
-      } catch {
-        (action as any).success = false;
+        ok = res.ok;
+        reason = ok ? undefined : `webhook_failed: HTTP ${res.status}`;
+      } catch (e) {
+        reason = `webhook_error: ${String(e)}`;
       }
+      (action as any).success = ok;
+      await recordOutcome(action, ok, reason);
     }
   }
 
-  return { stmts, rateLimited, outcomeLogs };
+  return { stmts, rateLimited, nodeLogs };
 }
 
 export function youtubeActionRequest(args: {
@@ -971,8 +1031,8 @@ app.post("/internal/trigger", async (c) => {
     const graph: FlowGraph = JSON.parse(flow.graph_json);
     const result = executeFlow(graph, eventType, payload || {});
     if (result.matched) {
-      const { stmts, outcomeLogs } = await executeActions(result.actions, userId || "", String(tenantId), c.env, payload, flow.id);
-      if (outcomeLogs.length > 0) await emitNodeLogs(outcomeLogs, flow.id, userId || "", Number(tenantId), c.env);
+      const { stmts, nodeLogs } = await executeActions(result.actions, userId || "", String(tenantId), c.env, payload, flow.id, graph);
+      if (nodeLogs.length > 0) await emitNodeLogs(nodeLogs, flow.id, userId || "", Number(tenantId), c.env);
       if (stmts.length > 0) await c.env.FLOW_DB.batch(stmts);
       results.push({ flowId: flow.id, actions: result.actions.length, matched: true });
     }
@@ -1663,8 +1723,8 @@ export default {
           if (result.nodeLogs.length > 0) await emitNodeLogs(result.nodeLogs, flow.id, userId, Number(tenantId), env);
 
           if (result.actions.length > 0) {
-            const { stmts: actionStmts, rateLimited: rl, outcomeLogs } = await executeActions(result.actions, userId, tenantId, env, payload, flow.id);
-            if (outcomeLogs.length > 0) await emitNodeLogs(outcomeLogs, flow.id, userId, Number(tenantId), env);
+            const { stmts: actionStmts, rateLimited: rl, nodeLogs } = await executeActions(result.actions, userId, tenantId, env, payload, flow.id, graph);
+            if (nodeLogs.length > 0) await emitNodeLogs(nodeLogs, flow.id, userId, Number(tenantId), env);
             const stmts: D1PreparedStatement[] = [...actionStmts];
 
             for (const r of rl) {
@@ -1728,8 +1788,8 @@ export default {
 
           const stmts: D1PreparedStatement[] = [];
           if (result.actions.length > 0) {
-            const { stmts: actionStmts, rateLimited: rl, outcomeLogs } = await executeActions(result.actions, pending.user_id, pending.tenant_id, env, undefined, pending.flow_id);
-            if (outcomeLogs.length > 0) await emitNodeLogs(outcomeLogs, pending.flow_id, pending.user_id, Number(pending.tenant_id), env);
+            const { stmts: actionStmts, rateLimited: rl, nodeLogs } = await executeActions(result.actions, pending.user_id, pending.tenant_id, env, pendingPayload, pending.flow_id, graph);
+            if (nodeLogs.length > 0) await emitNodeLogs(nodeLogs, pending.flow_id, pending.user_id, Number(pending.tenant_id), env);
             stmts.push(...actionStmts);
             for (const r of rl) {
               stmts.push(env.FLOW_DB.prepare(
@@ -1770,8 +1830,8 @@ export default {
           if (shouldCronFire(node.data, new Date())) {
             const result = executeFlow(graph, "cron.trigger", {});
             if (result.matched && result.actions.length > 0) {
-              const { stmts, outcomeLogs } = await executeActions(result.actions, "", flow.tenant_id, env, {}, flow.id);
-              if (outcomeLogs.length > 0) await emitNodeLogs(outcomeLogs, flow.id, "", Number(flow.tenant_id), env);
+              const { stmts, nodeLogs } = await executeActions(result.actions, "", flow.tenant_id, env, {}, flow.id, graph);
+              if (nodeLogs.length > 0) await emitNodeLogs(nodeLogs, flow.id, "", Number(flow.tenant_id), env);
               if (stmts.length > 0) await env.FLOW_DB.batch(stmts);
               console.log(JSON.stringify({ event: "cron_trigger_fired", flowId: flow.id, actions: result.actions.length }));
             }
@@ -1977,8 +2037,16 @@ export default {
         if (row.retry_action) {
           const action = JSON.parse(row.retry_action) as ActionResult & { userId?: string };
           const retryUserId = (action.userId as string) || row.user_id;
-          const { stmts: actionStmts, rateLimited: rl, outcomeLogs } = await executeActions([action], retryUserId, row.tenant_id, env, undefined, row.flow_id);
-          if (outcomeLogs.length > 0) await emitNodeLogs(outcomeLogs, row.flow_id, retryUserId, Number(row.tenant_id), env);
+          // A retried action's success/failed branch has to continue like any other action's, so
+          // the graph is loaded here too. A retry row for a flow that has since been unpublished
+          // or deleted still executes (that was always true), just without branch continuation.
+          const retryFlow = await env.FLOW_DB.prepare(`SELECT graph_json, status FROM flows WHERE id = ?`)
+            .bind(row.flow_id).first<{ graph_json: string; status: string }>();
+          const retryGraph = retryFlow && retryFlow.status === "published"
+            ? JSON.parse(retryFlow.graph_json) as FlowGraph : undefined;
+          const retryPayload = JSON.parse(row.payload || "{}");
+          const { stmts: actionStmts, rateLimited: rl, nodeLogs } = await executeActions([action], retryUserId, row.tenant_id, env, retryPayload, row.flow_id, retryGraph);
+          if (nodeLogs.length > 0) await emitNodeLogs(nodeLogs, row.flow_id, retryUserId, Number(row.tenant_id), env);
 
           if (rl.length > 0 && row.retry_count < 5) {
             await env.FLOW_DB.prepare(
@@ -1990,6 +2058,35 @@ export default {
             await env.FLOW_DB.batch(stmts);
             if (rl.length > 0) {
               console.log(JSON.stringify({ event: "flow_retry_exhausted", id: row.id, retryCount: row.retry_count }));
+              // Retries exhausted, still rate limited — flow/CLAUDE.md: "Rate limit重试耗尽后才走
+              // failed分支". Until now this branch only logged, so a rate-limited action that ran
+              // out of retries left the flow dead with no outcome row at all.
+              const retryNodeId = action.nodeId as string | undefined;
+              if (retryGraph && retryNodeId) {
+                const failedResult = resumeFromNode(retryGraph, retryNodeId, retryPayload, "failed", `rate_limit_exhausted: still rate limited after ${row.retry_count + 1} retries`);
+                if (failedResult.nodeLogs.length > 0) await emitNodeLogs(failedResult.nodeLogs, row.flow_id, retryUserId, Number(row.tenant_id), env);
+                if (failedResult.actions.length > 0) {
+                  const nested = await executeActions(failedResult.actions, retryUserId, row.tenant_id, env, retryPayload, row.flow_id, retryGraph, 1);
+                  if (nested.nodeLogs.length > 0) await emitNodeLogs(nested.nodeLogs, row.flow_id, retryUserId, Number(row.tenant_id), env);
+                  if (nested.stmts.length > 0) await env.FLOW_DB.batch(nested.stmts);
+                  for (const r of nested.rateLimited) {
+                    await env.FLOW_DB.prepare(
+                      `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+                       VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 0)`
+                    ).bind(crypto.randomUUID(), row.flow_id, retryUserId, row.tenant_id, row.payload, r.retryAt, now, JSON.stringify(r.action)).run();
+                  }
+                }
+                for (const wait of failedResult.pendingWaits) {
+                  await env.FLOW_DB.prepare(
+                    `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                  ).bind(
+                    crypto.randomUUID(), row.flow_id, wait.nodeId, retryUserId, row.tenant_id, row.payload,
+                    new Date(Date.now() + wait.durationMs).toISOString(), now,
+                    wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
+                  ).run();
+                }
+              }
             }
           }
           continue;
@@ -2019,8 +2116,8 @@ export default {
         const stmts: D1PreparedStatement[] = [];
 
         if (result.actions.length > 0) {
-          const { stmts: actionStmts, rateLimited: rl, outcomeLogs } = await executeActions(result.actions, row.user_id, row.tenant_id, env, undefined, row.flow_id);
-          if (outcomeLogs.length > 0) await emitNodeLogs(outcomeLogs, row.flow_id, row.user_id, Number(row.tenant_id), env);
+          const { stmts: actionStmts, rateLimited: rl, nodeLogs } = await executeActions(result.actions, row.user_id, row.tenant_id, env, payload, row.flow_id, graph);
+          if (nodeLogs.length > 0) await emitNodeLogs(nodeLogs, row.flow_id, row.user_id, Number(row.tenant_id), env);
           stmts.push(...actionStmts);
           for (const r of rl) {
             stmts.push(env.FLOW_DB.prepare(

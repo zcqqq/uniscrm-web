@@ -74,11 +74,18 @@ export async function fetchActiveChannelIds(
   tenantId: number
 ): Promise<Set<string> | null>
 
+// 这个 flow 的 trigger 是否绑 channel（cronTrigger、无 trigger、graph 解析失败都是 false）。
+// publish 用它决定要不要问 link —— 一个 cron flow 不该因为 link 抖动就发布不了。
+export function triggerBindsChannel(graphJson: string): boolean
+
 // 返回失效的 trigger 节点；健康、无 trigger、或 activeIds 为 null 时返回 null。
 export function findBrokenTrigger(
   graphJson: string,
   activeIds: Set<string> | null
 ): { nodeId: string; nodeType: string } | null
+
+// publish 被拒时回给前端、由前端原样 toast 的人话。
+export function brokenTriggerMessage(nodeType: string): string
 ```
 
 `findBrokenTrigger` 的逻辑：解析 graph（解析失败返回 null），取第一个 `NODE_TYPE_REGISTRY[node.type]?.role === "trigger"` 的节点 —— `flow/nodeTypeRegistry.ts` 在模块根目录，`src/generate-prompt.ts` 已经在 import 它，后端可直接用，不要另写一份硬编码的类型列表。`cronTrigger` 放行；否则 `data.channelId` 为空或不在 `activeIds` 中即为失效。
@@ -93,23 +100,26 @@ SELECT id FROM channels WHERE tenant_id = ? AND is_active = 1
 
 ### `flow`：`GET /api/flows`
 
-列表查询多 select `graph_json`；与之并行发一次 `fetchActiveChannelIds`。对 `status = 'published'` 的行调 `findBrokenTrigger`，把 `trigger_broken: boolean` 加进响应。`graph_json` 本身不返回给前端。draft 行恒为 `false`。
+列表查询多 select `graph_json`；本页有 published 行时发一次 `fetchActiveChannelIds`。对 `status = 'published'` 的行调 `findBrokenTrigger`，把 **`broken_trigger_type: string | null`**（失效 trigger 的节点类型，如 `"xTrigger"`；`null` = 健康）加进响应。`graph_json` 本身不返回给前端。draft 行恒为 `null`。
+
+返回节点类型而不是 boolean，是因为前端的 tooltip 文案要按 trigger 类型区分（X / YouTube），而前端拿不到 `graph_json`。
 
 ### `flow`：`POST /api/flows/:id/publish`
 
 先取 flow 的 `graph_json`（现在的实现直接 UPDATE，没读过），再走同一套判定：
 
+- `triggerBindsChannel` 为 false（cron flow、无 trigger）→ 不问 link，直接 UPDATE。
 - `activeIds === null` → `503 { error: "Cannot verify channel status right now. Please try again." }`，不写库。
-- `findBrokenTrigger` 返回非 null → `400 { error: <按节点类型的文案> }`，不写库。
+- `findBrokenTrigger` 返回非 null → `400 { error: brokenTriggerMessage(nodeType) }`，不写库。
 - 否则照旧 UPDATE。
 
 ### 前端：`flow/frontend/pages/FlowsPage.tsx`
 
-1. Status 列：`trigger_broken` 为真时渲染 `<StatusCell status="error" label="Trigger Disconnected" />`，外层包 tooltip，文案按 trigger 节点类型区分（X / YouTube）。
-2. 行 `onClick`：`trigger_broken` 时跳编辑器（`/flows/:id`）而非 analytics —— analytics 对一个从未触发过的 flow 就是一片空白，用户此刻需要的是修，不是看。
+1. Status 列：`broken_trigger_type` 非 null 时渲染 `<StatusCell status="error" label="Trigger Disconnected" />`，外层包 tooltip，文案按该节点类型区分（X / YouTube）。`FlowsPage` 现在没有 `TooltipProvider` 祖先，需要补一个；`TooltipTrigger asChild` 里要再包一层 `<span>`，因为 `StatusCell` 不转发 ref（同 `frontend/nodes/XTriggerNode.tsx:29` 的写法）。
+2. 行 `onClick`：失效时跳编辑器（`/flows/:id`）而非 analytics —— analytics 对一个从未触发过的 flow 就是一片空白，用户此刻需要的是修，不是看。
 3. `OperationCell` 的 `status` 传合成值 `"broken"`，`operations` 加一个 `broken` 分支：primary = Edit，menu = Duplicate / Stop。（现在已发布的 flow 没有 Edit 入口，必须先 Stop。）
 
-`FlowSummary` 接口加 `trigger_broken: boolean`。
+`FlowSummary` 接口加 `broken_trigger_type: string | null`。
 
 ### 前端：`flow/frontend/pages/EditorPage.tsx`
 
@@ -121,9 +131,12 @@ Publish 按钮的 `api.flows.publish(id)` 加 `try/catch`：捕获后 `toast({ v
 
 `flow/tests/unit/trigger-health.test.ts`：
 
-- `findBrokenTrigger` 表驱动：空 channelId → broken；channelId 不在集合 → broken；在集合 → null；`cronTrigger` → null；`activeIds` 为 null → null；无 trigger 节点 → null；`graph_json` 非法 → null。
-- publish 路由集成：link stub 返回不含该 channel 的集合 → 400，且库里 `status` 仍是 `draft`；link stub 抛错 → 503，`status` 仍是 `draft`；link stub 返回含该 channel 的集合 → 200，`status` 变 `published`。
-- 列表路由集成：link stub 抛错 → 所有行 `trigger_broken === false`（fail-open）。
+- `findBrokenTrigger` 表驱动：空 channelId → broken；channelId 不在集合 → broken；在集合 → null；`cronTrigger` → null；`activeIds` 为 null → null；无 trigger 节点 → null；`graph_json` 非法 → null；action 节点的 channelId 失效不算数 → null。
+- `triggerBindsChannel`：channel-bound trigger → true；`cronTrigger` → false；无 trigger / 非法 json → false。
+- `fetchActiveChannelIds`：200 正常 → Set；200 但空数组 → 空 Set（与 null 区分开）；非 2xx → null；fetch 抛错 → null；200 但响应体形状不对 → null。
+- publish 路由集成：link stub 返回不含该 channel 的集合 → 400，且库里 `status` 仍是 `draft`；link stub 抛错 → 503，`status` 仍是 `draft`；link stub 返回含该 channel 的集合 → 200，`status` 变 `published`；cron flow + link stub 抛错 → 200（根本没问 link）；别的租户的 flow → 404。
+- 列表路由集成：link stub 抛错 → 所有行 `broken_trigger_type === null`（fail-open）；draft 行恒为 `null`；响应里没有 `graph_json`。
+- `link` 的新内部接口：只回本租户的、只回 `is_active = 1` 的；缺 `tenantId` 或非数字 → 400（避免漏掉 WHERE 就泄露全平台 channel）。
 
 ## 不做
 

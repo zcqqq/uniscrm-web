@@ -7,6 +7,7 @@ import { passesPropsFilter } from "../../metadata/props-filter";
 import { r2Query, latestRowsSql, sqlStr, sqlInt } from "../../shared/r2-sql";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY } from "../nodeTypeRegistry";
+import { fetchActiveChannelIds, findBrokenTrigger } from "./trigger-health";
 
 // node ids are NOT always UUIDs: flow/frontend/config/templates.ts hardcodes short ids like
 // "t1"/"w1"/"a1" for template-instantiated flows, and those ids persist forever unless the node
@@ -1309,11 +1310,11 @@ app.get("/api/flows", async (c) => {
   const total = countRow?.total || 0;
 
   const rows = await c.env.FLOW_DB.prepare(
-    `SELECT f.id, f.name, f.description, f.status, f.member_id, f.created_at, f.updated_at, f.trigger_count
+    `SELECT f.id, f.name, f.description, f.status, f.member_id, f.created_at, f.updated_at, f.trigger_count, f.graph_json
      FROM flows f WHERE f.tenant_id = ? AND f.domain = ? ORDER BY f.updated_at DESC LIMIT ? OFFSET ?`
   )
     .bind(tenantId, domain, limit, offset)
-    .all<{ id: string; name: string; description: string; status: string; member_id: string; created_at: string; updated_at: string; trigger_count: number | null }>();
+    .all<{ id: string; name: string; description: string; status: string; member_id: string; created_at: string; updated_at: string; trigger_count: number | null; graph_json: string }>();
 
   const memberIds = [...new Set(rows.results.map(r => r.member_id).filter(Boolean))];
   let memberMap: Record<string, string> = {};
@@ -1325,9 +1326,16 @@ app.get("/api/flows", async (c) => {
     memberMap = Object.fromEntries(members.results.map(m => [m.id, m.email]));
   }
 
-  const flows = rows.results.map(f => ({
+  // 只有 published 的行才需要判定 —— draft 还没声称自己在跑。整页一行都不需要时就不打扰 link。
+  const needsCheck = rows.results.some((r) => r.status === "published");
+  const activeIds = needsCheck ? await fetchActiveChannelIds(c.env, tenantId) : null;
+
+  const flows = rows.results.map(({ graph_json, ...f }) => ({
     ...f,
     member_email: memberMap[f.member_id] || "",
+    // activeIds 为 null（link 不可达）时 findBrokenTrigger 一律返回 null —— fail-open。
+    // 把一个租户的 flow 全标红是比几分钟的陈旧绿色更严重的误报。
+    broken_trigger_type: f.status === "published" ? (findBrokenTrigger(graph_json, activeIds)?.nodeType ?? null) : null,
   }));
 
   return c.json({ flows, total, page, totalPages: Math.ceil(total / limit) });

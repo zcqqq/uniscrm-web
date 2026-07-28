@@ -16,6 +16,7 @@ import { Card, CardContent } from "../../../shared/frontend/ui/card";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 import { Pencil as EditIcon, Search as SearchIcon, Clock as ClockIcon, List as ListIcon, Clapperboard as ClapperboardIcon } from "lucide-react";
 import { XIcon, TikTokIcon, YouTubeIcon } from "../../../shared/frontend/ui/icons";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
 
 export function getNodeIcon(type: string, data: Record<string, unknown>) {
   if (type === "xTrigger") return XIcon;
@@ -42,6 +43,17 @@ function getNodeIcons(nodes: { type: string; data: Record<string, unknown> }[]) 
   }
   const extra = nodes.length - icons.length;
   return { icons, extra: extra > 0 ? extra : 0 };
+}
+
+const TRIGGER_ACCOUNT_NOUN: Record<string, string> = {
+  xTrigger: "X account",
+  xContentTrigger: "X account",
+  youtubeContentTrigger: "YouTube account",
+};
+
+export function brokenTriggerTooltip(nodeType: string) {
+  const noun = TRIGGER_ACCOUNT_NOUN[nodeType] || "channel";
+  return `The ${noun} this flow triggers on is not connected, so this flow never runs. Connect it under Channels, or pick another one in the trigger node.`;
 }
 
 type SortKey = "trigger_count" | "updated_at";
@@ -158,62 +170,79 @@ export default function FlowsPage({ domain }: FlowsPageProps) {
             />
           ) : (
             <>
-              <DataTable total={total} page={page} totalPages={totalPages} onPageChange={setPage}>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("trigger_count")}>
-                      No. Triggered<SortIcon active={sortKey === "trigger_count"} dir={sortDir} />
-                    </TableHead>
-                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("updated_at")}>
-                      Updated At<SortIcon active={sortKey === "updated_at"} dir={sortDir} />
-                    </TableHead>
-                    <TableHead>Updated By</TableHead>
-                    <TableHead className="text-right">Operations</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sorted.map((flow) => {
-                    const isPublished = flow.status === "published";
-                    return (
-                      <TableRow
-                        key={flow.id}
-                        className="cursor-pointer"
-                        onClick={() => navigate(isPublished ? `/flows/${flow.id}/analytics` : `/flows/${flow.id}`)}
-                      >
-                        <TableCell className="font-medium text-foreground">{flow.name}</TableCell>
-                        <TableCell>
-                          <StatusCell status={isPublished ? "published" : "draft"} label={isPublished ? "Published" : "Draft"} />
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{flow.trigger_count || "-"}</TableCell>
-                        <TableCell className="text-muted-foreground">
-                          <DateCell iso={flow.updated_at} timezone={timezone} />
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{flow.member_email || "-"}</TableCell>
-                        <TableCell className="text-right">
-                          <OperationCell
-                            status={flow.status}
-                            operations={{
-                              published: {
-                                primary: { icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg>, title: "Duplicate", onClick: () => handleDuplicate(flow.id) },
-                                menu: [{ label: "Stop", onClick: () => api.flows.unpublish(flow.id).then(() => refresh()), destructive: true }],
-                              },
-                              draft: {
-                                primary: { icon: <EditIcon className="w-5 h-5" />, title: "Edit", onClick: () => navigate(`/flows/${flow.id}`) },
-                                menu: [
-                                  { label: "Duplicate", onClick: () => handleDuplicate(flow.id) },
-                                  { label: "Delete", onClick: () => { if (confirm("Delete this flow?")) deleteFlow(flow.id); }, destructive: true },
-                                ],
-                              },
-                            }}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </DataTable>
+              <TooltipProvider>
+                <DataTable total={total} page={page} totalPages={totalPages} onPageChange={setPage}>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("trigger_count")}>
+                        No. Triggered<SortIcon active={sortKey === "trigger_count"} dir={sortDir} />
+                      </TableHead>
+                      <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("updated_at")}>
+                        Updated At<SortIcon active={sortKey === "updated_at"} dir={sortDir} />
+                      </TableHead>
+                      <TableHead>Updated By</TableHead>
+                      <TableHead className="text-right">Operations</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sorted.map((flow) => {
+                      const isPublished = flow.status === "published";
+                      const broken = isPublished ? flow.broken_trigger_type : null;
+                      // 失效的 flow 点进 analytics 是一片空白 —— 它从未触发过。用户此刻要的是修，不是看。
+                      const rowHref = broken || !isPublished ? `/flows/${flow.id}` : `/flows/${flow.id}/analytics`;
+                      return (
+                        <TableRow key={flow.id} className="cursor-pointer" onClick={() => navigate(rowHref)}>
+                          <TableCell className="font-medium text-foreground">{flow.name}</TableCell>
+                          <TableCell>
+                            {broken ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span><StatusCell status="error" label="Trigger Disconnected" /></span>
+                                </TooltipTrigger>
+                                <TooltipContent>{brokenTriggerTooltip(broken)}</TooltipContent>
+                              </Tooltip>
+                            ) : (
+                              <StatusCell status={isPublished ? "published" : "draft"} label={isPublished ? "Published" : "Draft"} />
+                            )}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{flow.trigger_count || "-"}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            <DateCell iso={flow.updated_at} timezone={timezone} />
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{flow.member_email || "-"}</TableCell>
+                          <TableCell className="text-right">
+                            <OperationCell
+                              status={broken ? "broken" : flow.status}
+                              operations={{
+                                broken: {
+                                  primary: { icon: <EditIcon className="w-5 h-5" />, title: "Edit", onClick: () => navigate(`/flows/${flow.id}`) },
+                                  menu: [
+                                    { label: "Duplicate", onClick: () => handleDuplicate(flow.id) },
+                                    { label: "Stop", onClick: () => api.flows.unpublish(flow.id).then(() => refresh()), destructive: true },
+                                  ],
+                                },
+                                published: {
+                                  primary: { icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg>, title: "Duplicate", onClick: () => handleDuplicate(flow.id) },
+                                  menu: [{ label: "Stop", onClick: () => api.flows.unpublish(flow.id).then(() => refresh()), destructive: true }],
+                                },
+                                draft: {
+                                  primary: { icon: <EditIcon className="w-5 h-5" />, title: "Edit", onClick: () => navigate(`/flows/${flow.id}`) },
+                                  menu: [
+                                    { label: "Duplicate", onClick: () => handleDuplicate(flow.id) },
+                                    { label: "Delete", onClick: () => { if (confirm("Delete this flow?")) deleteFlow(flow.id); }, destructive: true },
+                                  ],
+                                },
+                              }}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </DataTable>
+              </TooltipProvider>
             </>
           )}
         </div>

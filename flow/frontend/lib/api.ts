@@ -21,6 +21,8 @@ export interface FlowSummary {
   description: string;
   status: string;
   trigger_count: number;
+  // 失效 trigger 的节点类型；null 表示健康。只对 published 的 flow 计算。
+  broken_trigger_type: string | null;
   member_id: string;
   member_email: string;
   created_at: string;

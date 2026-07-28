@@ -2,7 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 
 const validateAuthorizationCodeMock = vi.fn();
-const getAppCredentialsMock = vi.fn().mockResolvedValue({ clientId: "byok-client-id", clientSecret: "byok-client-secret" });
+const getAppCredentialsMock = vi.fn().mockResolvedValue({
+  clientId: "byok-client-id",
+  clientSecret: "byok-client-secret",
+  // The BYOK app's app-only Bearer: `/2/webhooks` rejects the OAuth 2.0 user token, so the
+  // callback must register the webhook with this and only pass the user token to the
+  // subscription calls.
+  bearerToken: "byok-bearer",
+});
 const updateConfigMock = vi.fn().mockResolvedValue(undefined);
 const setupAllSubscriptionsMock = vi.fn().mockResolvedValue(["sub-1"]);
 const createAuthorizationURLMock = vi.fn().mockReturnValue(new URL("https://x.com/i/oauth2/authorize"));
@@ -36,15 +43,24 @@ vi.mock("../src/services/x-token", () => ({
   },
 }));
 
+// Records which token each call was made with: the whole point of the 2026-07-28 fix is that
+// `/2/webhooks` must be called with the app-only Bearer and `/2/activity/subscriptions` with
+// the user token, and passing the user token to both is what silently broke BYOK setup.
+const webhookCallTokens: string[] = [];
+const subscriptionCallTokens: string[] = [];
 vi.mock("../src/services/x-webhook", () => ({
   XActivityService: class {
+    constructor(private token: string) {}
     setupAllSubscriptions(...args: unknown[]) {
+      subscriptionCallTokens.push(this.token);
       return setupAllSubscriptionsMock(...args);
     }
     getWebhook() {
+      webhookCallTokens.push(this.token);
       return Promise.resolve(null);
     }
     createWebhook() {
+      webhookCallTokens.push(this.token);
       return Promise.resolve("wh-id");
     }
   },
@@ -171,6 +187,8 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     updateConfigMock.mockClear();
     setupAllSubscriptionsMock.mockClear();
     pollChannelOnceMock.mockClear();
+    webhookCallTokens.length = 0;
+    subscriptionCallTokens.length = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -222,8 +240,8 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
 
     expect(pollChannelOnceMock).toHaveBeenCalledWith(expect.anything(), "X", byokChannelId);
 
-    expect(setupAllSubscriptionsMock).toHaveBeenCalledWith("xuser-999", `http://localhost/x/webhook/${byokChannelId}`);
-    expect(updateConfigMock).toHaveBeenCalledWith(byokChannelId, { subscription_ids: ["sub-1"] });
+    expect(setupAllSubscriptionsMock).toHaveBeenCalledWith("xuser-999", `http://localhost/x/webhook/${byokChannelId}`, "wh-id");
+    expect(updateConfigMock).toHaveBeenCalledWith(byokChannelId, expect.objectContaining({ subscription_ids: ["sub-1"], subscription_error: null }));
   });
 
   it("redirects without waiting for the instant poll and subscription setup — they run via executionCtx.waitUntil after the response", async () => {
@@ -253,6 +271,87 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     } finally {
       // Restore for subsequent tests — mockClear() in beforeEach only clears
       // call history, not this returnValue override.
+      pollChannelOnceMock.mockResolvedValue(undefined);
+    }
+  });
+
+  // 2026-07-28: the BYOK branch handed the OAuth 2.0 user token to BOTH /2/webhooks and
+  // /2/activity/subscriptions. X answers the first with 403 "Unsupported Authentication ...
+  // Supported authentication types are [OAuth 1.0a User Context, OAuth 2.0 Application-Only]",
+  // so createWebhook threw and the whole setup aborted — silently, inside a catch — on every
+  // single authorize. The webhook call must use the BYOK app's own app-only Bearer.
+  it("registers the webhook with the BYOK app's app-only bearer, not the user token", async () => {
+    const byokChannelId = "placeholder-chan";
+    const kv = createMockKv(byokChannelId);
+    const linkDb = createMockLinkDb([
+      ["WHERE id = ? AND tenant_id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
+      ["SELECT config, tenant_id FROM channels WHERE id = ?", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }), tenant_id: 5 }],
+      ["channel_type = 'X' AND source_channel_id", null],
+    ]);
+
+    const app = buildApp();
+    const { ctx, flush } = createMockExecutionCtx();
+    await app.request("/x/callback?code=abc&state=state123", {}, { KV: kv, LINK_DB: linkDb } as any, ctx as any);
+    await flush();
+
+    expect(webhookCallTokens.length).toBeGreaterThan(0);
+    for (const token of webhookCallTokens) expect(token).toBe("byok-bearer");
+    // ...and the subscriptions still go out under user context, which private events require.
+    expect(subscriptionCallTokens).toEqual(["access-tok"]);
+  });
+
+  it("skips webhook registration with a clear error when the BYOK channel predates the stored bearer token", async () => {
+    getAppCredentialsMock.mockResolvedValueOnce({ clientId: "byok-client-id", clientSecret: "byok-client-secret" });
+    const byokChannelId = "placeholder-chan";
+    const kv = createMockKv(byokChannelId);
+    const linkDb = createMockLinkDb([
+      ["WHERE id = ? AND tenant_id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
+      ["SELECT config, tenant_id FROM channels WHERE id = ?", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }), tenant_id: 5 }],
+      ["channel_type = 'X' AND source_channel_id", null],
+    ]);
+
+    const app = buildApp();
+    const { ctx, flush } = createMockExecutionCtx();
+    const res = await app.request("/x/callback?code=abc&state=state123", {}, { KV: kv, LINK_DB: linkDb } as any, ctx as any);
+    await flush();
+
+    // The authorize itself still succeeds — only the webhook/subscription step is unavailable,
+    // and it must not reach X at all rather than 403 halfway through.
+    expect(res.status).toBe(302);
+    expect(webhookCallTokens).toEqual([]);
+    expect(setupAllSubscriptionsMock).not.toHaveBeenCalled();
+  });
+
+  // 2026-07-28: both ran in ONE waitUntil task with the poll first, and the poll's two
+  // 20s-budget pollers outlasted the runtime's waitUntil allowance — it cancelled the task
+  // mid-flight, so subscription setup never ran and the channel silently kept the
+  // subscription_ids of a previously-used X app. The poll self-heals via the hourly cron;
+  // subscription setup does not, so it must not sit behind the poll.
+  it("completes subscription setup before the instant poll, so a slow poll cannot starve it", async () => {
+    const byokChannelId = "placeholder-chan";
+    const kv = createMockKv(byokChannelId);
+    const linkDb = createMockLinkDb([
+      ["WHERE id = ? AND tenant_id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
+      ["SELECT config, tenant_id FROM channels WHERE id = ?", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }), tenant_id: 5 }],
+      ["channel_type = 'X' AND source_channel_id", null],
+    ]);
+
+    // Stands in for the poll outrunning the waitUntil budget: it never finishes, so anything
+    // sequenced after it would never run.
+    pollChannelOnceMock.mockReturnValue(new Promise(() => {}));
+
+    try {
+      const app = buildApp();
+      const { ctx } = createMockExecutionCtx();
+      await app.request("/x/callback?code=abc&state=state123", {}, { KV: kv, LINK_DB: linkDb } as any, ctx as any);
+
+      // Deliberately NOT flush() — that would await the hung poll. The subscriptions must
+      // already be persisted by the time the poll is even reached.
+      await vi.waitFor(() => {
+        expect(setupAllSubscriptionsMock).toHaveBeenCalledWith("xuser-999", `http://localhost/x/webhook/${byokChannelId}`, "wh-id");
+        expect(updateConfigMock).toHaveBeenCalledWith(byokChannelId, expect.objectContaining({ subscription_ids: ["sub-1"], subscription_error: null }));
+      });
+    } finally {
       pollChannelOnceMock.mockResolvedValue(undefined);
     }
   });

@@ -6,6 +6,13 @@ export interface ChannelConfig {
   refresh_token: string;
   expires_at?: string;
   subscription_ids?: string[];
+  // Why webhook/subscription setup last failed, or null once it succeeds. Setup runs inside
+  // executionCtx.waitUntil after the redirect, so a failure there reaches nobody: the browser
+  // has already been sent on its way and the only trace is a console.error that is gone by the
+  // time anyone looks. Three separate BYOK setup bugs (2026-07-28) each stayed invisible for
+  // exactly this reason — persist the outcome so it can be read off the channel row.
+  subscription_error?: string | null;
+  subscription_setup_at?: string;
 }
 
 export class XTokenService {

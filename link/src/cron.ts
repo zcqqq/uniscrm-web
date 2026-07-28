@@ -100,23 +100,24 @@ async function handleTokenRefresh(env: Env): Promise<void> {
 
       if (!config.subscription_ids?.length && config.x_user_id) {
         try {
-          if (config.is_byok) {
-            const webhookUrl = `${env.LINK_URL}/x/webhook/${row.id}`;
-            const userService = new XActivityService(newToken);
-            const ids = await userService.setupAllSubscriptions(config.x_user_id, webhookUrl);
-            await tokenService.updateConfig(row.id, { subscription_ids: ids });
-          } else {
-            const webhookUrl = `${env.LINK_URL}/x/webhook`;
-            const bearerService = new XActivityService(env.X_BEARER_TOKEN);
-            let webhook = await bearerService.getWebhook();
-            if (!webhook || webhook.url !== webhookUrl) {
-              const whId = await bearerService.createWebhook(webhookUrl);
-              webhook = { webhook_id: whId, url: webhookUrl };
-            }
-            const userService = new XActivityService(newToken);
-            const ids = await userService.setupAllSubscriptions(config.x_user_id, webhookUrl, webhook.webhook_id);
-            await tokenService.updateConfig(row.id, { subscription_ids: ids });
+          // Both branches: app-only Bearer registers the webhook, the freshly refreshed USER
+          // token creates the subscriptions. The BYOK branch used to hand the user token to
+          // both, which `/2/webhooks` rejects with 403 (see oauth.ts's BYOK branch).
+          const webhookUrl = config.is_byok
+            ? `${env.LINK_URL}/x/webhook/${row.id}`
+            : `${env.LINK_URL}/x/webhook`;
+          if (!creds.bearerToken) {
+            throw new Error(`channel ${row.id} has no app-only bearer token — cannot register its webhook`);
           }
+          const bearerService = new XActivityService(creds.bearerToken);
+          let webhook = await bearerService.getWebhook(webhookUrl);
+          if (!webhook) {
+            const whId = await bearerService.createWebhook(webhookUrl);
+            webhook = { webhook_id: whId, url: webhookUrl };
+          }
+          const userService = new XActivityService(newToken);
+          const ids = await userService.setupAllSubscriptions(config.x_user_id, webhookUrl, webhook.webhook_id);
+          await tokenService.updateConfig(row.id, { subscription_ids: ids });
         } catch (e) {
           console.error("XAA subscription setup failed:", e);
         }

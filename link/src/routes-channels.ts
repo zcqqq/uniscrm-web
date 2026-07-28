@@ -100,28 +100,81 @@ export function channelsRoutes() {
   router.post("/x/byok", async (c) => {
     const tenantId = c.get("tenantId" as never) as number;
     const memberId = c.get("memberId" as never) as string;
-    const { channel_id, client_id, client_secret, consumer_secret } = await c.req.json<{
-      channel_id?: string; client_id: string; client_secret: string; consumer_secret: string;
+    const body = await c.req.json<{
+      channel_id?: string; client_id: string; client_secret: string; consumer_secret: string; bearer_token: string;
     }>();
+    const { channel_id } = body;
+    // Trim before storing. These are pasted out of the X Developer Console, and a trailing
+    // newline survives encryption invisibly — the value then goes into an Authorization header
+    // and X answers a bare 401 with nothing to distinguish it from a genuinely wrong token.
+    const client_id = body.client_id?.trim();
+    const client_secret = body.client_secret?.trim();
+    const consumer_secret = body.consumer_secret?.trim();
+    const bearer_token = body.bearer_token?.trim();
 
-    if (!client_id || !client_secret || !consumer_secret) {
+    // bearer_token is required alongside the other three: `POST /2/webhooks` refuses an
+    // OAuth 2.0 user token, so without it the authorize flow silently ends with no webhook
+    // and no subscriptions (the 2026-07-28 dev failure). The three older fields cannot
+    // substitute — they are user-context or HMAC material, not app-only auth.
+    if (!client_id || !client_secret || !consumer_secret || !bearer_token) {
       return c.json({ error: "Missing credentials" }, 400);
     }
 
-    const masterKey = await c.env.ENCRYPTION_KEY.get();
-    const [encClientId, encClientSecret, encConsumerSecret] = await Promise.all([
-      encrypt(client_id, masterKey),
-      encrypt(client_secret, masterKey),
-      encrypt(consumer_secret, masterKey),
-    ]);
-
     const url = new URL(c.req.url);
+    // `is_active = 1` matters: without it this route happily rewrote the credentials of a
+    // channel the user had already deleted and answered 200 with a connect URL that then
+    // 404s, because GET /x/byok and /x/connect both DO require it. Three views of the same
+    // channel disagreeing is what made a delete look like a broken save.
     const existing = channel_id
       ? await c.env.LINK_DB
-          .prepare("SELECT config FROM channels WHERE id = ? AND tenant_id = ? AND channel_type = 'X' AND is_byok = 1")
+          .prepare("SELECT config FROM channels WHERE id = ? AND tenant_id = ? AND channel_type = 'X' AND is_byok = 1 AND is_active = 1")
           .bind(channel_id, tenantId)
           .first<{ config: string }>()
       : null;
+
+    if (!existing && channel_id) {
+      // Not this tenant's channel — reject rather than falling through to
+      // INSERT, which would either collide on the primary key or (if some
+      // future change made the insert an upsert) silently overwrite someone
+      // else's row. Checked before the credential probe below so an authorization
+      // failure is never reported as a credential problem (and so a caller poking at
+      // someone else's channel id can't use this route to test tokens against X).
+      const claimedElsewhere = await c.env.LINK_DB
+        // tenant-scope-ok: intentional global probe — detects a channel_id already claimed by ANY tenant before INSERT
+        .prepare("SELECT id FROM channels WHERE id = ?")
+        .bind(channel_id)
+        .first<{ id: string }>();
+      if (claimedElsewhere) return c.json({ error: "Channel not found" }, 404);
+    }
+
+    // Verify the bearer against the very endpoint it exists for, while a human is still
+    // watching. Otherwise a bad token is accepted here and only fails later inside the
+    // callback's waitUntil, where nothing surfaces it. Only a 401 is fatal — that is X
+    // saying the credential itself is bad. Anything else (403 access tier, 429, 5xx, a
+    // network blip) is not evidence about the token, so it must not block saving.
+    const probe = await fetch("https://api.x.com/2/webhooks", {
+      headers: { Authorization: `Bearer ${bearer_token}` },
+    }).catch(() => null);
+    if (probe && probe.status === 401) {
+      return c.json({
+        error: "X rejected this Bearer Token (401). Copy it from this app's Keys and tokens page — regenerating it there invalidates the old value.",
+      }, 400);
+    }
+    if (probe && !probe.ok) {
+      console.warn(JSON.stringify({
+        event: "byok_bearer_probe_non_ok",
+        status: probe.status,
+        message: "not treated as fatal — only 401 proves a bad credential",
+      }));
+    }
+
+    const masterKey = await c.env.ENCRYPTION_KEY.get();
+    const [encClientId, encClientSecret, encConsumerSecret, encBearerToken] = await Promise.all([
+      encrypt(client_id, masterKey),
+      encrypt(client_secret, masterKey),
+      encrypt(consumer_secret, masterKey),
+      encrypt(bearer_token, masterKey),
+    ]);
 
     if (existing) {
       // Editing an existing app: only the credential fields change — everything
@@ -133,6 +186,7 @@ export function channelsRoutes() {
         app_client_id: encClientId,
         app_client_secret: encClientSecret,
         app_consumer_secret: encConsumerSecret,
+        app_bearer_token: encBearerToken,
       });
       await c.env.LINK_DB
         // tenant-scope-ok: `existing` was fetched WHERE id = ? AND tenant_id = ? above; reached only if this tenant owns channel_id
@@ -147,25 +201,15 @@ export function channelsRoutes() {
       });
     }
 
-    if (channel_id) {
-      // Not this tenant's channel — reject rather than falling through to
-      // INSERT, which would either collide on the primary key or (if some
-      // future change made the insert an upsert) silently overwrite someone
-      // else's row.
-      const claimedElsewhere = await c.env.LINK_DB
-        // tenant-scope-ok: intentional global probe — detects a channel_id already claimed by ANY tenant before INSERT
-        .prepare("SELECT id FROM channels WHERE id = ?")
-        .bind(channel_id)
-        .first<{ id: string }>();
-      if (claimedElsewhere) return c.json({ error: "Channel not found" }, 404);
-    }
-
+    // The "claimed by another tenant" rejection now happens above, before the credential
+    // probe, so this point is only reached for an id this tenant may legitimately insert.
     const channelId = channel_id || crypto.randomUUID();
     const config = JSON.stringify({
       is_byok: true,
       app_client_id: encClientId,
       app_client_secret: encClientSecret,
       app_consumer_secret: encConsumerSecret,
+      app_bearer_token: encBearerToken,
     });
 
     await c.env.LINK_DB
@@ -246,10 +290,11 @@ export function channelsRoutes() {
       .first<{ config: string; created_at: string }>();
     if (!row) return c.json({ connected: false });
 
-    const config = JSON.parse(row.config) as { email?: string; sync_status?: string; subscriptions?: unknown[] };
+    const config = JSON.parse(row.config) as { email?: string; channel_title?: string; sync_status?: string; subscriptions?: unknown[] };
     return c.json({
       connected: true,
       email: config.email,
+      channel_title: config.channel_title,
       sync_status: config.sync_status,
       subscription_count: (config.subscriptions || []).length,
       created_at: row.created_at,

@@ -108,6 +108,8 @@ export function oauthRoutes() {
 
     let clientId = c.env.X_CLIENT_ID;
     let clientSecret = c.env.X_CLIENT_SECRET;
+    // App-only auth for `/2/webhooks`, kept separate from the user token below.
+    let bearerToken: string | undefined = c.env.X_BEARER_TOKEN;
 
     if (byokChannelId) {
       // /x/connect already proved this channel belongs to the session's tenant
@@ -124,6 +126,9 @@ export function oauthRoutes() {
       const creds = await getAppCredentials(c.env, cfg);
       clientId = creds.clientId;
       clientSecret = creds.clientSecret;
+      // Undefined for a BYOK channel saved before the field existed — the authorize itself
+      // still succeeds; only webhook registration below reports the gap.
+      bearerToken = creds.bearerToken;
     }
 
     const twitter = new Twitter(clientId, clientSecret, `${url.origin}/api/auth/x/callback`);
@@ -223,19 +228,53 @@ export function oauthRoutes() {
       const tokenService = new XTokenService(c.env.LINK_DB, clientId, clientSecret);
       c.executionCtx.waitUntil(
         (async () => {
+          // Subscriptions FIRST. The instant backfill poll runs two pollers, each with its own
+          // 20s budget (pollers/poll-channel.ts PER_CHANNEL_BUDGET_MS), which alone can outlast
+          // the whole waitUntil allowance — and it did: on 2026-07-28 the runtime cancelled the
+          // tail of this task ("waitUntil() tasks did not complete within the allowed time"),
+          // so subscription setup never ran and the channel silently kept the subscription_ids
+          // of a previous X app. Subscriptions are the part that cannot self-heal (nothing else
+          // ever calls setupAllSubscriptions for an already-populated config); the poll can —
+          // the hourly cron re-runs it from the same unfinished cursor.
+          try {
+            const webhookUrl = `${url.origin}/x/webhook/${byokChannelId}`;
+            // Two different credentials, exactly as the system-app branch below does it:
+            // `/2/webhooks` only accepts app-only auth (a user token gets 403 "Unsupported
+            // Authentication"), while `/2/activity/subscriptions` needs user context for
+            // private events. Passing the user token to both is what broke BYOK setup on
+            // every authorize until 2026-07-28.
+            if (!bearerToken) {
+              throw new Error("BYOK channel has no stored bearer token — re-enter the app credentials to register its webhook");
+            }
+            const bearerService = new XActivityService(bearerToken);
+            let webhook = await bearerService.getWebhook(webhookUrl);
+            if (!webhook) {
+              const whId = await bearerService.createWebhook(webhookUrl);
+              webhook = { webhook_id: whId, url: webhookUrl };
+            }
+            const userService = new XActivityService(tokens.accessToken());
+            const ids = await userService.setupAllSubscriptions(xUser.id, webhookUrl, webhook.webhook_id);
+            await tokenService.updateConfig(byokChannelId, {
+              subscription_ids: ids,
+              subscription_error: null,
+              subscription_setup_at: new Date().toISOString(),
+            });
+          } catch (e) {
+            console.error("BYOK XAA subscription setup failed:", e);
+            // Persist it: this catch is the end of the line for the error otherwise (see
+            // ChannelConfig.subscription_error).
+            await tokenService
+              .updateConfig(byokChannelId, {
+                subscription_error: String(e).slice(0, 500),
+                subscription_setup_at: new Date().toISOString(),
+              })
+              .catch((inner) => console.error("recording BYOK setup error failed:", inner));
+          }
+
           try {
             await pollChannelOnce(c.env, "X", byokChannelId);
           } catch (e) {
             console.error("X BYOK instant poll failed:", e);
-          }
-
-          try {
-            const webhookUrl = `${url.origin}/x/webhook/${byokChannelId}`;
-            const userService = new XActivityService(tokens.accessToken());
-            const ids = await userService.setupAllSubscriptions(xUser.id, webhookUrl);
-            await tokenService.updateConfig(byokChannelId, { subscription_ids: ids });
-          } catch (e) {
-            console.error("BYOK XAA subscription setup failed:", e);
           }
         })()
       );
@@ -462,6 +501,26 @@ export function oauthRoutes() {
     const googleUserId = claims.sub;
     const email = claims.email;
 
+    // `email` above is the Google *login* identity, not the channel's own name — for a
+    // Brand Account (a channel not tied 1:1 to a personal Gmail), Google's OAuth email
+    // claim is a synthetic placeholder like "xxxx@pages.plusgoogle.com", not anything a
+    // tenant would recognize. Fetch the channel's actual public title the same way the X
+    // callback fetches `users/me` for a display name, instead of relying on the ID token.
+    let channelTitle: string | null = null;
+    try {
+      const channelRes = await fetch("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true", {
+        headers: { Authorization: `Bearer ${tokens.accessToken()}` },
+      });
+      if (channelRes.ok) {
+        const channelData = await channelRes.json() as { items?: { snippet?: { title?: string } }[] };
+        channelTitle = channelData.items?.[0]?.snippet?.title ?? null;
+      } else {
+        console.error(JSON.stringify({ event: "youtube_oauth_channel_fetch_failed", status: channelRes.status }));
+      }
+    } catch (e) {
+      console.error(JSON.stringify({ event: "youtube_oauth_channel_fetch_failed", error: String(e) }));
+    }
+
     let expiresAt: string;
     try {
       expiresAt = new Date(Date.now() + tokens.accessTokenExpiresInSeconds() * 1000).toISOString();
@@ -513,6 +572,7 @@ export function oauthRoutes() {
     const config = {
       google_user_id: googleUserId,
       email,
+      channel_title: channelTitle,
       access_token: tokens.accessToken(),
       refresh_token: refreshToken,
       expires_at: expiresAt,

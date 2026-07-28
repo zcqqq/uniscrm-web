@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { Hono } from "hono";
 import { generateMasterKey, decrypt } from "uniscrm-byok";
 import { channelsRoutes } from "../../src/routes-channels";
@@ -24,7 +24,7 @@ function createMockLinkDb() {
           if (sql.includes("SELECT config FROM channels WHERE id = ? AND tenant_id = ? AND channel_type = 'X' AND is_byok = 1")) {
             const [id, tenantId] = args as [string, number];
             const row = rows.get(id);
-            if (!row || row.tenant_id !== tenantId || !row.is_byok) return null;
+            if (!row || row.tenant_id !== tenantId || !row.is_byok || !row.is_active) return null;
             return { config: row.config } as unknown as T;
           }
           if (sql === "SELECT id FROM channels WHERE id = ?") {
@@ -73,6 +73,13 @@ describe("POST /x/byok", () => {
 
   beforeEach(async () => {
     masterKey = await generateMasterKey();
+    // The route probes GET /2/webhooks to validate the bearer before storing it. Unstubbed,
+    // these tests would reach the real api.x.com and every save would 400.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 200 })));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("creates a new BYOK channel when channel_id does not exist yet", async () => {
@@ -84,7 +91,7 @@ describe("POST /x/byok", () => {
       new Request("https://link-dev.uni-scrm.com/x/byok", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel_id: preChannelId, client_id: "cid", client_secret: "csecret", consumer_secret: "consecret" }),
+        body: JSON.stringify({ channel_id: preChannelId, client_id: "cid", client_secret: "csecret", consumer_secret: "consecret", bearer_token: "btok" }),
       }),
       env
     );
@@ -121,7 +128,7 @@ describe("POST /x/byok", () => {
       new Request("https://link-dev.uni-scrm.com/x/byok", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel_id: "existing-channel", client_id: "new-cid", client_secret: "new-secret", consumer_secret: "new-consecret" }),
+        body: JSON.stringify({ channel_id: "existing-channel", client_id: "new-cid", client_secret: "new-secret", consumer_secret: "new-consecret", bearer_token: "new-btok" }),
       }),
       env
     );
@@ -157,7 +164,7 @@ describe("POST /x/byok", () => {
       new Request("https://link-dev.uni-scrm.com/x/byok", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel_id: "tenant-2-channel", client_id: "cid", client_secret: "csecret", consumer_secret: "consecret" }),
+        body: JSON.stringify({ channel_id: "tenant-2-channel", client_id: "cid", client_secret: "csecret", consumer_secret: "consecret", bearer_token: "btok" }),
       }),
       env
     );
@@ -168,5 +175,102 @@ describe("POST /x/byok", () => {
     expect(res.status).toBe(404);
     const unchanged = JSON.parse(linkDb._rows.get("tenant-2-channel")!.config);
     expect(unchanged.x_user_id).toBe("999");
+    // The credential probe must not have run: an authorization failure is not a credential
+    // problem, and this route must not double as a way to test tokens against X using
+    // someone else's channel id.
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  // A stale browser tab can still show the card for a channel that was just deleted. Editing
+  // it used to return 200 plus a connect URL, because only this route ignored is_active —
+  // GET /x/byok and /x/connect both require it, so the "successful" save ended on a 404.
+  it("refuses to edit a deleted (is_active = 0) channel instead of resurrecting its credentials", async () => {
+    const linkDb = createMockLinkDb();
+    linkDb._rows.set("deleted-channel", {
+      id: "deleted-channel",
+      channel_type: "X",
+      config: JSON.stringify({ is_byok: true, x_user_id: "999" }),
+      tenant_id: 1,
+      member_id: "member-1",
+      is_byok: 1,
+      is_active: 0,
+    });
+    const { app, env } = buildTestApp(linkDb, masterKey, 1);
+
+    const res = await app.fetch(
+      new Request("https://link-dev.uni-scrm.com/x/byok", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel_id: "deleted-channel", client_id: "cid", client_secret: "csecret", consumer_secret: "consecret", bearer_token: "btok" }),
+      }),
+      env
+    );
+
+    expect(res.status).toBe(404);
+    const unchanged = JSON.parse(linkDb._rows.get("deleted-channel")!.config);
+    expect(unchanged.app_client_id).toBeUndefined();
+  });
+
+  // A bearer X refuses is worthless — `/2/webhooks` is the only thing it is stored for. Saving
+  // it anyway means the failure surfaces later inside the OAuth callback's waitUntil, where
+  // nobody sees it; that invisibility is what made three separate BYOK bugs take a day to find.
+  it("rejects the save when X answers 401 to the bearer token, without writing anything", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 401 })));
+    const linkDb = createMockLinkDb();
+    const { app, env } = buildTestApp(linkDb, masterKey);
+
+    const res = await app.fetch(
+      new Request("https://link-dev.uni-scrm.com/x/byok", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel_id: "new-channel-id", client_id: "cid", client_secret: "csecret", consumer_secret: "consecret", bearer_token: "bad-token" }),
+      }),
+      env
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toContain("401");
+    expect(linkDb._rows.size).toBe(0);
+  });
+
+  // Only 401 proves the credential itself is bad. A 403 (app lacks the Activity access tier),
+  // 429 or 5xx says nothing about the token, and blocking the save on those would lock a
+  // tenant out over a transient X-side condition.
+  it("still saves when the probe fails with something other than 401", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 403 })));
+    const linkDb = createMockLinkDb();
+    const { app, env } = buildTestApp(linkDb, masterKey);
+
+    const res = await app.fetch(
+      new Request("https://link-dev.uni-scrm.com/x/byok", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel_id: "new-channel-id", client_id: "cid", client_secret: "csecret", consumer_secret: "consecret", bearer_token: "btok" }),
+      }),
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(linkDb._rows.size).toBe(1);
+  });
+
+  it("trims pasted credentials — a trailing newline would otherwise be encrypted into the header value", async () => {
+    const linkDb = createMockLinkDb();
+    const { app, env } = buildTestApp(linkDb, masterKey);
+
+    await app.fetch(
+      new Request("https://link-dev.uni-scrm.com/x/byok", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel_id: "new-channel-id", client_id: " cid\n", client_secret: "csecret ", consumer_secret: "\tconsecret", bearer_token: "btok\r\n" }),
+      }),
+      env
+    );
+
+    const stored = JSON.parse(linkDb._rows.get("new-channel-id")!.config);
+    expect(await decrypt(stored.app_client_id, masterKey)).toBe("cid");
+    expect(await decrypt(stored.app_client_secret, masterKey)).toBe("csecret");
+    expect(await decrypt(stored.app_consumer_secret, masterKey)).toBe("consecret");
+    expect(await decrypt(stored.app_bearer_token, masterKey)).toBe("btok");
   });
 });

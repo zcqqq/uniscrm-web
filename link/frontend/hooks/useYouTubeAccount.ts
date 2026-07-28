@@ -11,8 +11,24 @@ interface YouTubeAccountState {
   loading: boolean;
 }
 
+// The OAuth callback cannot render anything itself — it is a top-level redirect back into the
+// SPA — so a refused connect arrives as ?youtube_error=<reason> on the landing URL. Read it
+// once on mount and strip it, so the message shows on arrival but does not survive a refresh
+// or outlive a later successful connect.
+function takeConnectError(): string | null {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const reason = params.get("youtube_error");
+  if (!reason) return null;
+  params.delete("youtube_error");
+  const query = params.toString();
+  window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  return reason;
+}
+
 export function useYouTubeAccount() {
   const [state, setState] = useState<YouTubeAccountState>({ connected: false, subscriptionCount: 0, loading: true });
+  const [connectError, setConnectError] = useState<string | null>(() => takeConnectError());
 
   const loadStatus = useCallback(async () => {
     try {
@@ -42,6 +58,7 @@ export function useYouTubeAccount() {
   }, [state.connected, state.syncStatus, loadStatus]);
 
   const connect = () => {
+    setConnectError(null);
     window.location.href = "/api/auth/youtube/connect";
   };
 
@@ -50,5 +67,5 @@ export function useYouTubeAccount() {
     setState({ connected: false, subscriptionCount: 0, loading: false });
   };
 
-  return { ...state, connect, disconnect };
+  return { ...state, connectError, connect, disconnect };
 }

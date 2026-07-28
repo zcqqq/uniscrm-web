@@ -458,10 +458,21 @@ const YOUTUBE_STRINGS = {
   connectButton: { en: "Connect YouTube", zh: "连接 YouTube" } as LocalizedString,
   syncing: { en: "Syncing your subscriptions…", zh: "正在同步你的订阅…" } as LocalizedString,
   syncFailed: { en: "Failed to sync subscriptions — try reconnecting.", zh: "订阅同步失败，请尝试重新连接。" } as LocalizedString,
+  // Google's chooser lists every signed-in identity plus any Brand Accounts, and says nothing
+  // about which of them owns a channel. Set the expectation before the redirect, and name the
+  // recovery after a refused one — "pick the right account" is only actionable if we say which.
+  pickChannelOwner: {
+    en: "Google will ask which account to use — pick the one that owns your channel.",
+    zh: "Google 会让你选择账号——请选择拥有你频道的那个身份。",
+  } as LocalizedString,
+  noChannel: {
+    en: "That Google account has no YouTube channel. Connect again and pick the identity that owns your channel (Brand Accounts are listed separately), or create a channel on YouTube first.",
+    zh: "这个 Google 账号名下没有 YouTube 频道。请重新连接，并在账号选择页选择拥有你频道的身份（品牌账号会单独列出）；如果还没有频道，请先在 YouTube 创建。",
+  } as LocalizedString,
 };
 
 function YouTubeAccountCard({ locale }: { locale: Locale }) {
-  const { connected, email, channelTitle, syncStatus, subscriptionCount, createdAt, connect, disconnect } = useYouTubeAccount();
+  const { connected, email, channelTitle, syncStatus, subscriptionCount, createdAt, connectError, connect, disconnect } = useYouTubeAccount();
 
   const status = !connected ? "disconnected" : syncStatus === "pending" ? "pending" : "connected";
   // channelTitle is the channel's own public name (fetched via channels.list at connect
@@ -484,7 +495,13 @@ function YouTubeAccountCard({ locale }: { locale: Locale }) {
       statusLabel={connected && displayLabel ? displayLabel : undefined}
       createdAt={connected ? createdAt : undefined}
       extra={
-        !connected ? undefined : syncStatus === "pending" ? (
+        !connected ? (
+          connectError === "no_channel" ? (
+            <p className="text-xs text-destructive">{t(YOUTUBE_STRINGS.noChannel, locale)}</p>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t(YOUTUBE_STRINGS.pickChannelOwner, locale)}</p>
+          )
+        ) : syncStatus === "pending" ? (
           <p className="text-xs text-muted-foreground">{t(YOUTUBE_STRINGS.syncing, locale)}</p>
         ) : syncStatus === "error" ? (
           <p className="text-xs text-destructive">{t(YOUTUBE_STRINGS.syncFailed, locale)}</p>

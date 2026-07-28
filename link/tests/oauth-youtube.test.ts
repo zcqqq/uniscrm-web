@@ -73,26 +73,54 @@ function buildApp() {
   return app;
 }
 
+// resolveSession reads the `session` cookie and looks it up in KV first. Without both, the
+// route now refuses before it ever builds Google's authorization URL.
+const SESSION_COOKIE = { Cookie: "session=sess-1" };
+function createSessionKv() {
+  return {
+    get: vi.fn().mockImplementation((key: string) =>
+      Promise.resolve(key === "session:sess-1" ? JSON.stringify({ tenant_id: 1, member_id: "member-1", email: "" }) : null)
+    ),
+    put: vi.fn().mockResolvedValue(undefined),
+    delete: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 describe("GET /youtube/connect", () => {
   it("stores oauth state in KV and redirects to Google's authorization URL", async () => {
-    const kv = createMockKv(null);
+    const kv = createSessionKv();
     const app = buildApp();
 
-    const res = await app.request("/youtube/connect", {}, { KV: kv, WEB_DB: { prepare: vi.fn() }, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any);
+    const res = await app.request("/youtube/connect", { headers: SESSION_COOKIE }, { KV: kv, WEB_DB: { prepare: vi.fn() }, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any);
 
     expect(res.status).toBe(302);
     expect(kv.put).toHaveBeenCalledWith(expect.stringMatching(/^oauth_state:/), expect.any(String), { expirationTtl: 300 });
   });
 
   it("requests prompt=consent select_account and access_type=offline so Google always shows the account chooser and returns a refresh token", async () => {
-    const kv = createMockKv(null);
+    const kv = createSessionKv();
     const app = buildApp();
 
-    const res = await app.request("/youtube/connect", { redirect: "manual" }, { KV: kv, WEB_DB: { prepare: vi.fn() }, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any);
+    const res = await app.request("/youtube/connect", { redirect: "manual", headers: SESSION_COOKIE }, { KV: kv, WEB_DB: { prepare: vi.fn() }, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any);
 
     const location = res.headers.get("Location")!;
     expect(new URL(location).searchParams.get("prompt")).toBe("consent select_account");
     expect(new URL(location).searchParams.get("access_type")).toBe("offline");
+  });
+
+  // The callback hard-requires tenantId+memberId, so a sessionless start was always doomed —
+  // it just failed AFTER the user had picked a Google account, clicked through the unverified-
+  // app warning and granted consent, landing on a raw JSON 401 with nothing connected.
+  it("refuses without a session instead of sending the user through Google's consent flow first", async () => {
+    const kv = createMockKv(null);
+    const app = buildApp();
+
+    const res = await app.request("/youtube/connect", { redirect: "manual" }, { KV: kv, WEB_DB: { prepare: vi.fn().mockReturnValue({ bind: () => ({ first: async () => null }) }) }, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any);
+
+    expect(res.status).toBe(401);
+    // No state written, and no redirect to Google — the refusal is what the user sees first.
+    expect(kv.put).not.toHaveBeenCalled();
+    expect(res.headers.get("Location")).toBeNull();
   });
 });
 
@@ -213,6 +241,42 @@ describe("GET /youtube/callback", () => {
     const insertCall = linkDb.calls.find((c) => c.sql.includes("INSERT INTO channels"));
     const config = JSON.parse(insertCall!.args[1] as string);
     expect(config.channel_title).toBeNull();
+  });
+
+  // Google's chooser lists every signed-in identity plus any Brand Accounts and gives no hint
+  // which of them owns a channel. Landing on one that owns none used to produce a channel row
+  // with no title and no subscriptions — a card that looks connected and does nothing.
+  it("refuses to create a channel when the chosen Google account owns no YouTube channel, and says why", async () => {
+    validateAuthorizationCodeMock.mockResolvedValueOnce({
+      accessToken: () => "access-tok",
+      idToken: () => "mock-id-token",
+      accessTokenExpiresInSeconds: () => 3600,
+    });
+    decodeIdTokenMock.mockReturnValueOnce({ sub: "google-user-1", email: "tenant@example.com" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [] }), { status: 200 })));
+    // No clearMocks in this project's vitest config — the sync mock carries calls from the
+    // tests above, so the "not called" assertion below only means anything after a clear.
+    syncYouTubeSubscriptionsMock.mockClear();
+
+    const kv = createMockKv({ codeVerifier: "verifier", tenantId: "1", memberId: "member1" });
+    const linkDb = createMockLinkDb([]);
+
+    const app = buildApp();
+    const { ctx, flush } = createMockExecutionCtx();
+    const res = await app.request(
+      "/youtube/callback?code=abc&state=xyz",
+      { redirect: "manual" },
+      { KV: kv, LINK_DB: linkDb, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any,
+      ctx as any
+    );
+    await flush();
+
+    expect(res.status).toBe(302);
+    // The reason rides back on the URL — the callback is a top-level redirect and cannot
+    // render anything itself, and a raw JSON error page leaves the tenant with no way back.
+    expect(new URL(res.headers.get("Location")!).search).toBe("?youtube_error=no_channel");
+    expect(linkDb.calls.some((c) => c.sql.includes("INSERT INTO channels"))).toBe(false);
+    expect(syncYouTubeSubscriptionsMock).not.toHaveBeenCalled();
   });
 
   it("reconnecting after a prior disconnect (inactive row, same source_channel_id) does not throw and still redirects", async () => {

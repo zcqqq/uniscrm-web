@@ -461,8 +461,14 @@ export function oauthRoutes() {
   // for "Sign in with Google" in the web module (GOOGLE_CLIENT_ID/SECRET), not a new one.
   router.get("/youtube/connect", async (c) => {
     const session = await resolveSession(c);
-    const tenantId = session ? String(session.tenant_id) : null;
-    const memberId = session?.member_id || null;
+    // Unlike X's system-app connect (which doubles as signup) this flow only ever attaches a
+    // channel to an existing tenant — the callback hard-requires tenantId+memberId. Refusing
+    // here rather than there is the same guard X's BYOK branch applies: without it an expired
+    // session sends the user through Google's whole consent flow (account chooser, unverified-
+    // app warning, two clicks) only to land on a raw 401 JSON page with nothing connected.
+    if (!session) return c.json({ error: "Must be logged in to connect YouTube" }, 401);
+    const tenantId = String(session.tenant_id);
+    const memberId = session.member_id;
 
     const url = new URL(c.req.url);
     const { url: oauthUrl, state, codeVerifier } = buildYouTubeAuthUrl(
@@ -507,18 +513,34 @@ export function oauthRoutes() {
     // tenant would recognize. Fetch the channel's actual public title the same way the X
     // callback fetches `users/me` for a display name, instead of relying on the ID token.
     let channelTitle: string | null = null;
+    // Three-state on purpose: true = this identity owns a channel, false = the API answered
+    // but the identity owns none, null = we could not ask (transient failure). Only `false`
+    // is grounds to refuse below — a network blip must not block an otherwise valid connect.
+    let hasChannel: boolean | null = null;
     try {
       const channelRes = await fetch("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true", {
         headers: { Authorization: `Bearer ${tokens.accessToken()}` },
       });
       if (channelRes.ok) {
         const channelData = await channelRes.json() as { items?: { snippet?: { title?: string } }[] };
+        hasChannel = (channelData.items?.length ?? 0) > 0;
         channelTitle = channelData.items?.[0]?.snippet?.title ?? null;
       } else {
         console.error(JSON.stringify({ event: "youtube_oauth_channel_fetch_failed", status: channelRes.status }));
       }
     } catch (e) {
       console.error(JSON.stringify({ event: "youtube_oauth_channel_fetch_failed", error: String(e) }));
+    }
+
+    // Google's account chooser offers every identity signed into the browser plus any Brand
+    // Accounts; a Google account with no YouTube channel of its own is a perfectly ordinary
+    // choice to land on by mistake, and nothing in that flow says it was wrong. Connecting it
+    // anyway produced a channel row with no title and no subscriptions — a card that looks
+    // connected and does nothing, with no way for the tenant to tell what they did wrong.
+    // Refuse and send them back with a reason instead of writing that row.
+    if (hasChannel === false) {
+      console.error(JSON.stringify({ event: "youtube_oauth_no_channel", googleUserId, email }));
+      return c.redirect(`${url.origin}/channel?youtube_error=no_channel`, 302);
     }
 
     let expiresAt: string;

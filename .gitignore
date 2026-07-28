@@ -14,3 +14,7 @@ shared-state/
 !.env.example
 .worktrees/
 .claude/
+
+# Python bytecode caches (content module test tooling)
+__pycache__/
+*.pyc

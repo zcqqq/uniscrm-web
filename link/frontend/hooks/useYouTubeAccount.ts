@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 interface YouTubeAccountState {
   connected: boolean;
   email?: string;
+  channelTitle?: string;
   syncStatus?: "pending" | "done" | "error";
   subscriptionCount: number;
   createdAt?: string;
@@ -19,6 +20,7 @@ export function useYouTubeAccount() {
       setState({
         connected: data.connected,
         email: data.email,
+        channelTitle: data.channel_title,
         syncStatus: data.sync_status as "pending" | "done" | "error" | undefined,
         subscriptionCount: data.subscription_count || 0,
         createdAt: data.created_at,

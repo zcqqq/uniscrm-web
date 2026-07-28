@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 
 const validateAuthorizationCodeMock = vi.fn();
@@ -97,6 +97,18 @@ describe("GET /youtube/connect", () => {
 });
 
 describe("GET /youtube/callback", () => {
+  beforeEach(() => {
+    // The callback fetches the connected channel's own title (channels.list)
+    // right after token exchange, to use as the display name instead of the
+    // Google login email — mirrors the X callback's `users/me` fetch.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ items: [{ snippet: { title: "Test Channel" } }] }), { status: 200 })
+      )
+    );
+  });
+
   it("upserts a YOUTUBE_ACCOUNT channel row and backgrounds the subscription sync", async () => {
     validateAuthorizationCodeMock.mockResolvedValueOnce({
       accessToken: () => "access-tok",
@@ -139,6 +151,68 @@ describe("GET /youtube/callback", () => {
     // what gets passed to the sync — not the pre-generated (possibly discarded)
     // channelId from the INSERT.
     expect(syncYouTubeSubscriptionsMock).toHaveBeenCalledWith(expect.anything(), "row-1", "access-tok");
+  });
+
+  it("stores the channel's own title (channels.list) instead of relying on the OAuth email for display", async () => {
+    // The Google ID token's `email` claim is the login identity, not the channel
+    // name — for a Brand Account it's a synthetic "xxx@pages.plusgoogle.com"
+    // placeholder. The callback must fetch and persist the actual channel title.
+    validateAuthorizationCodeMock.mockResolvedValueOnce({
+      accessToken: () => "access-tok",
+      idToken: () => "mock-id-token",
+      accessTokenExpiresInSeconds: () => 3600,
+    });
+    decodeIdTokenMock.mockReturnValueOnce({ sub: "google-user-1", email: "xxx@pages.plusgoogle.com" });
+
+    const kv = createMockKv({ codeVerifier: "verifier", tenantId: "1", memberId: "member1" });
+    const linkDb = createMockLinkDb([
+      ["channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id", { id: "row-1" }],
+    ]);
+
+    const app = buildApp();
+    const { ctx, flush } = createMockExecutionCtx();
+    await app.request(
+      "/youtube/callback?code=abc&state=xyz",
+      {},
+      { KV: kv, LINK_DB: linkDb, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any,
+      ctx as any
+    );
+    await flush();
+
+    const insertCall = linkDb.calls.find((c) => c.sql.includes("INSERT INTO channels"));
+    const config = JSON.parse(insertCall!.args[1] as string);
+    expect(config.channel_title).toBe("Test Channel");
+    expect(config.email).toBe("xxx@pages.plusgoogle.com");
+  });
+
+  it("stores a null channel_title (not a thrown error) when the channels.list fetch fails", async () => {
+    validateAuthorizationCodeMock.mockResolvedValueOnce({
+      accessToken: () => "access-tok",
+      idToken: () => "mock-id-token",
+      accessTokenExpiresInSeconds: () => 3600,
+    });
+    decodeIdTokenMock.mockReturnValueOnce({ sub: "google-user-1", email: "tenant@example.com" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("error", { status: 500 })));
+
+    const kv = createMockKv({ codeVerifier: "verifier", tenantId: "1", memberId: "member1" });
+    const linkDb = createMockLinkDb([
+      ["channel_type = 'YOUTUBE_ACCOUNT' AND source_channel_id", { id: "row-1" }],
+    ]);
+
+    const app = buildApp();
+    const { ctx, flush } = createMockExecutionCtx();
+    const res = await app.request(
+      "/youtube/callback?code=abc&state=xyz",
+      {},
+      { KV: kv, LINK_DB: linkDb, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any,
+      ctx as any
+    );
+    await flush();
+
+    expect(res.status).toBe(302);
+    const insertCall = linkDb.calls.find((c) => c.sql.includes("INSERT INTO channels"));
+    const config = JSON.parse(insertCall!.args[1] as string);
+    expect(config.channel_title).toBeNull();
   });
 
   it("reconnecting after a prior disconnect (inactive row, same source_channel_id) does not throw and still redirects", async () => {

@@ -132,7 +132,7 @@ export const api = {
       request<{ connected: boolean; username?: string; channel_id?: string; created_at?: string; has_byok?: boolean }>("/channels/x/status"),
     disconnectX: () =>
       request<{ ok: boolean }>("/channels/x", { method: "DELETE" }),
-    byokCreate: (credentials: { channel_id?: string; client_id: string; client_secret: string; consumer_secret: string }) =>
+    byokCreate: (credentials: { channel_id?: string; client_id: string; client_secret: string; consumer_secret: string; bearer_token: string }) =>
       request<{ channel_id: string; webhook_url: string; redirect_url: string }>("/channels/x/byok", {
         method: "POST",
         body: JSON.stringify(credentials),
@@ -156,7 +156,7 @@ export const api = {
         body: JSON.stringify({ config }),
       }),
     youtubeStatus: () =>
-      request<{ connected: boolean; email?: string; sync_status?: string; subscription_count?: number; created_at?: string }>(
+      request<{ connected: boolean; email?: string; channel_title?: string; sync_status?: string; subscription_count?: number; created_at?: string }>(
         "/channels/youtube/status"
       ),
     youtubeSubscriptions: () =>

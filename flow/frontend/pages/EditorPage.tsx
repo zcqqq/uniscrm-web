@@ -122,12 +122,16 @@ function EditorToolbar() {
             // 在这之前 api.flows.publish 抛错完全没人接：不跳转、也不提示，publish 失败是静默的。
             // 后端把人话放在响应体的 error 里，request() 已经把它变成 Error.message。
             toast({ title: (e as Error).message || "Publish failed", variant: "destructive" });
-            // 一个 flow 至多一个 trigger（store 的 addNode 拒绝第二个），所以直接找到它标红，
-            // 复用孤立节点那套高亮，不需要后端回传 nodeId。
-            const trigger = useFlowEditor.getState().nodes.find(
-              (n) => n.type && NODE_TYPE_REGISTRY[n.type]?.role === "trigger"
-            );
-            useFlowEditor.getState().setErrorNodeIds(trigger ? [trigger.id] : []);
+            // 只有 400（trigger 的 channel 确实断了）才该标红 trigger 节点。503（link 验证不了，
+            // 让用户重试）和 404 都跟 trigger 本身无关，标红只会误导用户去修一个没坏的节点。
+            if ((e as Error & { status?: number }).status === 400) {
+              // 一个 flow 至多一个 trigger（store 的 addNode 拒绝第二个），所以直接找到它标红，
+              // 复用孤立节点那套高亮，不需要后端回传 nodeId。
+              const trigger = useFlowEditor.getState().nodes.find(
+                (n) => n.type && NODE_TYPE_REGISTRY[n.type]?.role === "trigger"
+              );
+              useFlowEditor.getState().setErrorNodeIds(trigger ? [trigger.id] : []);
+            }
           }
         }}
       >

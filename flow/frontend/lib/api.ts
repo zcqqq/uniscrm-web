@@ -10,7 +10,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error((err as any).error || res.statusText);
+    const e = new Error((err as any).error || res.statusText) as Error & { status?: number };
+    e.status = res.status;
+    throw e;
   }
   return res.json();
 }

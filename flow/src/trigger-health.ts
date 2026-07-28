@@ -16,7 +16,7 @@ export async function fetchActiveChannelIds(
   try {
     const res = await fetch(
       `${env.LINK_URL}/internal/channels/active?tenantId=${encodeURIComponent(String(tenantId))}`,
-      { headers: { "X-Internal-Secret": env.INTERNAL_SECRET } }
+      { headers: { "X-Internal-Secret": env.INTERNAL_SECRET }, signal: AbortSignal.timeout(5000) }
     );
     if (!res.ok) {
       console.error(JSON.stringify({ event: "active_channels_fetch_failed", tenantId, status: res.status }));

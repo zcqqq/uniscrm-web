@@ -92,6 +92,9 @@ describe("fetchActiveChannelIds", () => {
     const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://link.test/internal/channels/active?tenantId=7");
     expect((init.headers as Record<string, string>)["X-Internal-Secret"]).toBe("s3cret");
+    // A hanging link must not hang GET /api/flows forever — the fetch needs an abort signal
+    // wired in, not just a try/catch around a promise that may never settle.
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("distinguishes an empty tenant from an unreachable link", async () => {
@@ -106,6 +109,11 @@ describe("fetchActiveChannelIds", () => {
 
   it("returns null when link throws", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("ECONNREFUSED"); }));
+    expect(await fetchActiveChannelIds(env, 7)).toBeNull();
+  });
+
+  it("returns null when the fetch aborts (e.g. the 5s timeout firing on a hanging link)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new DOMException("The operation was aborted.", "AbortError"); }));
     expect(await fetchActiveChannelIds(env, 7)).toBeNull();
   });
 

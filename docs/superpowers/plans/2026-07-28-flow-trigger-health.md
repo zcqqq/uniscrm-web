@@ -541,10 +541,10 @@ Expected: FAIL —— `broken_trigger_type` 是 `undefined` 而不是 `"xTrigger
 在 `uniscrm-web/flow/src/index.ts` 顶部的 import 区加上：
 
 ```ts
-import { fetchActiveChannelIds, findBrokenTrigger, brokenTriggerMessage } from "./trigger-health";
+import { fetchActiveChannelIds, findBrokenTrigger } from "./trigger-health";
 ```
 
-（`brokenTriggerMessage` 在 Task 4 才用到，一次 import 齐，避免两个 task 改同一行。）
+（只 import 本 task 真正用到的两个 —— Task 4 会把这一行补全。）
 
 把 `GET /api/flows` 里的行查询（现在的 `index.ts:1311-1316`）改成多取 `f.graph_json`：
 
@@ -739,7 +739,13 @@ Expected: FAIL —— 失效的 flow 和 link 挂掉的场景都拿到 200 并�
 
 - [ ] **Step 3: 改 publish 路由**
 
-把 `uniscrm-web/flow/src/index.ts` 的整个 publish handler 替换成：
+先把 Task 3 加的那行 import 补全（`uniscrm-web/flow/src/index.ts` 顶部）：
+
+```ts
+import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage } from "./trigger-health";
+```
+
+再把整个 publish handler 替换成：
 
 ```ts
 // Publish flow

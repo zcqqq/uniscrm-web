@@ -214,6 +214,12 @@ export default function Sidebar() {
       el: <DraggableItem key="videoCondition" type="videoCondition" label={NODE_TYPE_REGISTRY.videoCondition.label!} description={NODE_TYPE_REGISTRY.videoCondition.description!} color="border-secondary bg-secondary/30" icon="👁️" />,
     });
   }
+  if (visible("youtubeCondition")) {
+    flowControlItems.push({
+      key: "youtubeCondition",
+      el: <DraggableItem key="youtubeCondition" type="youtubeCondition" label={NODE_TYPE_REGISTRY.youtubeCondition.label!} description={NODE_TYPE_REGISTRY.youtubeCondition.description!} color="border-secondary bg-secondary/30" icon="📊" />,
+    });
+  }
 
   return (
     <TooltipProvider>

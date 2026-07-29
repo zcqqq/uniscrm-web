@@ -32,4 +32,13 @@ describe("isValidConnection (shared by Canvas.tsx and the store's onConnect)", (
     expect(isValidConnection(undefined, node("action"))).toBe(false);
     expect(isValidConnection(node("xContentTrigger"), undefined)).toBe(false);
   });
+
+  it("allows a youtubeCondition to sit between a YouTube trigger and an action", () => {
+    expect(isValidConnection(node("youtubeContentTrigger"), node("youtubeCondition"))).toBe(true);
+    expect(isValidConnection(node("youtubeCondition"), node("action"))).toBe(true);
+  });
+
+  it("rejects wiring a youtubeCondition back into a trigger", () => {
+    expect(isValidConnection(node("youtubeCondition"), node("youtubeContentTrigger"))).toBe(false);
+  });
 });

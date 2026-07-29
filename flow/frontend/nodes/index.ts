@@ -10,6 +10,7 @@ import UserPropsConditionNode from "./UserPropsConditionNode";
 import AbSplitNode from "./AbSplitNode";
 import WebhookNode from "./WebhookNode";
 import VideoConditionNode from "./VideoConditionNode";
+import YouTubeConditionNode from "./YouTubeConditionNode";
 
 export const nodeTypes = {
   xTrigger: XTriggerNode,
@@ -24,4 +25,5 @@ export const nodeTypes = {
   abSplit: AbSplitNode,
   webhook: WebhookNode,
   videoCondition: VideoConditionNode,
+  youtubeCondition: YouTubeConditionNode,
 };

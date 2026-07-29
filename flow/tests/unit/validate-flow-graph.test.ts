@@ -125,6 +125,20 @@ describe("validateFlowGraph", () => {
     expect(result.misplacedNodeIds).toEqual([]);
   });
 
+  it("flags a youtubeCondition when the graph has a second, non-YouTube trigger", () => {
+    // 单 trigger 只由 addNode 保证；replaceGraph（AI 生成 / 模板载入）不校验，所以两个
+    // trigger 的图确实会出现。X 触发的那次运行会把 X post id 喂给 videos.list。
+    const nodes = [
+      { id: "t1", type: "youtubeContentTrigger" },
+      { id: "t2", type: "xContentTrigger" },
+      { id: "yc1", type: "youtubeCondition" },
+    ];
+    const edges = [{ source: "t1", target: "yc1" }, { source: "t2", target: "yc1" }];
+    const result = validateFlowGraph(nodes, edges);
+    expect(result.valid).toBe(false);
+    expect(result.misplacedNodeIds).toEqual(["yc1"]);
+  });
+
   it("flags a youtubeCondition in a flow with no trigger at all", () => {
     const nodes = [{ id: "yc1", type: "youtubeCondition" }];
     const result = validateFlowGraph(nodes, []);

@@ -910,7 +910,9 @@ async function executeContentActions(
       }
 
       const outcome = resolveYouTubeCondition(conditions, payload, resp);
-      console.log(JSON.stringify({ event: "content_condition_youtube", contentId, flowId: flowId || null, nodeId, branch: outcome.branch, ok: resp.ok }));
+      // reason 一并打出来：Finding 2 之后 link 的 reason 是有界的短码，flow 这边不再有
+      // 别的地方留下"为什么 failed"。
+      console.log(JSON.stringify({ event: "content_condition_youtube", contentId, flowId: flowId || null, nodeId, branch: outcome.branch, ok: resp.ok, reason: outcome.failureReason || resp.reason || null }));
 
       const resumed = resumeFromNode(graph, nodeId, outcome.payload, outcome.branch, outcome.failureReason);
       if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, outcome.payload);

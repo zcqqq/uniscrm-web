@@ -86,7 +86,9 @@ describe("resolveYouTubeCondition", () => {
     expect(r.branch).toBe("true");
   });
 
-  it("merges fresh props over the old payload without dropping keys the fetch didn't return", () => {
+  it("merges fresh props over the old payload without dropping keys no condition references", () => {
+    // channel_id / content_url 不是 videos.list 的统计量，也没有条件写在它们上面——
+    // 保留旧值供下游插值即可。
     const r = resolveYouTubeCondition(
       [],
       { ...stale, channel_id: "ch1", content_url: "https://youtu.be/vid123" },
@@ -94,7 +96,66 @@ describe("resolveYouTubeCondition", () => {
     );
     expect(r.payload.view_count).toBe("12000");
     expect(r.payload.channel_id).toBe("ch1");
-    expect(r.payload.title).toBe("old");
+    expect(r.payload.content_url).toBe("https://youtu.be/vid123");
+  });
+
+  it("fails rather than judging a condition field the fetch did not return", () => {
+    // 作者后来隐藏了点赞数：videos.list 不再返回 statistics.likeCount，resolveProps 于是
+    // 不写 like_count。浅合并会把 trigger 时的 "1" 补回来，>0 就假装成立了——那是在判一个
+    // 已经不存在的数。
+    const r = resolveYouTubeCondition(
+      [{ field: "like_count", operator: ">", value: "0" }],
+      stale,
+      { ok: true, props: { source_content_id: "vid123", view_count: "12000" } }
+    );
+    expect(r.branch).toBe("failed");
+    expect(r.failureReason).toBe("stat_unavailable: like_count not returned by videos.list");
+    expect(r.payload).toEqual(stale);
+  });
+
+  it("fails when duration could not be parsed and the payload still holds the old one", () => {
+    // link 在 parseISO8601Duration 返回 null 时故意不写 props.duration（P0D = 直播/待发布）。
+    const r = resolveYouTubeCondition(
+      [{ field: "duration", operator: "<", value: "600" }],
+      { ...stale, duration: 200 },
+      { ok: true, props: { source_content_id: "vid123", view_count: "12000" } }
+    );
+    expect(r.branch).toBe("failed");
+    expect(r.failureReason).toBe("stat_unavailable: duration not returned by videos.list");
+  });
+
+  it("reports the first missing field only once, and still merges nothing on failure", () => {
+    const r = resolveYouTubeCondition(
+      [
+        { field: "view_count", operator: ">", value: "1" },
+        { field: "like_count", operator: ">", value: "1" },
+      ],
+      stale,
+      { ok: true, props: { view_count: "12000" } }
+    );
+    expect(r.failureReason).toBe("stat_unavailable: like_count not returned by videos.list");
+    expect(r.payload.view_count).toBe("10");
+  });
+
+  it("does not fail on a field absent from BOTH the fresh props and the payload", () => {
+    // 条件写在了 videos.list 从来不返回的字段上——那不是"这次没取到"，evaluateCondition
+    // 本就按缺失值处理，升级成 failed 会把用户的配置错误伪装成 API 故障。
+    const r = resolveYouTubeCondition(
+      [{ field: "comment_count", operator: ">", value: "1" }],
+      stale,
+      { ok: true, props: fresh }
+    );
+    expect(r.branch).toBe("false");
+    expect(r.failureReason).toBeUndefined();
+  });
+
+  it("ignores the missing-field check for half-filled rows", () => {
+    const r = resolveYouTubeCondition(
+      [{ field: "", operator: "==", value: "" }],
+      stale,
+      { ok: true, props: { view_count: "12000" } }
+    );
+    expect(r.branch).toBe("true");
   });
 
   it("takes the failed branch and carries link's reason when the fetch did not succeed", () => {

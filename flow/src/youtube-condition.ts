@@ -49,6 +49,26 @@ export function resolveYouTubeCondition(
   }
 
   const merged = { ...payload, ...resp.props };
+
+  // "绝不猜"要落到字段粒度，不只是响应粒度：resolveProps 对 API 没返回的 source path
+  // 直接不写 key（duration 解析失败时同样不写），浅合并就会把 trigger 时的旧值补回来，
+  // evaluateCondition 分辨不出来。例：作者后来隐藏了点赞数，videos.list 不再返回
+  // statistics.likeCount，旧的 like_count: "800" 被还原，like_count > 500 于是走了 true
+  // ——判的是一个已经不存在的数。这种情况一律 failed，并把哪个字段没取到写进 failureReason。
+  // 两边都没有的字段是另一回事（条件写在了 API 从来不返回的字段上），evaluateCondition
+  // 本就按缺失处理，不升级成 failed。
+  const props = resp.props;
+  for (const c of conditions || []) {
+    if (!c.field) continue;
+    if (!(c.field in props) && c.field in payload) {
+      return {
+        branch: "failed",
+        payload,
+        failureReason: `stat_unavailable: ${c.field} not returned by videos.list`,
+      };
+    }
+  }
+
   // field 为空的半成品条目跳过——与 executeFlow 里 trigger 的 allPass 写法逐字一致。
   const allPass = (conditions || []).every(
     (c) => !c.field || evaluateCondition(c.field, c.operator, String(c.value), merged)

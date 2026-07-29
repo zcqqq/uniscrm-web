@@ -27,14 +27,18 @@ export function findOrphanNodeIds(
     .map((n) => n.id);
 }
 
-// youtubeCondition 复查的是"触发这条流程的那个 YouTube 视频"，所以它只在 YouTube Trigger
-// 开的流程里有意义。addNode 保证每个 flow 至多一个 trigger（flow-editor.ts），因此这里
-// 判断唯一那个 trigger 的类型即可，不需要遍历上游可达性。
+// youtubeCondition 复查的是"触发这条流程的那个 YouTube 视频"，所以它只在唯一 trigger 是
+// youtubeContentTrigger 的流程里有意义。
+// 判的是"trigger 集合恰好等于一个 youtubeContentTrigger"，而不是"图里存在一个
+// youtubeContentTrigger"：单 trigger 只由 addNode 保证（flow-editor.ts:113），
+// replaceGraph（AI 生成 / 模板载入）不校验，同时含 youtubeContentTrigger 和 xContentTrigger
+// 的图确实存在，那时 X 触发的那次运行会把 X post id 喂给 videos.list。
 export function findMisplacedYouTubeConditionIds(
   nodes: { id: string; type?: string }[]
 ): string[] {
-  const hasYouTubeTrigger = nodes.some((n) => n.type === "youtubeContentTrigger");
-  if (hasYouTubeTrigger) return [];
+  const triggers = nodes.filter((n) => TRIGGER_NODE_TYPES.includes(n.type ?? ""));
+  const onlyYouTubeTrigger = triggers.length === 1 && triggers[0].type === "youtubeContentTrigger";
+  if (onlyYouTubeTrigger) return [];
   return nodes.filter((n) => n.type === "youtubeCondition").map((n) => n.id);
 }
 

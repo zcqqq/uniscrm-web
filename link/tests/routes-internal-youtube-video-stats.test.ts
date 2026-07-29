@@ -71,6 +71,33 @@ describe("POST /internal/youtube/video-stats", () => {
     expect(body.reason.startsWith("youtube_api_error")).toBe(true);
   });
 
+  it("keeps the API error body out of reason — flow writes reason into content_flow_log", async () => {
+    // fetchVideoDetails 抛的消息里带着 Google 的完整错误体，长度不可控。
+    const hugeBody = JSON.stringify({ error: { message: "x".repeat(5000) } });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(hugeBody, { status: 500 })));
+    const res = await app()({ videoId: "vid123" });
+    const body = await res.json() as { ok: boolean; reason: string };
+    expect(body.reason).toBe("youtube_api_error: videos.list HTTP 500");
+    expect(body.reason).not.toContain("xxx");
+  });
+
+  it("distinguishes quota exhaustion (403) — this node never retries, so reason is the only trace", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ error: { reason: "quotaExceeded" } }), { status: 403 })
+    ));
+    const res = await app()({ videoId: "vid123" });
+    const body = await res.json() as { ok: boolean; reason: string };
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("youtube_quota_exceeded: videos.list HTTP 403");
+  });
+
+  it("falls back to a fixed string when no HTTP status can be extracted", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network down"); }));
+    const res = await app()({ videoId: "vid123" });
+    const body = await res.json() as { reason: string };
+    expect(body.reason).toBe("youtube_api_error: videos.list request failed");
+  });
+
   it("leaves duration unset rather than faking 0 when it cannot be parsed", async () => {
     // "P0D" = 直播/待发布，没有已知时长。填 0 会让下游条件判定得出假结论。
     vi.stubGlobal("fetch", vi.fn(async () =>
@@ -82,8 +109,11 @@ describe("POST /internal/youtube/video-stats", () => {
     expect("duration" in body.props).toBe(false);
   });
 
-  it("rejects a missing videoId", async () => {
+  it("rejects a missing videoId with the same { ok, reason } shape as every other outcome", async () => {
     const res = await app()({});
     expect(res.status).toBe(400);
+    const body = await res.json() as { ok: boolean; reason: string };
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("video_unavailable: no videoId in payload");
   });
 });

@@ -114,6 +114,13 @@ export async function fetchChannelDetails(
   if (!res.ok) {
     throw new Error(`YouTube channels.list failed: ${res.status} ${await res.text().catch(() => "")}`);
   }
-  const body = (await res.json()) as { items?: YouTubeChannelItem[] };
-  return body.items || [];
+  const body = (await res.json()) as { items?: unknown };
+  // 200 但 items 不是数组：响应体畸形，绝不能当成「这批频道都不存在了」——那会让调用方
+  // 把一整批仍在订阅的频道误判成取消订阅。真正的「这批全部被删除/终止/地区屏蔽」在
+  // YouTube 侧就是合法的 items: []（数组，只是空），这里只拦截畸形，不拦截合法空数组。
+  // 与 fetchSubscribedChannelIds 的同名判断保持一致（本文件另一半的同一条防线）。
+  if (!Array.isArray(body.items)) {
+    throw new Error("YouTube channels.list malformed body: items is not an array");
+  }
+  return body.items as YouTubeChannelItem[];
 }

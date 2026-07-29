@@ -127,4 +127,24 @@ describe("fetchChannelDetails", () => {
     expect(await fetchChannelDetails("tok", [])).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  // 200 但 items 不是数组（缺席或类型错误）：响应体畸形，绝不能悄悄当成「这批频道都不
+  // 存在」返回 [] —— 调用方（poller）捕获异常才会把 completeWalk 按到 false 从而跳过
+  // 取消订阅 diff；静默返回 [] 会让整批仍在订阅的频道被误判为已取消订阅。
+  it("200 但 items 缺席时抛错，而不是静默返回 []", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ kind: "youtube#channelListResponse" }), { status: 200 }));
+    await expect(fetchChannelDetails("tok", ["UC1"])).rejects.toThrow(/items/);
+  });
+
+  it("200 但 items 不是数组时抛错", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: "not-an-array" }), { status: 200 }));
+    await expect(fetchChannelDetails("tok", ["UC1"])).rejects.toThrow(/items/);
+  });
+
+  // 对照：items: [] 是合法的「这批请求的 id 一个都拿不到详情」（全部被删除/终止/
+  // 地区屏蔽），必须仍然正常返回空数组，不能被上面的畸形检查连带误判。
+  it("items: [] 是合法的空结果，不抛错", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    expect(await fetchChannelDetails("tok", ["UC1"])).toEqual([]);
+  });
 });

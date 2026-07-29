@@ -62,6 +62,26 @@ export const ContentMetadata_X: ContentMetadata[] = [
       { propId: "reply_count", dataId: "{linkPrefix}.public_metrics.reply_count" },
       { propId: "repost_count", dataId: "{linkPrefix}.public_metrics.retweet_count" },
     ],
+    // 作者字段：X API v2 的 expansions 不额外计费也不额外消耗调用配额，作者对象与推文在
+    // 同一个响应的 includes.users[] 里（见 x-posts-api.ts 的 fetchListPostsPage）。
+    // dataId 相对作者对象本身，不带 {linkPrefix}。
+    // 不含 is_followed：UserMetadata_X 里它是写死的 { value: 1 }（那份 metadata 是给
+    // 「拉自己的粉丝列表」用的，拉到的当然都是粉丝），照抄会让每个列表作者恒等于"我的
+    // 粉丝"。X 的 user 对象里也没有这个信息——"你有没有关注他"只存在于我们自己的库里。
+    userProps: [
+      { propId: "source_user_id", dataId: "id" },
+      { propId: "name", dataId: "name" },
+      { propId: "username", dataId: "username" },
+      { propId: "description", dataId: "description" },
+      { propId: "profile_image_url", dataId: "profile_image_url" },
+      { propId: "verified_type", dataId: "verified_type" },
+      { propId: "followers_count", dataId: "public_metrics.followers_count" },
+      { propId: "following_count", dataId: "public_metrics.following_count" },
+      { propId: "post_count", dataId: "public_metrics.tweet_count" },
+      { propId: "listed_count", dataId: "public_metrics.listed_count" },
+      { propId: "like_count", dataId: "public_metrics.like_count" },
+      { propId: "media_count", dataId: "public_metrics.media_count" },
+    ],
   },
   {
     sourceContentType: "create-bookmark", // https://docs.x.com/x-api/users/create-bookmark

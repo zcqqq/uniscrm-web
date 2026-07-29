@@ -26,6 +26,21 @@ export const ContentMetadata_YouTube: ContentMetadata[] = [
     contentPropsFilter: [
       { propId: "duration", operator: "<=", value: 600 },
     ],
+    // 作者（频道）字段：来自 channels.list?part=snippet,statistics 的一条 item
+    // （videos.list 的 snippet 只白送 channelId/channelTitle，订阅数必须另打一次，
+    // 1 unit）。dataId 相对那条 item 本身，不带 {linkPrefix}。
+    // view_count 是频道历史总播放量，与内容侧 view_count（这个视频的播放量）同名但含义
+    // 不同——靠 USER_PROP_PREFIX 命名空间区分，同一次请求白送，故声明。
+    userProps: [
+      { propId: "source_user_id", dataId: "id" },
+      { propId: "name", dataId: "snippet.title" },
+      { propId: "username", dataId: "snippet.customUrl" },
+      { propId: "description", dataId: "snippet.description" },
+      { propId: "profile_image_url", dataId: "snippet.thumbnails.default.url" },
+      { propId: "followers_count", dataId: "statistics.subscriberCount" },
+      { propId: "post_count", dataId: "statistics.videoCount" },
+      { propId: "view_count", dataId: "statistics.viewCount" },
+    ],
   },
   {
     sourceContentType: "save-to-playlist", // https://developers.google.com/youtube/v3/docs/playlistItems/insert

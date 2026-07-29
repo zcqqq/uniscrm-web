@@ -1,6 +1,14 @@
 export type PropDataType = "INT" | "TEXT" | "ENUM_INT" | "ENUM_TEXT" | "DATETIME" | "IMAGE" | "VIDEO";
 export type PropFieldType = "IMAGE" | "VIDEO";
 
+// 作者字段在 flow payload 里的命名空间前缀。内容侧的键是裸 propId，作者侧是
+// "user.<propId>"——两边有 like_count / view_count 等同名 propId 且含义完全不同
+// （推文被点赞数 vs 作者点过多少赞；视频播放量 vs 频道历史总播放量），扁平共用一个
+// key 空间会让条件静默取到错的那个。
+// 前缀只在 link 的 resolveAuthorProps 一处施加，metadata 里的 propId 保持干净。
+// flow 侧 evaluateCondition 对 $user.x 严格查这个键，不降级（flow/src/engine.ts）。
+export const USER_PROP_PREFIX = "user.";
+
 export type LocalizedString = { en: string; zh: string };
 
 export interface PropDefinition {
@@ -74,6 +82,12 @@ export interface ContentMetadata {
   description?: LocalizedString;
   contentProps: PropMapping[];
   contentPropsFilter?: PropFilter[]; // 全部通过才发content trigger事件（link端入队前评估，被拦内容不计flow entered）
+  // 内容**作者**的字段。dataId 相对「作者对象」本身，**不走 contentProps 的 linkPrefix**
+  // ——作者对象来自另一个响应：X 要按 item.author_id 从 includes.users[] 数组里匹配
+  // （不是一条路径能表达的），YouTube 干脆来自另一次 channels.list 调用。由调用方先取出
+  // 作者对象，再交给 resolveAuthorProps（它统一加 USER_PROP_PREFIX 前缀）。
+  // 不声明 = 该内容源的条件里没有作者字段，前端字段列表与 payload 逐字不变。
+  userProps?: PropMapping[];
 }
 
 export interface EventMetadata {

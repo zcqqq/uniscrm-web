@@ -1,5 +1,6 @@
 import { navigatePath } from "../../webhook";
 import type { PropMapping } from "../../../../metadata/dataTypes";
+import { USER_PROP_PREFIX } from "../../../../metadata/dataTypes";
 
 export function resolveProps(
   item: Record<string, unknown>,
@@ -55,4 +56,23 @@ export function consumedPaths(
     paths.push(relativePath);
   }
   return paths;
+}
+
+// 作者对象 → flow payload 用的作者字段，键统一加 USER_PROP_PREFIX。
+// **加前缀的唯一一处**：内容侧与作者侧有 like_count / view_count 等同名 propId，含义
+// 完全不同，扁平共用一个 key 空间会让条件静默取到错的那个。metadata 里的 propId 保持
+// 干净，前缀是在这里施加的命名空间规则（不是逐字段改名——那才是「propId ≠ field name」
+// 那条教训禁止的东西）。
+// `author` 是调用方已经取出来的作者对象本身（X：includes.users[] 里按 author_id 匹配到
+// 的那条；YouTube：channels.list 的一条 item），所以不传 linkPrefix。
+export function resolveAuthorProps(
+  author: Record<string, unknown>,
+  userProps: PropMapping[]
+): Record<string, unknown> {
+  const resolved = resolveProps(author, userProps);
+  const out: Record<string, unknown> = {};
+  for (const [propId, value] of Object.entries(resolved)) {
+    out[USER_PROP_PREFIX + propId] = value;
+  }
+  return out;
 }

@@ -1,4 +1,5 @@
 export type { PropDataType, LocalizedString, PropDefinition, PropMapping, UserMetadata, ContentMetadata, EventMetadata } from "./dataTypes";
+export { USER_PROP_PREFIX } from "./dataTypes";
 export type { Locale } from "./locale";
 export { t } from "./locale";
 export { PROPS } from "./props";

@@ -127,15 +127,46 @@ POST /internal/youtube/video-stats   body: { videoId }
 
 `resumeFromNode` 无需改动 —— `youtubeCondition` 不在 `DEFERRED_EXIT_TYPES` 里，走既有的 `outcome` 分支路径。
 
+### `flow/src/youtube-condition.ts`（新）
+
+把"发什么请求"和"拿到响应后走哪个分支"抽成两个**纯函数**，与 I/O 分离 —— `index.ts` 已经三千行，且现有测试（`dispatch-youtube-action.test.ts`）的做法就是测导出的纯 helper 而非整个 `executeContentActions`（后者要 env/D1）。
+
+```ts
+export interface VideoStatsResponse {
+  ok: boolean;
+  props?: Record<string, unknown>;
+  reason?: string;
+}
+
+export function youtubeConditionRequest(args: {
+  env: { LINK_URL: string; INTERNAL_SECRET: string };
+  contentId: string;
+  flowId?: string | null;
+  payload: Record<string, unknown>;
+}): { url: string; body: string };
+
+export function resolveYouTubeCondition(
+  conditions: { field: string; operator: string; value: string }[],
+  payload: Record<string, unknown>,
+  resp: VideoStatsResponse
+): { branch: "true" | "false" | "failed"; payload: Record<string, unknown>; failureReason?: string };
+```
+
+`resolveYouTubeCondition` 内部调 `engine.ts` 的 `evaluateCondition`（已 export，`engine.ts:124`），`field` 为空的条目跳过 —— 与 `executeFlow` 里 trigger 的 `allPass` 写法逐字一致。`resp.ok` 为 false 时返回原 payload 不合并。
+
 ### `flow/src/index.ts`
 
 `executeContentActions` 加一支：
 
-1. `videoId = String(payload?.source_content_id ?? "")`
-2. POST `${env.LINK_URL}/internal/youtube/video-stats`，带 `X-Internal-Secret`
-3. 响应非 2xx、fetch 抛错、或 `ok: false` → `branch = "failed"`，`failureReason` 取响应里的 `reason`（拿不到则 `youtube_api_error: <status>`），payload 保持原样
-4. `ok: true` → `merged = { ...payload, ...props }`；用节点的 `conditions` 逐条调 `evaluateCondition(c.field, c.operator, String(c.value), merged)`，`field` 为空的条目跳过（与 trigger 的 `allPass` 写法一致）；全通过 → `"true"`，否则 `"false"`
-5. `resumeFromNode(graph, nodeId, merged, branch, failureReason)`，随后的 node log、嵌套 action、`content_flow_pending` 落库一律用 `merged`
+1. `const { url, body } = youtubeConditionRequest({ env, contentId, flowId, payload })`
+2. `fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET }, body })`
+3. fetch 抛错或响应体解析失败 → 合成 `{ ok: false, reason: "youtube_api_error: <status or message>" }`
+4. `const { branch, payload: next, failureReason } = resolveYouTubeCondition(conditions, payload, resp)`
+5. `resumeFromNode(graph, nodeId, next, branch, failureReason)`，随后的 node log、嵌套 action、`content_flow_pending` 落库一律用 `next`
+
+节点的 `conditions` 从 graph 里取（`graph.nodes.find((n) => n.id === nodeId)?.data.conditions`），不放进 `ActionResult` —— 与 `videoCondition` 把 `operator`/`threshold` 留在 graph 里、只在 resume 时读的做法一致。
+
+`scheduled` 里那段处理 `content_flow_pending` 超时的分支判定（`index.ts:2016-2024`）**不需要改** —— `youtubeCondition` 是同步的，从不为自己写 pending 行。
 
 与 `youtubeContentAction` 一样打一行结构化日志（`event: "content_condition_youtube"`，含 contentId / videoId / branch / ok）。
 
@@ -166,8 +197,8 @@ Sidebar 不做禁用/灰掉。
 ## 测试
 
 - **`flow/tests/unit/engine.test.ts`**：`youtubeCondition` 被 collect 成 `{ type: "youtubeCondition", hasBranches: true }` 且 eager 记了 enter/exit；`resumeFromNode` 的 `true` / `false` / `failed` 三个分支各自走对边、走到对的下游节点。
-- **`flow/tests/unit/youtube-condition.test.ts`**（新）：link stub 返回 `ok: true` + 满足条件的 props → 走 `true`；同样的 props 但条件不满足 → 走 `false`；`ok: false` → 走 `failed` 且 `failure_reason` 是 link 给的 reason；fetch 抛错 → 走 `failed`；成功时下游节点收到的 payload 含新鲜值（覆盖了旧的 `view_count`）；失败时 payload 未被污染；`conditions` 为空数组 → 走 `true`。
-- **link `tests/youtube-video-stats.test.ts`**（新）：`items` 为空 → `ok: false, reason` 以 `video_unavailable` 开头；缺 `videoId` → 400；无 `X-Internal-Secret` → 403；正常 → props 里 `view_count` / `duration` 已按 metadata 映射好（验证 duration 走了 ISO8601 解析）。
+- **`flow/tests/unit/youtube-condition.test.ts`**（新，测两个纯函数）：`youtubeConditionRequest` 的 url 与 body（videoId 取自 `payload.source_content_id`）；`resolveYouTubeCondition` 在 `ok: true` + 条件满足时 → `branch: "true"` 且返回的 payload 含新鲜值（旧 `view_count` 被覆盖）；条件不满足 → `"false"`；`conditions` 为空数组 → `"true"`；含空 `field` 的条目被跳过；`ok: false` → `"failed"`、`failureReason` 是 link 给的 reason、返回的 payload 与传入的**同一份内容**（未被污染）。
+- **link `tests/routes-internal-youtube-video-stats.test.ts`**（新）：`items` 为空 → `ok: false, reason` 以 `video_unavailable` 开头；缺 `videoId` → 400；正常 → props 里 `view_count` / `duration` 已按 metadata 映射好（验证 duration 走了 ISO8601 解析）。（不重复测 403 —— `X-Internal-Secret` 中间件挂在 `link/src/index.ts:33`，路由测试直接挂载 `internalRoutes()`，鉴权由 `middleware.test.ts` 覆盖。）
 - **link 现有 `youtube-content` / `webhook-youtube` 测试保持绿** —— 证明 `fetchYouTubeVideoProps` 的抽取没有行为变化。
 - **`flow/tests/unit/validate-flow-graph.test.ts`**：X Trigger + youtubeCondition → `misplacedNodeIds` 含该节点；YouTube Trigger + youtubeCondition → 空；无 youtubeCondition 的图 → 空（不回归现有孤儿检查）。
 - **`flow/tests/unit/node-type-registry.test.ts` / `generate-prompt.test.ts`**：按现有断言风格补 `youtubeCondition` 的 registry 条目与 prompt 片段。

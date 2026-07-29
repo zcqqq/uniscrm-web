@@ -129,7 +129,7 @@ export const api = {
   // Social
   channels: {
     xStatus: () =>
-      request<{ connected: boolean; username?: string; channel_id?: string; created_at?: string; has_byok?: boolean }>("/channels/x/status"),
+      request<{ connected: boolean; username?: string; channel_id?: string; created_at?: string; has_byok?: boolean; frozen_at?: string | null; frozen_message?: string | null }>("/channels/x/status"),
     disconnectX: () =>
       request<{ ok: boolean }>("/channels/x", { method: "DELETE" }),
     byokCreate: (credentials: { channel_id?: string; client_id: string; client_secret: string; consumer_secret: string; bearer_token: string }) =>

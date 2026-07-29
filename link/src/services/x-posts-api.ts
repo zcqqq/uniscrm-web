@@ -1,4 +1,5 @@
-import { XUnauthorizedError } from "./x-errors";
+import { XUnauthorizedError, XAccountFrozenError } from "./x-errors";
+import { detectFreeze, type XFreezeSignal } from "./x-freeze";
 
 // Full set of tweet.fields the get-posts endpoint supports — requested in full so
 // raw_data (see ContentService.upsertContentFromMetadata) captures everything X returns.
@@ -60,7 +61,12 @@ export async function fetchPostsPage(
     throw new XUnauthorizedError(`X get-posts failed: ${res.status} ${await res.text()}`);
   }
   if (!res.ok) {
-    throw new Error(`X get-posts failed: ${res.status} ${await res.text()}`);
+    const errorBody = await res.text().catch(() => "");
+    // The account itself is locked/suspended — a distinct error so the poller trips the freeze
+    // breaker instead of retrying (a fresh token cannot unlock an account).
+    const frozen = detectFreeze(res.status, errorBody);
+    if (frozen) throw new XAccountFrozenError(frozen);
+    throw new Error(`X get-posts failed: ${res.status} ${errorBody}`);
   }
 
   const body = (await res.json()) as { data?: Record<string, unknown>[]; meta?: { next_token?: string } };
@@ -84,7 +90,12 @@ export async function fetchOwnedLists(accessToken: string, xUserId: string): Pro
     throw new XUnauthorizedError(`X get-owned-lists failed: ${res.status} ${await res.text()}`);
   }
   if (!res.ok) {
-    throw new Error(`X get-owned-lists failed: ${res.status} ${await res.text()}`);
+    const errorBody = await res.text().catch(() => "");
+    // The account itself is locked/suspended — a distinct error so the poller trips the freeze
+    // breaker instead of retrying (a fresh token cannot unlock an account).
+    const frozen = detectFreeze(res.status, errorBody);
+    if (frozen) throw new XAccountFrozenError(frozen);
+    throw new Error(`X get-owned-lists failed: ${res.status} ${errorBody}`);
   }
 
   const body = (await res.json()) as { data?: { id: string; name: string }[] };
@@ -112,7 +123,12 @@ export async function fetchListPostsPage(
     throw new XUnauthorizedError(`X get-list-posts failed: ${res.status} ${await res.text()}`);
   }
   if (!res.ok) {
-    throw new Error(`X get-list-posts failed: ${res.status} ${await res.text()}`);
+    const errorBody = await res.text().catch(() => "");
+    // The account itself is locked/suspended — a distinct error so the poller trips the freeze
+    // breaker instead of retrying (a fresh token cannot unlock an account).
+    const frozen = detectFreeze(res.status, errorBody);
+    if (frozen) throw new XAccountFrozenError(frozen);
+    throw new Error(`X get-list-posts failed: ${res.status} ${errorBody}`);
   }
 
   const body = (await res.json()) as { data?: Record<string, unknown>[]; meta?: { next_token?: string } };
@@ -121,6 +137,9 @@ export async function fetchListPostsPage(
 
 export interface CreatePostResult {
   ok: boolean;
+  // Set when X reported the account itself is locked/suspended; the caller records it
+  // against the channel (only the route knows the channelId) and stops calling X.
+  frozen?: XFreezeSignal;
   id?: string;
   rateLimited?: boolean;
 }
@@ -217,8 +236,9 @@ export async function createPost(accessToken: string, text: string, mediaId?: st
     return { ok: false, rateLimited: true };
   }
   if (!res.ok) {
-    console.error(JSON.stringify({ event: "x_create_post_failed", status: res.status, body: await res.text().catch(() => "") }));
-    return { ok: false };
+    const errorBody = await res.text().catch(() => "");
+    console.error(JSON.stringify({ event: "x_create_post_failed", status: res.status, body: errorBody }));
+    return { ok: false, frozen: detectFreeze(res.status, errorBody) ?? undefined };
   }
 
   const respBody = (await res.json()) as { data: { id: string; text: string } };
@@ -227,6 +247,9 @@ export async function createPost(accessToken: string, text: string, mediaId?: st
 
 export interface RepostResult {
   ok: boolean;
+  // Set when X reported the account itself is locked/suspended; the caller records it
+  // against the channel (only the route knows the channelId) and stops calling X.
+  frozen?: XFreezeSignal;
   rateLimited?: boolean;
 }
 
@@ -248,7 +271,7 @@ export async function repostPost(accessToken: string, sourceUserId: string, twee
   if (!res.ok) {
     const errorBody = await res.text().catch(() => "");
     console.error(JSON.stringify({ event: "x_repost_api_error", status: res.status, errorBody }));
-    return { ok: false };
+    return { ok: false, frozen: detectFreeze(res.status, errorBody) ?? undefined };
   }
 
   return { ok: true };
@@ -256,6 +279,9 @@ export async function repostPost(accessToken: string, sourceUserId: string, twee
 
 export interface BookmarkResult {
   ok: boolean;
+  // Set when X reported the account itself is locked/suspended; the caller records it
+  // against the channel (only the route knows the channelId) and stops calling X.
+  frozen?: XFreezeSignal;
   rateLimited?: boolean;
 }
 
@@ -278,7 +304,7 @@ export async function createBookmark(accessToken: string, sourceUserId: string, 
     const headers: Record<string, string> = {};
     for (const [k, v] of res.headers.entries()) headers[k] = v;
     console.error(JSON.stringify({ event: "x_bookmark_api_error", status: res.status, errorBody, headers, sourceUserId }));
-    return { ok: false };
+    return { ok: false, frozen: detectFreeze(res.status, errorBody) ?? undefined };
   }
 
   return { ok: true };
@@ -286,6 +312,9 @@ export async function createBookmark(accessToken: string, sourceUserId: string, 
 
 export interface LikeResult {
   ok: boolean;
+  // Set when X reported the account itself is locked/suspended; the caller records it
+  // against the channel (only the route knows the channelId) and stops calling X.
+  frozen?: XFreezeSignal;
   rateLimited?: boolean;
 }
 
@@ -306,7 +335,7 @@ export async function likePost(accessToken: string, sourceUserId: string, tweetI
   if (!res.ok) {
     const errorBody = await res.text().catch(() => "");
     console.error(JSON.stringify({ event: "x_like_api_error", status: res.status, errorBody }));
-    return { ok: false };
+    return { ok: false, frozen: detectFreeze(res.status, errorBody) ?? undefined };
   }
 
   return { ok: true };

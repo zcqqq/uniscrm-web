@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
 import { XTokenService } from "./services/x-token";
+import { readFrozenState, frozenReason, recordXApiResult, markChannelFrozen, type XFreezeSignal } from "./services/x-freeze";
 import { XActivityService } from "./services/x-webhook";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 import { CreditService, getActiveSubscriptionTier } from "../../shared/credit-service";
@@ -89,6 +90,22 @@ function inactiveChannel(channelId: string) {
   return { ok: false, reason: `channel_inactive: channel ${channelId} is deactivated` };
 }
 
+// Same shape for the account-freeze breaker: while X has the account locked, no route may call
+// it (x-freeze.ts). Takes the already-parsed config so callers don't parse it twice.
+function frozenChannel(config: Record<string, unknown>): { ok: false; reason: string } | null {
+  const frozen = readFrozenState(config);
+  return frozen ? { ok: false, reason: frozenReason(frozen) } : null;
+}
+
+// getValidToken throws for three different reasons: a genuine refresh failure, a deactivated
+// channel, and a frozen X account. The last two are diagnoses worth keeping — flow writes this
+// string into the node's failure_reason, and "token refresh failed" would send whoever reads it
+// looking for an OAuth problem that isn't there.
+function tokenErrorReason(e: unknown): string {
+  const msg = String(e instanceof Error ? e.message : e);
+  return /^channel_(frozen|inactive)/.test(msg) ? msg : "channel_not_authorized: X token refresh failed";
+}
+
 export function internalRoutes() {
   const router = new Hono<{ Bindings: Env }>();
 
@@ -107,6 +124,8 @@ export function internalRoutes() {
     if (!channel.is_active) return c.json(inactiveChannel(channelId));
 
     const config = JSON.parse(channel.config);
+    const frozenState = frozenChannel(config);
+    if (frozenState) return c.json(frozenState);
     const sourceUserId = config.x_user_id;
     if (!sourceUserId) return c.json({ error: "Channel has no X user ID" }, 400);
 
@@ -167,6 +186,15 @@ export function internalRoutes() {
     const rateLimitReset = rateLimitResetUnix ? new Date(rateLimitResetUnix * 1000).toISOString() : "";
 
     console.log(JSON.stringify({ event: "x_action_executed", action, sourceUserId, targetUserId, status: xRes.status, rateLimitRemaining, rateLimitReset, response: xBody }));
+
+    // X reported the account itself is locked/suspended: trip the breaker so no later call goes
+    // out until the hourly probe sees it recover. Returned ahead of the generic x_api_error
+    // below so the flow node's failure_reason names the real cause. No credit is charged — the
+    // deduction below only fires on a 2xx anyway.
+    const freezeSignal = await recordXApiResult(c.env.LINK_DB, channelId, xRes.status, xBody);
+    if (freezeSignal) {
+      return c.json({ ok: false, status: xRes.status, data: xBody, reason: frozenReason(freezeSignal) });
+    }
 
     // Deduct credit only after a successful (2xx) paid API call, and only for non-BYOK channels.
     if (xRes.ok && !isByok && creditMicros > 0) {
@@ -302,6 +330,8 @@ export function internalRoutes() {
     if (!channel.is_active) return c.json(inactiveChannel(channelId));
 
     const config = JSON.parse(channel.config);
+    const frozen = frozenChannel(config);
+    if (frozen) return c.json(frozen);
     const sourceUserId = config.x_user_id;
     if (!sourceUserId) return c.json({ ok: false, reason: "channel_not_authorized: the X channel has no linked user id" }, 200);
 
@@ -313,6 +343,10 @@ export function internalRoutes() {
 
     if (repostResult.rateLimited) {
       return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+    }
+    if (repostResult.frozen) {
+      await markChannelFrozen(c.env.LINK_DB, channelId, repostResult.frozen);
+      return c.json({ ok: false, reason: frozenReason(repostResult.frozen) });
     }
     return c.json({ ok: repostResult.ok, reason: repostResult.ok ? undefined : "x_api_error: repost rejected" });
   });
@@ -330,6 +364,8 @@ export function internalRoutes() {
     if (!channel.is_active) return c.json(inactiveChannel(channelId));
 
     const config = JSON.parse(channel.config);
+    const frozen = frozenChannel(config);
+    if (frozen) return c.json(frozen);
     const sourceUserId = config.x_user_id;
     if (!sourceUserId) return c.json({ ok: false, reason: "channel_not_authorized: the X channel has no linked user id" }, 200);
 
@@ -341,6 +377,10 @@ export function internalRoutes() {
 
     if (bookmarkResult.rateLimited) {
       return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+    }
+    if (bookmarkResult.frozen) {
+      await markChannelFrozen(c.env.LINK_DB, channelId, bookmarkResult.frozen);
+      return c.json({ ok: false, reason: frozenReason(bookmarkResult.frozen) });
     }
     return c.json({ ok: bookmarkResult.ok, reason: bookmarkResult.ok ? undefined : "x_api_error: bookmark rejected" });
   });
@@ -358,6 +398,8 @@ export function internalRoutes() {
     if (!channel.is_active) return c.json(inactiveChannel(channelId));
 
     const config = JSON.parse(channel.config);
+    const frozen = frozenChannel(config);
+    if (frozen) return c.json(frozen);
     const sourceUserId = config.x_user_id;
     if (!sourceUserId) return c.json({ ok: false, reason: "channel_not_authorized: the X channel has no linked user id" }, 200);
 
@@ -369,6 +411,10 @@ export function internalRoutes() {
 
     if (likeResult.rateLimited) {
       return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+    }
+    if (likeResult.frozen) {
+      await markChannelFrozen(c.env.LINK_DB, channelId, likeResult.frozen);
+      return c.json({ ok: false, reason: frozenReason(likeResult.frozen) });
     }
     return c.json({ ok: likeResult.ok, reason: likeResult.ok ? undefined : "x_api_error: like rejected" });
   });
@@ -513,7 +559,7 @@ export function internalRoutes() {
       accessToken = await tokenService.getValidToken(channelId);
     } catch (e) {
       console.error(JSON.stringify({ event: "create_post_no_token", contentId, channelId, error: String(e) }));
-      return c.json({ ok: false, reason: "channel_not_authorized: X token refresh failed" }, 200);
+      return c.json({ ok: false, reason: tokenErrorReason(e) }, 200);
     }
 
     let mediaId: string | undefined;
@@ -542,6 +588,10 @@ export function internalRoutes() {
 
     if (postResult.rateLimited) {
       return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+    }
+    if (postResult.frozen) {
+      await markChannelFrozen(c.env.LINK_DB, channelId, postResult.frozen);
+      return c.json({ ok: false, reason: frozenReason(postResult.frozen) }, 200);
     }
     if (!postResult.ok || !postResult.id) {
       return c.json({ ok: false, reason: "x_api_error: create post rejected" }, 200);
@@ -595,7 +645,7 @@ export function internalRoutes() {
       accessToken = await tokenService.getValidToken(channelId);
     } catch (e) {
       console.error(JSON.stringify({ event: "x_video_status_no_token", contentId, channelId, error: String(e) }));
-      return c.json({ ok: false, reason: "channel_not_authorized: X token refresh failed" }, 200);
+      return c.json({ ok: false, reason: tokenErrorReason(e) }, 200);
     }
     const status = await getMediaUploadStatus(accessToken, mediaId);
 
@@ -620,6 +670,10 @@ export function internalRoutes() {
       // Transient — the media is uploaded and processed; only the final post hit a 429. The flow
       // worker reschedules on rateLimited instead of resolving the failed branch.
       return c.json({ ok: false, rateLimited: true, rateLimitReset: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+    }
+    if (postResult.frozen) {
+      await markChannelFrozen(c.env.LINK_DB, channelId, postResult.frozen);
+      return c.json({ ok: false, reason: frozenReason(postResult.frozen) }, 200);
     }
     if (!postResult.ok || !postResult.id) {
       return c.json({ ok: false, reason: "x_api_error: create post rejected" }, 200);

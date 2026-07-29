@@ -887,6 +887,131 @@ describe("stub content-flow action endpoints", () => {
     vi.unstubAllGlobals();
   });
 
+  // The freeze breaker (x-freeze.ts): X answering 403 + code 326 means the authorized account
+  // itself is locked, and every further call risks lengthening the lock. The route records it
+  // on the channel and reports it as the failure_reason instead of a generic x_api_error.
+  it("POST /internal/content/create-post trips the freeze breaker when X reports a locked account", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", expires_at: new Date(Date.now() + 3600_000).toISOString() }),
+      channel_type: "X",
+      tenant_id: 1,
+      is_active: 1,
+    };
+    const lockedBody = JSON.stringify({
+      errors: [{ code: 326, message: "To protect our users from spam and other malicious activity, this account is temporarily locked." }],
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(lockedBody, { status: 403 })); // X POST /2/tweets
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+    const linkDb = mockLinkDb(channelRow);
+    const pipelineContent = mockPipelineContent();
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "literal text", provider: "none", channelId: "tgt-chan", flowId: "flow-1", skillId: "none" }),
+      }),
+      { ...testEnv, LINK_DB: linkDb, WEB_DB: mockWebDb("tenant-db-1"), PIPELINE_CONTENT: pipelineContent }
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; reason: string };
+    expect(body.ok).toBe(false);
+    expect(body.reason).toMatch(/^channel_frozen.*\[326\]/);
+    // The freeze is persisted, so the next call is refused before it reaches X at all.
+    expect(linkDb.prepare.mock.calls.some(([sql]: [string]) => sql.includes("json_set(config") && sql.includes("x_frozen_at"))).toBe(true);
+    // Nothing was recorded as published — the post never went out.
+    expect(pipelineContent.send).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("POST /internal/x/action refuses a channel already marked frozen without calling X", async () => {
+    const channelRow = {
+      config: JSON.stringify({
+        x_user_id: "x-user-1", access_token: "tok", is_byok: true,
+        x_frozen_at: "2026-07-29T02:00:00.000Z", x_frozen_code: 326, x_frozen_message: "temporarily locked",
+      }),
+      channel_type: "X",
+      tenant_id: 1,
+      is_active: 1,
+    };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/x/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ channelId: "src-chan", targetUserId: "target-1", action: "follow", flowId: "flow-1" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow) }
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; reason: string };
+    expect(body.ok).toBe(false);
+    expect(body.reason).toMatch(/^channel_frozen/);
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("POST /internal/x/like trips the breaker when X reports a locked account", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", expires_at: new Date(Date.now() + 3600_000).toISOString() }),
+      channel_type: "X",
+      tenant_id: 1,
+      is_active: 1,
+    };
+    const lockedBody = JSON.stringify({ errors: [{ code: 326, message: "this account is temporarily locked" }] });
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(lockedBody, { status: 403 }));
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+    const linkDb = mockLinkDb(channelRow);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/x/like", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ channelId: "src-chan", contentId: "content-1", tweetId: "tweet-1" }),
+      }),
+      { ...testEnv, LINK_DB: linkDb }
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; reason: string };
+    expect(body.reason).toMatch(/^channel_frozen/);
+    expect(linkDb.prepare.mock.calls.some(([sql]: [string]) => sql.includes("json_set(config"))).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  // The counter-case that keeps the breaker honest: an ordinary 403 (the bookmark retweet cap)
+  // must stay a plain API error, or a healthy channel would silently stop working.
+  it("POST /internal/x/bookmark leaves an ordinary 403 as a plain x_api_error", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", expires_at: new Date(Date.now() + 3600_000).toISOString() }),
+      channel_type: "X",
+      tenant_id: 1,
+      is_active: 1,
+    };
+    const capBody = JSON.stringify({ title: "Forbidden", detail: "You have exceeded the retweet limit." });
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(capBody, { status: 403 }));
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+    const linkDb = mockLinkDb(channelRow);
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/x/bookmark", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ channelId: "src-chan", contentId: "content-1", tweetId: "tweet-1" }),
+      }),
+      { ...testEnv, LINK_DB: linkDb }
+    );
+
+    const body = await res.json() as { ok: boolean; reason: string };
+    expect(body.reason).toBe("x_api_error: bookmark rejected");
+    expect(linkDb.prepare.mock.calls.some(([sql]: [string]) => sql.includes("json_set(config"))).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
   it("POST /internal/content/create-post returns channel_not_authorized instead of a 500 when the token refresh fails", async () => {
     const channelRow = {
       config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: "rt", expires_at: new Date(Date.now() - 1000).toISOString() }),

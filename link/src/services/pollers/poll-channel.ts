@@ -2,7 +2,8 @@ import type { Env, ChannelType } from "../../types";
 import { getAppCredentials, type ByokConfig } from "../app-credentials";
 import { XTokenService } from "../x-token";
 import { TikTokTokenService } from "../tiktok-token";
-import { XUnauthorizedError } from "../x-errors";
+import { XUnauthorizedError, XAccountFrozenError } from "../x-errors";
+import { markChannelFrozen } from "../x-freeze";
 import { TikTokUnauthorizedError } from "../tiktok-errors";
 import { runFollowersPoller } from "./x-followers";
 import { runPostsPoller } from "./x-posts";
@@ -110,6 +111,13 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
         });
       }
     } catch (e) {
+      // X reports the account itself is locked/suspended: record it and stop polling this
+      // channel. getValidToken refuses every later call until the hourly probe in cron.ts sees
+      // the account answer again — retrying now would only lengthen the lock.
+      if (e instanceof XAccountFrozenError) {
+        await markChannelFrozen(env.LINK_DB, row.id, e.signal);
+        return;
+      }
       console.error(JSON.stringify({ event: "followers_poll_error", channel_id: row.id, error: String(e) }));
     }
   }
@@ -134,6 +142,13 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
         });
       }
     } catch (e) {
+      // X reports the account itself is locked/suspended: record it and stop polling this
+      // channel. getValidToken refuses every later call until the hourly probe in cron.ts sees
+      // the account answer again — retrying now would only lengthen the lock.
+      if (e instanceof XAccountFrozenError) {
+        await markChannelFrozen(env.LINK_DB, row.id, e.signal);
+        return;
+      }
       console.error(JSON.stringify({ event: "posts_poll_error", channel_id: row.id, error: String(e) }));
     }
   }
@@ -251,6 +266,11 @@ export async function pollXListPosts(env: Env, channelId: string, listId: string
       });
     }
   } catch (e) {
+    // Same breaker as pollXChannel: a locked account stops every X call for this channel.
+    if (e instanceof XAccountFrozenError) {
+      await markChannelFrozen(env.LINK_DB, channelId, e.signal);
+      return;
+    }
     console.error(JSON.stringify({ event: "list_posts_poll_error", channel_id: channelId, list_id: listId, error: String(e) }));
   }
 }

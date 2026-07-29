@@ -13,14 +13,66 @@ import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { TikTokTokenService } from "./services/tiktok-token";
 import { pollChannelOnce, pollXListPosts } from "./services/pollers/poll-channel";
 import { subscribeWebSub } from "./services/youtube-api";
+import { clearChannelFrozen } from "./services/x-freeze";
 
 export async function handleCron(env: Env): Promise<void> {
+  // The unfreeze probe runs BEFORE the rest: a channel that recovered this hour should be
+  // polled and refreshed in the same tick rather than waiting another hour. Its own failure is
+  // swallowed here — everything below (trends, token refresh, polling, WebSub renewal) is
+  // independent of it, and Promise.allSettled would not cover a throw from this awaited call.
+  await handleFrozenProbe(env).catch((e) => {
+    console.error(JSON.stringify({ event: "x_freeze_probe_sweep_error", error: String(e) }));
+  });
+
   await Promise.allSettled([
     handleTrendAggregation(env),
     handleTokenRefresh(env),
     handlePolling(env),
     handleYouTubeRenewal(env),
   ]);
+}
+
+/**
+ * One GET /2/users/me per frozen channel, per hour — the only X call a frozen channel is
+ * allowed to make. A 200 means the account is back, so the breaker clears and everything
+ * resumes by itself; anything else leaves it frozen. See x-freeze.ts for why the breaker
+ * exists at all.
+ */
+export async function handleFrozenProbe(env: Env): Promise<void> {
+  const rows = await env.LINK_DB
+    .prepare(
+      `SELECT id, config FROM channels
+        WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1
+          AND json_extract(config, '$.x_frozen_at') IS NOT NULL`
+    )
+    .all<{ id: string; config: string }>();
+
+  for (const row of rows.results) {
+    const config = JSON.parse(row.config) as ByokConfig & { access_token?: string; expires_at?: string; refresh_token?: string };
+    try {
+      // getValidToken refuses frozen channels by design, so the probe reads the stored token
+      // directly and refreshes only when it has actually expired. Token refresh is an app-level
+      // call — it does not touch the locked account's own endpoints.
+      let accessToken = config.access_token;
+      const expired = !config.expires_at || Date.now() > new Date(config.expires_at).getTime() - 60 * 1000;
+      if (expired && config.refresh_token) {
+        const creds = await getAppCredentials(env, config);
+        accessToken = await new XTokenService(env.LINK_DB, creds.clientId, creds.clientSecret).refreshAccessToken(row.id);
+      }
+      if (!accessToken) continue;
+
+      const res = await fetch("https://api.x.com/2/users/me", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res.ok) {
+        await clearChannelFrozen(env.LINK_DB, row.id);
+        continue;
+      }
+      console.log(JSON.stringify({ event: "x_freeze_probe_still_frozen", channel_id: row.id, status: res.status }));
+    } catch (e) {
+      console.error(JSON.stringify({ event: "x_freeze_probe_error", channel_id: row.id, error: String(e) }));
+    }
+  }
 }
 
 async function handleTrendAggregation(env: Env): Promise<void> {
@@ -78,7 +130,9 @@ async function handleTrendAggregation(env: Env): Promise<void> {
 async function handleTokenRefresh(env: Env): Promise<void> {
   // X token refresh (system app + BYOK)
   const rows = await env.LINK_DB
-    .prepare("SELECT id, config FROM channels WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1")
+    // Frozen channels are excluded: handleFrozenProbe above is the only thing allowed to call
+    // X for them, and it refreshes their token itself when the probe needs one.
+    .prepare("SELECT id, config FROM channels WHERE channel_type IN ('TWITTER', 'X') AND is_active = 1 AND json_extract(config, '$.x_frozen_at') IS NULL")
     .all<{ id: string; config: string }>();
 
   for (const row of rows.results) {
@@ -156,7 +210,9 @@ export async function handlePolling(env: Env): Promise<void> {
   const runDeadline = Date.now() + TOTAL_BUDGET_MS;
 
   const rows = await env.LINK_DB
-    .prepare("SELECT id, channel_type FROM channels WHERE channel_type IN ('X', 'TIKTOK') AND is_active = 1")
+    // json_extract is NULL for TikTok rows too (they never carry the key), so the freeze
+    // filter narrows X channels only.
+    .prepare("SELECT id, channel_type FROM channels WHERE channel_type IN ('X', 'TIKTOK') AND is_active = 1 AND json_extract(config, '$.x_frozen_at') IS NULL")
     .all<{ id: string; channel_type: "X" | "TIKTOK" }>();
 
   console.log(JSON.stringify({ event: "polling_cron_started", candidateChannels: rows.results.length }));

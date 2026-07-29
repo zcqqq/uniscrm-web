@@ -1,4 +1,5 @@
-import { XUnauthorizedError } from "./x-errors";
+import { XUnauthorizedError, XAccountFrozenError } from "./x-errors";
+import { detectFreeze } from "./x-freeze";
 
 // Full set of user.fields the get-followers endpoint supports — requested in full so
 // raw_data (see XUsersService.upsertUserFromMetadata) captures everything X returns,
@@ -64,7 +65,12 @@ export async function fetchFollowersPage(
     throw new XUnauthorizedError(`X get-followers failed: ${res.status} ${await res.text()}`);
   }
   if (!res.ok) {
-    throw new Error(`X get-followers failed: ${res.status} ${await res.text()}`);
+    const errorBody = await res.text().catch(() => "");
+    // The account itself is locked/suspended — a distinct error so the poller trips the freeze
+    // breaker instead of retrying (a fresh token cannot unlock an account).
+    const frozen = detectFreeze(res.status, errorBody);
+    if (frozen) throw new XAccountFrozenError(frozen);
+    throw new Error(`X get-followers failed: ${res.status} ${errorBody}`);
   }
 
   const body = (await res.json()) as { data?: Record<string, unknown>[]; meta?: { next_token?: string } };

@@ -12,6 +12,7 @@ import {
 import { encrypt } from "./services/crypto";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { XTokenService } from "./services/x-token";
+import { readFrozenState } from "./services/x-freeze";
 import { fetchOwnedLists } from "./services/x-posts-api";
 import { YouTubeTokenService } from "./services/youtube-token";
 
@@ -51,7 +52,14 @@ export function channelsRoutes() {
     const hasByok = !!byokRow;
     if (!row) return c.json({ connected: false, has_byok: hasByok });
     const config = JSON.parse(row.config) as { x_username?: string };
-    return c.json({ connected: true, username: config.x_username, channel_id: row.id, created_at: row.created_at, has_byok: hasByok });
+    // frozen: X has the account locked/suspended and every X call for it is paused until the
+    // hourly probe sees it recover (x-freeze.ts). Surfaced so the card can say so — otherwise
+    // a connected-looking channel silently does nothing.
+    const frozen = readFrozenState(config as Record<string, unknown>);
+    return c.json({
+      connected: true, username: config.x_username, channel_id: row.id, created_at: row.created_at, has_byok: hasByok,
+      frozen_at: frozen?.frozenAt ?? null, frozen_message: frozen?.message ?? null,
+    });
   });
 
   router.get("/x/:channelId/lists", async (c) => {
@@ -234,12 +242,15 @@ export function channelsRoutes() {
 
     const byokChannels = rows.results.map((r) => {
       const cfg = JSON.parse(r.config) as ByokConfig & { x_username?: string; x_user_id?: string };
+      const frozen = readFrozenState(cfg as Record<string, unknown>);
       return {
         id: r.id,
         username: cfg.x_username || null,
         x_user_id: cfg.x_user_id || null,
         authorized: !!cfg.x_user_id,
         created_at: r.created_at,
+        frozen_at: frozen?.frozenAt ?? null,
+        frozen_message: frozen?.message ?? null,
       };
     });
 

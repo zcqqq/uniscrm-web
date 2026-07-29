@@ -1,3 +1,5 @@
+import { readFrozenState, frozenReason } from "./x-freeze";
+
 export interface ChannelConfig {
   x_user_id: string;
   x_username: string;
@@ -13,6 +15,11 @@ export interface ChannelConfig {
   // exactly this reason — persist the outcome so it can be read off the channel row.
   subscription_error?: string | null;
   subscription_setup_at?: string;
+  // Written by the freeze breaker (x-freeze.ts) while X has the account locked or suspended,
+  // removed again by the hourly probe once it answers.
+  x_frozen_at?: string;
+  x_frozen_code?: number;
+  x_frozen_message?: string;
 }
 
 export class XTokenService {
@@ -118,6 +125,12 @@ export class XTokenService {
     if (!row.is_active) throw new Error(`channel_inactive: channel ${channelId} is deactivated`);
 
     const config = JSON.parse(row.config) as ChannelConfig;
+
+    // X locked or suspended the account — every further call risks lengthening the lock, so
+    // hand out no token at all. The hourly probe in cron.ts clears this by itself once the
+    // account answers again (see x-freeze.ts); nothing here needs un-pausing by hand.
+    const frozen = readFrozenState(config as unknown as Record<string, unknown>);
+    if (frozen) throw new Error(frozenReason(frozen));
 
     // Proactively refresh if expiring within 10 minutes
     if (config.expires_at) {

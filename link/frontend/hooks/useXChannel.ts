@@ -6,6 +6,8 @@ interface XChannelState {
   username?: string;
   createdAt?: string;
   hasByok: boolean;
+  /** Set while X has the account locked/suspended and every X call for it is paused. */
+  frozenAt?: string | null;
   loading: boolean;
 }
 
@@ -24,6 +26,7 @@ export function useXChannel() {
         username: data.username,
         createdAt: data.created_at,
         hasByok: !!data.has_byok,
+        frozenAt: data.frozen_at ?? null,
         loading: false,
       });
     } catch {

@@ -19,6 +19,7 @@ import {
   DialogDescription,
 } from "../../../shared/frontend/ui/dialog";
 import { ChannelCard } from "./ChannelCard";
+import { FrozenNotice } from "./FrozenNotice";
 import { useXChannel } from "../hooks/useXChannel";
 import { useSimpleChannel } from "../hooks/useSimpleChannel";
 import { useYouTubeAccount } from "../hooks/useYouTubeAccount";
@@ -61,7 +62,7 @@ const X_STRINGS = {
 };
 
 function XChannelCard({ locale }: { locale: Locale }) {
-  const { connected, username, createdAt, hasByok, loading, connect } = useXChannel();
+  const { connected, username, createdAt, hasByok, frozenAt, loading, connect } = useXChannel();
   const [reauthOpen, setReauthOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
   const tier = useTier();
@@ -91,6 +92,7 @@ function XChannelCard({ locale }: { locale: Locale }) {
         status={status}
         statusLabel={connected && username ? `@${username}` : undefined}
         createdAt={connected ? createdAt : undefined}
+        extra={connected && frozenAt ? <FrozenNotice frozenAt={frozenAt} locale={locale} /> : undefined}
         actions={
           connected ? (
             <Button variant="destructive" className="w-full" onClick={() => setReauthOpen(true)}>
@@ -152,6 +154,7 @@ interface ByokChannel {
   x_user_id: string | null;
   authorized: boolean;
   created_at: string;
+  frozen_at?: string | null;
 }
 
 const BYOK_STRINGS = {
@@ -270,6 +273,7 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
         status={cardStatus}
         statusLabel={connectedChannel?.username ? `@${connectedChannel.username}` : undefined}
         createdAt={activeChannel?.created_at}
+        extra={connectedChannel?.frozen_at ? <FrozenNotice frozenAt={connectedChannel.frozen_at} locale={locale} /> : undefined}
         actions={
           !activeChannel ? (
             <Button className="w-full" variant="outline" onClick={openCreateDialog}>

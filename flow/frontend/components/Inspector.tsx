@@ -968,6 +968,31 @@ function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Recor
   );
 }
 
+// 与 YouTubeContentTriggerInspector 共用同一套字段与同一个 ConditionsEditor：判定语义必须
+// 与 trigger 完全一致，否则用户要记两套。区别只有一个——不传 systemFilters：trigger 上锁着的
+// duration <= 600 是 link 入队前的摄取门槛，与"发布一天后复查"无关。
+function YouTubeConditionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const { updateNodeData } = useFlowEditor();
+  const conditions = (data.conditions as Condition[]) || [];
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.youtubeCondition.label}</h4>
+      <div className="space-y-3">
+        <ConditionsEditor
+          conditions={conditions}
+          fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos")}
+          onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+          label="Content Props"
+        />
+        <p className="text-xs text-muted-foreground">
+          Re-reads the video's current stats from YouTube. Put a Wait node before this to check it some time after publication.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 const VIDEO_ACTION_LANGUAGES = [
   { value: "zh", label: "Chinese" },
   { value: "en", label: "English" },
@@ -1404,6 +1429,9 @@ export default function Inspector() {
       )}
       {node.type === "videoCondition" && (
         <VideoConditionInspector nodeId={node.id} data={node.data as Record<string, any>} />
+      )}
+      {node.type === "youtubeCondition" && (
+        <YouTubeConditionInspector nodeId={node.id} data={node.data as Record<string, any>} />
       )}
     </aside>
   );

@@ -14,7 +14,7 @@ import { initPhotoPost, initVideoPost } from "./services/tiktok-publish";
 import { YouTubeTokenService } from "./services/youtube-token";
 import { rateVideo, insertPlaylistItem } from "./services/youtube-actions";
 import { recordYouTubeQuota } from "./services/youtube-quota";
-import { fetchYouTubeVideoProps } from "./services/pollers/youtube-content";
+import { fetchYouTubeVideoProps, fetchYouTubeAuthorProps, type YouTubeVideoProps } from "./services/pollers/youtube-content";
 
 const ACTION_TO_EVENT_TYPE: Record<string, string> = {
   follow: "follow-user",
@@ -107,17 +107,18 @@ function tokenErrorReason(e: unknown): string {
   return /^channel_(frozen|inactive)/.test(msg) ? msg : "channel_not_authorized: X token refresh failed";
 }
 
-// fetchVideoDetails 抛的是 `YouTube videos.list failed: <status> <body>` —— 里面带着
-// Google 返回的完整错误体。那个字符串会一路变成 flow 的 failureReason 并写进
-// content_flow_log，违反"外部 API 全量 payload 不入库"。这里只留 HTTP 状态码，明细留在
-// youtube_video_stats_error 那行 console.log 里。
-// 403 单独给一个码：这个节点对配额耗尽不重试、直接走 failed（设计已定），reason 是这个
-// 状态唯一可诊断的地方。
-export function boundedVideoStatsReason(e: unknown): string {
-  const status = /YouTube videos\.list failed: (\d{3})\b/.exec(String(e instanceof Error ? e.message : e))?.[1];
-  if (!status) return "youtube_api_error: videos.list request failed";
-  if (status === "403") return "youtube_quota_exceeded: videos.list HTTP 403";
-  return `youtube_api_error: videos.list HTTP ${status}`;
+// fetchVideoDetails / fetchChannelDetails 抛的是 `YouTube <endpoint> failed: <status> <body>`
+// —— 里面带着 Google 返回的完整错误体。那个字符串会一路变成 flow 的 failureReason 并写进
+// content_flow_log，违反"外部 API 全量 payload 不入库"。这里只留端点名与 HTTP 状态码，
+// 明细留在对应的 console.log 里。
+// 403 单独给一个码：这两个调用对配额耗尽都不重试、直接走 failed（设计已定），reason 是
+// 这个状态唯一可诊断的地方。
+export function boundedYouTubeReason(e: unknown): string {
+  const m = /YouTube ([\w.]+) failed: (\d{3})\b/.exec(String(e instanceof Error ? e.message : e));
+  if (!m) return "youtube_api_error: request failed";
+  const [, endpoint, status] = m;
+  if (status === "403") return `youtube_quota_exceeded: ${endpoint} HTTP 403`;
+  return `youtube_api_error: ${endpoint} HTTP ${status}`;
 }
 
 export function internalRoutes() {
@@ -513,30 +514,53 @@ export function internalRoutes() {
   // 条件求值留在 flow 侧（engine.ts 的 evaluateCondition），这里不认识 flow 的条件语义。
   // 走 API key 的读操作（1 unit），不需要 channelId 或用户 OAuth。
   router.post("/youtube/video-stats", async (c) => {
-    const { videoId, contentId, flowId } = await c.req
-      .json<{ videoId?: string; contentId?: string; flowId?: string | null }>()
-      .catch(() => ({ videoId: undefined, contentId: undefined, flowId: undefined }));
+    const { videoId, contentId, flowId, withAuthor } = await c.req
+      .json<{ videoId?: string; contentId?: string; flowId?: string | null; withAuthor?: boolean }>()
+      .catch(() => ({ videoId: undefined, contentId: undefined, flowId: undefined, withAuthor: undefined }));
     // 与其它出口同形（HTTP 200/400 都是 { ok: false, reason }）：flow 把任何非 2xx 都
     // 记成 "youtube_api_error: link returned 400"，会把"payload 里根本没有视频 id"
     // 误报成 API 出错。
     if (!videoId) return c.json({ ok: false, reason: "video_unavailable: no videoId in payload" }, 400);
 
-    let video: { props: Record<string, unknown>; authorChannelId: string } | null;
+    let video: YouTubeVideoProps | null;
     try {
       video = await fetchYouTubeVideoProps(c.env.YOUTUBE_API_KEY, videoId);
     } catch (e) {
       // 全量 API 错误体只进日志，不进 reason —— reason 会一路写进 content_flow_log
       // 这张分析表（flow/src/index.ts 的 emitContentNodeLogs），外部返回体长度不可控。
       console.log(JSON.stringify({ event: "youtube_video_stats_error", videoId, contentId: contentId || null, flowId: flowId || null, error: String(e) }));
-      return c.json({ ok: false, reason: boundedVideoStatsReason(e) });
+      return c.json({ ok: false, reason: boundedYouTubeReason(e) });
     }
     if (!video) {
       console.log(JSON.stringify({ event: "youtube_video_stats_empty", videoId, contentId: contentId || null, flowId: flowId || null }));
       return c.json({ ok: false, reason: "video_unavailable: video not found or private" });
     }
-    const props = video.props;
 
-    console.log(JSON.stringify({ event: "youtube_video_stats", videoId, contentId: contentId || null, flowId: flowId || null, view_count: props.view_count, like_count: props.like_count }));
+    let props = video.props;
+    // withAuthor 由 flow 侧按"这个节点的条件是否引用了 user.*"决定（flow/src/youtube-condition.ts
+    // 的 conditionsNeedAuthor）。不引用就不打这一次 channels.list —— YOUTUBE_API_KEY 是全平台
+    // 共享的 10000 units/天免费配额，condition 节点的调用量随 flow 数量线性增长。
+    if (withAuthor) {
+      let authorProps: Record<string, unknown>;
+      try {
+        authorProps = await fetchYouTubeAuthorProps(c.env.YOUTUBE_API_KEY, video.authorChannelId);
+      } catch (e) {
+        console.log(JSON.stringify({ event: "youtube_channel_stats_error", videoId, authorChannelId: video.authorChannelId, contentId: contentId || null, flowId: flowId || null, error: String(e) }));
+        return c.json({ ok: false, reason: boundedYouTubeReason(e) });
+      }
+      // 空 = channels.list 返回了但没有这个频道（已删/已封）。与视频没了对称：一律
+      // ok:false，绝不把缺了作者字段的 props 交给 flow 去判 true/false。
+      if (Object.keys(authorProps).length === 0) {
+        console.log(JSON.stringify({ event: "youtube_channel_stats_empty", videoId, authorChannelId: video.authorChannelId, contentId: contentId || null, flowId: flowId || null }));
+        return c.json({ ok: false, reason: "channel_unavailable" });
+      }
+      // 合并成**同一份**"新鲜 props"：flow 的 stat_unavailable 守卫按"条件引用的字段在
+      // 新数据里有没有"判断，两次调用的结果必须在这里合完再回去，否则每个 user.* 条件都
+      // 会被误判成 stat_unavailable 而走 failed。
+      props = { ...props, ...authorProps };
+    }
+
+    console.log(JSON.stringify({ event: "youtube_video_stats", videoId, contentId: contentId || null, flowId: flowId || null, withAuthor: !!withAuthor, view_count: props.view_count, like_count: props.like_count }));
     return c.json({ ok: true, props });
   });
 

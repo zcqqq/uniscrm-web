@@ -15,6 +15,7 @@ import { XTokenService } from "./services/x-token";
 import { readFrozenState } from "./services/x-freeze";
 import { fetchOwnedLists } from "./services/x-posts-api";
 import { YouTubeTokenService } from "./services/youtube-token";
+import { fetchAllSubscriptions } from "./services/youtube-api";
 
 export function channelsRoutes() {
   const router = new Hono<{ Bindings: Env }>();
@@ -296,18 +297,36 @@ export function channelsRoutes() {
   router.get("/youtube/status", async (c) => {
     const tenantId = c.get("tenantId" as never) as number;
     const row = await c.env.LINK_DB
-      .prepare("SELECT config, created_at FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND tenant_id = ? AND is_active = 1")
+      .prepare("SELECT id, config, created_at FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND tenant_id = ? AND is_active = 1")
       .bind(tenantId)
-      .first<{ config: string; created_at: string }>();
+      .first<{ id: string; config: string; created_at: string }>();
     if (!row) return c.json({ connected: false });
 
-    const config = JSON.parse(row.config) as { email?: string; channel_title?: string; sync_status?: string; subscriptions?: unknown[] };
+    const config = JSON.parse(row.config) as { email?: string; channel_title?: string; sync_status?: string };
+
+    // 订阅数的真相现在是 per-tenant D1 的 user 表（is_follow = 1 的 YOUTUBE 行），不再是
+    // config 里的旧快照。租户还没 provision 数据库时返 0 而不是报错 —— 这个接口是页面
+    // 加载就调的，未 provision 是正常状态，不是错误状态（不同于 /tiktok/sync 等写路径）。
+    const tenantDb = c.get("tenantDataDb" as never) as TenantDataDB | undefined;
+    let subscriptionCount = 0;
+    if (tenantDb) {
+      try {
+        const rows = await tenantDb.query<{ c: number }>(
+          "SELECT COUNT(*) AS c FROM user WHERE channel_id = ? AND channel_type = 'YOUTUBE' AND is_follow = 1",
+          [row.id]
+        );
+        subscriptionCount = Number(rows[0]?.c ?? 0);
+      } catch (e) {
+        console.error(JSON.stringify({ event: "youtube_status_count_error", channel_id: row.id, error: String(e) }));
+      }
+    }
+
     return c.json({
       connected: true,
       email: config.email,
       channel_title: config.channel_title,
       sync_status: config.sync_status,
-      subscription_count: (config.subscriptions || []).length,
+      subscription_count: subscriptionCount,
       created_at: row.created_at,
     });
   });
@@ -320,15 +339,26 @@ export function channelsRoutes() {
       .first<{ id: string; config: string }>();
     if (!accountRow) return c.json({ connected: false, accountChannelId: null, subscriptions: [] });
 
-    const config = JSON.parse(accountRow.config) as {
-      email?: string;
-      subscriptions?: { channelId: string; channelName: string; thumbnailUrl: string }[];
-    };
+    const config = JSON.parse(accountRow.config) as { email?: string };
+
+    // 实时拉取，不吃 config 里的旧快照 —— 新订阅的频道要立刻出现在 flow 的选择器里
+    // （与 YouTube Condition 节点已定的「取实时 API 数据、不吃快照」同一原则）。
+    // 失败时返回空列表而不是 5xx：前端已有「No subscriptions found」空态，一次配额
+    // 波动不该让整个 Inspector 报错。
+    let subscriptions: { channelId: string; channelName: string; thumbnailUrl: string }[] = [];
+    try {
+      const tokenService = new YouTubeTokenService(c.env.LINK_DB, c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET);
+      const accessToken = await tokenService.getValidToken(accountRow.id);
+      subscriptions = await fetchAllSubscriptions(accessToken);
+    } catch (e) {
+      console.error(JSON.stringify({ event: "youtube_subscriptions_fetch_error", channel_id: accountRow.id, error: String(e) }));
+    }
+
     return c.json({
       connected: true,
       accountChannelId: accountRow.id,
       email: config.email,
-      subscriptions: config.subscriptions || [],
+      subscriptions,
     });
   });
 

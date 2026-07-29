@@ -157,7 +157,7 @@ describe("fetchListPostsPage", () => {
     const { page, rateLimited } = await fetchListPostsPage("tok", "listA", "p1");
 
     expect(rateLimited).toBe(false);
-    expect(page).toEqual({ data: [{ id: "t1", text: "hi" }], nextToken: "p2" });
+    expect(page).toEqual({ data: [{ id: "t1", text: "hi" }], nextToken: "p2", authors: {} });
     const calledUrl = new URL(fetchMock.mock.calls[0][0] as string);
     expect(calledUrl.pathname).toContain("/2/lists/listA/tweets");
     expect(calledUrl.searchParams.get("pagination_token")).toBe("p1");

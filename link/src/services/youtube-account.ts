@@ -54,13 +54,25 @@ export async function syncYouTubeSubscriptionUsers(
 
   // json_set 定点改这两个 key，绝不整体重写 config —— YouTubeTokenService.forceRefresh
   // 会整体重写 config，读改写会与它互相覆盖（本仓库在 X 冻结标记上踩过这个坑）。
-  await env.LINK_DB
-    .prepare(
-      `UPDATE channels
-          SET config = json_set(config, '$.sync_status', ?, '$.last_synced_at', ?),
-              updated_at = datetime('now')
-        WHERE id = ?`
-    )
-    .bind(syncStatus, new Date().toISOString(), accountChannelId)
-    .run();
+  //
+  // 这一步本身也必须兜住异常：D1 REST 调用真的会失败，而这个函数存在的全部理由就是
+  // 「不能让任何异常从这里逃出去到 OAuth 回调的 waitUntil 里」——丢一个 sync_status
+  // 标记只是前端卡片显示旧状态（美观退化），异常逃逸出去才是 OAuth 已经写成功的连接
+  // 却让用户看到报错页（本函数要严防的那类错误）。
+  try {
+    await env.LINK_DB
+      .prepare(
+        `UPDATE channels
+            SET config = json_set(config, '$.sync_status', ?, '$.last_synced_at', ?),
+                updated_at = datetime('now')
+          WHERE id = ?`
+      )
+      .bind(syncStatus, new Date().toISOString(), accountChannelId)
+      .run();
+  } catch (e) {
+    console.error(JSON.stringify({
+      event: "youtube_subscriptions_sync_status_write_failed",
+      account_channel_id: accountChannelId, sync_status: syncStatus, error: String(e),
+    }));
+  }
 }

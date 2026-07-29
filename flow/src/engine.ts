@@ -447,4 +447,12 @@ function processTargetNode(
     return;
   }
 
+  if (targetNode.type === "youtubeCondition") {
+    // conditions 留在 graph 里（executeContentActions 用 nodeId 回查），不塞进 ActionResult——
+    // 与 videoCondition 把 operator/threshold 留在 graph 的做法一致：阈值改了是纯配置变更。
+    actions.push({ type: "youtubeCondition", nodeId: targetNode.id, hasBranches: true });
+    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+    return;
+  }
+
 }

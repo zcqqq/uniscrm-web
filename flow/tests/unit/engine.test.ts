@@ -304,6 +304,21 @@ describe("collectActions: new content-domain action types", () => {
     ]);
   });
 
+  it("collects a youtubeCondition action with branches", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "youtubeContentTrigger", data: { channelId: "chan1", subscriptionChannelId: "sub1", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "yc1", type: "youtubeCondition", data: { conditions: [{ field: "view_count", operator: ">", value: "1000" }] }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "yc1" }],
+    };
+    const result = executeFlow(graph, "content.created", { channel_id: "chan1", subscription_channel_id: "sub1" });
+    expect(result.actions).toEqual([
+      { type: "youtubeCondition", nodeId: "yc1", hasBranches: true },
+    ]);
+    expect(result.nodeLogs.map((l) => `${l.nodeId}:${l.direction}`)).toEqual(["t1:enter", "t1:exit", "yc1:enter", "yc1:exit"]);
+  });
+
   it("carries a set operation through for videoCondition", () => {
     const graph: FlowGraph = {
       nodes: [
@@ -546,6 +561,38 @@ describe("resumeFromNode: branch targets that are not action/wait nodes", () => 
       { type: "videoCondition", nodeId: "vc1", operation: "check-face", hasBranches: true },
     ]);
     expect(result.nodeLogs.map((l) => `${l.nodeId}:${l.direction}`)).toEqual(["a1:outcome", "vc1:enter", "vc1:exit"]);
+  });
+
+  it("dispatches a youtubeCondition wired to a branch handle", () => {
+    const graph = graphWithBranchInto({
+      id: "yc1", type: "youtubeCondition", data: { conditions: [] }, position: { x: 200, y: 0 },
+    });
+    const result = resumeFromNode(graph, "a1", {}, "success");
+    expect(result.actions).toEqual([
+      { type: "youtubeCondition", nodeId: "yc1", hasBranches: true },
+    ]);
+    expect(result.nodeLogs.map((l) => `${l.nodeId}:${l.direction}`)).toEqual(["a1:outcome", "yc1:enter", "yc1:exit"]);
+  });
+
+  it("routes each youtubeCondition branch to its own downstream node", () => {
+    const graph: FlowGraph = {
+      nodes: [
+        { id: "t1", type: "youtubeContentTrigger", data: { channelId: "chan1", subscriptionChannelId: "sub1", conditions: [] }, position: { x: 0, y: 0 } },
+        { id: "yc1", type: "youtubeCondition", data: { conditions: [] }, position: { x: 200, y: 0 } },
+        { id: "aTrue", type: "action", data: { actionType: "youtubeContentAction", operation: "rate-like" }, position: { x: 400, y: 0 } },
+        { id: "aFalse", type: "action", data: { actionType: "youtubeContentAction", operation: "save-to-playlist", playlistId: "pl1" }, position: { x: 400, y: 100 } },
+        { id: "aFailed", type: "webhook", data: { url: "https://example.test/hook", method: "POST" }, position: { x: 400, y: 200 } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "yc1" },
+        { id: "e2", source: "yc1", sourceHandle: "true", target: "aTrue" },
+        { id: "e3", source: "yc1", sourceHandle: "false", target: "aFalse" },
+        { id: "e4", source: "yc1", sourceHandle: "failed", target: "aFailed" },
+      ],
+    };
+    expect(resumeFromNode(graph, "yc1", {}, "true").actions).toMatchObject([{ nodeId: "aTrue" }]);
+    expect(resumeFromNode(graph, "yc1", {}, "false").actions).toMatchObject([{ nodeId: "aFalse" }]);
+    expect(resumeFromNode(graph, "yc1", {}, "failed").actions).toMatchObject([{ nodeId: "aFailed" }]);
   });
 
   it("dispatches a webhook wired to a branch handle", () => {

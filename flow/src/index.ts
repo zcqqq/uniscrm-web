@@ -8,6 +8,7 @@ import { r2Query, latestRowsSql, sqlStr, sqlInt } from "../../shared/r2-sql";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY } from "../nodeTypeRegistry";
 import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage } from "./trigger-health";
+import { youtubeConditionRequest, resolveYouTubeCondition, type VideoStatsResponse } from "./youtube-condition";
 
 // node ids are NOT always UUIDs: flow/frontend/config/templates.ts hardcodes short ids like
 // "t1"/"w1"/"a1" for template-instantiated flows, and those ids persist forever unless the node
@@ -878,6 +879,48 @@ async function executeContentActions(
         ).bind(
           crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
           JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
+          wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
+        ).run();
+      }
+    } else if (action.type === "youtubeCondition") {
+      // 同步执行：videos.list 是一次几百毫秒的读调用，不像 videoCondition 的人脸检测需要
+      // 拉视频跑容器，所以不进队列、不写 content_flow_pending。
+      const nodeId = action.nodeId as string;
+      const conditions = ((graph.nodes.find((n) => n.id === nodeId)?.data?.conditions) as
+        { field: string; operator: string; value: string }[] | undefined) || [];
+      const { url, body } = youtubeConditionRequest({ env, contentId, flowId, payload });
+
+      let resp: VideoStatsResponse;
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+          body,
+        });
+        resp = res.ok
+          ? (await res.json().catch(() => ({ ok: false, reason: "youtube_api_error: malformed response" })) as VideoStatsResponse)
+          : { ok: false, reason: `youtube_api_error: link returned ${res.status}` };
+      } catch (e) {
+        resp = { ok: false, reason: `youtube_api_error: ${String(e)}` };
+      }
+
+      const outcome = resolveYouTubeCondition(conditions, payload, resp);
+      console.log(JSON.stringify({ event: "content_condition_youtube", contentId, flowId: flowId || null, nodeId, branch: outcome.branch, ok: resp.ok }));
+
+      const resumed = resumeFromNode(graph, nodeId, outcome.payload, outcome.branch, outcome.failureReason);
+      if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, outcome.payload);
+      if (resumed.actions.length > 0) {
+        const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, outcome.payload, flowId);
+        rateLimited.push(...nested.rateLimited);
+      }
+      for (const wait of resumed.pendingWaits) {
+        const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
+        await env.FLOW_DB.prepare(
+          `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
+          JSON.stringify({ ...outcome.payload, channel_id: channelId }), executeAt, new Date().toISOString(),
           wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
         ).run();
       }

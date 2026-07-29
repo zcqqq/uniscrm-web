@@ -104,12 +104,19 @@ function EditorToolbar() {
         size="sm"
         onClick={async () => {
           const { nodes, edges } = useFlowEditor.getState();
-          const { valid, orphanNodeIds } = validateFlowGraph(nodes, edges);
+          const { valid, orphanNodeIds, misplacedNodeIds } = validateFlowGraph(nodes, edges);
           // Always resolve against the current graph first, so a second Publish click
           // after a partial fix doesn't compound a stale highlight from the first click.
-          useFlowEditor.getState().setErrorNodeIds(orphanNodeIds);
+          useFlowEditor.getState().setErrorNodeIds([...orphanNodeIds, ...misplacedNodeIds]);
           if (!valid) {
-            toast({ title: `${orphanNodeIds.length} 个节点未连接，无法发布`, variant: "destructive" });
+            // 两类错误的修法完全不同（连线 vs 换 trigger），文案必须分开，否则用户会对着
+            // 一个连得好好的节点找"哪里没连上"。孤儿优先——它更常见也更基础。
+            toast({
+              title: orphanNodeIds.length > 0
+                ? `${orphanNodeIds.length} 个节点未连接，无法发布`
+                : `YouTube Condition 需要 YouTube Trigger 才能工作，无法发布`,
+              variant: "destructive",
+            });
             return;
           }
           await handleSave();

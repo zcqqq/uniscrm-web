@@ -8,7 +8,9 @@ export function pacificDateKey(now: Date = new Date()): string {
   return now.toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 }
 
-export async function recordYouTubeWriteQuota(env: Env, units = 50): Promise<void> {
+// units 必填、无默认值：读调用是 1 unit，写调用是 50。一个 50 的默认值用在读调用上
+// 会把记账放大 50 倍，静默地把阈值告警变成噪音。
+export async function recordYouTubeQuota(env: Env, units: number): Promise<void> {
   const date = pacificDateKey();
   const counterKey = `yt_quota:${date}`;
   const prev = Number((await env.KV.get(counterKey)) ?? "0");

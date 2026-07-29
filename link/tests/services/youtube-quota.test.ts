@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { recordYouTubeWriteQuota, pacificDateKey } from "../../src/services/youtube-quota";
+import { recordYouTubeQuota, pacificDateKey } from "../../src/services/youtube-quota";
 
 function makeKV(initial: Record<string, string> = {}) {
   const store = { ...initial };
@@ -20,7 +20,7 @@ describe("youtube-quota", () => {
   it("increments the daily counter by 50", async () => {
     const KV = makeKV();
     const env = { KV } as any;
-    await recordYouTubeWriteQuota(env);
+    await recordYouTubeQuota(env, 50);
     const key = `yt_quota:${pacificDateKey()}`;
     expect(Number(KV._store[key])).toBe(50);
   });
@@ -30,10 +30,10 @@ describe("youtube-quota", () => {
     const KV = makeKV({ [key]: "7980" });
     const env = { KV } as any;
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    await recordYouTubeWriteQuota(env); // 7980 -> 8030, crosses 8000
+    await recordYouTubeQuota(env, 50); // 7980 -> 8030, crosses 8000
     expect(errSpy).toHaveBeenCalledTimes(1);
     // second crossing does not re-alert (flag set)
-    await recordYouTubeWriteQuota(env);
+    await recordYouTubeQuota(env, 50);
     expect(errSpy).toHaveBeenCalledTimes(1);
   });
 });

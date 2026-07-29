@@ -8,8 +8,8 @@ vi.mock("../../src/services/youtube-token", () => ({
 const rateVideo = vi.fn();
 const insertPlaylistItem = vi.fn();
 vi.mock("../../src/services/youtube-actions", () => ({ rateVideo, insertPlaylistItem, nextPacificMidnightISO: () => "2026-07-22T07:00:00.000Z" }));
-const recordYouTubeWriteQuota = vi.fn(async () => {});
-vi.mock("../../src/services/youtube-quota", () => ({ recordYouTubeWriteQuota, pacificDateKey: () => "2026-07-21" }));
+const recordYouTubeQuota = vi.fn(async () => {});
+vi.mock("../../src/services/youtube-quota", () => ({ recordYouTubeQuota, pacificDateKey: () => "2026-07-21" }));
 
 function makeEnv() {
   return {
@@ -41,14 +41,14 @@ describe("POST /internal/youtube/rate", () => {
     rateVideo.mockResolvedValue({ ok: true });
     const res = await callRate(makeEnv(), { channelId: "ch", contentId: "c", videoId: "v" });
     expect(await res.json()).toEqual({ ok: true });
-    expect(recordYouTubeWriteQuota).toHaveBeenCalled();
+    expect(recordYouTubeQuota).toHaveBeenCalled();
   });
 
   it("propagates rateLimited without recording quota", async () => {
     rateVideo.mockResolvedValue({ ok: false, rateLimited: true, rateLimitReset: "2026-07-22T07:00:00.000Z" });
     const res = await callRate(makeEnv(), { channelId: "ch", contentId: "c", videoId: "v" });
     expect(await res.json()).toEqual({ ok: false, rateLimited: true, rateLimitReset: "2026-07-22T07:00:00.000Z" });
-    expect(recordYouTubeWriteQuota).not.toHaveBeenCalled();
+    expect(recordYouTubeQuota).not.toHaveBeenCalled();
   });
 
   it("retries once after unauthorized", async () => {
@@ -66,14 +66,14 @@ describe("POST /internal/youtube/playlist-insert", () => {
     insertPlaylistItem.mockResolvedValue({ ok: true });
     const res = await callPlaylistInsert(makeEnv(), { channelId: "ch", contentId: "c", videoId: "v", playlistId: "pl" });
     expect(await res.json()).toEqual({ ok: true });
-    expect(recordYouTubeWriteQuota).toHaveBeenCalled();
+    expect(recordYouTubeQuota).toHaveBeenCalled();
   });
 
   it("propagates rateLimited without recording quota", async () => {
     insertPlaylistItem.mockResolvedValue({ ok: false, rateLimited: true, rateLimitReset: "2026-07-22T07:00:00.000Z" });
     const res = await callPlaylistInsert(makeEnv(), { channelId: "ch", contentId: "c", videoId: "v", playlistId: "pl" });
     expect(await res.json()).toEqual({ ok: false, rateLimited: true, rateLimitReset: "2026-07-22T07:00:00.000Z" });
-    expect(recordYouTubeWriteQuota).not.toHaveBeenCalled();
+    expect(recordYouTubeQuota).not.toHaveBeenCalled();
   });
 
   it("retries once after unauthorized", async () => {

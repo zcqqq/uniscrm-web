@@ -13,7 +13,7 @@ import { TikTokTokenService } from "./services/tiktok-token";
 import { initPhotoPost, initVideoPost } from "./services/tiktok-publish";
 import { YouTubeTokenService } from "./services/youtube-token";
 import { rateVideo, insertPlaylistItem } from "./services/youtube-actions";
-import { recordYouTubeWriteQuota } from "./services/youtube-quota";
+import { recordYouTubeQuota } from "./services/youtube-quota";
 import { fetchYouTubeVideoProps } from "./services/pollers/youtube-content";
 
 const ACTION_TO_EVENT_TYPE: Record<string, string> = {
@@ -464,7 +464,7 @@ export function internalRoutes() {
         return c.json({ ok: false, reason: "channel_not_authorized: token refresh failed" });
       }
     }
-    if (result.ok) await recordYouTubeWriteQuota(c.env);
+    if (result.ok) await recordYouTubeQuota(c.env, 50);
 
     console.log(JSON.stringify({ event: "youtube_rate", contentId, channelId, videoId, flowId: flowId || null, ok: result.ok, rateLimited: !!result.rateLimited }));
     if (result.rateLimited) return c.json({ ok: false, rateLimited: true, rateLimitReset: result.rateLimitReset });
@@ -501,7 +501,7 @@ export function internalRoutes() {
         return c.json({ ok: false, reason: "channel_not_authorized: token refresh failed" });
       }
     }
-    if (result.ok) await recordYouTubeWriteQuota(c.env);
+    if (result.ok) await recordYouTubeQuota(c.env, 50);
 
     console.log(JSON.stringify({ event: "youtube_playlist_insert", contentId, channelId, videoId, playlistId, flowId: flowId || null, ok: result.ok, rateLimited: !!result.rateLimited }));
     if (result.rateLimited) return c.json({ ok: false, rateLimited: true, rateLimitReset: result.rateLimitReset });

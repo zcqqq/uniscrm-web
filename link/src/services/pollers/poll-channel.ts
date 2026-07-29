@@ -50,8 +50,6 @@ export async function pollChannelOnce(env: Env, channelType: ChannelType, channe
     await pollXChannel(env, row);
   } else if (channelType === "TIKTOK") {
     await pollTikTokChannel(env, row);
-  } else if (channelType === "YOUTUBE_ACCOUNT") {
-    await pollYouTubeChannel(env, row);
   }
 }
 
@@ -200,11 +198,14 @@ async function pollTikTokChannel(env: Env, row: { id: string; config: string; te
 //    进入长间隔的增量节奏。没有这一条，一个 400 订阅的账号每天只推进 ~150 个，要 8 天
 //    才跑完一轮完整同步，而取消订阅的 diff 只在跑完的那一轮才执行。
 // tenantDb 解析与 token 刷新都在 syncYouTubeSubscriptionUsers 里，这里只做调度判断。
-async function pollYouTubeChannel(env: Env, row: { id: string; config: string; tenant_id: number | null }): Promise<void> {
+// 不再挂在 pollChannelOnce/handlePolling 的 X/TikTok 队列下面：那条队列有 50s 总预算，
+// YouTube 排在最后必然被饿死（已在 dev 上实测复现）。改由 cron.ts 的
+// handleYouTubeSubscriptions 独立调度、独立预算，直接调用本函数。
+export async function pollYouTubeChannel(env: Env, row: { id: string; config: string; tenant_id: number | null }): Promise<void> {
   if (!row.tenant_id) return;
 
-  // 这个 SELECT 必须自己兜住异常：pollChannelOnce 由 cron 的 handlePolling 在一个循环里
-  // 逐个租户调用，一次 D1 报错逃出去会中断循环、连带跳过后面所有租户的轮询。
+  // 这个 SELECT 必须自己兜住异常：handleYouTubeSubscriptions 在一个循环里逐个账号调用，
+  // 一次 D1 报错逃出去会中断循环、连带跳过后面所有账号的轮询。
   let state: { cursor: string | null; last_polled_at: string | null } | null = null;
   try {
     state = await env.LINK_DB

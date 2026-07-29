@@ -11,7 +11,7 @@ import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { TikTokTokenService } from "./services/tiktok-token";
-import { pollChannelOnce, pollXListPosts } from "./services/pollers/poll-channel";
+import { pollChannelOnce, pollXListPosts, pollYouTubeChannel } from "./services/pollers/poll-channel";
 import { subscribeWebSub } from "./services/youtube-api";
 import { clearChannelFrozen } from "./services/x-freeze";
 
@@ -29,6 +29,7 @@ export async function handleCron(env: Env): Promise<void> {
     handleTokenRefresh(env),
     handlePolling(env),
     handleYouTubeRenewal(env),
+    handleYouTubeSubscriptions(env),
   ]);
 }
 
@@ -210,10 +211,17 @@ export async function handlePolling(env: Env): Promise<void> {
   const runDeadline = Date.now() + TOTAL_BUDGET_MS;
 
   const rows = await env.LINK_DB
-    // json_extract is NULL for TikTok and YOUTUBE_ACCOUNT rows too (they never carry the key),
-    // so the freeze filter narrows X channels only; it's a no-op (always true) for the others.
-    .prepare("SELECT id, channel_type FROM channels WHERE channel_type IN ('X', 'TIKTOK', 'YOUTUBE_ACCOUNT') AND is_active = 1 AND json_extract(config, '$.x_frozen_at') IS NULL")
-    .all<{ id: string; channel_type: "X" | "TIKTOK" | "YOUTUBE_ACCOUNT" }>();
+    // json_extract is NULL for TikTok rows too (they never carry the key), so the freeze
+    // filter narrows X channels only; it's a no-op (always true) for TikTok.
+    // YOUTUBE_ACCOUNT is deliberately NOT in this list: it used to ride this same 50s-budget
+    // queue and, having no ORDER BY, was appended last on every single run — so it was starved
+    // every time the queue filled up on X/TikTok work (confirmed on dev: polling_cron_started
+    // logged 4 candidates, polling_cron_budget_exhausted always fired on the YouTube row, and
+    // channel_poll_state never gained a poller_name='subscriptions' row). It has its own
+    // 23-hour self-throttle and a handful of calls per run, so it gets its own top-level
+    // handler (handleYouTubeSubscriptions) instead of sharing this rationed budget.
+    .prepare("SELECT id, channel_type FROM channels WHERE channel_type IN ('X', 'TIKTOK') AND is_active = 1 AND json_extract(config, '$.x_frozen_at') IS NULL")
+    .all<{ id: string; channel_type: "X" | "TIKTOK" }>();
 
   console.log(JSON.stringify({ event: "polling_cron_started", candidateChannels: rows.results.length }));
 
@@ -289,6 +297,40 @@ async function handleYouTubeRenewal(env: Env): Promise<void> {
       await subscribeWebSub(`${env.LINK_URL}/youtube/websub/${accountChannelId}/${youtubeChannelId}`, youtubeChannelId);
     } catch (e) {
       console.error(JSON.stringify({ event: "youtube_resubscribe_error", account_channel_id: accountChannelId, subscription_channel_id: youtubeChannelId, error: String(e) }));
+    }
+  }
+}
+
+// YouTube 订阅同步独立成一个 handler，不再挤在 handlePolling 的 50s 预算队列里 —— 那条队列
+// 服务 X/TikTok 每 55 分钟一次的重负载分页拉取，YouTube 这边是每账号每 23 小时一次、几个
+// API 调用就完事、且自带节流（channel_poll_state.last_polled_at），排在队尾必然被饿死
+// （dev 上已实测复现：polling_cron_budget_exhausted 每次都精确打在 YouTube 那一行）。
+// 预算给得比 handlePolling 小得多：YouTube 账号数量级远小于 X/TikTok，且每次真正执行同步的
+// 只是过了 23 小时节流的那一小撮；这里只是防止某个账号的走查异常拖慢，卡住同一次 cron 里
+// 其它独立 handler 的调度节奏。
+const YOUTUBE_SUBSCRIPTIONS_BUDGET_MS = 20_000;
+
+export async function handleYouTubeSubscriptions(env: Env): Promise<void> {
+  const deadline = Date.now() + YOUTUBE_SUBSCRIPTIONS_BUDGET_MS;
+
+  const rows = await env.LINK_DB
+    .prepare("SELECT id, config, tenant_id FROM channels WHERE channel_type = 'YOUTUBE_ACCOUNT' AND is_active = 1")
+    .all<{ id: string; config: string; tenant_id: number | null }>();
+
+  console.log(JSON.stringify({ event: "youtube_subscriptions_cron_started", candidateChannels: rows.results.length }));
+
+  for (const row of rows.results) {
+    if (Date.now() >= deadline) {
+      console.log(JSON.stringify({ event: "youtube_subscriptions_cron_budget_exhausted", channel_id: row.id }));
+      break;
+    }
+    try {
+      await pollYouTubeChannel(env, row);
+    } catch (e) {
+      // Per-iteration guard, deliberately mirroring handlePolling's loop: one account's
+      // failure must not abort the loop and starve every account queued behind it — that
+      // silent starvation is exactly the bug this handler exists to avoid reintroducing.
+      console.error(JSON.stringify({ event: "youtube_subscriptions_channel_error", channel_id: row.id, error: String(e) }));
     }
   }
 }

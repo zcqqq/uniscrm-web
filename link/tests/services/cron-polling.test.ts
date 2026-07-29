@@ -26,7 +26,8 @@ describe("handlePolling channel selection", () => {
     await handlePolling(env);
 
     const call = linkDb.prepare.mock.calls[0][0] as string;
-    expect(call).toContain("channel_type IN ('X', 'TIKTOK', 'YOUTUBE_ACCOUNT')");
+    expect(call).toContain("channel_type IN ('X', 'TIKTOK')");
+    expect(call).not.toContain("YOUTUBE_ACCOUNT");
     expect(call).toContain("is_active = 1");
 
     expect(pollChannelOnceMock).toHaveBeenCalledTimes(2);
@@ -72,7 +73,7 @@ describe("handlePolling channel selection", () => {
     const channelRows = [
       { id: "chan-x-fails", channel_type: "X" },
       { id: "chan-x-after", channel_type: "X" },
-      { id: "chan-youtube-after", channel_type: "YOUTUBE_ACCOUNT" },
+      { id: "chan-tt-after", channel_type: "TIKTOK" },
     ];
     const linkDb = {
       prepare: vi.fn().mockReturnValue({ all: vi.fn().mockResolvedValue({ results: channelRows }) }),
@@ -84,7 +85,7 @@ describe("handlePolling channel selection", () => {
     expect(pollChannelOnceMock).toHaveBeenCalledTimes(3);
     expect(pollChannelOnceMock).toHaveBeenNthCalledWith(1, env, "X", "chan-x-fails");
     expect(pollChannelOnceMock).toHaveBeenNthCalledWith(2, env, "X", "chan-x-after");
-    expect(pollChannelOnceMock).toHaveBeenNthCalledWith(3, env, "YOUTUBE_ACCOUNT", "chan-youtube-after");
+    expect(pollChannelOnceMock).toHaveBeenNthCalledWith(3, env, "TIKTOK", "chan-tt-after");
 
     const loggedError = consoleErrorSpy.mock.calls
       .map((call) => call[0])

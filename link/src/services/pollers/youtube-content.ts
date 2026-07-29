@@ -89,20 +89,6 @@ export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: str
   }
   const props = video.props;
 
-  // 作者（频道）字段：与内容字段一起进 flow payload。多打一次 channels.list（1 unit）。
-  // 失败不阻断——整条跳过等于永久丢失这个视频（recordTriggerContentSeen 下面就把它记成
-  // "见过"，WebSub 只推一次，配额恢复也不会补）。拿不到就不带 user.*：引用作者字段的
-  // 条件按 fail-closed 不通过，没配作者条件的 flow 完全不受影响。
-  let authorProps: Record<string, unknown> = {};
-  try {
-    authorProps = await fetchYouTubeAuthorProps(ctx.apiKey, video.authorChannelId);
-  } catch (e) {
-    console.log(JSON.stringify({ event: "youtube_author_fetch_failed", account_channel_id: ctx.accountChannelId, subscription_channel_id: ctx.subscriptionChannelId, video_id: videoId, author_channel_id: video.authorChannelId, error: String(e) }));
-  }
-  if (Object.keys(authorProps).length === 0) {
-    console.log(JSON.stringify({ event: "youtube_author_fetch_empty", account_channel_id: ctx.accountChannelId, subscription_channel_id: ctx.subscriptionChannelId, video_id: videoId, author_channel_id: video.authorChannelId }));
-  }
-
   const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue, ctx.entityState);
   const sourceContentId = String(props.source_content_id ?? "");
   const isNew = await contentService.recordTriggerContentSeen(ctx.accountChannelId, ctx.subscriptionChannelId, sourceContentId);
@@ -110,6 +96,25 @@ export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: str
     // contentPropsFilter 只判内容字段（duration <= 600），作者字段不参与——它是 metadata
     // 声明的系统级限制，与用户在节点上配的条件是两回事。
     if (passesPropsFilter(YOUTUBE_METADATA.contentPropsFilter, props)) {
+      // 作者（频道）字段：与内容字段一起进 flow payload。多打一次 channels.list（1 unit）。
+      // 取在去重与 contentPropsFilter **之后**：YOUTUBE_API_KEY 是全平台共享的
+      // 10000 units/天免费配额，WebSub 重推（作者改了标题就会再推一次）与被时长过滤掉的
+      // 长视频都不该为一份根本不会发出去的 payload 烧掉这 1 unit。配额烧穿的代价不只是
+      // 浪费：fetchVideoDetails 一旦抛错，ingest 在 recordTriggerContentSeen 之前就中断，
+      // 视频没被记成"见过"，而 WebSub 只推一次——那个视频就永久丢了。
+      // 失败不阻断——整条跳过同样等于永久丢失这个视频（上面 recordTriggerContentSeen 已经
+      // 把它记成"见过"）。拿不到就不带 user.*：引用作者字段的条件按 fail-closed 不通过，
+      // 没配作者条件的 flow 完全不受影响。
+      let authorProps: Record<string, unknown> = {};
+      try {
+        authorProps = await fetchYouTubeAuthorProps(ctx.apiKey, video.authorChannelId);
+      } catch (e) {
+        console.log(JSON.stringify({ event: "youtube_author_fetch_failed", account_channel_id: ctx.accountChannelId, subscription_channel_id: ctx.subscriptionChannelId, video_id: videoId, author_channel_id: video.authorChannelId, error: String(e) }));
+      }
+      if (Object.keys(authorProps).length === 0) {
+        console.log(JSON.stringify({ event: "youtube_author_fetch_empty", account_channel_id: ctx.accountChannelId, subscription_channel_id: ctx.subscriptionChannelId, video_id: videoId, author_channel_id: video.authorChannelId }));
+      }
+
       await contentService.emitContentTriggerEvent(ctx.accountChannelId, "YOUTUBE", "subscriptionChannelId", ctx.subscriptionChannelId, { ...props, ...authorProps });
     } else {
       console.log(JSON.stringify({ event: "youtube_content_skipped_filter", account_channel_id: ctx.accountChannelId, subscription_channel_id: ctx.subscriptionChannelId, video_id: videoId, duration: props.duration }));

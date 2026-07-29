@@ -1,4 +1,5 @@
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../nodeTypeRegistry";
+import { USER_PROP_PREFIX } from "../../metadata/dataTypes";
 
 export interface FlowNode {
   id: string;
@@ -134,13 +135,32 @@ function evaluateExpr(expr: string): number {
   return parseExprInner();
 }
 
-function resolveStringValue(value: string, payload: Record<string, unknown>): string {
-  if (!value.includes("$")) return value;
-  return value.replace(PROP_REF_RE, (_, ref: string) => {
+interface ResolvedString {
+  text: string;
+  // 值里出现了 $user.x，但 payload 里没有这个键。数值侧靠 NaN → null 天然 fail-closed，
+  // 字符串侧没有这样的哨兵值：取不到只能替换成空串，而 "任何字符串".includes("") 恒为
+  // true、!= 也几乎恒为 true——作者数据取不到反而让条件**通过**，与 fail-closed 相反。
+  // 例：X List Posts 的作者被封时 includes.users[] 里没有他，payload 完全不带 user.*，
+  // content_text contains $user.username 就会命中，下游自动转发/私信照跑。
+  // 所以把"有未解析的 user. 引用"这件事显式带回 evaluateCondition 短路成 false。
+  //
+  // 只对 user. 前缀成立：$event.x 与裸 $x 取不到时替换成空串是存量已发布 flow 的既有语义，
+  // 这个分支不动它们。
+  missingUserRef: boolean;
+}
+
+function resolveStringValue(value: string, payload: Record<string, unknown>): ResolvedString {
+  if (!value.includes("$")) return { text: value, missingUserRef: false };
+  let missingUserRef = false;
+  const text = value.replace(PROP_REF_RE, (_, ref: string) => {
     const v = lookupPropRef(ref, payload);
-    if (v === undefined || v === null) return "";
+    if (v === undefined || v === null) {
+      if (ref.startsWith(USER_PROP_PREFIX)) missingUserRef = true;
+      return "";
+    }
     return String(v);
   });
+  return { text, missingUserRef };
 }
 
 export function evaluateCondition(
@@ -153,7 +173,10 @@ export function evaluateCondition(
   if (actual === undefined || actual === null) return false;
 
   const actualStr = String(actual);
-  const resolved = resolveStringValue(value, payload);
+  const { text: resolved, missingUserRef } = resolveStringValue(value, payload);
+  // 作者字段取不到 → 一律不通过，与数值侧 resolveValue 的 NaN → null → false 对齐。
+  // 放在算子分支之前，所有算子（含 contains / == / !=）统一 fail-closed。
+  if (missingUserRef) return false;
 
   if (resolved.includes(",") && !value.includes("$")) {
     const values = resolved.split(",");

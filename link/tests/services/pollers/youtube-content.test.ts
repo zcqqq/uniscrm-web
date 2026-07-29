@@ -277,6 +277,43 @@ describe("ingestYouTubeVideo — 作者字段", () => {
     expect(payload["user.followers_count"]).toBe("1000000");
   });
 
+  // YOUTUBE_API_KEY 是全平台共享的 10000 units/天免费配额。配额烧穿不只是浪费：
+  // fetchVideoDetails 一旦抛错，ingest 会在 recordTriggerContentSeen 之前中断，视频没被
+  // 记成"见过"，而 WebSub 只推一次——那个视频永久丢失。所以但凡这份 payload 不会发出去，
+  // 就一个 unit 都不该花在 channels.list 上。
+  it("视频已见过（WebSub 重推）时不打 channels.list", async () => {
+    vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue(VIDEO_ITEM);
+    const channelSpy = vi.spyOn(youtubeApi, "fetchChannelDetails").mockResolvedValue(CHANNEL_ITEM);
+
+    const entityState = createMockEntityState();
+    entityState.markSeen.mockResolvedValue(false);
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+
+    await ingestYouTubeVideo(baseCtx({ entityState, flowQueue }) as any, "vid1");
+
+    expect(flowQueue.send).not.toHaveBeenCalled();
+    expect(channelSpy).not.toHaveBeenCalled();
+  });
+
+  it("被 contentPropsFilter 挡掉（超时长）时不打 channels.list", async () => {
+    vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
+      ...VIDEO_ITEM,
+      id: "vid-long",
+      contentDetails: { duration: `PT${DURATION_LIMIT + 1}S` },
+    });
+    const channelSpy = vi.spyOn(youtubeApi, "fetchChannelDetails").mockResolvedValue(CHANNEL_ITEM);
+
+    const entityState = createMockEntityState();
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+
+    await ingestYouTubeVideo(baseCtx({ entityState, flowQueue }) as any, "vid-long");
+
+    // 去重仍要记（这个视频确实处理过了），只是不为它花作者那 1 unit。
+    expect(entityState.markSeen).toHaveBeenCalledTimes(1);
+    expect(flowQueue.send).not.toHaveBeenCalled();
+    expect(channelSpy).not.toHaveBeenCalled();
+  });
+
   it("channels.list 失败时照常发内容，只是不带 user.*", async () => {
     // 整条跳过是错的：recordTriggerContentSeen 已经把它记成"见过"，WebSub 只推一次，
     // 配额恢复也不会补——这个视频会永久丢失。

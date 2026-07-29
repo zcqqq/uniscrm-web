@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeInsertPrefix } from "../../../shared/frontend/components/SelectPropsValue";
+import { computeInsertPrefix, computeSelectedDisplay } from "../../../shared/frontend/components/SelectPropsValue";
 
 // Deviation from the original brief's test approach: it called for rendering SelectPropsValue
 // with @testing-library/react and clicking an option. That package isn't installed anywhere in
@@ -27,5 +27,29 @@ describe("SelectPropsValue insert 变体的 $ 前缀", () => {
   it("content 分组的裸 id 只加 $", () => {
     const opt = { id: "like_count", label: "Likes", group: "content" as const };
     expect(computeInsertPrefix(opt) + opt.id).toBe("$like_count");
+  });
+});
+
+// 同上，纯函数直接断言，不引 @testing-library/react（本仓库没装，workerd 里也没有 document）。
+describe("SelectPropsValue 收起态的分组标注", () => {
+  it("同名的作者字段与内容字段收起后必须能分辨", () => {
+    // 这两条条件的含义完全不同：这条推文被点了多少赞 vs 作者一共点过多少赞。
+    const authorLikes = { id: "user.like_count", label: "Likes", group: "user" as const };
+    const contentLikes = { id: "like_count", label: "Likes", group: "content" as const };
+    expect(computeSelectedDisplay(authorLikes)).not.toBe(computeSelectedDisplay(contentLikes));
+  });
+
+  it("限定名带上分组名", () => {
+    expect(computeSelectedDisplay({ id: "user.followers_count", label: "Followers", group: "user" as const }))
+      .toBe("User · Followers");
+  });
+
+  it("裸 id 不变（存量 user flow 的观感不动）", () => {
+    expect(computeSelectedDisplay({ id: "followers_count", label: "Followers", group: "user" as const }))
+      .toBe("Followers");
+    expect(computeSelectedDisplay({ id: "like_count", label: "Likes", group: "content" as const }))
+      .toBe("Likes");
+    expect(computeSelectedDisplay({ id: "event_time", label: "Event Time", group: "event" as const }))
+      .toBe("Event Time");
   });
 });

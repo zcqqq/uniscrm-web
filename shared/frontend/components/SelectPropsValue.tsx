@@ -60,6 +60,24 @@ export function computeInsertPrefix(opt: Pick<PropOption, "id" | "group">): stri
     : opt.group === "event" ? "$event." : opt.group === "user" ? "$user." : "$";
 }
 
+const GROUP_LABELS: Record<PropOption["group"], string> = {
+  event: "Event",
+  user: "User",
+  content: "Content",
+};
+
+// 收起态显示什么。打开的下拉里选项按 CONTENT PROPS / USER PROPS 分组，选完就只剩 label：
+// user.like_count 与 like_count 长得一模一样，而这两个含义完全不同（这条推文被点了多少赞
+// vs 作者一共点过多少赞；这个视频的播放量 vs 频道历史总播放量）——分清它们正是 user.
+// 命名空间存在的全部理由，收起后分不清等于白设。
+//
+// 只对**限定名**（id 带 "."，即 content flow 的作者字段）加分组标注：裸 id 在同一个列表里
+// 不会有第二个同名项，加了只是噪音，也会动到存量 user flow 的既有观感。
+// 与 computeInsertPrefix 同理导出成纯函数，好在无 DOM 的 workerd 测试环境里直接断言。
+export function computeSelectedDisplay(opt: Pick<PropOption, "id" | "label" | "group">): string {
+  return opt.id.includes(".") ? `${GROUP_LABELS[opt.group]} · ${opt.label}` : opt.label;
+}
+
 export function SelectPropsValue({ value, onChange, options, placeholder = "Select field...", variant = "select", open: externalOpen, onOpenChange }: SelectPropsProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -116,7 +134,7 @@ export function SelectPropsValue({ value, onChange, options, placeholder = "Sele
           className="w-full flex items-center justify-between gap-1 text-xs border border-border rounded-md px-2 py-1.5 bg-background text-foreground hover:bg-accent transition-colors cursor-pointer text-left"
         >
           <span className={selected ? "text-foreground" : "text-muted-foreground"}>
-            {selected ? selected.label : placeholder}
+            {selected ? computeSelectedDisplay(selected) : placeholder}
           </span>
           <svg className="w-3 h-3 text-muted-foreground shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />

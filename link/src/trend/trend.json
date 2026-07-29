@@ -1,4 +1,7 @@
 [
+    {"TWITTER":{
+        "locations": ["global", "china"]
+    }},
     {"TIKTOK":{
         "locations": ["All regions", "United States"],
         "categories": ["Culture, Education & Technology"]

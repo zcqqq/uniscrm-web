@@ -56,6 +56,41 @@ describe("fetchSubscribedChannelIds", () => {
     const r = await fetchSubscribedChannelIds("tok", Date.now() + 60_000);
     expect(r.ids).toEqual(["UC9"]);
   });
+
+  // fetch 本身 reject（网络失败）不能让异常逃逸出去 —— 调用方（poller）需要
+  // 已收集的部分 id 和 complete:false 同时到手，抛异常会让它两手空空。
+  it("fetch 中途 reject 时 complete = false，不抛异常，已收集的 id 照常返回", async () => {
+    fetchMock
+      .mockResolvedValueOnce(subsPage(["UC1"], "p2"))
+      .mockRejectedValueOnce(new Error("network down"));
+
+    const r = await fetchSubscribedChannelIds("tok", Date.now() + 60_000);
+
+    expect(r.ids).toEqual(["UC1"]);
+    expect(r.complete).toBe(false);
+  });
+
+  // 200 但 body 没有 items 字段：响应体畸形，绝不能当成「这一页恰好没有订阅」，
+  // 否则若这恰好发生在最后一页，会让整轮被误判为 complete:true 的短列表。
+  it("200 但 body 没有 items 字段时 complete = false", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ nextPageToken: undefined }), { status: 200 }));
+
+    const r = await fetchSubscribedChannelIds("tok", Date.now() + 60_000);
+
+    expect(r.ids).toEqual([]);
+    expect(r.complete).toBe(false);
+  });
+
+  // 与上一条对照：items: [] 且没有 nextPageToken 是真实的「零订阅」，必须仍然
+  // complete:true —— 修复畸形 body 的判断不能连带把这个合法场景也判成不完整。
+  it("items: [] 且无 nextPageToken 时仍是合法空列表，complete = true", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+
+    const r = await fetchSubscribedChannelIds("tok", Date.now() + 60_000);
+
+    expect(r.ids).toEqual([]);
+    expect(r.complete).toBe(true);
+  });
 });
 
 describe("fetchChannelDetails", () => {

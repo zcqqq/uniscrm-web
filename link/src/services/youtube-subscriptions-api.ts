@@ -48,21 +48,43 @@ export async function fetchSubscribedChannelIds(
     apiUrl.searchParams.set("maxResults", "50");
     if (pageToken) apiUrl.searchParams.set("pageToken", pageToken);
 
-    const res = await fetch(apiUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
-    calls++;
-    if (!res.ok) {
+    let body: {
+      items?: { snippet?: { resourceId?: { channelId?: string } } }[];
+      nextPageToken?: string;
+    };
+    try {
+      const res = await fetch(apiUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+      calls++;
+      if (!res.ok) {
+        console.error(JSON.stringify({
+          event: "youtube_subscriptions_walk_error",
+          status: res.status, body: await res.text().catch(() => ""), collected: ids.length,
+        }));
+        return { ids, complete: false, calls };
+      }
+      body = await res.json();
+    } catch (err) {
+      // 网络失败 / 响应体不是合法 JSON：吞掉异常，把已收集的 ids 和 complete:false
+      // 一起还给调用方 —— 抛出异常会让调用方（Task 4 的 poller）既拿不到部分结果，
+      // 也来不及记录本轮的轮询状态。
       console.error(JSON.stringify({
-        event: "youtube_subscriptions_walk_error",
-        status: res.status, body: await res.text().catch(() => ""), collected: ids.length,
+        event: "youtube_subscriptions_walk_exception",
+        message: err instanceof Error ? err.message : String(err), collected: ids.length,
       }));
       return { ids, complete: false, calls };
     }
 
-    const body = (await res.json()) as {
-      items?: { snippet?: { resourceId?: { channelId?: string } } }[];
-      nextPageToken?: string;
-    };
-    for (const item of body.items || []) {
+    // 200 但 items 不是数组：响应体畸形，不能当成「这一页没有订阅」。真正的空页
+    // （items: [] 且没有 nextPageToken）必须仍然 complete:true，二者不能混淆。
+    if (!Array.isArray(body.items)) {
+      console.error(JSON.stringify({
+        event: "youtube_subscriptions_walk_malformed_body",
+        collected: ids.length,
+      }));
+      return { ids, complete: false, calls };
+    }
+
+    for (const item of body.items) {
       const channelId = item.snippet?.resourceId?.channelId;
       if (channelId) ids.push(channelId);
     }

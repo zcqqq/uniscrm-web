@@ -28,14 +28,22 @@ const USER_VALUE_REF_RE = new RegExp(`\\$(${escapeRegExp(USER_PROP_PREFIX)}\\w+)
 // flow 数量线性增长，绝大多数条件只看 view_count/like_count，白打就是白烧。
 // 两种引用形式都要覆盖：字段侧 cond.field 直接是限定名；值侧写在表达式里
 // （like_count > $user.followers_count * 0.01 —— 字段侧完全是内容字段）。
+//
+// 这个函数在 index.ts 里是在 try/fetch 之外调用的（构造请求体本身就先于 fetch），
+// 一个存量/AI 生成的 graph 完全可能带 conditions: [{ field: 5, ... }] 这种畸形值——
+// UI 的 select 不会产的形状，但 AI 生成的 graph 会。旧的 `c.field in payload` /
+// `payload[field]` 用法对非字符串是安全的，这里的 startsWith/regex.test 不是，
+// 抛出去会逃出 executeContentActions：队列消息整条重试，这一批里已经执行过的
+// action 全部重跑一遍（重复发帖/私信）。所以两侧都先 typeof 判断，绝不让畸形值
+// 升级成异常——判不出"需要作者字段"就是最坏情况，不是崩溃。
 export function conditionsNeedAuthor(
   conditions: { field: string; operator: string; value: string }[]
 ): boolean {
-  return (conditions || []).some(
-    (c) =>
-      c.field?.startsWith(USER_PROP_PREFIX) ||
-      new RegExp(USER_VALUE_REF_RE.source).test(String(c.value ?? ""))
-  );
+  return (conditions || []).some((c) => {
+    if (typeof c.field === "string" && c.field.startsWith(USER_PROP_PREFIX)) return true;
+    if (typeof c.value !== "string") return false;
+    return new RegExp(USER_VALUE_REF_RE.source).test(c.value);
+  });
 }
 
 // videoId 取自 payload.source_content_id，与 youtubeActionRequest 一致（index.ts）。

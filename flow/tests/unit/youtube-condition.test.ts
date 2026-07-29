@@ -8,9 +8,10 @@ describe("youtubeConditionRequest", () => {
       contentId: "c1",
       flowId: "f1",
       payload: { source_content_id: "vid123", view_count: "10" },
+      withAuthor: false,
     });
     expect(req.url).toBe("https://link/internal/youtube/video-stats");
-    expect(JSON.parse(req.body)).toEqual({ videoId: "vid123", contentId: "c1", flowId: "f1" });
+    expect(JSON.parse(req.body)).toEqual({ videoId: "vid123", contentId: "c1", flowId: "f1", withAuthor: false });
   });
 
   it("sends an empty videoId rather than 'undefined' when the payload has none", () => {
@@ -19,8 +20,9 @@ describe("youtubeConditionRequest", () => {
       contentId: "c1",
       flowId: null,
       payload: {},
+      withAuthor: false,
     });
-    expect(JSON.parse(req.body)).toEqual({ videoId: "", contentId: "c1", flowId: null });
+    expect(JSON.parse(req.body)).toEqual({ videoId: "", contentId: "c1", flowId: null, withAuthor: false });
   });
 });
 
@@ -206,6 +208,22 @@ describe("conditionsNeedAuthor", () => {
     expect(conditionsNeedAuthor([])).toBe(false);
     expect(conditionsNeedAuthor([{ field: "", operator: "==", value: "" }])).toBe(false);
   });
+
+  it("畸形 condition（field/value 非字符串）不抛异常，返回 false", () => {
+    // 这个函数在 index.ts 里是在 fetch 的 try/catch 之外调用的——AI 生成的 graph 完全
+    // 可能带非字符串的 field/value（UI 的 select 不会产这种形状，但这里不能假设）。
+    // 抛出去会逃出 executeContentActions，队列消息整条重试，这一批已执行过的 action
+    // 全部重跑一遍。
+    expect(() =>
+      conditionsNeedAuthor([{ field: 5 as unknown as string, operator: ">", value: "1000" }])
+    ).not.toThrow();
+    expect(conditionsNeedAuthor([{ field: 5 as unknown as string, operator: ">", value: "1000" }])).toBe(false);
+
+    expect(() =>
+      conditionsNeedAuthor([{ field: "like_count", operator: ">", value: 5 as unknown as string }])
+    ).not.toThrow();
+    expect(conditionsNeedAuthor([{ field: "like_count", operator: ">", value: 5 as unknown as string }])).toBe(false);
+  });
 });
 
 describe("youtubeConditionRequest — withAuthor", () => {
@@ -257,5 +275,23 @@ describe("resolveYouTubeCondition — 作者字段", () => {
     );
     expect(out.branch).toBe("failed");
     expect(out.failureReason).toBe("channel_unavailable");
+  });
+
+  it("值里引用的是内容字段（非 $user.x）而它从 props 消失时，不升级成 failed —— 这是刻意的范围边界", () => {
+    // 守卫只扫值表达式里的 $user.x 引用，不扫 $content_field 引用——这是本任务刻意划定的
+    // 范围（scope），不是遗漏。$view_count 这类值侧内容字段引用的陈旧值风险是既有行为，
+    // 早于这个 feature，改动会牵动既有条件语义，留给整支分支的最终评审处理。
+    // 这条测试钉住当前边界：以后有人想"顺手"把它也纳入或移出这个守卫，测试会提醒他这是
+    // 一个决定，不是可以随手改的细节。
+    const payload = { source_content_id: "v1", like_count: 10, view_count: 500 };
+    const resp = { ok: true, props: { like_count: 150 } }; // view_count 从 props 里消失了
+    const out = resolveYouTubeCondition(
+      [{ field: "like_count", operator: ">", value: "$view_count * 0.1" }],
+      payload,
+      resp
+    );
+    // like_count(150) > view_count(500，取自陈旧 payload) * 0.1(=50) → true，而不是 failed。
+    expect(out.branch).toBe("true");
+    expect(out.failureReason).toBeUndefined();
   });
 });

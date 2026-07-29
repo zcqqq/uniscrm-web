@@ -26,6 +26,10 @@ export async function handleCron(env: Env): Promise<void> {
 async function handleTrendAggregation(env: Env): Promise<void> {
   const sources: TrendSource[] = [];
 
+  // TWITTER is deliberately absent from trend.json right now: X froze the account that owns
+  // this app (2026-07-29) and /2/trends runs hourly on the app-only bearer regardless of any
+  // channel, so it would keep hitting X even with every X channel paused. Put the TWITTER entry
+  // back in trend.json once the freeze lifts — nothing else needs changing.
   const twitterConfig = getTwitterConfig();
   if (twitterConfig && env.X_BEARER_TOKEN) {
     sources.push(new TwitterTrendSource(env.X_BEARER_TOKEN));

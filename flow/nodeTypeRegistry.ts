@@ -250,6 +250,19 @@ ${CONTENT_YOUTUBE_ACTION_BULLETS}`,
    - Uses the upstream Video Action node's output video when one precedes it, otherwise the original. Exposes $content.face_ratio.
    - "failed" covers content with no video (image-only posts), a video longer than 600 seconds, and detection errors — never guess a result on failure.`,
   },
+  youtubeCondition: {
+    reactFlowType: "youtubeCondition",
+    label: "YouTube Condition",
+    description: "Re-check the trigger video's current stats",
+    domain: "content",
+    role: "condition",
+    generatable: true,
+    promptFragment: `youtubeCondition - re-fetches the trigger video's current stats from YouTube and branches on them, has "true"/"false"/"failed" branches
+   data: { conditions: [{ field: string, operator: string, value: string }] }
+   - Requires a youtubeContentTrigger in the same flow. Put a wait node before it to check the video some time after publication (e.g. wait 1 day, then check whether it passed 10000 views).
+   - Fields are the same content props youtubeContentTrigger filters on (view_count, like_count, title, duration, ...), re-read live rather than taken from the trigger-time snapshot.
+   - All conditions must pass (AND) for "true"; "failed" means the video is gone/private or the API errored — never guessed.`,
+  },
   // --- shared across both domains ---
   wait: {
     reactFlowType: "wait",
@@ -313,6 +326,6 @@ export const USER_FLOW_SIDEBAR_ORDER: string[] = [
 ];
 
 export const CONTENT_FLOW_SIDEBAR_ORDER: string[] = [
-  "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition",
+  "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition", "youtubeCondition",
   "wait", "timeCondition", "abSplit", "webhook",
 ];

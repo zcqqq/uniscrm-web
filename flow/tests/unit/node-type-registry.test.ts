@@ -218,9 +218,29 @@ describe("generatableKeysForDomain", () => {
   it("content domain: every domain:'content'/'both' type/actionType, now that all of them are generatable", () => {
     expect(generatableKeysForDomain("content").sort()).toEqual(
       [
-        "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition",
+        "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition", "youtubeCondition",
         "wait", "timeCondition", "abSplit", "webhook",
       ].sort()
     );
+  });
+
+  it("registers youtubeCondition as a generatable content-domain condition", () => {
+    const cfg = NODE_TYPE_REGISTRY.youtubeCondition;
+    expect(cfg).toBeDefined();
+    expect(cfg.reactFlowType).toBe("youtubeCondition");
+    expect(cfg.role).toBe("condition");
+    expect(cfg.domain).toBe("content");
+    expect(cfg.generatable).toBe(true);
+    expect(cfg.label).toBe("YouTube Condition");
+    expect(cfg.description).toBe("Re-check the trigger video's current stats");
+  });
+
+  it("puts youtubeCondition in the content sidebar right after videoCondition", () => {
+    const order = CONTENT_FLOW_SIDEBAR_ORDER;
+    expect(order.indexOf("youtubeCondition")).toBe(order.indexOf("videoCondition") + 1);
+  });
+
+  it("does not offer youtubeCondition in the user-flow sidebar", () => {
+    expect(USER_FLOW_SIDEBAR_ORDER).not.toContain("youtubeCondition");
   });
 });

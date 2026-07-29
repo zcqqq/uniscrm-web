@@ -181,28 +181,9 @@ export function SelectPropsValue({ value, onChange, options, placeholder = "Sele
               </>
             )}
 
-            {userProps.length > 0 && (
-              <>
-                <div className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 mt-1">
-                  <UserIcon />
-                  User Props
-                </div>
-                {userProps.map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => handleSelect(opt)}
-                    className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 cursor-pointer transition-colors ${
-                      !isInsert && value === opt.id ? "bg-primary/10 text-primary font-medium" : "text-foreground hover:bg-accent"
-                    }`}
-                  >
-                    <UserIcon />
-                    <span>{opt.label} <span className="text-muted-foreground">({opt.id})</span></span>
-                  </button>
-                ))}
-              </>
-            )}
-
+            {/* 分组顺序：事件/内容这类"这条东西自己的"字段在上，作者(user)字段在下。
+                user flow 是 Event Props → User Props，content flow 相应地是
+                Content Props → User Props——两个 domain 用同一条规则，用户不用记两套。 */}
             {contentProps.length > 0 && (
               <>
                 <div className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 mt-1">
@@ -219,6 +200,28 @@ export function SelectPropsValue({ value, onChange, options, placeholder = "Sele
                     }`}
                   >
                     <ContentIcon />
+                    <span>{opt.label} <span className="text-muted-foreground">({opt.id})</span></span>
+                  </button>
+                ))}
+              </>
+            )}
+
+            {userProps.length > 0 && (
+              <>
+                <div className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 mt-1">
+                  <UserIcon />
+                  User Props
+                </div>
+                {userProps.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => handleSelect(opt)}
+                    className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 cursor-pointer transition-colors ${
+                      !isInsert && value === opt.id ? "bg-primary/10 text-primary font-medium" : "text-foreground hover:bg-accent"
+                    }`}
+                  >
+                    <UserIcon />
                     <span>{opt.label} <span className="text-muted-foreground">({opt.id})</span></span>
                   </button>
                 ))}

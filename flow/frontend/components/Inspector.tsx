@@ -362,7 +362,7 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
           conditions={conditions}
           fields={getContentTriggerFields(ContentMetadata_X, data.mode || CONTENT_X_TRIGGER_MODE_LIST_POSTS)}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
-          label="Content Props"
+          label="Condition"
         />
       </div>
     </div>
@@ -442,7 +442,7 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
           conditions={conditions}
           fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos")}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
-          label="Content Props"
+          label="Condition"
           systemFilters={YOUTUBE_TRIGGER_META.contentPropsFilter}
         />
       </div>
@@ -983,7 +983,7 @@ function YouTubeConditionInspector({ nodeId, data }: { nodeId: string; data: Rec
           conditions={conditions}
           fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos")}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
-          label="Content Props"
+          label="Condition"
         />
         <p className="text-xs text-muted-foreground">
           Re-reads the video's current stats from YouTube. Put a Wait node before this to check it some time after publication.

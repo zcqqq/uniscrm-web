@@ -10,9 +10,9 @@ function createMockLinkDb(initialState: { cursor: string | null; backfill_comple
   return { prepare, _state: state, _run: run, _bind: bind };
 }
 
-// XUsersService's first constructor argument is the per-tenant D1 (TenantDataDB) — the source
+// UsersService's first constructor argument is the per-tenant D1 (TenantDataDB) — the source
 // of truth for `user` (2026-07-26 plan). runFollowersPoller forwards ctx.tenantDb straight into
-// `new XUsersService(...)`'s first slot. Whether a follower counts as "new" — what upsertPage
+// `new UsersService(...)`'s first slot. Whether a follower counts as "new" — what upsertPage
 // tallies, and what stops the incremental poll — is decided by the D1 probe, not by an
 // entity_state claim.
 function createMockTenantDb(existingBySourceId: Record<string, Record<string, unknown>> = {}) {
@@ -36,7 +36,7 @@ function createMockTenantDb(existingBySourceId: Record<string, Record<string, un
 }
 
 // LINK_DB-backed dedup/follow-mirror index (ctx.entityState, opts.entityState) — separate from
-// tenantDb now that content/x-users.ts have their own D1 truth store. Only mirrorFollowState's
+// tenantDb now that content/users.ts have their own D1 truth store. Only mirrorFollowState's
 // ensureEntity/setFollow are exercised by this poller.
 function createMockEntityState() {
   return {

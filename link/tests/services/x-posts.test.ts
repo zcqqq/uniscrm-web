@@ -13,7 +13,7 @@ function createMockLinkDb(initialState: { cursor: string | null; backfill_comple
 // ContentService's D1 truth (2026-07-26 plan) — this file exercises the real content.ts, so
 // tenantDb needs a working query() rather than an entity_state claim() (mirrors
 // content.test.ts's createMockTenantDb and x-followers.test.ts's identical pattern for
-// XUsersService). Probe SELECTs default to "no existing row" so the common case is an insert;
+// UsersService). Probe SELECTs default to "no existing row" so the common case is an insert;
 // the RETURNING upsert echoes back the bound id/created_at, i.e. "this writer won the race". A
 // test that wants an existing row (the "already known" half of the zero-new-tweets test) seeds
 // `existingBySourceId`.

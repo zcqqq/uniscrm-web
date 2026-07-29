@@ -3,9 +3,9 @@ import { Hono } from "hono";
 
 // webhook.ts's own job (2026-07-26 plan: user/content back to per-tenant D1) is routing,
 // tenant-DB-provisioned guarding, and argument threading (flowType from the metadata registry,
-// tenantDb/entityState into the service constructors) — NOT re-proving content.ts's/x-users.ts's
-// internal D1 upsert semantics, which content.test.ts and x-users.test.ts already cover in
-// depth. So ContentService, XUsersService and TenantDataDB are mocked wholesale here (same
+// tenantDb/entityState into the service constructors) — NOT re-proving content.ts's/users.ts's
+// internal D1 upsert semantics, which content.test.ts and users.test.ts already cover in
+// depth. So ContentService, UsersService and TenantDataDB are mocked wholesale here (same
 // pattern as tiktok-content.test.ts), and assertions inspect what webhook.ts constructed/called
 // them with, plus the delete route's own direct D1 lookup (which is NOT inside ContentService).
 
@@ -38,10 +38,10 @@ vi.mock("../src/services/content", () => ({
 const upsertUserMock = vi.fn().mockResolvedValue("user-id-1");
 const insertEventsMock = vi.fn().mockResolvedValue(undefined);
 const usersServiceConstructorMock = vi.fn();
-vi.mock("../src/services/x-users", () => ({
-  XUsersService: class {
+vi.mock("../src/services/users", () => ({
+  UsersService: class {
     constructor(...args: unknown[]) { usersServiceConstructorMock(...args); }
-    upsertUser(...args: unknown[]) { return upsertUserMock(...args); }
+    upsertXWebhookUser(...args: unknown[]) { return upsertUserMock(...args); }
     insertEvents(...args: unknown[]) { return insertEventsMock(...args); }
   },
   EVENT_VALUE_COLUMNS: ["followers_count", "following_count", "verified_type", "message_text"],
@@ -269,7 +269,7 @@ describe("webhookRoutes POST /webhook — follow events / resolveEventConsumedPa
     expect(event.consumedPaths.length).toBeGreaterThan(0);
   });
 
-  it("constructs XUsersService with the resolved per-tenant TenantDataDB and the LINK_DB entity_state for follow mirroring", async () => {
+  it("constructs UsersService with the resolved per-tenant TenantDataDB and the LINK_DB entity_state for follow mirroring", async () => {
     const env = baseEnv();
     const app = buildApp();
 
@@ -287,8 +287,8 @@ describe("webhookRoutes POST /webhook — follow events / resolveEventConsumedPa
 
   // Minor 1 (task-7 fix round 1): an eventType with an EventMetadata_X entry but an empty
   // eventProps array (post.create) produced consumedPaths === [] — truthy, which used to fool a
-  // bare `if (e.consumedPaths)` guard inside insertEvents. That guard lives in x-users.ts
-  // (covered by x-users.test.ts) — this test only proves webhook.ts's own
+  // bare `if (e.consumedPaths)` guard inside insertEvents. That guard lives in users.ts
+  // (covered by users.test.ts) — this test only proves webhook.ts's own
   // resolveEventConsumedPaths resolves to [] rather than undefined for such an event, which is
   // the one part of that bug webhook.ts itself could reintroduce. (like.create used to be the
   // other such event; it now declares eventProps for the liker's metrics.)

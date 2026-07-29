@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
 import { XWebhookService } from "./services/x-webhook";
-import { XUsersService, EVENT_VALUE_COLUMNS, type XUserData } from "./services/x-users";
+import { UsersService, EVENT_VALUE_COLUMNS, type XUserData } from "./services/users";
 import { EntityStateStore } from "./services/entity-state";
 import { ContentService, CONTENT_MAPPED_PROP_IDS } from "./services/content";
 import { TenantDataDB } from "../../shared/tenant-data-db";
@@ -13,7 +13,7 @@ import { resolveProps, consumedPaths } from "./services/pollers/resolve-props";
 const POSTS_METADATA = ContentMetadata_X.find((m) => m.sourceContentType === "own:get-posts")!;
 
 // propIds an event's eventProps mapping can supply — same "mapped-but-columnless" guard as
-// x-users.ts's MAPPED_USER_PROP_IDS, applied to the event pipeline: a metadata eventProps
+// users.ts's MAPPED_USER_PROP_IDS, applied to the event pipeline: a metadata eventProps
 // entry having a dataId doesn't mean EVENT_VALUE_COLUMNS has a matching R2 column for it.
 const EVENT_ALLOWED_PROP_IDS = new Set(EVENT_VALUE_COLUMNS);
 
@@ -185,7 +185,7 @@ async function handleXActivityEventByChannel(body: Record<string, unknown>, env:
 
   const tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, tenant.d1_database_id);
   const entityState = new EntityStateStore(env.LINK_DB, channel.tenant_id);
-  const usersService = new XUsersService(tenantDb, {
+  const usersService = new UsersService(tenantDb, {
     pipelineEvent: env.PIPELINE_EVENT,
     pipelineUser: env.PIPELINE_USER,
     tenantId: channel.tenant_id,
@@ -205,7 +205,7 @@ async function processXEvent(
   filterUserId: string,
   payload: Record<string, unknown>,
   channelInfo: ChannelInfo,
-  usersService: XUsersService,
+  usersService: UsersService,
   env: Env,
   activity: { includes?: Record<string, unknown>; direction?: string } = {},
 ): Promise<void> {
@@ -223,7 +223,7 @@ async function processXEvent(
       const resolvedEventType = isFollow ? "follow.follow" : "follow.unfollow";
       // follow 状态与用户快照一次性写完:R2 读路径按 QUALIFY 取整行最新,
       // 分两次写会让后一次把前一次的列冲成 null。
-      await usersService.upsertUser(userData as XUserData, channelId, "X", { is_follow: isFollow ? 1 : 0 });
+      await usersService.upsertXWebhookUser(userData as XUserData, channelId, "X", { is_follow: isFollow ? 1 : 0 });
       await usersService.insertEvents([{
         userId: userData.id as string,
         channelId,
@@ -249,7 +249,7 @@ async function processXEvent(
       const resolvedEventType = isFollow ? "follow.followed" : "follow.unfollowed";
       // follow 状态与用户快照一次性写完:R2 读路径按 QUALIFY 取整行最新,
       // 分两次写会让后一次把前一次的列冲成 null。
-      await usersService.upsertUser(userData as XUserData, channelId, "X", { is_followed: isFollow ? 1 : 0 });
+      await usersService.upsertXWebhookUser(userData as XUserData, channelId, "X", { is_followed: isFollow ? 1 : 0 });
       await usersService.insertEvents([{
         userId: userData.id as string,
         channelId,
@@ -282,7 +282,7 @@ async function processXEvent(
   if (eventType === "like.create" && isInboundLike(payload, filterUserId, activity.direction)) {
     const liker = findCounterparty(activity.includes, filterUserId);
     if (liker?.id) {
-      await usersService.upsertUser(liker as XUserData, channelId, "X");
+      await usersService.upsertXWebhookUser(liker as XUserData, channelId, "X");
       await usersService.insertEvents([{
         userId: liker.id as string,
         channelId,
@@ -310,7 +310,7 @@ async function processXEvent(
     if (userData) {
       const userId = userData.id as string;
       if (userId && userId !== filterUserId) {
-        await usersService.upsertUser({
+        await usersService.upsertXWebhookUser({
           id: userId,
           name: userData.name as string | undefined,
           username: userData.username as string | undefined,
@@ -335,7 +335,7 @@ async function processXEvent(
       || payload.user_id as string | undefined
       || payload.id as string | undefined;
     if (senderId && senderId !== filterUserId) {
-      await usersService.upsertUser({
+      await usersService.upsertXWebhookUser({
         id: senderId,
         username: payload.sender_username as string | undefined || payload.username as string | undefined,
         name: payload.sender_name as string | undefined || payload.name as string | undefined,
@@ -422,7 +422,7 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
 
   const tenantDb = new TenantDataDB(env.CF_ACCOUNT_ID, env.CF_D1_API_TOKEN, d1DatabaseId);
   const entityState = new EntityStateStore(env.LINK_DB, tenantId);
-  const usersService = new XUsersService(tenantDb, {
+  const usersService = new UsersService(tenantDb, {
     pipelineEvent: env.PIPELINE_EVENT,
     pipelineUser: env.PIPELINE_USER,
     tenantId,

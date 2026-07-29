@@ -1,7 +1,7 @@
 import type { Pipeline } from "../../types";
 import type { TenantDataDB } from "../../../../shared/tenant-data-db";
 import type { EntityStateStore } from "../entity-state";
-import { XUsersService } from "../x-users";
+import { UsersService } from "../users";
 import { fetchFollowersPage } from "../x-followers-api";
 import { resolveProps } from "./resolve-props";
 import { UserMetadata_X } from "../../../../metadata/x-byok";
@@ -18,7 +18,7 @@ export interface FollowersPollerContext {
   // provisioned database, so it is always real by the time runFollowersPoller runs.
   tenantDb: TenantDataDB;
   // LINK_DB-backed dedup/follow-mirror index — still needed here (unlike x-posts.ts) because
-  // XUsersService.mirrorFollowState writes the flow-facing follow bit into entity_state.
+  // UsersService.mirrorFollowState writes the flow-facing follow bit into entity_state.
   entityState: EntityStateStore;
   tenantId: number;
   pipelineUser?: Pipeline;
@@ -42,7 +42,7 @@ export async function runFollowersPoller(ctx: FollowersPollerContext): Promise<v
     return; // not seeded yet — channel isn't authorized
   }
 
-  const usersService = new XUsersService(ctx.tenantDb, { pipelineUser: ctx.pipelineUser, tenantId: ctx.tenantId, entityState: ctx.entityState });
+  const usersService = new UsersService(ctx.tenantDb, { pipelineUser: ctx.pipelineUser, tenantId: ctx.tenantId, entityState: ctx.entityState });
   const phase = state.backfill_complete ? "incremental" : "backfill";
   console.log(JSON.stringify({ event: "followers_poll_started", channel_id: ctx.channelId, phase, cursor: state.cursor }));
 
@@ -54,14 +54,14 @@ export async function runFollowersPoller(ctx: FollowersPollerContext): Promise<v
 }
 
 async function upsertPage(
-  usersService: XUsersService,
+  usersService: UsersService,
   items: Record<string, unknown>[],
   channelId: string
 ): Promise<number> {
   let newCount = 0;
   for (const item of items) {
     const props = resolveProps(item, FOLLOWERS_METADATA.userProps, FOLLOWERS_METADATA.linkPrefix);
-    const isNew = await usersService.upsertUserFromMetadata(item, props, channelId, "X");
+    const isNew = await usersService.upsertUserFromMetadata(item, props, channelId, "X", FOLLOWERS_METADATA);
     if (isNew) newCount++;
   }
   return newCount;
@@ -69,7 +69,7 @@ async function upsertPage(
 
 async function runBackfill(
   ctx: FollowersPollerContext,
-  usersService: XUsersService,
+  usersService: UsersService,
   startCursor: string | null
 ): Promise<void> {
   let cursor = startCursor || undefined;
@@ -106,7 +106,7 @@ async function runBackfill(
   console.log(JSON.stringify({ event: "followers_poll_deadline_reached", channel_id: ctx.channelId, phase: "backfill", pagesFetched }));
 }
 
-async function runIncrementalPoll(ctx: FollowersPollerContext, usersService: XUsersService): Promise<void> {
+async function runIncrementalPoll(ctx: FollowersPollerContext, usersService: UsersService): Promise<void> {
   let cursor: string | undefined;
   let pagesFetched = 0;
   let totalNew = 0;

@@ -2,7 +2,7 @@ import { XUnauthorizedError, XAccountFrozenError } from "./x-errors";
 import { detectFreeze } from "./x-freeze";
 
 // Full set of user.fields the get-followers endpoint supports — requested in full so
-// raw_data (see XUsersService.upsertUserFromMetadata) captures everything X returns,
+// raw_data (see UsersService.upsertUserFromMetadata) captures everything X returns,
 // not just the subset UserMetadata_X happens to map into structured columns.
 // https://docs.x.com/x-api/users/get-followers
 const USER_FIELDS = [

@@ -3,6 +3,7 @@ import type { Pipeline } from "../types";
 import { EntityStateStore, type EntityStateKey } from "./entity-state";
 import { resolveProps, consumedPaths } from "./pollers/resolve-props";
 import { UserMetadata_X } from "../../../metadata/x-byok";
+import type { UserMetadata } from "../../../metadata/dataTypes";
 
 // X nests the counts under public_metrics and names some fields differently from our
 // propIds (post_count -> tweet_count), so the propId -> payload path mapping has to come
@@ -103,7 +104,7 @@ function stripConsumedPaths(payload: Record<string, unknown>, paths: string[]): 
   return clone;
 }
 
-export class XUsersService {
+export class UsersService {
   private pipelineEvent?: Pipeline;
   private pipelineUser?: Pipeline;
   private tenantId?: number;
@@ -137,7 +138,7 @@ export class XUsersService {
 
   private requireDb(method: string): TenantDataDB {
     if (!this.tenantDb) {
-      throw new Error(`XUsersService.${method}: tenantDb is required (tenant DB not provisioned)`);
+      throw new Error(`UsersService.${method}: tenantDb is required (tenant DB not provisioned)`);
     }
     return this.tenantDb;
   }
@@ -403,7 +404,7 @@ export class XUsersService {
   // directions (see webhook.ts's follow.follow/follow.unfollow/follow.followed/
   // follow.unfollowed handling). It is also what forces the R2 copy out even when every profile
   // field is unchanged.
-  async upsertUser(
+  async upsertXWebhookUser(
     user: XUserData,
     channelId: string,
     channelType: string,
@@ -446,14 +447,18 @@ export class XUsersService {
   }
 
   // `resolvedProps` arrives already resolved by the caller (e.g. x-followers.ts's poller, which
-  // walks FOLLOWERS_METADATA.userProps itself) — this method does not re-derive it, only uses
-  // its own X_USER_MAPPINGS/X_USER_META (the same metadata entry) to compute which payload paths
-  // were consumed, for raw_data stripping.
+  // walks its own metadata entry's userProps itself) — this method does not re-derive it, only
+  // uses the caller-supplied `meta` to compute which payload paths were consumed, for raw_data
+  // stripping.
   async upsertUserFromMetadata(
     rawItem: Record<string, unknown>,
     resolvedProps: Record<string, unknown>,
     channelId: string,
-    channelType: string
+    channelType: string,
+    // 调用方持有的 metadata 条目。只用于算 consumedPaths（raw_data 剥离），
+    // resolvedProps 已经由调用方自己 resolveProps 好了。必填而非默认 X ——
+    // 传错平台的 metadata 会把该留的字段剥掉、该剥的留下，两种都是静默的数据损坏。
+    meta: UserMetadata
   ): Promise<boolean> {
     const sourceUserId = String(resolvedProps.source_user_id ?? rawItem.id ?? "");
     if (!sourceUserId) throw new Error("upsertUserFromMetadata: missing source_user_id");
@@ -471,7 +476,7 @@ export class XUsersService {
     if (resolvedProps.is_follow !== undefined) followValues.is_follow = resolvedProps.is_follow as 0 | 1;
     if (resolvedProps.is_followed !== undefined) followValues.is_followed = resolvedProps.is_followed as 0 | 1;
 
-    const paths = consumedPaths(X_USER_MAPPINGS, X_USER_META?.linkPrefix, MAPPED_USER_PROP_IDS);
+    const paths = consumedPaths(meta.userProps, meta.linkPrefix, MAPPED_USER_PROP_IDS);
     const rawData = JSON.stringify(stripConsumedPaths(rawItem, paths));
 
     const { isNew } = await this.persistUser({
@@ -486,6 +491,29 @@ export class XUsersService {
       forceSend: false,
     });
     return isNew;
+  }
+
+  // 只改 follow 位，不碰任何资料列。取消订阅/取关时用：调用方已经确认这个
+  // (channelId, sourceUserId) 在 D1 里存在（它就是从 D1 查出来的），所以这里
+  // 不再重复探测。forceSend: true 是必须的 —— follow 位变了但资料列一个字没动时，
+  // persistUser 的 unchanged 比对虽然会因 follow 列而判定为「变了」，但 R2 无列级
+  // 更新，只有推一条完整新行分析侧才看得到。
+  async setFollowState(
+    channelId: string,
+    channelType: string,
+    sourceUserId: string,
+    follow: { is_follow?: 0 | 1; is_followed?: 0 | 1 }
+  ): Promise<void> {
+    await this.persistUser({
+      channelId,
+      channelType,
+      sourceUserId,
+      columnValues: {},
+      followValues: follow,
+      // json_patch(user.raw_data, '{}') 是无操作合并：这条写入不带任何新的原始字段。
+      rawData: "{}",
+      forceSend: true,
+    });
   }
 
   // `eventProps` must arrive already resolved: the metadata `dataId` paths that describe

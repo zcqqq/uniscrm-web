@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { XUsersService } from "../../src/services/x-users";
+import { UsersService } from "../../src/services/users";
 import userSchema from "../../../analytics/pipelines/user-stream-schema.json";
 import eventSchema from "../../../analytics/pipelines/event-stream-schema.json";
 
@@ -94,14 +94,14 @@ function updateSetOf(sql: string): string {
   return sql.slice(sql.indexOf("DO UPDATE SET"), sql.indexOf("RETURNING"));
 }
 
-describe("XUsersService.upsertUser", () => {
+describe("UsersService.upsertUser", () => {
   it("sends a complete row to the user pipeline — every schema column present, null when absent", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new XUsersService(createMockTenantDb() as any, {
+    const service = new UsersService(createMockTenantDb() as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
-    await service.upsertUser({ id: "u1", name: "Ada", username: "ada" } as any, "chan1", "X");
+    await service.upsertXWebhookUser({ id: "u1", name: "Ada", username: "ada" } as any, "chan1", "X");
 
     const [[record]] = pipelineUser.send.mock.calls[0];
     // A spot-check of a few columns can't catch a writer that silently drops others — compare
@@ -113,9 +113,9 @@ describe("XUsersService.upsertUser", () => {
 
   it("writes the user through query(), never run() — run() would discard the RETURNING row", async () => {
     const tenantDb = createMockTenantDb();
-    const service = new XUsersService(tenantDb as any, { tenantId: 42, entityState: createMockEntityState() as any });
+    const service = new UsersService(tenantDb as any, { tenantId: 42, entityState: createMockEntityState() as any });
 
-    await service.upsertUser({ id: "u1", name: "Ada" } as any, "chan1", "X");
+    await service.upsertXWebhookUser({ id: "u1", name: "Ada" } as any, "chan1", "X");
 
     expect(tenantDb._inserts).toHaveLength(1);
     expect(tenantDb._inserts[0].sql).toContain("ON CONFLICT(channel_id, source_user_id) DO UPDATE SET");
@@ -124,17 +124,17 @@ describe("XUsersService.upsertUser", () => {
   });
 
   it("throws a clear error when the tenant DB is not provisioned", async () => {
-    const service = new XUsersService(null, { tenantId: 42, entityState: createMockEntityState() as any });
+    const service = new UsersService(null, { tenantId: 42, entityState: createMockEntityState() as any });
 
-    await expect(service.upsertUser({ id: "u1", name: "Ada" } as any, "chan1", "X"))
+    await expect(service.upsertXWebhookUser({ id: "u1", name: "Ada" } as any, "chan1", "X"))
       .rejects.toThrow(/tenantDb is required/);
   });
 
   it("returns the id D1 returned, not the one the probe minted", async () => {
     const tenantDb = createMockTenantDb([], { id: "winner-id", created_at: "2026-07-02T00:00:00.000Z", is_follow: 0, is_followed: 0 });
-    const service = new XUsersService(tenantDb as any, { tenantId: 42, entityState: createMockEntityState() as any });
+    const service = new UsersService(tenantDb as any, { tenantId: 42, entityState: createMockEntityState() as any });
 
-    const id = await service.upsertUser({ id: "u1", name: "Ada" } as any, "chan1", "X");
+    const id = await service.upsertXWebhookUser({ id: "u1", name: "Ada" } as any, "chan1", "X");
 
     expect(id).toBe("winner-id");
   });
@@ -147,11 +147,11 @@ describe("XUsersService.upsertUser", () => {
     // The probe saw nothing, so this call mints a fresh uuid — but between probe and upsert the
     // poller inserted the same (channel_id, source_user_id), so D1 keeps ITS id.
     const tenantDb = createMockTenantDb([], { id: "poller-won", created_at: "2026-07-02T00:00:00.000Z", is_follow: 0, is_followed: 1 });
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: entityState as any,
     });
 
-    const returned = await service.upsertUser({ id: "u1", name: "Ada" } as any, "chan1", "X");
+    const returned = await service.upsertXWebhookUser({ id: "u1", name: "Ada" } as any, "chan1", "X");
 
     const mintedId = tenantDb._inserts[0].row.id as string;
     expect(mintedId).not.toBe("poller-won"); // the probe really did propose a different id
@@ -174,12 +174,12 @@ describe("XUsersService.upsertUser", () => {
   it("does not null out D1-known columns in the R2 copy when the webhook payload omits them", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
     const tenantDb = createMockTenantDb([priorRow()]);
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
     // The webhook knows only name/username — and changes the name, so the row genuinely changed.
-    await service.upsertUser({ id: "x1", name: "NewName", username: "ann" } as any, "chan1", "X");
+    await service.upsertXWebhookUser({ id: "x1", name: "NewName", username: "ann" } as any, "chan1", "X");
 
     const [[record]] = pipelineUser.send.mock.calls[0];
     expect(record.name).toBe("NewName");       // the webhook's own field wins
@@ -197,11 +197,11 @@ describe("XUsersService.upsertUser", () => {
 
   it("keeps created_at from the existing D1 row instead of re-stamping it on every touch", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new XUsersService(createMockTenantDb([priorRow()]) as any, {
+    const service = new UsersService(createMockTenantDb([priorRow()]) as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
-    await service.upsertUser({ id: "x1", name: "NewName" } as any, "chan1", "X");
+    await service.upsertXWebhookUser({ id: "x1", name: "NewName" } as any, "chan1", "X");
 
     const [[record]] = pipelineUser.send.mock.calls[0];
     expect(record.created_at).toBe("2026-07-01T00:00:00.000Z");
@@ -214,11 +214,11 @@ describe("XUsersService.upsertUser", () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
     const entityState = createMockEntityState();
     const tenantDb = createMockTenantDb();
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: entityState as any,
     });
 
-    await service.upsertUser({ id: "x1", name: "Ann", username: "ann" } as any, "chan1", "X", { is_follow: 1 });
+    await service.upsertXWebhookUser({ id: "x1", name: "Ann", username: "ann" } as any, "chan1", "X", { is_follow: 1 });
 
     expect(tenantDb._inserts[0].row.is_follow).toBe(1);
     const [[record]] = pipelineUser.send.mock.calls[0];
@@ -239,11 +239,11 @@ describe("XUsersService.upsertUser", () => {
   it("preserves the stored follow state when a plain webhook touch re-upserts an existing user", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
     const tenantDb = createMockTenantDb([priorRow({ is_follow: 1 })]);
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
-    await service.upsertUser({ id: "x1", name: "Ann2" } as any, "chan1", "X");
+    await service.upsertXWebhookUser({ id: "x1", name: "Ann2" } as any, "chan1", "X");
 
     // 不带 follow 参数的 upsert 绝不能把已知的 is_follow 冲回 0
     const [[record]] = pipelineUser.send.mock.calls[0];
@@ -253,9 +253,9 @@ describe("XUsersService.upsertUser", () => {
 
   it("does not call setFollow when the caller reports no follow bits — but still creates the mirror row", async () => {
     const entityState = createMockEntityState();
-    const service = new XUsersService(createMockTenantDb() as any, { tenantId: 42, entityState: entityState as any });
+    const service = new UsersService(createMockTenantDb() as any, { tenantId: 42, entityState: entityState as any });
 
-    await service.upsertUser({ id: "x1", name: "Ann" } as any, "chan1", "X");
+    await service.upsertXWebhookUser({ id: "x1", name: "Ann" } as any, "chan1", "X");
 
     expect(entityState.ensureEntity).toHaveBeenCalledTimes(1);
     expect(entityState.setFollow).not.toHaveBeenCalled();
@@ -263,11 +263,11 @@ describe("XUsersService.upsertUser", () => {
 
   it("does not assert is_followed from the poller's fixed-value mapping", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new XUsersService(createMockTenantDb() as any, {
+    const service = new UsersService(createMockTenantDb() as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
-    await service.upsertUser({ id: "u4", name: "Dee" } as any, "chan1", "X");
+    await service.upsertXWebhookUser({ id: "u4", name: "Dee" } as any, "chan1", "X");
 
     const [[record]] = pipelineUser.send.mock.calls[0];
     expect(record.is_followed).toBe(0);
@@ -278,11 +278,11 @@ describe("XUsersService.upsertUser", () => {
   it("skips both the D1 write and the R2 send when nothing the webhook knows has changed", async () => {
     const pipelineUser = { send: vi.fn() };
     const tenantDb = createMockTenantDb([priorRow()]);
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
-    await service.upsertUser({ id: "x1", name: "Ann", username: "ann" } as any, "chan1", "X");
+    await service.upsertXWebhookUser({ id: "x1", name: "Ann", username: "ann" } as any, "chan1", "X");
 
     expect(tenantDb._inserts).toHaveLength(0);
     expect(pipelineUser.send).not.toHaveBeenCalled();
@@ -290,11 +290,11 @@ describe("XUsersService.upsertUser", () => {
 
   it("still mirrors into entity_state on the unchanged path, using the existing D1 id", async () => {
     const entityState = createMockEntityState();
-    const service = new XUsersService(createMockTenantDb([priorRow()]) as any, {
+    const service = new UsersService(createMockTenantDb([priorRow()]) as any, {
       tenantId: 42, entityState: entityState as any,
     });
 
-    const id = await service.upsertUser({ id: "x1", name: "Ann", username: "ann" } as any, "chan1", "X");
+    const id = await service.upsertXWebhookUser({ id: "x1", name: "Ann", username: "ann" } as any, "chan1", "X");
 
     expect(id).toBe("u-existing");
     expect(entityState.ensureEntity).toHaveBeenCalledWith(expect.anything(), "u-existing");
@@ -304,11 +304,11 @@ describe("XUsersService.upsertUser", () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
     // The stored follow state already matches what the webhook reports, so nothing changed.
     const tenantDb = createMockTenantDb([priorRow({ is_follow: 1 })]);
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
-    await service.upsertUser({ id: "x1", name: "Ann", username: "ann" } as any, "chan1", "X", { is_follow: 1 });
+    await service.upsertXWebhookUser({ id: "x1", name: "Ann", username: "ann" } as any, "chan1", "X", { is_follow: 1 });
 
     // No D1 write (the truth already says so) but R2, which has no column-wise update, still
     // gets a complete row carrying the follow state.
@@ -321,9 +321,9 @@ describe("XUsersService.upsertUser", () => {
 
   it("a flipped follow bit counts as a change and reaches D1", async () => {
     const tenantDb = createMockTenantDb([priorRow({ is_follow: 1 })]);
-    const service = new XUsersService(tenantDb as any, { tenantId: 42, entityState: createMockEntityState() as any });
+    const service = new UsersService(tenantDb as any, { tenantId: 42, entityState: createMockEntityState() as any });
 
-    await service.upsertUser({ id: "x1", name: "Ann", username: "ann" } as any, "chan1", "X", { is_follow: 0 });
+    await service.upsertXWebhookUser({ id: "x1", name: "Ann", username: "ann" } as any, "chan1", "X", { is_follow: 0 });
 
     expect(tenantDb._inserts).toHaveLength(1);
     expect(tenantDb._inserts[0].row.is_follow).toBe(0);
@@ -338,11 +338,11 @@ describe("XUsersService.upsertUser", () => {
   it("maps post_count from X's public_metrics.tweet_count via metadata", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
     const tenantDb = createMockTenantDb();
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
-    await service.upsertUser(
+    await service.upsertXWebhookUser(
       { id: "u3", name: "Cy", public_metrics: { followers_count: 10, tweet_count: 1234, listed_count: 7 } } as any,
       "chan1",
       "X"
@@ -360,11 +360,11 @@ describe("XUsersService.upsertUser", () => {
   it("writes verified_type to both stores when the payload carries it", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
     const tenantDb = createMockTenantDb();
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
-    await service.upsertUser({ id: "u7", name: "Gil", verified_type: "business" } as any, "chan1", "X");
+    await service.upsertXWebhookUser({ id: "u7", name: "Gil", verified_type: "business" } as any, "chan1", "X");
 
     expect(tenantDb._inserts[0].row.verified_type).toBe("business");
     const [[record]] = pipelineUser.send.mock.calls[0];
@@ -374,11 +374,11 @@ describe("XUsersService.upsertUser", () => {
   it("strips every column-mapped payload path from raw_data and keeps only the unmapped remainder", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
     const tenantDb = createMockTenantDb();
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
-    await service.upsertUser(
+    await service.upsertXWebhookUser(
       {
         id: "u1", name: "Ada", username: "ada", profile_image_url: "https://x/pic.jpg",
         location: "Earth", verified: true,
@@ -406,15 +406,15 @@ describe("XUsersService.upsertUser", () => {
   });
 });
 
-describe("XUsersService.upsertUserFromMetadata", () => {
+describe("UsersService.upsertUserFromMetadata", () => {
   it("returns isNew true when the probe found no row and the write kept the proposed id", async () => {
     const tenantDb = createMockTenantDb();
-    const service = new XUsersService(tenantDb as any, { entityState: createMockEntityState() as any });
+    const service = new UsersService(tenantDb as any, { entityState: createMockEntityState() as any });
 
     const isNew = await service.upsertUserFromMetadata(
       { id: "u1", name: "Ada", username: "ada" },
       { source_user_id: "u1", name: "Ada", username: "ada", is_followed: 1 },
-      "chan1", "X"
+      "chan1", "X", UserMetadata_X[0]
     );
 
     expect(isNew).toBe(true);
@@ -422,10 +422,10 @@ describe("XUsersService.upsertUserFromMetadata", () => {
   });
 
   it("returns false when the user already exists in D1", async () => {
-    const service = new XUsersService(createMockTenantDb([priorRow()]) as any, { entityState: createMockEntityState() as any });
+    const service = new UsersService(createMockTenantDb([priorRow()]) as any, { entityState: createMockEntityState() as any });
 
     const isNew = await service.upsertUserFromMetadata(
-      { id: "u1" }, { source_user_id: "u1", name: "Ada Updated" }, "chan1", "X"
+      { id: "u1" }, { source_user_id: "u1", name: "Ada Updated" }, "chan1", "X", UserMetadata_X[0]
     );
 
     expect(isNew).toBe(false);
@@ -435,10 +435,10 @@ describe("XUsersService.upsertUserFromMetadata", () => {
   it("race: returns false when RETURNING hands back an id this call did not mint", async () => {
     const tenantDb = createMockTenantDb([], { id: "webhook-won", created_at: "2026-07-02T00:00:00.000Z", is_follow: 0, is_followed: 1 });
     const entityState = createMockEntityState();
-    const service = new XUsersService(tenantDb as any, { entityState: entityState as any });
+    const service = new UsersService(tenantDb as any, { entityState: entityState as any });
 
     const isNew = await service.upsertUserFromMetadata(
-      { id: "u1" }, { source_user_id: "u1", name: "Ada", is_followed: 1 }, "chan1", "X"
+      { id: "u1" }, { source_user_id: "u1", name: "Ada", is_followed: 1 }, "chan1", "X", UserMetadata_X[0]
     );
 
     expect(isNew).toBe(false);
@@ -446,21 +446,21 @@ describe("XUsersService.upsertUserFromMetadata", () => {
   });
 
   it("throws a clear error when the tenant DB is not provisioned", async () => {
-    const service = new XUsersService(null, { entityState: createMockEntityState() as any });
+    const service = new UsersService(null, { entityState: createMockEntityState() as any });
 
     await expect(
-      service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1" }, "chan1", "X")
+      service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1" }, "chan1", "X", UserMetadata_X[0])
     ).rejects.toThrow(/tenantDb is required/);
   });
 
   it("sends a complete row to the user pipeline — every schema column present, null when absent", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new XUsersService(createMockTenantDb() as any, {
+    const service = new UsersService(createMockTenantDb() as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
     await service.upsertUserFromMetadata(
-      { id: "u1" }, { source_user_id: "u1", name: "Ada", is_followed: 1 }, "chan1", "X"
+      { id: "u1" }, { source_user_id: "u1", name: "Ada", is_followed: 1 }, "chan1", "X", UserMetadata_X[0]
     );
 
     const [[record]] = pipelineUser.send.mock.calls[0];
@@ -472,7 +472,7 @@ describe("XUsersService.upsertUserFromMetadata", () => {
   it("skips both the D1 write and the R2 send when the re-walked follower is byte-identical", async () => {
     const pipelineUser = { send: vi.fn() };
     const tenantDb = createMockTenantDb([priorRow({ is_followed: 1 })]);
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
@@ -484,7 +484,7 @@ describe("XUsersService.upsertUserFromMetadata", () => {
         followers_count: 500, following_count: 4, post_count: 10, listed_count: 2, like_count: 3,
         is_followed: 1,
       },
-      "chan1", "X"
+      "chan1", "X", UserMetadata_X[0]
     );
 
     expect(tenantDb._inserts).toHaveLength(0);
@@ -494,7 +494,7 @@ describe("XUsersService.upsertUserFromMetadata", () => {
   it("writes every resolved userProps field to its matching column, not just name/username/is_followed", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
     const tenantDb = createMockTenantDb();
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
@@ -506,7 +506,7 @@ describe("XUsersService.upsertUserFromMetadata", () => {
       post_count: 456,
     };
 
-    await service.upsertUserFromMetadata({ id: "u1" }, resolvedProps, "chan1", "X");
+    await service.upsertUserFromMetadata({ id: "u1" }, resolvedProps, "chan1", "X", UserMetadata_X[0]);
 
     const [[record]] = pipelineUser.send.mock.calls[0];
     expect(record.followers_count).toBe(123);
@@ -519,11 +519,11 @@ describe("XUsersService.upsertUserFromMetadata", () => {
 
   it("leaves an unresolved column-mapped field as null in the pipeline row, not omitted", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new XUsersService(createMockTenantDb() as any, {
+    const service = new UsersService(createMockTenantDb() as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
-    await service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1" }, "chan1", "X");
+    await service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1" }, "chan1", "X", UserMetadata_X[0]);
 
     const [[record]] = pipelineUser.send.mock.calls[0];
     expect(record.followers_count).toBeNull();
@@ -533,11 +533,11 @@ describe("XUsersService.upsertUserFromMetadata", () => {
   it("takes is_followed from resolvedProps' fixed-value mapping (own:get-followers)", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
     const tenantDb = createMockTenantDb();
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
-    await service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1", is_followed: 1 }, "chan1", "X");
+    await service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1", is_followed: 1 }, "chan1", "X", UserMetadata_X[0]);
 
     expect(tenantDb._inserts[0].row.is_followed).toBe(1);
     const [[record]] = pipelineUser.send.mock.calls[0];
@@ -548,12 +548,12 @@ describe("XUsersService.upsertUserFromMetadata", () => {
   it("preserves a previously stored is_follow when re-polling an existing follower", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
     const tenantDb = createMockTenantDb([priorRow({ is_follow: 1, is_followed: 1 })]);
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
     await service.upsertUserFromMetadata(
-      { id: "u1" }, { source_user_id: "u1", followers_count: 999, is_followed: 1 }, "chan1", "X"
+      { id: "u1" }, { source_user_id: "u1", followers_count: 999, is_followed: 1 }, "chan1", "X", UserMetadata_X[0]
     );
 
     const [[record]] = pipelineUser.send.mock.calls[0];
@@ -566,9 +566,9 @@ describe("XUsersService.upsertUserFromMetadata", () => {
   it("mirrors is_followed into entity_state in the same call as the D1 write (C1 regression)", async () => {
     const tenantDb = createMockTenantDb();
     const entityState = createMockEntityState();
-    const service = new XUsersService(tenantDb as any, { tenantId: 42, entityState: entityState as any });
+    const service = new UsersService(tenantDb as any, { tenantId: 42, entityState: entityState as any });
 
-    await service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1", is_followed: 1 }, "chan1", "X");
+    await service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1", is_followed: 1 }, "chan1", "X", UserMetadata_X[0]);
 
     expect(entityState.ensureEntity).toHaveBeenCalledWith(
       { entity: "user", channelId: "chan1", sourceId: "u1" },
@@ -583,9 +583,9 @@ describe("XUsersService.upsertUserFromMetadata", () => {
 
   it("mirrors is_follow into entity_state when resolvedProps provides it", async () => {
     const entityState = createMockEntityState();
-    const service = new XUsersService(createMockTenantDb() as any, { tenantId: 42, entityState: entityState as any });
+    const service = new UsersService(createMockTenantDb() as any, { tenantId: 42, entityState: entityState as any });
 
-    await service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1", is_follow: 1 }, "chan1", "X");
+    await service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1", is_follow: 1 }, "chan1", "X", UserMetadata_X[0]);
 
     expect(entityState.setFollow).toHaveBeenCalledWith(
       expect.objectContaining({ entity: "user", channelId: "chan1", sourceId: "u1" }),
@@ -598,11 +598,11 @@ describe("XUsersService.upsertUserFromMetadata", () => {
     const pipelineUser = { send: vi.fn() };
     const entityState = createMockEntityState();
     const tenantDb = createMockTenantDb([priorRow({ is_followed: 1 })]);
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: entityState as any,
     });
 
-    await service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1", is_followed: 1 }, "chan1", "X");
+    await service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1", is_followed: 1 }, "chan1", "X", UserMetadata_X[0]);
 
     expect(tenantDb._inserts).toHaveLength(0);
     expect(pipelineUser.send).not.toHaveBeenCalled();
@@ -612,10 +612,10 @@ describe("XUsersService.upsertUserFromMetadata", () => {
 
   it("warns once, rather than silently, when no entityState is wired and the mirror cannot run", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const service = new XUsersService(createMockTenantDb() as any, { tenantId: 42 });
+    const service = new UsersService(createMockTenantDb() as any, { tenantId: 42 });
 
-    await service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1", is_followed: 1 }, "chan1", "X");
-    await service.upsertUserFromMetadata({ id: "u2" }, { source_user_id: "u2", is_followed: 1 }, "chan1", "X");
+    await service.upsertUserFromMetadata({ id: "u1" }, { source_user_id: "u1", is_followed: 1 }, "chan1", "X", UserMetadata_X[0]);
+    await service.upsertUserFromMetadata({ id: "u2" }, { source_user_id: "u2", is_followed: 1 }, "chan1", "X", UserMetadata_X[0]);
 
     const mirrorWarnings = warnSpy.mock.calls.filter((c) => String(c[0]).includes("user_follow_mirror_disabled"));
     expect(mirrorWarnings).toHaveLength(1);
@@ -624,7 +624,7 @@ describe("XUsersService.upsertUserFromMetadata", () => {
 
   it("strips consumed payload paths from raw_data, keeping the unmapped remainder", async () => {
     const pipelineUser = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new XUsersService(createMockTenantDb() as any, {
+    const service = new UsersService(createMockTenantDb() as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
@@ -634,7 +634,7 @@ describe("XUsersService.upsertUserFromMetadata", () => {
         public_metrics: { followers_count: 10, following_count: 2, tweet_count: 3, listed_count: 0, like_count: 0, media_count: 0 },
       },
       { source_user_id: "u1", name: "Ada", followers_count: 10 },
-      "chan1", "X"
+      "chan1", "X", UserMetadata_X[0]
     );
 
     const [[record]] = pipelineUser.send.mock.calls[0];
@@ -646,23 +646,23 @@ describe("XUsersService.upsertUserFromMetadata", () => {
   });
 
   it("throws when source_user_id is missing", async () => {
-    const service = new XUsersService(createMockTenantDb() as any, { entityState: createMockEntityState() as any });
+    const service = new UsersService(createMockTenantDb() as any, { entityState: createMockEntityState() as any });
     await expect(
-      service.upsertUserFromMetadata({}, {}, "chan1", "X")
+      service.upsertUserFromMetadata({}, {}, "chan1", "X", UserMetadata_X[0])
     ).rejects.toThrow("upsertUserFromMetadata: missing source_user_id");
   });
 });
 
 // event has no D1 table (the 2026-07-26 restore brought back only `user` and `content`), so
 // insertEvents stays R2-only and needs no tenant DB at all.
-describe("XUsersService.insertEvents pipeline record", () => {
+describe("UsersService.insertEvents pipeline record", () => {
   // The X webhook payload nests counts under public_metrics, so the caller resolves
   // them via the event's metadata dataId mappings and hands them over already flat.
   const resolvedEventProps = { followers_count: 1234, following_count: 56, verified_type: "blue" };
 
   it("sends a complete row to the event pipeline — every schema column present, null when absent", async () => {
     const pipelineEvent = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new XUsersService(null, { pipelineEvent: pipelineEvent as any, tenantId: 42 });
+    const service = new UsersService(null, { pipelineEvent: pipelineEvent as any, tenantId: 42 });
 
     await service.insertEvents([{
       userId: "u1", channelId: "chan1", eventType: "follow.follow",
@@ -676,7 +676,7 @@ describe("XUsersService.insertEvents pipeline record", () => {
 
   it("writes caller-resolved event props onto the pipeline record", async () => {
     const pipelineEvent = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new XUsersService(null, { pipelineEvent: pipelineEvent as any, tenantId: 42 });
+    const service = new UsersService(null, { pipelineEvent: pipelineEvent as any, tenantId: 42 });
 
     await service.insertEvents([{
       userId: "u1",
@@ -697,7 +697,7 @@ describe("XUsersService.insertEvents pipeline record", () => {
 
   it("omits props the caller could not resolve as explicit null, never leaves them absent", async () => {
     const pipelineEvent = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new XUsersService(null, { pipelineEvent: pipelineEvent as any, tenantId: 42 });
+    const service = new UsersService(null, { pipelineEvent: pipelineEvent as any, tenantId: 42 });
 
     await service.insertEvents([{
       userId: "u1",
@@ -715,7 +715,7 @@ describe("XUsersService.insertEvents pipeline record", () => {
 
   it("strips exactly the given consumedPaths from raw_data, keeping everything else", async () => {
     const pipelineEvent = { send: vi.fn().mockResolvedValue(undefined) };
-    const service = new XUsersService(null, { pipelineEvent: pipelineEvent as any, tenantId: 42 });
+    const service = new UsersService(null, { pipelineEvent: pipelineEvent as any, tenantId: 42 });
 
     await service.insertEvents([{
       userId: "u1",
@@ -736,7 +736,7 @@ describe("XUsersService.insertEvents pipeline record", () => {
   it("falls back to storing the entire payload and warns once when consumedPaths is omitted", async () => {
     const pipelineEvent = { send: vi.fn().mockResolvedValue(undefined) };
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const service = new XUsersService(null, { pipelineEvent: pipelineEvent as any, tenantId: 42 });
+    const service = new UsersService(null, { pipelineEvent: pipelineEvent as any, tenantId: 42 });
 
     const rawData = { id: "u1", public_metrics: { followers_count: 1234 } };
     await service.insertEvents([{
@@ -753,7 +753,7 @@ describe("XUsersService.insertEvents pipeline record", () => {
 
   it("warns and drops events when no pipeline/tenantId is configured, rather than silently discarding them", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const service = new XUsersService(null);
+    const service = new UsersService(null);
 
     await service.insertEvents([{ userId: "u1", channelId: "chan1", eventType: "follow.follow", rawData: {} }]);
 
@@ -764,7 +764,7 @@ describe("XUsersService.insertEvents pipeline record", () => {
 
   it("does not warn for an empty events array with no pipeline configured", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const service = new XUsersService(null);
+    const service = new UsersService(null);
 
     await service.insertEvents([]);
 
@@ -780,14 +780,110 @@ describe("R2 send failure does not fail the caller", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const pipelineUser = { send: vi.fn().mockRejectedValue(new Error("transient R2 error")) };
     const tenantDb = createMockTenantDb();
-    const service = new XUsersService(tenantDb as any, {
+    const service = new UsersService(tenantDb as any, {
       pipelineUser: pipelineUser as any, tenantId: 42, entityState: createMockEntityState() as any,
     });
 
-    const id = await service.upsertUser({ id: "u1", name: "Ada" } as any, "chan1", "X");
+    const id = await service.upsertXWebhookUser({ id: "u1", name: "Ada" } as any, "chan1", "X");
 
     expect(id).toBe(tenantDb._inserts[0].row.id);
     expect(errorSpy.mock.calls[0][0]).toContain("pipeline_user_error");
     errorSpy.mockRestore();
+  });
+});
+
+// A full `user` row as it would already exist in D1 for a known follower — the merge/probe
+// source setFollowState's persistUser call diffs against. Distinct from priorRow() above (which
+// models an X follower): keyed to an arbitrary sourceUserId so it reads naturally for a YouTube
+// subscriber id (UC1) too, since setFollowState is platform-neutral.
+function knownFollower(sourceUserId: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id: `stored-${sourceUserId}`,
+    created_at: "2026-07-01T00:00:00.000Z",
+    is_follow: 0,
+    is_followed: 0,
+    name: null,
+    username: null,
+    verified_type: null,
+    profile_image_url: null,
+    description: null,
+    followers_count: null,
+    following_count: null,
+    post_count: null,
+    listed_count: null,
+    like_count: null,
+    media_count: null,
+    ...overrides,
+  };
+}
+
+import { UserMetadata_YouTube } from "../../../metadata/youtube";
+import { UserMetadata_X } from "../../../metadata/x-byok";
+
+describe("UsersService.upsertUserFromMetadata 用调用方传入的 metadata 剥离 raw_data", () => {
+  // 剥离必须按 dataId 路径走，不能按 propId 名字 —— propId ≠ payload 字段名
+  // （followers_count ← statistics.subscriberCount）。传错 metadata 会导致
+  // 已入列的值同时留在 raw_data 里（重复存储），或未入列的值被误删（永久丢失）。
+  it("YouTube 的 metadata 剥掉 statistics.subscriberCount，留下 statistics.viewCount", async () => {
+    const tenantDb = createMockTenantDb();
+    const service = new UsersService(tenantDb as any, { tenantId: 42, entityState: createMockEntityState() as any });
+    const item = {
+      id: "UC1",
+      snippet: { title: "N", customUrl: "@n", description: "d", thumbnails: { default: { url: "u" } }, country: "US" },
+      statistics: { subscriberCount: "100", videoCount: "5", viewCount: "9999", hiddenSubscriberCount: false },
+    };
+    const resolved = { source_user_id: "UC1", name: "N", username: "@n", followers_count: "100", post_count: "5", is_follow: 1 };
+
+    await service.upsertUserFromMetadata(item, resolved, "chan-1", "YOUTUBE", UserMetadata_YouTube[0]);
+
+    const insert = tenantDb.query.mock.calls.find((c: any[]) => String(c[0]).includes("INSERT INTO user"))!;
+    const cols = String(insert[0]).slice(String(insert[0]).indexOf("(") + 1, String(insert[0]).indexOf(")")).split(",").map((s) => s.trim());
+    const rawData = JSON.parse(String((insert[1] as unknown[])[cols.indexOf("raw_data")]));
+    expect(rawData.statistics.viewCount).toBe("9999");
+    expect(rawData.statistics.subscriberCount).toBeUndefined();
+    expect(rawData.snippet.country).toBe("US");
+    expect(rawData.snippet.title).toBeUndefined();
+  });
+
+  it("X 的 metadata 仍剥掉 public_metrics.followers_count", async () => {
+    const tenantDb = createMockTenantDb();
+    const service = new UsersService(tenantDb as any, { tenantId: 42, entityState: createMockEntityState() as any });
+    const item = { id: "9", name: "A", public_metrics: { followers_count: 3, tweet_count: 7 }, location: "SF" };
+    const resolved = { source_user_id: "9", name: "A", followers_count: 3, post_count: 7, is_followed: 1 };
+
+    await service.upsertUserFromMetadata(item, resolved, "chan-x", "X", UserMetadata_X[0]);
+
+    const insert = tenantDb.query.mock.calls.find((c: any[]) => String(c[0]).includes("INSERT INTO user"))!;
+    const cols = String(insert[0]).slice(String(insert[0]).indexOf("(") + 1, String(insert[0]).indexOf(")")).split(",").map((s) => s.trim());
+    const rawData = JSON.parse(String((insert[1] as unknown[])[cols.indexOf("raw_data")]));
+    expect(rawData.location).toBe("SF");
+    expect(rawData.public_metrics.followers_count).toBeUndefined();
+  });
+});
+
+describe("UsersService.setFollowState", () => {
+  // 取消订阅用的方法：只动 follow 位，不碰任何资料列，且必须强制推一条 R2 副本 ——
+  // R2 是 append-only 且无列级更新，不 forceSend 的话分析侧永远看不到这次变化。
+  it("把已知用户的 is_follow 置 0，且不写任何资料列", async () => {
+    const prior = knownFollower("UC1", { id: "stored-UC1", is_follow: 1, is_followed: 0, name: "N" });
+    const tenantDb = createMockTenantDb([prior]);
+    const sent: unknown[][] = [];
+    const service = new UsersService(tenantDb as any, {
+      tenantId: 42,
+      entityState: createMockEntityState() as any,
+      pipelineUser: { send: async (r: unknown[]) => { sent.push(r); } } as any,
+    });
+
+    await service.setFollowState("chan-1", "YOUTUBE", "UC1", { is_follow: 0 });
+
+    const insert = tenantDb.query.mock.calls.find((c: any[]) => String(c[0]).includes("INSERT INTO user"))!;
+    const sql = String(insert[0]);
+    expect(sql).toContain("is_follow = excluded.is_follow");
+    expect(sql).not.toContain("name = excluded.name");
+    expect(sql).not.toContain("followers_count = excluded.followers_count");
+    expect(sent).toHaveLength(1);
+    expect((sent[0][0] as Record<string, unknown>).is_follow).toBe(0);
+    // 行本身保留（逻辑删除语义）：没有任何 DELETE
+    expect(tenantDb.query.mock.calls.every((c: any[]) => !String(c[0]).includes("DELETE"))).toBe(true);
   });
 });

@@ -222,7 +222,16 @@ export async function handlePolling(env: Env): Promise<void> {
       console.log(JSON.stringify({ event: "polling_cron_budget_exhausted", channel_id: row.id }));
       break;
     }
-    await pollChannelOnce(env, row.channel_type, row.id);
+    try {
+      await pollChannelOnce(env, row.channel_type, row.id);
+    } catch (e) {
+      console.error(JSON.stringify({
+        event: "poll_channel_error",
+        channel_id: row.id,
+        channel_type: row.channel_type,
+        error: String(e),
+      }));
+    }
   }
 
   if (Date.now() < runDeadline) {

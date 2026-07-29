@@ -55,4 +55,44 @@ describe("handlePolling channel selection", () => {
     expect(pollChannelOnceMock).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
+
+  it("continues polling later channels after one channel's pollChannelOnce throws", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // handlePolling makes an unrelated fetch to FLOW_URL/internal/list-watches after the
+    // polling loop; stub it so this test doesn't add its own copy of the pre-existing
+    // "Invalid URL: undefined/internal/list-watches" unhandled-rejection warning.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ watches: [] }), { status: 200 })
+    );
+
+    pollChannelOnceMock.mockImplementationOnce(async () => {
+      throw new Error("X poll failed");
+    });
+
+    const channelRows = [
+      { id: "chan-x-fails", channel_type: "X" },
+      { id: "chan-x-after", channel_type: "X" },
+      { id: "chan-youtube-after", channel_type: "YOUTUBE_ACCOUNT" },
+    ];
+    const linkDb = {
+      prepare: vi.fn().mockReturnValue({ all: vi.fn().mockResolvedValue({ results: channelRows }) }),
+    };
+    const env = { LINK_DB: linkDb, FLOW_URL: "https://flow.test", INTERNAL_SECRET: "secret" } as any;
+
+    await handlePolling(env);
+
+    expect(pollChannelOnceMock).toHaveBeenCalledTimes(3);
+    expect(pollChannelOnceMock).toHaveBeenNthCalledWith(1, env, "X", "chan-x-fails");
+    expect(pollChannelOnceMock).toHaveBeenNthCalledWith(2, env, "X", "chan-x-after");
+    expect(pollChannelOnceMock).toHaveBeenNthCalledWith(3, env, "YOUTUBE_ACCOUNT", "chan-youtube-after");
+
+    const loggedError = consoleErrorSpy.mock.calls
+      .map((call) => call[0])
+      .find((arg) => typeof arg === "string" && arg.includes("poll_channel_error"));
+    expect(loggedError).toBeDefined();
+    expect(loggedError).toContain("chan-x-fails");
+
+    consoleErrorSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
 });

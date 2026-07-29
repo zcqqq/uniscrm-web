@@ -886,8 +886,13 @@ async function executeContentActions(
       // 同步执行：videos.list 是一次几百毫秒的读调用，不像 videoCondition 的人脸检测需要
       // 拉视频跑容器，所以不进队列、不写 content_flow_pending。
       const nodeId = action.nodeId as string;
-      const conditions = ((graph.nodes.find((n) => n.id === nodeId)?.data?.conditions) as
-        { field: string; operator: string; value: string }[] | undefined) || [];
+      // Array.isArray, not just a truthy check: a malformed graph whose `conditions` is an object
+      // or a string would throw ".every is not a function" inside resolveYouTubeCondition — and in
+      // the queue path a throw means the message is retried, re-running every action already
+      // executed in that batch. An unusable value degrades to "no conditions" instead.
+      const rawConditions = graph.nodes.find((n) => n.id === nodeId)?.data?.conditions;
+      const conditions = (Array.isArray(rawConditions) ? rawConditions : []) as
+        { field: string; operator: string; value: string }[];
       const { url, body } = youtubeConditionRequest({ env, contentId, flowId, payload });
 
       let resp: VideoStatsResponse;

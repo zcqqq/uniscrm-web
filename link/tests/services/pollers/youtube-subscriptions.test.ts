@@ -399,6 +399,71 @@ describe("runYouTubeSubscriptionsPoller", () => {
       expect(tenantDb.query.mock.calls.some((c: any[]) => (c[1] as unknown[])?.includes?.("UC_GONE"))).toBe(false);
     });
 
+    // Important（本轮修复）：零进度的一轮必须把 cursor 清成 NULL，而不是原样存下没有
+    // 挪动过的下标（哪怕那个下标恰好是 "0"）。"0" 不携带任何续跑信息 —— parseCursor 对
+    // NULL/空串/"0" 一视同仁地从下标 0 开始 —— 它唯一的效果是让 pollYouTubeChannel 的
+    // resumePending 判断永久为真，从而永久关掉 23h 节流，把这个账号退化成每小时全量重跑，
+    // 且没有任何自愈路径（每小时都撞同一堵墙，永远零进度）。这正是断点续跑机制本来要修的
+    // fail-open 从另一个入口回来，量级比原来的 192 units/天/账号还大。
+    it("批次循环一批都没处理完就撞 deadline 时，cursor 清成 NULL 而不是 \"0\"", async () => {
+      const clock = stubClock();
+      fetchMock.mockImplementation(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/subscriptions")) {
+          // 走查本身在真实场景里也会占用时间：这一页拿全了 120 个订阅、complete=true，
+          // 但耗时已经把预算的 1000ms 吃光了（deadline 检查只在分页 do-while 的页边界，
+          // 单页走查不会再撞一次，所以 walk.complete 仍然是 true）。
+          clock.advance(2000);
+          return subsPage(IDS_120);
+        }
+        return channelsPage(idsOfChannelsCall([u]).map((id) => ({ ...MKBHD, id })));
+      });
+      const linkDb = createMockLinkDb();
+      const tenantDb = createMockTenantDb({}, [{ source_user_id: "UC_GONE" }]);
+
+      await runYouTubeSubscriptionsPoller(baseCtx({
+        linkDb, tenantDb, deadline: clock.start + 1000,
+      }) as any);
+
+      // 批次循环在 i=0（本轮的 startIndex）上第一次检查 deadline 就已经越过，一批
+      // channels.list 都没发出、一行都没写。
+      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/channels?"))).toHaveLength(0);
+      // 修复前：resumeIndex 停在初始值 0，finally 原样存 String(0) = "0"，
+      // 之后每小时都会被 pollYouTubeChannel 当成「有断点续跑」而无视 23h 节流。
+      // 修复后：resumeIndex(0) <= startIndex(0)，视为零进度，落成 NULL。
+      expect(stateWriteOf(linkDb)!.params[0]).toBeNull();
+      // 零进度这一轮当然也不能 diff。
+      expect(tenantDb.query.mock.calls.some((c: any[]) => (c[1] as unknown[])?.includes?.("UC_GONE"))).toBe(false);
+    });
+
+    // 同一形状不止发生在 0：已经带着断点续跑（startIndex = 100）的一轮如果同样一批都没
+    // 推进，也必须清空 cursor，而不是把 "100" 原样存回去（那样和上面 "0" 的情形一样，
+    // 会让这个账号永久跳过 23h 节流，卡在同一个断点上重复重跑）。
+    it("已带断点续跑（startIndex > 0）但一批都没推进时，cursor 同样清成 NULL", async () => {
+      const clock = stubClock();
+      fetchMock.mockImplementation(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/subscriptions")) {
+          clock.advance(2000); // 走查本身吃光预算，但仍然完整拿到 120 个
+          return subsPage(IDS_120);
+        }
+        return channelsPage(idsOfChannelsCall([u]).map((id) => ({ ...MKBHD, id })));
+      });
+      const linkDb = createMockLinkDb({ cursor: "100" });
+      const tenantDb = createMockTenantDb({}, [{ source_user_id: "UC_GONE" }]);
+
+      await runYouTubeSubscriptionsPoller(baseCtx({
+        linkDb, tenantDb, deadline: clock.start + 1000,
+      }) as any);
+
+      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/channels?"))).toHaveLength(0);
+      // 修复前：resumeIndex 停在 startIndex(100)，finally 原样存 "100" —— 和上一轮存的
+      // 一模一样，账号从此每小时重跑同一个断点、23h 节流永久失效。
+      // 修复后：resumeIndex(100) <= startIndex(100)，同样视为零进度，落成 NULL。
+      expect(stateWriteOf(linkDb)!.params[0]).toBeNull();
+      expect(tenantDb.query.mock.calls.some((c: any[]) => (c[1] as unknown[])?.includes?.("UC_GONE"))).toBe(false);
+    });
+
     it("下一轮从 cursor 续跑，跑完才做 diff（且 cursor 清空）", async () => {
       fetchMock.mockImplementation(async (url: string) => {
         const u = String(url);
@@ -426,6 +491,14 @@ describe("runYouTubeSubscriptionsPoller", () => {
       );
       expect(unfollow).toBeTruthy();
       expect(String(unfollow![0])).toContain("is_follow = excluded.is_follow");
+      // Minor 1：UC0 在本轮现拉的 walk.ids 里（IDS_120 包含 UC0），diff 必须以完整的
+      // walk.ids 为准而不是「续跑之后剩下的那一小段」——否则一个把 authoritative 集合
+      // 建在续跑切片上的回归会把 UC0 也误判成取消订阅，而这里如果只断言 UC_GONE 被处理，
+      // 那样的回归仍会通过。UC0 绝不能出现在任何一条 INSERT INTO user 调用的参数里。
+      const touchedUC0 = tenantDb.query.mock.calls.some(
+        (c: any[]) => String(c[0]).includes("INSERT INTO user") && (c[1] as unknown[]).includes("UC0")
+      );
+      expect(touchedUC0).toBe(false);
       // 跑完了 → cursor 清空 → 重新回到 23h 节流的节奏。
       expect(stateWriteOf(linkDb)!.params[0]).toBeNull();
     });

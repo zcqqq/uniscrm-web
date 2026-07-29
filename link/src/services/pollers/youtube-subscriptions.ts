@@ -75,9 +75,12 @@ export async function runYouTubeSubscriptionsPoller(ctx: YouTubeSubscriptionsPol
     }));
   }
 
-  // 本轮停在哪（批边界下标）与本轮有没有把这次走查的 id 全部处理完 —— 两者都要在
-  // 抛出路径上也有确定的值，所以声明在 try 之外，finally 里据此落 cursor。
+  // 本轮停在哪（批边界下标）、本轮从哪个下标续跑、与本轮有没有把这次走查的 id 全部
+  // 处理完 —— 三者都要在抛出路径上也有确定的值，所以声明在 try 之外，finally 里据此落
+  // cursor。startIndex 单独留在这里（而不是只在 try 内部 const 一次）是本轮修复的关键：
+  // finally 要拿它和 resumeIndex 比较，判断本轮到底有没有真的往前推进过（见下方 finally）。
   let resumeIndex = 0;
+  let startIndex = 0;
   let loopComplete = false;
 
   try {
@@ -93,7 +96,7 @@ export async function runYouTubeSubscriptionsPoller(ctx: YouTubeSubscriptionsPol
     // 从上一轮停下的地方继续。subscriptions.list 便宜（50 个 id / 1 unit），所以每轮都
     // 重新走查一遍完整 id 列表，只在这份**新鲜**列表里跳到断点 —— 续跑因此不会让 diff
     // 落在陈旧数据上：下面 diff 用的 walk.ids 永远来自本轮的走查（见 diff 分支注释）。
-    const startIndex = parseCursor(storedCursor, walk.ids.length);
+    startIndex = parseCursor(storedCursor, walk.ids.length);
     resumeIndex = startIndex;
 
     console.log(JSON.stringify({
@@ -202,7 +205,13 @@ export async function runYouTubeSubscriptionsPoller(ctx: YouTubeSubscriptionsPol
       }
 
       if (i >= walk.ids.length) {
-        // 把本轮走查出来的 id 全部处理完了（包括「续跑之后终于跑完」这一种）。
+        // 把本轮走查出来的 id 全部处理完了 —— 包括「续跑之后终于跑完」，也包括「上一轮
+        // 存的 cursor 在本轮变短的 walk.ids 上被 parseCursor 直接夹到了末尾，批次循环从
+        // startIndex 起一次都没进（i 从没 < walk.ids.length 过）」这种一批都没处理、却仍算
+        // 完整通过的边界（例如账号在两轮之间大量退订）。这条分支和 finally 里的
+        // resumeIndex <= startIndex 兜底是同一个结论在两处的自然重合，不是各管一段：
+        // 这里让 loopComplete 直接为 true，finally 里的 guard 只是在 loopComplete 因为
+        // 别的原因未被设为 true 时（例如批次中途失败但恰好没推进）兜住同一类「零进度」。
         loopComplete = true;
         resumeIndex = walk.ids.length;
       }
@@ -305,11 +314,22 @@ export async function runYouTubeSubscriptionsPoller(ctx: YouTubeSubscriptionsPol
     //   - 走查本身失败时（walk.complete=false）walk.ids 只是半份，而我们不存 pageToken，
     //     没有可续的位置：这时按「这半份处理完了」清 cursor，下一轮从第一页重来即可，
     //     既不会漏 diff（半份本来就不 diff），也不会因为一个持续失败的走查而变成每小时重试。
+    //   - resumeIndex <= startIndex（本轮压根没能比上一轮的断点往前推进一步，包括
+    //     startIndex 本身就是 0 的情况）同样清 cursor，而不是原样存下 resumeIndex：
+    //     "0" 和其它任何「没挪动过」的下标一样，不带任何续跑信息（parseCursor 对空/NULL
+    //     和 "0" 一视同仁地从下标 0 开始），它唯一的效果是让 pollYouTubeChannel 的
+    //     resumePending 判断永久为真，从而永久关掉 23h 节流、把这个账号退化成每小时
+    //     全量重跑——这正是 cursor 断点这套机制本来要修的那个 fail-open，只是换了个
+    //     入口回来。丢一个没有推进的续跑位置只会让下一轮多花点配额重跑，绝不会算错数据，
+    //     这笔账划得来（数据准确性 > 系统稳定性）。跑到列表尾时 resumeIndex 也会被上面
+    //     设成 walk.ids.length（== startIndex 或更大都可能），guard 与 loopComplete 在
+    //     这条路径上是同一个结论，写在一起只是让「本轮没有可持久化的有效断点」这件事
+    //     只有一处判断依据。
     // 这条写入自身也兜异常：它若抛出会顶替掉 try 里真正的根因异常（调用方据此写 sync_status）。
     try {
       await ctx.linkDb
         .prepare("UPDATE channel_poll_state SET cursor = ?, last_polled_at = datetime('now'), updated_at = datetime('now') WHERE channel_id = ? AND poller_name = 'subscriptions'")
-        .bind(loopComplete ? null : String(resumeIndex), ctx.accountChannelId)
+        .bind(loopComplete || resumeIndex <= startIndex ? null : String(resumeIndex), ctx.accountChannelId)
         .run();
     } catch (e) {
       console.error(JSON.stringify({

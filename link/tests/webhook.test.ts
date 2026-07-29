@@ -302,6 +302,36 @@ describe("webhookRoutes POST /webhook — follow events / resolveEventConsumedPa
     const [events] = insertEventsMock.mock.calls[0];
     expect(events[0].consumedPaths).toEqual([]);
   });
+
+  it("发给 FLOW_QUEUE 的 payload 同时含裸键与 user. 键", async () => {
+    const env = baseEnv();
+    const app = buildApp();
+
+    await post(app, {
+      data: {
+        event_type: "follow.follow",
+        filter: { user_id: "x-user-1" },
+        payload: {
+          source: { data: { id: "x-user-1" } },
+          target: {
+            data: {
+              id: "target-1", name: "Target", username: "target_h",
+              public_metrics: { followers_count: 10, following_count: 2 },
+              verified_type: "blue",
+            },
+          },
+        },
+      },
+    }, env);
+
+    expect(env.FLOW_QUEUE.send).toHaveBeenCalledTimes(1);
+    const [msg] = (env.FLOW_QUEUE.send as any).mock.calls[0];
+    // 裸键：存量条件的 cond.field 写的是裸 propId
+    expect(msg.payload.followers_count).toBe(10);
+    // user. 键：存量条件的值里写的是 $user.followers_count，flow 侧现在严格解析
+    expect(msg.payload["user.followers_count"]).toBe(10);
+    expect(msg.payload["user.name"]).toBe("Target");
+  });
 });
 
 // X's like.create is one event type covering both directions, and its payload has no

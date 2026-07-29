@@ -71,7 +71,7 @@ function findCounterparty(includes: Record<string, unknown> | undefined, filterU
 function flattenUserPayload(userData?: Record<string, unknown>): Record<string, unknown> {
   if (!userData) return {};
   const pm = userData.public_metrics as Record<string, unknown> | undefined;
-  return {
+  const bare: Record<string, unknown> = {
     name: String(userData.name || ""),
     username: String(userData.username || ""),
     verified_type: String(userData.verified_type || (userData.verified ? "blue" : "none")),
@@ -84,6 +84,14 @@ function flattenUserPayload(userData?: Record<string, unknown>): Record<string, 
     like_count: Number(pm?.like_count || 0),
     media_count: Number(pm?.media_count || 0),
   };
+  // 裸键 + "user." 键双写。flow 的 evaluateCondition 现在对 $user.x 严格查 "user.x"、
+  // 不再降级到裸键（见 flow/src/engine.ts 的 PROP_REF_RE 注释）。存量已发布 user flow
+  // 的条件字段写的是裸名、值里写的是 $user.名，两种写法都必须继续命中，所以两份都发。
+  // 调用方在本函数返回后追加的键（如 DM 的 message_text）是 eventProp、不是 userProp，
+  // 不需要 user. 孪生键。
+  const out: Record<string, unknown> = { ...bare };
+  for (const [k, v] of Object.entries(bare)) out[`user.${k}`] = v;
+  return out;
 }
 
 export function navigatePath(obj: unknown, path: string): unknown {

@@ -49,11 +49,33 @@ export interface ExecutionResult {
   nodeLogs: NodeLog[];
 }
 
+// `$event.x` / `$user.x` / `$x` 三种引用形式。
+//
+// event. 是纯装饰前缀：剥掉后查裸键。它没有任何带点号的对应键，剥了无害，也让存量
+// user flow 的写法继续有效。
+//
+// user. 则是**真命名空间**：content flow 的 payload 里作者字段的键就是
+// "user.<propId>"（link 的 resolveAuthorProps 统一加的），与内容侧同名的
+// like_count / view_count 靠它区分——两侧含义完全不同（推文被点赞数 vs 作者点过多少赞；
+// 视频播放量 vs 频道历史总播放量）。
+//
+// 所以 user. **严格**解析，绝不降级到裸键：作者数据取不到时（配额耗尽、作者被封）
+// payload 不带 user.*，一降级 $user.view_count 就会命中这个视频自己的播放量，条件照常
+// 求值并给出一个看似合理的错误答案。严格解析下它取到 undefined，按 fail-closed 不通过。
+// user flow 的 payload 由 link 的 flattenUserPayload 双写裸键与 user. 键，所以存量
+// $user.x 写法在那边照常命中。
+const PROP_REF_RE = /\$((?:event\.|user\.)?\w+)/g;
+
+function lookupPropRef(ref: string, payload: Record<string, unknown>): unknown {
+  const key = ref.startsWith("event.") ? ref.slice("event.".length) : ref;
+  return payload[key];
+}
+
 function resolveValue(value: string, payload: Record<string, unknown>): number | null {
   if (!value.includes("$")) return parseFloat(value);
 
-  const expr = value.replace(/\$(?:event\.|user\.)?(\w+)/g, (_, field) => {
-    const v = payload[field];
+  const expr = value.replace(PROP_REF_RE, (_, ref: string) => {
+    const v = lookupPropRef(ref, payload);
     if (v === undefined || v === null) return "NaN";
     return String(Number(v));
   });
@@ -114,8 +136,8 @@ function evaluateExpr(expr: string): number {
 
 function resolveStringValue(value: string, payload: Record<string, unknown>): string {
   if (!value.includes("$")) return value;
-  return value.replace(/\$(?:event\.|user\.)?(\w+)/g, (_, field) => {
-    const v = payload[field];
+  return value.replace(PROP_REF_RE, (_, ref: string) => {
+    const v = lookupPropRef(ref, payload);
     if (v === undefined || v === null) return "";
     return String(v);
   });

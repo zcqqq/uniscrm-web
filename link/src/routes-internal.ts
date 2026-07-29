@@ -14,6 +14,7 @@ import { initPhotoPost, initVideoPost } from "./services/tiktok-publish";
 import { YouTubeTokenService } from "./services/youtube-token";
 import { rateVideo, insertPlaylistItem } from "./services/youtube-actions";
 import { recordYouTubeWriteQuota } from "./services/youtube-quota";
+import { fetchYouTubeVideoProps } from "./services/pollers/youtube-content";
 
 const ACTION_TO_EVENT_TYPE: Record<string, string> = {
   follow: "follow-user",
@@ -492,6 +493,30 @@ export function internalRoutes() {
     console.log(JSON.stringify({ event: "youtube_playlist_insert", contentId, channelId, videoId, playlistId, flowId: flowId || null, ok: result.ok, rateLimited: !!result.rateLimited }));
     if (result.rateLimited) return c.json({ ok: false, rateLimited: true, rateLimitReset: result.rateLimitReset });
     return c.json({ ok: result.ok, reason: result.ok ? undefined : "youtube_api_error: request rejected" });
+  });
+
+  // 只取数，不判定：按 videoId 拉一次 videos.list 并按 ContentMetadata_YouTube 映射成
+  // contentProps。flow 的 youtubeCondition 节点用它做"发布若干天后视频跑得怎么样"的复查，
+  // 条件求值留在 flow 侧（engine.ts 的 evaluateCondition），这里不认识 flow 的条件语义。
+  // 走 API key 的读操作（1 unit），不需要 channelId 或用户 OAuth。
+  router.post("/youtube/video-stats", async (c) => {
+    const { videoId } = await c.req.json<{ videoId?: string }>().catch(() => ({ videoId: undefined }));
+    if (!videoId) return c.json({ error: "videoId required" }, 400);
+
+    let props: Record<string, unknown> | null;
+    try {
+      props = await fetchYouTubeVideoProps(c.env.YOUTUBE_API_KEY, videoId);
+    } catch (e) {
+      console.log(JSON.stringify({ event: "youtube_video_stats_error", videoId, error: String(e) }));
+      return c.json({ ok: false, reason: `youtube_api_error: ${String(e)}` });
+    }
+    if (!props) {
+      console.log(JSON.stringify({ event: "youtube_video_stats_empty", videoId }));
+      return c.json({ ok: false, reason: "video_unavailable: video not found or private" });
+    }
+
+    console.log(JSON.stringify({ event: "youtube_video_stats", videoId, view_count: props.view_count, like_count: props.like_count }));
+    return c.json({ ok: true, props });
   });
 
   // Real X publish path: content's generated (or literal, for provider:"none") text gets

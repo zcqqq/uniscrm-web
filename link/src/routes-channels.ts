@@ -16,6 +16,7 @@ import { readFrozenState } from "./services/x-freeze";
 import { fetchOwnedLists } from "./services/x-posts-api";
 import { YouTubeTokenService } from "./services/youtube-token";
 import { fetchAllSubscriptions } from "./services/youtube-api";
+import { recordYouTubeQuota } from "./services/youtube-quota";
 
 export function channelsRoutes() {
   const router = new Hono<{ Bindings: Env }>();
@@ -346,12 +347,28 @@ export function channelsRoutes() {
     // 失败时返回空列表而不是 5xx：前端已有「No subscriptions found」空态，一次配额
     // 波动不该让整个 Inspector 报错。
     let subscriptions: { channelId: string; channelName: string; thumbnailUrl: string }[] = [];
+    let quotaCalls = 0;
     try {
       const tokenService = new YouTubeTokenService(c.env.LINK_DB, c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET);
       const accessToken = await tokenService.getValidToken(accountRow.id);
-      subscriptions = await fetchAllSubscriptions(accessToken);
+      const result = await fetchAllSubscriptions(accessToken);
+      subscriptions = result.subscriptions;
+      quotaCalls = result.calls;
     } catch (e) {
       console.error(JSON.stringify({ event: "youtube_subscriptions_fetch_error", channel_id: accountRow.id, error: String(e) }));
+    }
+
+    // 这是一条 UI 触发的**实时**读取（每打开一次 Inspector 就 ceil(订阅数/50) units），
+    // 不记账会让 8000 units 的阈值告警系统性少算这部分量。整轮合并成一次记账：配额计数器
+    // 是单个 KV key 的读-改-写，同一个 key 每秒只允许写一次。
+    // 失败路径（fetchAllSubscriptions 抛出）会漏记已发出的那几次请求 —— 量级 ≤ 本次打开的
+    // 页数，且只在出错时发生；为它改掉「抛异常」的契约不划算。记账失败也绝不能影响响应。
+    if (quotaCalls > 0) {
+      try {
+        await recordYouTubeQuota(c.env, quotaCalls);
+      } catch (e) {
+        console.error(JSON.stringify({ event: "youtube_quota_record_failed", channel_id: accountRow.id, units: quotaCalls, error: String(e) }));
+      }
     }
 
     return c.json({

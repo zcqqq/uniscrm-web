@@ -78,9 +78,15 @@ export interface YouTubeSubscription {
   thumbnailUrl: string;
 }
 
-export async function fetchAllSubscriptions(accessToken: string): Promise<YouTubeSubscription[]> {
+// calls = 实际发出的 subscriptions.list 请求数（1 unit/次）。调用方**必须**拿它去
+// recordYouTubeQuota 记账：这个函数被 flow 选择器的路由每次打开都实时调用一次，不记账
+// 就意味着 8000 units 的阈值告警系统性地少算了这部分读取量。
+export async function fetchAllSubscriptions(
+  accessToken: string
+): Promise<{ subscriptions: YouTubeSubscription[]; calls: number }> {
   const subscriptions: YouTubeSubscription[] = [];
   let pageToken: string | undefined;
+  let calls = 0;
 
   do {
     const apiUrl = new URL(`${DATA_API_BASE}/subscriptions`);
@@ -90,6 +96,8 @@ export async function fetchAllSubscriptions(accessToken: string): Promise<YouTub
     if (pageToken) apiUrl.searchParams.set("pageToken", pageToken);
 
     const res = await fetch(apiUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+    // 请求已经发出 = 配额已经计费，所以先计数再判断 ok。
+    calls++;
     if (!res.ok) throw new Error(`YouTube subscriptions.list failed: ${res.status} ${await res.text()}`);
     const body = (await res.json()) as {
       items?: { snippet?: { resourceId?: { channelId?: string }; title?: string; thumbnails?: { default?: { url?: string } } } }[];
@@ -109,5 +117,5 @@ export async function fetchAllSubscriptions(accessToken: string): Promise<YouTub
     pageToken = body.nextPageToken;
   } while (pageToken);
 
-  return subscriptions;
+  return { subscriptions, calls };
 }

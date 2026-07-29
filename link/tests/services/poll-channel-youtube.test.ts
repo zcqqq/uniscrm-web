@@ -59,6 +59,41 @@ describe("pollChannelOnce YOUTUBE_ACCOUNT", () => {
     await pollChannelOnce(env, "YOUTUBE_ACCOUNT", "acct-1");
     expect(syncYouTubeSubscriptionUsers).not.toHaveBeenCalled();
   });
+
+  // Important 1：cursor 非空 = 上一轮没跑完、欠着一段续跑。这时 23h 节流必须让路，
+  // 否则一个 400 订阅的账号每天只推进一段，要 8 天才跑完一轮 —— 而取消订阅的 diff
+  // 只在跑完的那一轮才执行，等于对这类账号永远不生效。
+  it("cursor 非空时无视 23h 节流，下一个小时的 tick 就续跑", async () => {
+    const { env } = createEnv(YT_ROW, { cursor: "150", last_polled_at: hoursAgo(1) });
+    await pollChannelOnce(env, "YOUTUBE_ACCOUNT", "acct-1");
+    expect(syncYouTubeSubscriptionUsers).toHaveBeenCalledTimes(1);
+  });
+
+  it("cursor 为空时 23h 节流照常生效（22 小时前跑过 —— 跳过）", async () => {
+    const { env } = createEnv(YT_ROW, { cursor: null, last_polled_at: hoursAgo(22) });
+    await pollChannelOnce(env, "YOUTUBE_ACCOUNT", "acct-1");
+    expect(syncYouTubeSubscriptionUsers).not.toHaveBeenCalled();
+  });
+
+  // 这个 SELECT 由 cron 的 handlePolling 在逐租户的循环里调用：异常逃出去会中断整个循环，
+  // 连带跳过后面所有租户的轮询。
+  it("channel_poll_state 的 SELECT 抛错时不外抛，只跳过这个频道", async () => {
+    const LINK_DB = {
+      prepare: vi.fn().mockImplementation((sql: string) => ({
+        bind: vi.fn().mockReturnValue({
+          first: vi.fn().mockImplementation(async () => {
+            if (sql.includes("channel_poll_state")) throw new Error("D1_ERROR: network");
+            return YT_ROW;
+          }),
+          run: vi.fn().mockResolvedValue({ success: true }),
+        }),
+      })),
+    };
+    const env = { LINK_DB } as any;
+
+    await expect(pollChannelOnce(env, "YOUTUBE_ACCOUNT", "acct-1")).resolves.toBeUndefined();
+    expect(syncYouTubeSubscriptionUsers).not.toHaveBeenCalled();
+  });
 });
 
 describe("handlePolling 候选频道", () => {

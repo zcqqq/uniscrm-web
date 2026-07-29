@@ -598,7 +598,8 @@ export function oauthRoutes() {
       access_token: tokens.accessToken(),
       refresh_token: refreshToken,
       expires_at: expiresAt,
-      subscriptions: [] as unknown[],
+      // config.subscriptions 已删除：订阅的真相是 per-tenant D1 的 user 表（is_follow=1 的
+      // YOUTUBE 行），选择器改为实时拉取。留一个永远为空的 key 只会误导下一个读代码的人。
       sync_status: "pending" as const,
       last_synced_at: null as string | null,
     };

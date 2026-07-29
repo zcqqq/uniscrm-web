@@ -8,6 +8,7 @@ import type { Env } from "../../src/types";
 function createApp(opts: {
   channelRow: Record<string, unknown> | null;
   tenantDataDb?: { query: ReturnType<typeof vi.fn> };
+  kv?: { get: ReturnType<typeof vi.fn>; put: ReturnType<typeof vi.fn> };
 }) {
   const LINK_DB = {
     prepare: vi.fn().mockReturnValue({
@@ -24,8 +25,9 @@ function createApp(opts: {
     await next();
   });
   app.route("/", channelsRoutes());
-  const env = { LINK_DB, GOOGLE_CLIENT_ID: "cid", GOOGLE_CLIENT_SECRET: "cs" } as unknown as Env;
-  return { app, env };
+  const KV = opts.kv ?? { get: vi.fn().mockResolvedValue(null), put: vi.fn().mockResolvedValue(undefined) };
+  const env = { LINK_DB, KV, GOOGLE_CLIENT_ID: "cid", GOOGLE_CLIENT_SECRET: "cs" } as unknown as Env;
+  return { app, env, KV };
 }
 
 const ACCOUNT_ROW = {
@@ -66,6 +68,34 @@ describe("GET /youtube/subscriptions", () => {
     const { app, env } = createApp({ channelRow: null });
     const body = await (await app.request("/youtube/subscriptions", {}, env)).json() as any;
     expect(body).toEqual({ connected: false, accountChannelId: null, subscriptions: [] });
+  });
+
+  // 这条路由每打开一次 Inspector 就实时消耗 ceil(订阅数/50) units。不记账 = 8000 units
+  // 的阈值告警系统性少算这部分读取量（配额池是整个 Google Cloud 项目共享的）。
+  it("实时拉取的配额按实际请求数记账（1 unit/次，整轮只写一次 KV）", async () => {
+    const page = (items: unknown[], nextPageToken?: string) => new Response(JSON.stringify({ items, nextPageToken }), { status: 200 });
+    fetchMock
+      .mockResolvedValueOnce(page([{ snippet: { resourceId: { channelId: "UC1" }, title: "A" } }], "p2"))
+      .mockResolvedValueOnce(page([{ snippet: { resourceId: { channelId: "UC2" }, title: "B" } }]));
+    const { app, env, KV } = createApp({ channelRow: ACCOUNT_ROW });
+
+    const body = await (await app.request("/youtube/subscriptions", {}, env)).json() as any;
+
+    expect(body.subscriptions).toHaveLength(2);
+    const quotaPuts = (KV.put as any).mock.calls.filter((c: unknown[]) => String(c[0]).startsWith("yt_quota:"));
+    expect(quotaPuts).toHaveLength(1);
+    // 2 页 subscriptions.list = 2 units（读调用 1 unit/次，绝不是写调用的 50）
+    expect(quotaPuts[0][1]).toBe("2");
+  });
+
+  it("配额记账失败也不影响响应", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    const kv = { get: vi.fn().mockResolvedValue(null), put: vi.fn().mockRejectedValue(new Error("KV down")) };
+    const { app, env } = createApp({ channelRow: ACCOUNT_ROW, kv });
+
+    const res = await app.request("/youtube/subscriptions", {}, env);
+    expect(res.status).toBe(200);
+    expect((await res.json() as any).subscriptions).toEqual([]);
   });
 
   it("YouTube API 失败时返回空列表而不是 5xx", async () => {

@@ -39,7 +39,9 @@ vi.mock("../../shared/tenant-data-db", () => ({ TenantDataDB: class {} }));
 vi.mock("../../shared/credit-service", () => ({ getActiveSubscriptionTier: vi.fn() }));
 vi.mock("../../shared/plans", () => ({ canUseFeature: vi.fn().mockReturnValue(true) }));
 vi.mock("../src/services/pollers/poll-channel", () => ({ pollChannelOnce: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("../src/services/youtube-account", () => ({ syncYouTubeSubscriptions: vi.fn() }));
+// 必须与 oauth.ts 实际 import 的导出名一致，否则这个 mock 什么都没 stub 住 ——
+// 一旦本文件里有用例走到 YouTube 回调，就会真的跑起订阅同步。
+vi.mock("../src/services/youtube-account", () => ({ syncYouTubeSubscriptionUsers: vi.fn() }));
 
 import { oauthRoutes } from "../src/oauth";
 

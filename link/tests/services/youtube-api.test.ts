@@ -89,10 +89,12 @@ describe("youtube-api fetch functions", () => {
       ],
     }));
     const result = await fetchAllSubscriptions("access-tok");
-    expect(result).toEqual([
+    expect(result.subscriptions).toEqual([
       { channelId: "UCabc", channelName: "Channel A", thumbnailUrl: "https://img/a.jpg" },
       { channelId: "UCdef", channelName: "Channel B", thumbnailUrl: "https://img/b.jpg" },
     ]);
+    // 配额记账要的是「发出了几次请求」——调用方据此调 recordYouTubeQuota（1 unit/次）。
+    expect(result.calls).toBe(1);
     expect(fetchMock.mock.calls[0][0]).toContain("mine=true");
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer access-tok");
   });
@@ -107,7 +109,8 @@ describe("youtube-api fetch functions", () => {
         items: [{ snippet: { resourceId: { channelId: "UC2" }, title: "Two" } }],
       }));
     const result = await fetchAllSubscriptions("access-tok");
-    expect(result.map((s) => s.channelId)).toEqual(["UC1", "UC2"]);
+    expect(result.subscriptions.map((s) => s.channelId)).toEqual(["UC1", "UC2"]);
+    expect(result.calls).toBe(2);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1][0]).toContain("pageToken=page2");
   });
@@ -117,7 +120,7 @@ describe("youtube-api fetch functions", () => {
       items: [{ snippet: { title: "Broken" } }, { snippet: { resourceId: { channelId: "UCok" }, title: "OK" } }],
     }));
     const result = await fetchAllSubscriptions("access-tok");
-    expect(result).toEqual([{ channelId: "UCok", channelName: "OK", thumbnailUrl: "" }]);
+    expect(result.subscriptions).toEqual([{ channelId: "UCok", channelName: "OK", thumbnailUrl: "" }]);
   });
 
   it("fetchAllSubscriptions throws on a non-ok response", async () => {

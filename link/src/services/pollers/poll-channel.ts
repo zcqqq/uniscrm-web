@@ -20,12 +20,7 @@ const REPOLL_INTERVAL_MS = 55 * 60 * 1000;
 // videos.list（content trigger）和写操作（50 units/次）。每天一次 = 8 units/天/账号。
 const YOUTUBE_REPOLL_INTERVAL_MS = 23 * 60 * 60 * 1000;
 
-async function shouldPoll(
-  env: Env,
-  channelId: string,
-  pollerName: string,
-  intervalMs: number = REPOLL_INTERVAL_MS
-): Promise<boolean> {
+async function shouldPoll(env: Env, channelId: string, pollerName: string): Promise<boolean> {
   const state = await env.LINK_DB
     .prepare("SELECT backfill_complete, last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = ?")
     .bind(channelId, pollerName)
@@ -36,7 +31,7 @@ async function shouldPoll(
   }
   if (state.backfill_complete && state.last_polled_at) {
     const elapsedMs = Date.now() - new Date(state.last_polled_at).getTime();
-    if (elapsedMs < intervalMs) {
+    if (elapsedMs < REPOLL_INTERVAL_MS) {
       console.log(JSON.stringify({ event: `${pollerName}_poll_skipped_too_recent`, channel_id: channelId, elapsedMs }));
       return false;
     }
@@ -196,20 +191,33 @@ async function pollTikTokChannel(env: Env, row: { id: string; config: string; te
   }
 }
 
-// YouTube 与 X/TikTok 有两处刻意的差异：
+// YouTube 与 X/TikTok 有三处刻意的差异：
 // 1) 没有 channel_poll_state 行 = 从没同步过 = 应该跑（poller 会自播种）。X 那边
 //    「没有行」意味着未授权；YouTube 的授权凭证就在 channels 行的 config 里。
 // 2) 节流 23 小时而不是 55 分钟（共享配额，见 YOUTUBE_REPOLL_INTERVAL_MS）。
+// 3) cursor 非空 = 上一轮没跑完、欠着一段续跑 → **无视 23 小时**，下一个小时的 tick 就继续。
+//    这与 x-followers 的 backfill / incremental 分工同构：backfill 每小时推进，跑完了才
+//    进入长间隔的增量节奏。没有这一条，一个 400 订阅的账号每天只推进 ~150 个，要 8 天
+//    才跑完一轮完整同步，而取消订阅的 diff 只在跑完的那一轮才执行。
 // tenantDb 解析与 token 刷新都在 syncYouTubeSubscriptionUsers 里，这里只做调度判断。
 async function pollYouTubeChannel(env: Env, row: { id: string; config: string; tenant_id: number | null }): Promise<void> {
   if (!row.tenant_id) return;
 
-  const state = await env.LINK_DB
-    .prepare("SELECT last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = 'subscriptions'")
-    .bind(row.id)
-    .first<{ last_polled_at: string | null }>();
+  // 这个 SELECT 必须自己兜住异常：pollChannelOnce 由 cron 的 handlePolling 在一个循环里
+  // 逐个租户调用，一次 D1 报错逃出去会中断循环、连带跳过后面所有租户的轮询。
+  let state: { cursor: string | null; last_polled_at: string | null } | null = null;
+  try {
+    state = await env.LINK_DB
+      .prepare("SELECT cursor, last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = 'subscriptions'")
+      .bind(row.id)
+      .first<{ cursor: string | null; last_polled_at: string | null }>();
+  } catch (e) {
+    console.error(JSON.stringify({ event: "youtube_subscriptions_poll_state_read_error", channel_id: row.id, error: String(e) }));
+    return;
+  }
 
-  if (state?.last_polled_at) {
+  const resumePending = state?.cursor != null;
+  if (!resumePending && state?.last_polled_at) {
     const elapsedMs = Date.now() - new Date(state.last_polled_at).getTime();
     if (elapsedMs < YOUTUBE_REPOLL_INTERVAL_MS) {
       console.log(JSON.stringify({ event: "youtube_subscriptions_poll_skipped_too_recent", channel_id: row.id, elapsedMs }));

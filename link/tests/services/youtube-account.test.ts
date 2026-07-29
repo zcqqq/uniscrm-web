@@ -64,6 +64,35 @@ describe("syncYouTubeSubscriptionUsers", () => {
     expect(runYouTubeSubscriptionsPoller).not.toHaveBeenCalled();
   });
 
+  // Important 3：OAuth 回调把 sync_status 写成 "pending"，前端每 2 秒轮询一次
+  // /youtube/status 直到它不再是 pending。未 provision 的租户（tenant 创建与 provision
+  // 之间的真实中间态）如果在这里直接 return，卡片会**永远**停在「正在同步你的订阅…」，
+  // 页面在整个生命周期里每 2 秒打一次请求。提前返回也必须先落一个终态。
+  it("租户 D1 未 provision 时仍写入终态 sync_status（不能把前端永远卡在 pending）", async () => {
+    (resolveTenantDb as any).mockResolvedValue(null);
+    vi.stubGlobal("fetch", vi.fn());
+    const { env, runs } = createEnv(CHANNEL_ROW);
+
+    await syncYouTubeSubscriptionUsers(env, "acct-1");
+
+    const statusWrite = runs.find((r) => r.sql.includes("json_set"));
+    expect(statusWrite).toBeTruthy();
+    expect(statusWrite!.params).toContain("error");
+    expect(statusWrite!.params).not.toContain("pending");
+  });
+
+  it("channels 行没有 tenant_id 时同样写入终态 sync_status", async () => {
+    (resolveTenantDb as any).mockResolvedValue({ query: vi.fn() });
+    vi.stubGlobal("fetch", vi.fn());
+    const { env, runs } = createEnv({ ...CHANNEL_ROW, tenant_id: null });
+
+    await syncYouTubeSubscriptionUsers(env, "acct-1");
+
+    expect(resolveTenantDb).not.toHaveBeenCalled();
+    expect(runYouTubeSubscriptionsPoller).not.toHaveBeenCalled();
+    expect(runs.find((r) => r.sql.includes("json_set"))!.params).toContain("error");
+  });
+
   it("channels 行不存在时静默返回", async () => {
     (resolveTenantDb as any).mockResolvedValue({ query: vi.fn() });
     const { env } = createEnv(null);

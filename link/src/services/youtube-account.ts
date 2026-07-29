@@ -16,7 +16,21 @@ export async function syncYouTubeSubscriptionUsers(
     .prepare("SELECT id, config, tenant_id FROM channels WHERE id = ? AND channel_type = 'YOUTUBE_ACCOUNT' AND is_active = 1")
     .bind(accountChannelId)
     .first<{ id: string; config: string; tenant_id: number | null }>();
-  if (!row || !row.tenant_id) return;
+  // 行本身不存在：没有可写状态的载体，也就没有卡在 pending 的卡片可言。
+  if (!row) return;
+
+  // OAuth 回调把 sync_status 写成 "pending"，前端每 2 秒轮询一次 /youtube/status 直到它
+  // 不再是 pending。因此**每一条**提前返回都必须先落一个终态 —— 否则未 provision 的租户
+  // （tenant 创建与 provision 之间的真实中间态）连上 YouTube 后，卡片会永远停在
+  // 「正在同步你的订阅…」，页面在其整个生命周期里每 2 秒打一次请求。
+  if (!row.tenant_id) {
+    console.log(JSON.stringify({
+      event: "youtube_subscriptions_sync_skipped_no_tenant",
+      account_channel_id: accountChannelId,
+    }));
+    await writeSyncStatus(env, accountChannelId, "error");
+    return;
+  }
 
   // 在任何 YouTube API 调用（含 token 刷新）之前守住 —— 存不下就别抓。
   const tenantDb = await resolveTenantDb(env, row.tenant_id);
@@ -25,6 +39,7 @@ export async function syncYouTubeSubscriptionUsers(
       event: "youtube_subscriptions_sync_skipped_no_tenant_db",
       account_channel_id: accountChannelId, tenant_id: row.tenant_id,
     }));
+    await writeSyncStatus(env, accountChannelId, "error");
     return;
   }
 
@@ -52,13 +67,17 @@ export async function syncYouTubeSubscriptionUsers(
     }));
   }
 
-  // json_set 定点改这两个 key，绝不整体重写 config —— YouTubeTokenService.forceRefresh
-  // 会整体重写 config，读改写会与它互相覆盖（本仓库在 X 冻结标记上踩过这个坑）。
-  //
-  // 这一步本身也必须兜住异常：D1 REST 调用真的会失败，而这个函数存在的全部理由就是
-  // 「不能让任何异常从这里逃出去到 OAuth 回调的 waitUntil 里」——丢一个 sync_status
-  // 标记只是前端卡片显示旧状态（美观退化），异常逃逸出去才是 OAuth 已经写成功的连接
-  // 却让用户看到报错页（本函数要严防的那类错误）。
+  await writeSyncStatus(env, accountChannelId, syncStatus);
+}
+
+// json_set 定点改这两个 key，绝不整体重写 config —— YouTubeTokenService.forceRefresh
+// 会整体重写 config，读改写会与它互相覆盖（本仓库在 X 冻结标记上踩过这个坑）。
+//
+// 这一步本身也必须兜住异常：D1 REST 调用真的会失败，而调用方存在的全部理由就是
+// 「不能让任何异常从这里逃出去到 OAuth 回调的 waitUntil 里」——丢一个 sync_status
+// 标记只是前端卡片显示旧状态（美观退化），异常逃逸出去才是 OAuth 已经写成功的连接
+// 却让用户看到报错页（要严防的那类错误）。
+async function writeSyncStatus(env: Env, accountChannelId: string, syncStatus: string): Promise<void> {
   try {
     await env.LINK_DB
       .prepare(

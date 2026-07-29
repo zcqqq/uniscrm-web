@@ -1,14 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runYouTubeSubscriptionsPoller } from "../../../src/services/pollers/youtube-subscriptions";
 
-function createMockLinkDb() {
+// state = channel_poll_state 里已有的行（poller 只 SELECT cursor 一列做断点续跑）。
+function createMockLinkDb(state: { cursor: string | null } | null = null) {
   const runs: { sql: string; params: unknown[] }[] = [];
   const prepare = vi.fn().mockImplementation((sql: string) => ({
     bind: vi.fn().mockImplementation((...params: unknown[]) => ({
+      first: vi.fn().mockResolvedValue(state),
       run: vi.fn().mockImplementation(async () => { runs.push({ sql, params }); return { success: true }; }),
     })),
   }));
   return { prepare, _runs: runs };
+}
+
+// channel_poll_state 的那条收尾 UPDATE（cursor + last_polled_at 同一条语句）。
+function stateWriteOf(linkDb: { _runs: { sql: string; params: unknown[] }[] }) {
+  return linkDb._runs.find((r) => r.sql.includes("UPDATE channel_poll_state SET cursor"));
 }
 
 // 与 x-followers.test.ts 的 mock 同构：INSERT INTO user 回一行（模拟 RETURNING），
@@ -174,6 +181,14 @@ describe("runYouTubeSubscriptionsPoller", () => {
     expect(linkDb._runs.some((r) => r.sql.includes("last_polled_at = datetime('now')"))).toBe(true);
   });
 
+  it("跑完一整轮后把 cursor 清成 NULL（重新受 23h 节流管辖）", async () => {
+    fetchMock.mockResolvedValueOnce(subsPage(["UC1"])).mockResolvedValueOnce(channelsPage([MKBHD]));
+    const linkDb = createMockLinkDb();
+    await runYouTubeSubscriptionsPoller(baseCtx({ linkDb }) as any);
+
+    expect(stateWriteOf(linkDb)!.params[0]).toBeNull();
+  });
+
   it("消失的频道置 is_follow = 0，行不删除", async () => {
     fetchMock.mockResolvedValueOnce(subsPage(["UC1"])).mockResolvedValueOnce(channelsPage([MKBHD]));
     const tenantDb = createMockTenantDb(
@@ -305,5 +320,142 @@ describe("runYouTubeSubscriptionsPoller", () => {
     const quotaPuts = kv.put.mock.calls.filter((c) => String(c[0]).startsWith("yt_quota:"));
     expect(quotaPuts).toHaveLength(1);
     expect(quotaPuts[0][1]).toBe("2");
+  });
+
+  // Important 2：last_polled_at 是 23h 节流的唯一依据。它原来写在函数末尾且没有 finally，
+  // 走查之后任何一处抛出都会让它停住，于是每小时的 cron 都判定「从没跑过」并全量走查一次 ——
+  // 24 倍于设计值地消耗一个整个 GCP 项目共享的配额池，而且是持续的失效开放。
+  it("diff 的 SELECT 抛错时，last_polled_at 仍然写入", async () => {
+    fetchMock.mockResolvedValueOnce(subsPage(["UC1"])).mockResolvedValueOnce(channelsPage([MKBHD]));
+    const linkDb = createMockLinkDb();
+    const tenantDb = createMockTenantDb();
+    const inner = tenantDb.query;
+    // 老租户库缺列时这条 SELECT 真的会抛（本轮 review 的 Important 2 场景）。
+    tenantDb.query = vi.fn(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes("is_follow = 1")) throw new Error("no such column: is_follow");
+      return inner(sql, params);
+    }) as any;
+
+    await expect(runYouTubeSubscriptionsPoller(baseCtx({ linkDb, tenantDb }) as any)).rejects.toThrow();
+
+    const write = stateWriteOf(linkDb);
+    expect(write).toBeTruthy();
+    expect(write!.sql).toContain("last_polled_at = datetime('now')");
+  });
+
+  // 同上：配额记账在 finally 里，KV 写失败（同 key 每秒 1 次的限流真的会打到）不能顶替
+  // 掉真正的根因、更不能把 last_polled_at 的写入整个跳过。
+  it("配额记账 KV 失败时不逃逸，也不阻断 last_polled_at 的写入", async () => {
+    fetchMock.mockResolvedValueOnce(subsPage(["UC1"])).mockResolvedValueOnce(channelsPage([MKBHD]));
+    const linkDb = createMockLinkDb();
+    const env = {
+      KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn().mockRejectedValue(new Error("KV rate limited")) },
+    } as any;
+
+    await expect(runYouTubeSubscriptionsPoller(baseCtx({ linkDb, env }) as any)).resolves.toBeUndefined();
+
+    expect(stateWriteOf(linkDb)!.sql).toContain("last_polled_at = datetime('now')");
+  });
+
+  // Important 1：20s 的 per-channel 预算下，大账号一轮跑不完全部批次。没有 cursor 的旧实现
+  // 每轮都从 walk.ids[0] 重来，永远跑不到列表末尾 —— 取消订阅的 diff 因此**永远不执行**，
+  // 恰恰在最需要它的账号上静默失效。
+  describe("断点续跑（channel_poll_state.cursor）", () => {
+    const IDS_120 = Array.from({ length: 120 }, (_, i) => `UC${i}`);
+
+    // 受控时钟：让「每批 channels.list + 写库」花掉真实感的时间，从而可确定地撞 deadline。
+    function stubClock(startAt = 1_700_000_000_000) {
+      let now = startAt;
+      vi.spyOn(Date, "now").mockImplementation(() => now);
+      return { start: startAt, advance: (ms: number) => { now += ms; } };
+    }
+    afterEach(() => vi.restoreAllMocks());
+
+    function idsOfChannelsCall(call: unknown[]): string[] {
+      return decodeURIComponent(String(call[0]).split("id=")[1].split("&")[0]).split(",");
+    }
+
+    it("撞 deadline 时把批次起点写进 cursor，且本轮绝不 diff", async () => {
+      const clock = stubClock();
+      fetchMock.mockImplementation(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/subscriptions")) return subsPage(IDS_120);
+        clock.advance(400); // 每批详情 + 写库 400ms
+        return channelsPage(idsOfChannelsCall([u]).map((id) => ({ ...MKBHD, id })));
+      });
+      const linkDb = createMockLinkDb();
+      // UC_GONE 在库里仍是 is_follow=1，且不在本次走查结果里 —— 只有跑完整轮才允许置 0。
+      const tenantDb = createMockTenantDb({}, [{ source_user_id: "UC0" }, { source_user_id: "UC_GONE" }]);
+
+      await runYouTubeSubscriptionsPoller(baseCtx({
+        linkDb, tenantDb, deadline: clock.start + 1000,
+      }) as any);
+
+      // 第三批（i=100）的详情已拉回，但写第一条之前时钟就越过了 deadline：
+      // cursor 停在本批起点 100（不是 150），下一轮从这里续跑。
+      const write = stateWriteOf(linkDb);
+      expect(write!.params[0]).toBe("100");
+      // 走查本身是完整的（subsPage 一页给全 120 个），但本轮没跑到尾 —— 绝不能 diff。
+      expect(tenantDb.query.mock.calls.some((c: any[]) => (c[1] as unknown[])?.includes?.("UC_GONE"))).toBe(false);
+    });
+
+    it("下一轮从 cursor 续跑，跑完才做 diff（且 cursor 清空）", async () => {
+      fetchMock.mockImplementation(async (url: string) => {
+        const u = String(url);
+        if (u.includes("/subscriptions")) return subsPage(IDS_120);
+        return channelsPage(idsOfChannelsCall([u]).map((id) => ({ ...MKBHD, id })));
+      });
+      const linkDb = createMockLinkDb({ cursor: "100" });
+      const tenantDb = createMockTenantDb(
+        { UC_GONE: { id: "stored-gone", created_at: "2026-07-01T00:00:00.000Z", is_follow: 1, is_followed: 0 } },
+        [{ source_user_id: "UC0" }, { source_user_id: "UC_GONE" }]
+      );
+
+      await runYouTubeSubscriptionsPoller(baseCtx({ linkDb, tenantDb }) as any);
+
+      // 只补跑最后一批（20 个），不重头再来。
+      const channelCalls = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/channels?"));
+      expect(channelCalls).toHaveLength(1);
+      const ids = idsOfChannelsCall(channelCalls[0]);
+      expect(ids).toHaveLength(20);
+      expect(ids[0]).toBe("UC100");
+
+      // 续跑跑到尾 = 一次完整通过：diff 这时才允许执行，依据是本轮现拉的 walk.ids。
+      const unfollow = tenantDb.query.mock.calls.find(
+        (c: any[]) => String(c[0]).includes("INSERT INTO user") && (c[1] as unknown[]).includes("UC_GONE")
+      );
+      expect(unfollow).toBeTruthy();
+      expect(String(unfollow![0])).toContain("is_follow = excluded.is_follow");
+      // 跑完了 → cursor 清空 → 重新回到 23h 节流的节奏。
+      expect(stateWriteOf(linkDb)!.params[0]).toBeNull();
+    });
+
+    it("cursor 越过列表末尾（期间大量退订）时不跳过 diff，也不重头重跑", async () => {
+      fetchMock.mockResolvedValueOnce(subsPage(["UC1"]));
+      const linkDb = createMockLinkDb({ cursor: "999" });
+      const tenantDb = createMockTenantDb(
+        { UC_GONE: { id: "stored-gone", created_at: "2026-07-01T00:00:00.000Z", is_follow: 1, is_followed: 0 } },
+        [{ source_user_id: "UC1" }, { source_user_id: "UC_GONE" }]
+      );
+
+      await runYouTubeSubscriptionsPoller(baseCtx({ linkDb, tenantDb }) as any);
+
+      // 没有可做的批次了（下标被夹到列表长度），但 walk.ids 是新鲜且完整的 —— 允许 diff。
+      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/channels?"))).toHaveLength(0);
+      expect(tenantDb.query.mock.calls.some((c: any[]) => (c[1] as unknown[])?.includes?.("UC_GONE"))).toBe(true);
+      expect(stateWriteOf(linkDb)!.params[0]).toBeNull();
+    });
+
+    it("走查中途失败时，即使有断点也不 diff", async () => {
+      fetchMock
+        .mockResolvedValueOnce(subsPage(["UC100"], "p2"))
+        .mockResolvedValueOnce(new Response("boom", { status: 500 }));
+      const linkDb = createMockLinkDb({ cursor: "100" });
+      const tenantDb = createMockTenantDb({}, [{ source_user_id: "UC_GONE" }]);
+
+      await runYouTubeSubscriptionsPoller(baseCtx({ linkDb, tenantDb }) as any);
+
+      expect(tenantDb.query.mock.calls.some((c: any[]) => (c[1] as unknown[])?.includes?.("UC_GONE"))).toBe(false);
+    });
   });
 });

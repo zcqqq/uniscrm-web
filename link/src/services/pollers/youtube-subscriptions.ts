@@ -38,6 +38,17 @@ function toInt(value: unknown): number | undefined {
   return Number.isFinite(n) ? Math.trunc(n) : undefined;
 }
 
+// channel_poll_state.cursor 存的是「下一轮从 walk.ids 的哪个下标继续」（批边界，文本）。
+// 脏值（非数字/负数/旧格式的 pageToken）一律当 0 —— 从头重跑是幂等的 upsert，只多花配额，
+// 绝不会写错数据；而把脏值当成一个大下标则会静默跳过一批频道，那才是数据准确性事故。
+// 上限夹到本轮实际走查到的长度：用户退订到列表变短时，旧下标可能已经越过末尾。
+function parseCursor(raw: string | null | undefined, total: number): number {
+  if (raw === null || raw === undefined || raw === "") return 0;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(Math.trunc(n), total);
+}
+
 export async function runYouTubeSubscriptionsPoller(ctx: YouTubeSubscriptionsPollerContext): Promise<void> {
   // 自播种。X 的 poller 语义是「没有 state 行 = 未授权」，YouTube 不同：授权凭证
   // 就在 channels 行的 config 里，这张表在这里只承担节流时间戳的职责。自播种消掉
@@ -47,169 +58,264 @@ export async function runYouTubeSubscriptionsPoller(ctx: YouTubeSubscriptionsPol
     .bind(ctx.accountChannelId)
     .run();
 
-  const walk = await fetchSubscribedChannelIds(ctx.accessToken, ctx.deadline);
-  // completeWalk 是本文件存在的全部理由：只有它为 true 才允许把「本轮结果里没有这个
-  // 频道」读成「取消订阅了」。subscriptions.list 分页中途失败、命中 deadline、或任何一批
-  // channels.list 抛出，都必须把它按到 false，并且一旦按下就不再翻回 true。
-  let completeWalk = walk.complete;
-  // 本轮实际发出的 YouTube Data API 请求数：subscriptions.list 的每一页 + 每一批
-  // channels.list（无论成功失败，请求都已经发出、配额已经计费）。
-  let apiCalls = walk.calls;
+  // 断点续跑的位置：上一轮撞 deadline 时停在 walk.ids 的哪个批次起点。x-followers.ts 用
+  // 同一张表的同一列做 backfill 续跑，这里沿用那套模式（Important 1）。
+  // 读失败就从头跑：重跑是幂等 upsert，只多花配额，不会写错数据。
+  let storedCursor: string | null = null;
+  try {
+    const state = await ctx.linkDb
+      .prepare("SELECT cursor FROM channel_poll_state WHERE channel_id = ? AND poller_name = 'subscriptions'")
+      .bind(ctx.accountChannelId)
+      .first<{ cursor: string | null }>();
+    storedCursor = state?.cursor ?? null;
+  } catch (e) {
+    console.error(JSON.stringify({
+      event: "youtube_subscriptions_cursor_read_failed",
+      account_channel_id: ctx.accountChannelId, error: String(e),
+    }));
+  }
 
-  console.log(JSON.stringify({
-    event: "youtube_subscriptions_poll_started",
-    account_channel_id: ctx.accountChannelId,
-    subscribed: walk.ids.length,
-    completeWalk,
-  }));
-
-  const usersService = new UsersService(ctx.tenantDb, {
-    pipelineUser: ctx.pipelineUser,
-    tenantId: ctx.tenantId,
-    entityState: ctx.entityState,
-  });
-
-  // 诊断用：本轮实际写成功的频道数（用于结束时的日志），**不**参与取消订阅的判定 ——
-  // 见下方 completeWalk 分支的注释（Critical fix：diff 必须以 walk.ids 为准，channels.list
-  // 实际返回了哪些行与「用户是否还订阅」无关）。
-  let refreshed = 0;
+  // 本轮停在哪（批边界下标）与本轮有没有把这次走查的 id 全部处理完 —— 两者都要在
+  // 抛出路径上也有确定的值，所以声明在 try 之外，finally 里据此落 cursor。
+  let resumeIndex = 0;
+  let loopComplete = false;
 
   try {
-    for (let i = 0; i < walk.ids.length; i += CHANNELS_BATCH_SIZE) {
-      if (Date.now() >= ctx.deadline) {
-        // 还有批次没跑完 —— 本轮的「订阅列表」是残缺的，不能拿来判定取消订阅。
-        completeWalk = false;
-        console.log(JSON.stringify({
-          event: "youtube_subscriptions_poll_deadline",
-          account_channel_id: ctx.accountChannelId, processed: refreshed,
-        }));
-        break;
-      }
+    const walk = await fetchSubscribedChannelIds(ctx.accessToken, ctx.deadline);
+    // completeWalk 是本文件存在的全部理由：只有它为 true 才允许把「本轮结果里没有这个
+    // 频道」读成「取消订阅了」。subscriptions.list 分页中途失败、命中 deadline、或任何一批
+    // channels.list 抛出，都必须把它按到 false，并且一旦按下就不再翻回 true。
+    let completeWalk = walk.complete;
+    // 本轮实际发出的 YouTube Data API 请求数：subscriptions.list 的每一页 + 每一批
+    // channels.list（无论成功失败，请求都已经发出、配额已经计费）。
+    let apiCalls = walk.calls;
 
-      const batch = walk.ids.slice(i, i + CHANNELS_BATCH_SIZE);
-      apiCalls++;
-      let items: YouTubeChannelItem[];
-      try {
-        items = await fetchChannelDetails(ctx.accessToken, batch);
-      } catch (e) {
-        // 这一批频道本轮没拿到 snippet/statistics —— 但注意：不拿到详情 ≠ 取消订阅
-        // （被删除/终止/地区屏蔽的频道也会让 channels.list 对它缄默或整批失败）。
-        // channels.list 结果从来就不是订阅判定的依据，只是资料来源；completeWalk=false
-        // 单纯是为了如实反映「本轮没能把这批频道的资料刷新完」，与 diff 的正确性无关
-        // （diff 已经只看 walk.ids，见下方）。
-        completeWalk = false;
-        console.error(JSON.stringify({
-          event: "youtube_channels_batch_error",
-          account_channel_id: ctx.accountChannelId, batchStart: i, error: String(e),
-        }));
-        continue;
-      }
+    // 从上一轮停下的地方继续。subscriptions.list 便宜（50 个 id / 1 unit），所以每轮都
+    // 重新走查一遍完整 id 列表，只在这份**新鲜**列表里跳到断点 —— 续跑因此不会让 diff
+    // 落在陈旧数据上：下面 diff 用的 walk.ids 永远来自本轮的走查（见 diff 分支注释）。
+    const startIndex = parseCursor(storedCursor, walk.ids.length);
+    resumeIndex = startIndex;
 
-      for (const item of items) {
-        // 全量 payload 进日志不进库（CLAUDE.md）。
-        console.log(JSON.stringify({ event: "youtube_channel_raw", channel_id: item.id, payload: item }));
+    console.log(JSON.stringify({
+      event: "youtube_subscriptions_poll_started",
+      account_channel_id: ctx.accountChannelId,
+      subscribed: walk.ids.length,
+      completeWalk,
+      resumed_from: startIndex,
+    }));
 
-        const props = resolveProps(item as unknown as Record<string, unknown>, YT_USER_META.userProps, YT_USER_META.linkPrefix);
-        // subscriberCount/videoCount 到这里还是 API 原样的字符串；D1 列是 INT，非数字/缺席
-        // 必须让该 key 从 props 里彻底消失（而不是变成 0），upsertUserFromMetadata 才会跳过
-        // 该列而不是把 0 写进「不知道」的位置。
-        const followers = toInt(props.followers_count);
-        const posts = toInt(props.post_count);
-        if (followers === undefined) delete props.followers_count; else props.followers_count = followers;
-        if (posts === undefined) delete props.post_count; else props.post_count = posts;
+    const usersService = new UsersService(ctx.tenantDb, {
+      pipelineUser: ctx.pipelineUser,
+      tenantId: ctx.tenantId,
+      entityState: ctx.entityState,
+    });
 
-        const sourceUserId = String(props.source_user_id ?? item.id ?? "");
-        if (!sourceUserId) continue;
+    // 诊断用：本轮实际写成功的频道数（用于结束时的日志），**不**参与取消订阅的判定 ——
+    // 见下方 completeWalk 分支的注释（Critical fix：diff 必须以 walk.ids 为准，channels.list
+    // 实际返回了哪些行与「用户是否还订阅」无关）。
+    let refreshed = 0;
 
+    try {
+      let i = startIndex;
+      batches: for (; i < walk.ids.length; i += CHANNELS_BATCH_SIZE) {
+        // 一旦中断，cursor 停在**本批起点**：这一批可能只做了一半，重跑它是幂等 upsert，
+        // 只多花 1 unit；相反地把 cursor 记到批尾会漏掉本批没写完的那些频道。
+        resumeIndex = i;
+
+        if (Date.now() >= ctx.deadline) {
+          // 还有批次没跑完 —— 本轮的「订阅列表」是残缺的，不能拿来判定取消订阅。
+          completeWalk = false;
+          console.log(JSON.stringify({
+            event: "youtube_subscriptions_poll_deadline",
+            account_channel_id: ctx.accountChannelId, processed: refreshed, resume_index: i,
+          }));
+          break;
+        }
+
+        const batch = walk.ids.slice(i, i + CHANNELS_BATCH_SIZE);
+        apiCalls++;
+        let items: YouTubeChannelItem[];
         try {
-          await usersService.upsertUserFromMetadata(
-            item as unknown as Record<string, unknown>,
-            props,
-            ctx.accountChannelId,
-            SUBSCRIBED_CHANNEL_TYPE,
-            YT_USER_META
-          );
-          refreshed++;
+          items = await fetchChannelDetails(ctx.accessToken, batch);
         } catch (e) {
-          // 一行写失败不能拖垮整轮 —— 否则这个账号会在每次 tick 上用同一行卡死。故意
-          // **不**把 completeWalk 按到 false：取消订阅的判定只看 walk.ids 是否完整
-          // （见下方），与某一行资料是否写入成功无关；这个频道本来就在 walk.ids 里，
-          // 不会被 diff 当成「取消订阅」，只是资料这次没刷新成功，下次 tick 再试。
+          // 这一批频道本轮没拿到 snippet/statistics —— 但注意：不拿到详情 ≠ 取消订阅
+          // （被删除/终止/地区屏蔽的频道也会让 channels.list 对它缄默或整批失败）。
+          // channels.list 结果从来就不是订阅判定的依据，只是资料来源；completeWalk=false
+          // 单纯是为了如实反映「本轮没能把这批频道的资料刷新完」，与 diff 的正确性无关
+          // （diff 已经只看 walk.ids，见下方）。
+          completeWalk = false;
           console.error(JSON.stringify({
-            event: "youtube_channel_upsert_error",
-            account_channel_id: ctx.accountChannelId, channel_id: sourceUserId, error: String(e),
+            event: "youtube_channels_batch_error",
+            account_channel_id: ctx.accountChannelId, batchStart: i, error: String(e),
+          }));
+          continue;
+        }
+
+        for (const item of items) {
+          // deadline 在**每条**上检查，而不是只在批边界：一批 50 条，每条都是
+          // persistUser 的 probe SELECT + upsert 两次 D1 REST 往返，只按批检查会
+          // 冲过 deadline 最多 50 个频道那么久。
+          if (Date.now() >= ctx.deadline) {
+            completeWalk = false;
+            console.log(JSON.stringify({
+              event: "youtube_subscriptions_poll_deadline",
+              account_channel_id: ctx.accountChannelId, processed: refreshed, resume_index: i,
+            }));
+            break batches;
+          }
+
+          // 全量 payload 进日志不进库（CLAUDE.md）。
+          console.log(JSON.stringify({ event: "youtube_channel_raw", channel_id: item.id, payload: item }));
+
+          const props = resolveProps(item as unknown as Record<string, unknown>, YT_USER_META.userProps, YT_USER_META.linkPrefix);
+          // subscriberCount/videoCount 到这里还是 API 原样的字符串；D1 列是 INT，非数字/缺席
+          // 必须让该 key 从 props 里彻底消失（而不是变成 0），upsertUserFromMetadata 才会跳过
+          // 该列而不是把 0 写进「不知道」的位置。
+          const followers = toInt(props.followers_count);
+          const posts = toInt(props.post_count);
+          if (followers === undefined) delete props.followers_count; else props.followers_count = followers;
+          if (posts === undefined) delete props.post_count; else props.post_count = posts;
+
+          const sourceUserId = String(props.source_user_id ?? item.id ?? "");
+          if (!sourceUserId) continue;
+
+          try {
+            await usersService.upsertUserFromMetadata(
+              item as unknown as Record<string, unknown>,
+              props,
+              ctx.accountChannelId,
+              SUBSCRIBED_CHANNEL_TYPE,
+              YT_USER_META
+            );
+            refreshed++;
+          } catch (e) {
+            // 一行写失败不能拖垮整轮 —— 否则这个账号会在每次 tick 上用同一行卡死。故意
+            // **不**把 completeWalk 按到 false：取消订阅的判定只看 walk.ids 是否完整
+            // （见下方），与某一行资料是否写入成功无关；这个频道本来就在 walk.ids 里，
+            // 不会被 diff 当成「取消订阅」，只是资料这次没刷新成功，下次 tick 再试。
+            console.error(JSON.stringify({
+              event: "youtube_channel_upsert_error",
+              account_channel_id: ctx.accountChannelId, channel_id: sourceUserId, error: String(e),
+            }));
+          }
+        }
+      }
+
+      if (i >= walk.ids.length) {
+        // 把本轮走查出来的 id 全部处理完了（包括「续跑之后终于跑完」这一种）。
+        loopComplete = true;
+        resumeIndex = walk.ids.length;
+      }
+    } finally {
+      // 无论 try 块是正常结束、continue 过、还是意外抛出，本轮已经花掉的配额都必须记账 ——
+      // 一次也不记等于用了配额却没算数，而恰恰是大账号/多页、最可能中途出问题的那些运行
+      // 花的配额最多（Important 2）。
+      //
+      // 只在结束时记一次、而不是每次请求各记一次：YouTube quota 计数器是单个 KV key 的
+      // 读-改-写，Cloudflare KV 对同一个 key 有 **每秒 1 次写入** 的限流 —— 一个上千订阅
+      // 的账号按每批各记一次，几秒内就会打满这个 key 的写入频率并触发限流报错，这才是
+      // 「必须合并成一次」的决定性理由（RMW 竞态只是次要理由：同一次 invocation 内部并不
+      // 存在并发，但多次读旧值+1 本身就是不必要的多余往返）。
+      //
+      // 记账本身也必须兜住异常：KV 真的会失败，而一次记账失败绝不能顶替掉真正的根因
+      // 异常，更不能把下面 finally 里的 last_polled_at 写入整个跳过（跳过 = 这个账号退化
+      // 成每小时全量走查一次，配额是整个 GCP 项目共享的）。
+      if (apiCalls > 0) {
+        try {
+          await recordYouTubeQuota(ctx.env, apiCalls);
+        } catch (e) {
+          console.error(JSON.stringify({
+            event: "youtube_quota_record_failed",
+            account_channel_id: ctx.accountChannelId, units: apiCalls, error: String(e),
           }));
         }
       }
     }
-  } finally {
-    // 无论 try 块是正常结束、continue 过、还是意外抛出，本轮已经花掉的配额都必须记账 ——
-    // 一次也不记等于用了配额却没算数，而恰恰是大账号/多页、最可能中途出问题的那些运行
-    // 花的配额最多（Important 2）。
-    //
-    // 只在结束时记一次、而不是每次请求各记一次：YouTube quota 计数器是单个 KV key 的
-    // 读-改-写，Cloudflare KV 对同一个 key 有 **每秒 1 次写入** 的限流 —— 一个上千订阅
-    // 的账号按每批各记一次，几秒内就会打满这个 key 的写入频率并触发限流报错，这才是
-    // 「必须合并成一次」的决定性理由（RMW 竞态只是次要理由：同一次 invocation 内部并不
-    // 存在并发，但多次读旧值+1 本身就是不必要的多余往返）。
-    if (apiCalls > 0) await recordYouTubeQuota(ctx.env, apiCalls);
-  }
 
-  if (completeWalk) {
-    // Critical fix：diff 的「谁还订阅着」必须用 walk.ids（subscriptions.list 的权威结果），
-    // 不能用 channels.list 实际返回了资料的那些 id。两者会不一致：YouTube 对被删除/终止/
-    // 地区屏蔽的频道会在 channels.list 里缄默（明明订阅关系还在，snippet/statistics 拿不到），
-    // 一个 200 但截断/畸形的 body 也可能被误读成「这批频道都不存在」。用 channels.list 的
-    // 结果做 diff，会把这些仍在订阅、只是这次没描述出来的频道误判为取消订阅并置 0 ——
-    // 这正是本函数要严防的那类错误。walk.ids 权威、channels.list 只是资料来源，仅此而已。
-    // 任何一批 channels.list 失败都已经把 completeWalk 按到 false（上面），diff 因此
-    // 永远不会在权威列表残缺时执行 —— walk.ids 在这个分支里必然是完整的。
-    const authoritative = new Set(walk.ids);
+    // diff 要求两件事同时成立：走查权威且完整（completeWalk），**且**本轮把这份列表
+    // 处理到了尾（loopComplete）。续跑的一轮跑到尾同样算一次完整通过 —— walk.ids 是
+    // 本轮现拉的，与「续跑」无关，所以 diff 依据的仍是新鲜、完整的权威列表；反过来，
+    // 中途停下的一轮绝不允许 diff（半份列表 diff 会把仍在订阅的频道误置 is_follow=0）。
+    if (completeWalk && loopComplete) {
+      // Critical fix：diff 的「谁还订阅着」必须用 walk.ids（subscriptions.list 的权威结果），
+      // 不能用 channels.list 实际返回了资料的那些 id。两者会不一致：YouTube 对被删除/终止/
+      // 地区屏蔽的频道会在 channels.list 里缄默（明明订阅关系还在，snippet/statistics 拿不到），
+      // 一个 200 但截断/畸形的 body 也可能被误读成「这批频道都不存在」。用 channels.list 的
+      // 结果做 diff，会把这些仍在订阅、只是这次没描述出来的频道误判为取消订阅并置 0 ——
+      // 这正是本函数要严防的那类错误。walk.ids 权威、channels.list 只是资料来源，仅此而已。
+      // 任何一批 channels.list 失败都已经把 completeWalk 按到 false（上面），diff 因此
+      // 永远不会在权威列表残缺时执行 —— walk.ids 在这个分支里必然是完整的。
+      const authoritative = new Set(walk.ids);
 
-    const stillFollowed = await ctx.tenantDb.query<{ source_user_id: string }>(
-      "SELECT source_user_id FROM user WHERE channel_id = ? AND channel_type = ? AND is_follow = 1",
-      [ctx.accountChannelId, SUBSCRIBED_CHANNEL_TYPE]
-    );
+      const stillFollowed = await ctx.tenantDb.query<{ source_user_id: string }>(
+        "SELECT source_user_id FROM user WHERE channel_id = ? AND channel_type = ? AND is_follow = 1",
+        [ctx.accountChannelId, SUBSCRIBED_CHANNEL_TYPE]
+      );
 
-    if (authoritative.size === 0 && stillFollowed.length > 0) {
-      // Important 1 floor guard：即使 completeWalk 为 true，一次把整个账号的订阅清空
-      // 也是爆炸半径最大的错误场景（例如 subscriptions.list 对一个仍有大量订阅的账号
-      // 200 回了 items: []，这种畸形/异常响应目前的分页逻辑无法百分百排除）。数据准确性
-      // 优先于「这次也把状态更新掉」，宁可这一轮什么都不做，也不要一次性误清空全账号。
-      console.error(JSON.stringify({
-        event: "youtube_subscriptions_diff_skipped_empty_result",
-        account_channel_id: ctx.accountChannelId,
-        reason: "authoritative subscription list is empty while rows are still followed",
-        still_followed_count: stillFollowed.length,
-      }));
-    } else {
-      const gone = stillFollowed.filter((r) => !authoritative.has(r.source_user_id));
-      for (const row of gone) {
-        // 逻辑删除：不知道就置 is_follow=0，行本身保留（CLAUDE.md「重要的被关联数据用逻辑删除」）。
-        await usersService.setFollowState(ctx.accountChannelId, SUBSCRIBED_CHANNEL_TYPE, row.source_user_id, { is_follow: 0 });
-      }
-      if (gone.length > 0) {
-        console.log(JSON.stringify({
-          event: "youtube_subscriptions_unfollowed",
-          account_channel_id: ctx.accountChannelId, count: gone.length,
+      if (authoritative.size === 0 && stillFollowed.length > 0) {
+        // Important 1 floor guard：即使 completeWalk 为 true，一次把整个账号的订阅清空
+        // 也是爆炸半径最大的错误场景（例如 subscriptions.list 对一个仍有大量订阅的账号
+        // 200 回了 items: []，这种畸形/异常响应目前的分页逻辑无法百分百排除）。数据准确性
+        // 优先于「这次也把状态更新掉」。
+        //
+        // 代价说清楚：这**不是**「这一轮先跳过、下一轮再说」。真的把所有频道都退订干净的
+        // 账号，每一轮都会走到这条分支，那些行会**永久**停在 is_follow = 1，没有任何自愈
+        // 路径（只有重新订阅再退订到非空、或人工改数据才会解开）。我们接受这个代价：
+        // 把「曾经订阅」多留一段时间，远好过因一次异常空响应把整个账号误清空。
+        console.error(JSON.stringify({
+          event: "youtube_subscriptions_diff_skipped_empty_result",
+          account_channel_id: ctx.accountChannelId,
+          reason: "authoritative subscription list is empty while rows are still followed",
+          still_followed_count: stillFollowed.length,
         }));
+      } else {
+        const gone = stillFollowed.filter((r) => !authoritative.has(r.source_user_id));
+        for (const row of gone) {
+          // 逻辑删除：不知道就置 is_follow=0，行本身保留（CLAUDE.md「重要的被关联数据用逻辑删除」）。
+          await usersService.setFollowState(ctx.accountChannelId, SUBSCRIBED_CHANNEL_TYPE, row.source_user_id, { is_follow: 0 });
+        }
+        if (gone.length > 0) {
+          console.log(JSON.stringify({
+            event: "youtube_subscriptions_unfollowed",
+            account_channel_id: ctx.accountChannelId, count: gone.length,
+          }));
+        }
       }
+    } else {
+      console.log(JSON.stringify({
+        event: "youtube_subscriptions_diff_skipped",
+        account_channel_id: ctx.accountChannelId,
+        reason: completeWalk ? "incomplete_pass" : "incomplete_walk",
+      }));
     }
-  } else {
+
     console.log(JSON.stringify({
-      event: "youtube_subscriptions_diff_skipped",
-      account_channel_id: ctx.accountChannelId,
-      reason: "incomplete_walk",
+      event: "youtube_subscriptions_poll_complete",
+      account_channel_id: ctx.accountChannelId, upserted: refreshed, completeWalk, loopComplete,
     }));
+  } finally {
+    // cursor 与 last_polled_at 一条 UPDATE 落地，且**每条退出路径都要落**（Important 2）：
+    //   - last_polled_at 是 23h 节流的唯一依据。原来它写在函数末尾且没有 finally，走查之后
+    //     任何一处抛出（stillFollowed 的 SELECT、setFollowState、配额记账）都会让它停住，
+    //     于是每小时的 cron 都判定「从没跑过」并做一次全量走查 —— 24 倍于设计值地消耗一个
+    //     整个 Google Cloud 项目共享的配额池，而且是持续失效开放（fail open）。
+    //   - cursor 为 NULL 表示「这一轮把本次走查的 id 处理完了」，重新受 23h 节流管辖；
+    //     非 NULL 表示还欠着一段，poll-channel.ts 会无视 23h 在下一个小时的 tick 上续跑
+    //     （否则 400 个订阅的账号要 8 天才同步完一轮）。
+    //   - 走查本身失败时（walk.complete=false）walk.ids 只是半份，而我们不存 pageToken，
+    //     没有可续的位置：这时按「这半份处理完了」清 cursor，下一轮从第一页重来即可，
+    //     既不会漏 diff（半份本来就不 diff），也不会因为一个持续失败的走查而变成每小时重试。
+    // 这条写入自身也兜异常：它若抛出会顶替掉 try 里真正的根因异常（调用方据此写 sync_status）。
+    try {
+      await ctx.linkDb
+        .prepare("UPDATE channel_poll_state SET cursor = ?, last_polled_at = datetime('now'), updated_at = datetime('now') WHERE channel_id = ? AND poller_name = 'subscriptions'")
+        .bind(loopComplete ? null : String(resumeIndex), ctx.accountChannelId)
+        .run();
+    } catch (e) {
+      console.error(JSON.stringify({
+        event: "youtube_subscriptions_poll_state_write_failed",
+        account_channel_id: ctx.accountChannelId, error: String(e),
+      }));
+    }
   }
-
-  await ctx.linkDb
-    .prepare("UPDATE channel_poll_state SET last_polled_at = datetime('now'), updated_at = datetime('now') WHERE channel_id = ? AND poller_name = 'subscriptions'")
-    .bind(ctx.accountChannelId)
-    .run();
-
-  console.log(JSON.stringify({
-    event: "youtube_subscriptions_poll_complete",
-    account_channel_id: ctx.accountChannelId, upserted: refreshed, completeWalk,
-  }));
 }

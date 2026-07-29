@@ -29,12 +29,16 @@ export interface YouTubeIngestContext {
   flowQueue?: Queue;
 }
 
-export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: string): Promise<void> {
-  const item = await fetchVideoDetails(ctx.apiKey, videoId);
-  if (!item) {
-    console.log(JSON.stringify({ event: "youtube_video_fetch_empty", account_channel_id: ctx.accountChannelId, subscription_channel_id: ctx.subscriptionChannelId, video_id: videoId }));
-    return;
-  }
+// videos.list 的一条 item → 已按 metadata 映射好的 contentProps。ingest 路径与 flow 的
+// youtubeCondition 节点（经 /internal/youtube/video-stats）共用这一份实现：字段怎么映射
+// 只能有一个答案，否则 metadata 改一次得记得改两处。
+// 返回 null = videos.list 没返回这个视频（已删除、转私密、id 不存在）——不是错误，是"没有"。
+export async function fetchYouTubeVideoProps(
+  apiKey: string,
+  videoId: string
+): Promise<Record<string, unknown> | null> {
+  const item = await fetchVideoDetails(apiKey, videoId);
+  if (!item) return null;
 
   const props = resolveProps(item, YOUTUBE_METADATA.contentProps, YOUTUBE_METADATA.linkPrefix);
   // YouTube's videos.list response has no permalink field; youtube.com/watch?v={id} is the
@@ -48,6 +52,15 @@ export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: str
   const parsedDuration = durationIso ? parseISO8601Duration(durationIso) : null;
   if (parsedDuration !== null) {
     props.duration = parsedDuration;
+  }
+  return props;
+}
+
+export async function ingestYouTubeVideo(ctx: YouTubeIngestContext, videoId: string): Promise<void> {
+  const props = await fetchYouTubeVideoProps(ctx.apiKey, videoId);
+  if (!props) {
+    console.log(JSON.stringify({ event: "youtube_video_fetch_empty", account_channel_id: ctx.accountChannelId, subscription_channel_id: ctx.subscriptionChannelId, video_id: videoId }));
+    return;
   }
 
   const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue, ctx.entityState);

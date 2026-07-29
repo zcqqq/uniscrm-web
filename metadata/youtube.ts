@@ -1,5 +1,5 @@
 // https://developers.google.com/youtube/v3/docs/videos/list
-import type { ContentMetadata } from "./dataTypes";
+import type { ContentMetadata, UserMetadata } from "./dataTypes";
 
 export const ContentMetadata_YouTube: ContentMetadata[] = [
   {
@@ -43,5 +43,27 @@ export const ContentMetadata_YouTube: ContentMetadata[] = [
     label: { "en": "Like", "zh": "点赞" },
     description: { "en": "Likes the video via the triggering channel", "zh": "通过触发该内容的账号给视频点赞" },
     contentProps: [],
+  },
+];
+
+// 订阅的频道 = user 实体，对齐 X 的 follow user（我订阅他们 → is_follow = 1）。
+// 数据来自 channels.list?part=snippet,statistics 的单条 item，不是 subscriptions.list ——
+// subscriptions.list 任何 part 都不含被订阅频道的订阅数（已核对官方文档）。
+// 无 linkPrefix：调用方逐条喂 item，不是整个响应体。
+export const UserMetadata_YouTube: UserMetadata[] = [
+  {
+    sourceUserType: "own:get-subscriptions", // https://developers.google.com/youtube/v3/docs/channels/list
+    userProps: [
+      { propId: "source_user_id", dataId: "id" }, // UC... 频道 ID
+      { propId: "name", dataId: "snippet.title" },
+      { propId: "username", dataId: "snippet.customUrl" }, // 形如 @mkbhd
+      { propId: "description", dataId: "snippet.description" },
+      { propId: "profile_image_url", dataId: "snippet.thumbnails.default.url" },
+      // subscriberCount 官方四舍五入到 3 位有效数字；这是唯一能拿到的数。
+      // hiddenSubscriberCount = true 时该字段缺席，下游保持 null 而不是写 0。
+      { propId: "followers_count", dataId: "statistics.subscriberCount" },
+      { propId: "post_count", dataId: "statistics.videoCount" },
+      { propId: "is_follow", value: 1 },
+    ],
   },
 ];

@@ -521,19 +521,20 @@ export function internalRoutes() {
     // 误报成 API 出错。
     if (!videoId) return c.json({ ok: false, reason: "video_unavailable: no videoId in payload" }, 400);
 
-    let props: Record<string, unknown> | null;
+    let video: { props: Record<string, unknown>; authorChannelId: string } | null;
     try {
-      props = await fetchYouTubeVideoProps(c.env.YOUTUBE_API_KEY, videoId);
+      video = await fetchYouTubeVideoProps(c.env.YOUTUBE_API_KEY, videoId);
     } catch (e) {
       // 全量 API 错误体只进日志，不进 reason —— reason 会一路写进 content_flow_log
       // 这张分析表（flow/src/index.ts 的 emitContentNodeLogs），外部返回体长度不可控。
       console.log(JSON.stringify({ event: "youtube_video_stats_error", videoId, contentId: contentId || null, flowId: flowId || null, error: String(e) }));
       return c.json({ ok: false, reason: boundedVideoStatsReason(e) });
     }
-    if (!props) {
+    if (!video) {
       console.log(JSON.stringify({ event: "youtube_video_stats_empty", videoId, contentId: contentId || null, flowId: flowId || null }));
       return c.json({ ok: false, reason: "video_unavailable: video not found or private" });
     }
+    const props = video.props;
 
     console.log(JSON.stringify({ event: "youtube_video_stats", videoId, contentId: contentId || null, flowId: flowId || null, view_count: props.view_count, like_count: props.like_count }));
     return c.json({ ok: true, props });

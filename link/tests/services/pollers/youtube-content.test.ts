@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ingestYouTubeVideo } from "../../../src/services/pollers/youtube-content";
+import { ingestYouTubeVideo, fetchYouTubeVideoProps, fetchYouTubeAuthorProps } from "../../../src/services/pollers/youtube-content";
 import * as youtubeApi from "../../../src/services/youtube-api";
 import { ContentMetadata_YouTube } from "../../../../metadata/youtube";
 
@@ -189,5 +189,108 @@ describe("ingestYouTubeVideo", () => {
     await ingestYouTubeVideo(ctx, "vid-boundary");
 
     expect(flowQueue.send).toHaveBeenCalledTimes(1);
+  });
+});
+
+const VIDEO_ITEM = {
+  id: "vid1",
+  snippet: {
+    title: "Cool Video",
+    description: "desc",
+    publishedAt: "2026-07-18T00:00:00Z",
+    channelId: "UC123",
+    thumbnails: { default: { url: "https://img/thumb.jpg" } },
+  },
+  contentDetails: { duration: "PT4M13S" },
+  statistics: { viewCount: "100", likeCount: "10" },
+};
+
+const CHANNEL_ITEM = {
+  id: "UC123",
+  snippet: { title: "Chan", customUrl: "@chan", description: "d", thumbnails: { default: { url: "https://y/t.jpg" } } },
+  statistics: { subscriberCount: "1000000", videoCount: "700", viewCount: "5000000000" },
+};
+
+describe("fetchYouTubeVideoProps — 作者频道 id", () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+
+  it("从 snippet.channelId 带出 authorChannelId，且不额外发起调用", async () => {
+    vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue(VIDEO_ITEM);
+    const channelSpy = vi.spyOn(youtubeApi, "fetchChannelDetails");
+
+    const out = await fetchYouTubeVideoProps("key", "vid1");
+
+    expect(out!.authorChannelId).toBe("UC123");
+    expect(out!.props.source_content_id).toBe("vid1");
+    expect(out!.props.duration).toBe(253);
+    expect(channelSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("fetchYouTubeAuthorProps", () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+
+  it("channels.list 的 item 映射成 user.* 字段", async () => {
+    vi.spyOn(youtubeApi, "fetchChannelDetails").mockResolvedValue(CHANNEL_ITEM);
+    const props = await fetchYouTubeAuthorProps("key", "UC123");
+    expect(props["user.followers_count"]).toBe("1000000");
+    expect(props["user.post_count"]).toBe("700");
+    expect(props["user.view_count"]).toBe("5000000000");
+    expect(props["user.name"]).toBe("Chan");
+    // 裸键一个都不能有——否则会覆盖内容侧的同名字段
+    expect(Object.keys(props).every((k) => k.startsWith("user."))).toBe(true);
+  });
+
+  it("channels.list 返回空时返回 {}（频道已删/已封）", async () => {
+    vi.spyOn(youtubeApi, "fetchChannelDetails").mockResolvedValue(null);
+    expect(await fetchYouTubeAuthorProps("key", "UC123")).toEqual({});
+  });
+
+  it("channelId 为空串时直接返回 {} 且不发起请求", async () => {
+    const spy = vi.spyOn(youtubeApi, "fetchChannelDetails");
+    expect(await fetchYouTubeAuthorProps("key", "")).toEqual({});
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("channels.list 出错时向上抛，由调用方决定语义", async () => {
+    // ingest 路径吞掉、照常发内容；condition 节点则必须走 failed 分支。
+    vi.spyOn(youtubeApi, "fetchChannelDetails").mockRejectedValue(
+      new Error("YouTube channels.list failed: 403 quota exceeded")
+    );
+    await expect(fetchYouTubeAuthorProps("key", "UC123")).rejects.toThrow("channels.list failed: 403");
+  });
+});
+
+describe("ingestYouTubeVideo — 作者字段", () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+
+  it("作者字段与内容字段一起发给 flow，两个 view_count 各是各的", async () => {
+    vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue(VIDEO_ITEM);
+    vi.spyOn(youtubeApi, "fetchChannelDetails").mockResolvedValue(CHANNEL_ITEM);
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+
+    await ingestYouTubeVideo(baseCtx({ flowQueue }) as any, "vid1");
+
+    const { payload } = flowQueue.send.mock.calls[0][0];
+    expect(payload.view_count).toBe("100");                 // 这个视频的播放量
+    expect(payload["user.view_count"]).toBe("5000000000");  // 频道历史总播放量
+    expect(payload["user.followers_count"]).toBe("1000000");
+  });
+
+  it("channels.list 失败时照常发内容，只是不带 user.*", async () => {
+    // 整条跳过是错的：recordTriggerContentSeen 已经把它记成"见过"，WebSub 只推一次，
+    // 配额恢复也不会补——这个视频会永久丢失。
+    vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue(VIDEO_ITEM);
+    vi.spyOn(youtubeApi, "fetchChannelDetails").mockRejectedValue(
+      new Error("YouTube channels.list failed: 403 quota exceeded")
+    );
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+
+    await ingestYouTubeVideo(baseCtx({ flowQueue }) as any, "vid1");
+
+    expect(flowQueue.send).toHaveBeenCalledTimes(1);
+    const { payload } = flowQueue.send.mock.calls[0][0];
+    expect(payload.view_count).toBe("100");
+    expect(Object.keys(payload).some((k) => k.startsWith("user."))).toBe(false);
   });
 });

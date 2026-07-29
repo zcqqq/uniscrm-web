@@ -28,6 +28,24 @@ export async function fetchVideoDetails(apiKey: string, videoId: string): Promis
   return body.items?.[0] ?? null;
 }
 
+// 频道（= 视频作者）的 snippet + statistics。videos.list 的 snippet 只白送
+// channelId/channelTitle，订阅数/视频数/频道总播放量必须来自这里，1 unit/次。
+// 返回 null = channels.list 没返回这个频道（已删、已封、id 不存在）——不是错误，是"没有"。
+// 抛错格式与 fetchVideoDetails 一致（`YouTube <endpoint> failed: <status> <body>`）：
+// routes-internal.ts 的 boundedVideoStatsReason 按这个格式提取端点名与状态码，全量错误体
+// 只进 console.log。
+export async function fetchChannelDetails(apiKey: string, channelId: string): Promise<Record<string, unknown> | null> {
+  const apiUrl = new URL(`${DATA_API_BASE}/channels`);
+  apiUrl.searchParams.set("part", "snippet,statistics");
+  apiUrl.searchParams.set("id", channelId);
+  apiUrl.searchParams.set("key", apiKey);
+
+  const res = await fetch(apiUrl.toString());
+  if (!res.ok) throw new Error(`YouTube channels.list failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { items?: Record<string, unknown>[] };
+  return body.items?.[0] ?? null;
+}
+
 async function callHub(mode: "subscribe" | "unsubscribe", callbackUrl: string, youtubeChannelId: string): Promise<void> {
   const topic = `https://www.youtube.com/xml/feeds/videos.xml?channel_id=${youtubeChannelId}`;
   const body = new URLSearchParams({

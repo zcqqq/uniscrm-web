@@ -3,7 +3,7 @@ import type { TenantDataDB } from "../../../../shared/tenant-data-db";
 import type { EntityStateStore } from "../entity-state";
 import { ContentService } from "../content";
 import { fetchListPostsPage } from "../x-posts-api";
-import { resolveProps } from "./resolve-props";
+import { resolveProps, resolveAuthorProps } from "./resolve-props";
 import { ContentMetadata_X } from "../../../../metadata/x-byok";
 
 // get-list-posts is flowType:"trigger" in ContentMetadata_X (spec's flowType table) — this
@@ -64,6 +64,7 @@ export async function runListPostsPoller(ctx: ListPostsPollerContext): Promise<v
 async function upsertPage(
   contentService: ContentService,
   items: Record<string, unknown>[],
+  authors: Record<string, Record<string, unknown>> | undefined,
   channelId: string,
   listId: string,
   emitFlowEvent: boolean
@@ -77,6 +78,15 @@ async function upsertPage(
     // X's tweet.fields has no permalink field; x.com/i/status/{id} is the official,
     // username-independent status URL format.
     props.content_url = `https://x.com/i/status/${props.source_content_id}`;
+    // 作者字段（user.* 命名空间）与内容字段一起进 flow payload。作者对象就在同一个响应的
+    // includes.users[] 里，零额外配额。匹配不到（作者被封/受保护，X 会省略）就不带
+    // user.*——照常发内容，引用作者字段的条件按 fail-closed 不通过，没配作者条件的 flow
+    // 完全不受影响。整条跳过是错的：recordTriggerContentSeen 已经把它记成"见过"。
+    const authorId = typeof item.author_id === "string" ? item.author_id : "";
+    const author = authorId ? authors?.[authorId] : undefined;
+    const authorProps = author && LIST_POSTS_METADATA.userProps
+      ? resolveAuthorProps(author, LIST_POSTS_METADATA.userProps)
+      : {};
     const sourceContentId = String(props.source_content_id ?? "");
     // ALWAYS record, including during the seed phase (emitFlowEvent=false) — the dedup table
     // is the only place "already seen" state lives now, so skipping the record during seed
@@ -85,7 +95,7 @@ async function upsertPage(
     const isNew = await contentService.recordTriggerContentSeen(channelId, listId, sourceContentId);
     if (isNew) newCount++;
     if (isNew && emitFlowEvent) {
-      await contentService.emitContentTriggerEvent(channelId, "X", "listId", listId, props);
+      await contentService.emitContentTriggerEvent(channelId, "X", "listId", listId, { ...props, ...authorProps });
     }
   }
   return newCount;
@@ -106,7 +116,7 @@ async function seedFromLatestPage(ctx: ListPostsPollerContext, contentService: C
     return;
   }
 
-  await upsertPage(contentService, page.data, ctx.channelId, ctx.listId, false);
+  await upsertPage(contentService, page.data, page.authors, ctx.channelId, ctx.listId, false);
 
   await ctx.linkDb
     .prepare(
@@ -129,7 +139,7 @@ async function runIncrementalPoll(ctx: ListPostsPollerContext, contentService: C
     return;
   }
 
-  const newCount = await upsertPage(contentService, page.data, ctx.channelId, ctx.listId, true);
+  const newCount = await upsertPage(contentService, page.data, page.authors, ctx.channelId, ctx.listId, true);
   console.log(JSON.stringify({ event: "list_posts_poll_incremental_complete", channel_id: ctx.channelId, list_id: ctx.listId, fetched: page.data.length, newCount }));
 
   await ctx.linkDb

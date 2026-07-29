@@ -29,9 +29,17 @@ const TWEET_FIELDS = [
   "withheld",
 ].join(",");
 
+// 作者字段：与 ContentMetadata_X 的 get-list-posts.userProps 的 dataId 一一对应。
+// X API v2 的 expansions 不额外计费、不额外消耗调用配额——作者对象与推文在同一个响应里。
+const AUTHOR_USER_FIELDS = "id,name,username,description,profile_image_url,verified_type,public_metrics";
+
 export interface XPostsPage {
   data: Record<string, unknown>[];
   nextToken?: string;
+  // includes.users[] 按 id 索引好的作者对象。只有请求了 expansions=author_id 的端点会填
+  // （目前只有 fetchListPostsPage）。调用方按 tweet.author_id 查；查不到是正常情况
+  // （作者被封/受保护时 X 会省略），不是错误。
+  authors?: Record<string, Record<string, unknown>>;
 }
 
 export interface XPostsFetchResult {
@@ -110,6 +118,8 @@ export async function fetchListPostsPage(
   const url = new URL(`https://api.x.com/2/lists/${listId}/tweets`);
   url.searchParams.set("max_results", "100");
   url.searchParams.set("tweet.fields", TWEET_FIELDS);
+  url.searchParams.set("expansions", "author_id");
+  url.searchParams.set("user.fields", AUTHOR_USER_FIELDS);
   if (paginationToken) url.searchParams.set("pagination_token", paginationToken);
 
   const res = await fetch(url.toString(), {
@@ -131,8 +141,16 @@ export async function fetchListPostsPage(
     throw new Error(`X get-list-posts failed: ${res.status} ${errorBody}`);
   }
 
-  const body = (await res.json()) as { data?: Record<string, unknown>[]; meta?: { next_token?: string } };
-  return { page: { data: body.data || [], nextToken: body.meta?.next_token }, rateLimited: false };
+  const body = (await res.json()) as {
+    data?: Record<string, unknown>[];
+    meta?: { next_token?: string };
+    includes?: { users?: Record<string, unknown>[] };
+  };
+  const authors: Record<string, Record<string, unknown>> = {};
+  for (const u of body.includes?.users || []) {
+    if (typeof u.id === "string") authors[u.id] = u;
+  }
+  return { page: { data: body.data || [], nextToken: body.meta?.next_token, authors }, rateLimited: false };
 }
 
 export interface CreatePostResult {

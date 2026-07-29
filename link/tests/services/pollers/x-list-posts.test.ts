@@ -147,4 +147,66 @@ describe("runListPostsPoller", () => {
 
     expect(entityState.markSeen).toHaveBeenCalledWith({ entity: "content_trigger", channelId: "chan1", secondaryId: "listA", sourceId: "t1" });
   });
+
+  it("请求带上 expansions=author_id 与 user.fields", async () => {
+    const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
+    const entityState = createMockEntityState();
+    fetchMock.mockImplementationOnce(() => jsonResponse({ data: [], meta: {} }));
+
+    await runListPostsPoller(baseCtx(linkDb, entityState));
+
+    const url = decodeURIComponent(String(fetchMock.mock.calls[0][0]));
+    expect(url).toContain("expansions=author_id");
+    expect(url).toContain("public_metrics");
+  });
+
+  it("按 author_id 从 includes.users[] 匹配作者，user.* 与内容字段一起发给 flow", async () => {
+    const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
+    const entityState = createMockEntityState();
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+
+    fetchMock.mockImplementationOnce(() => jsonResponse({
+      data: [{ id: "t1", text: "hello", author_id: "a1", public_metrics: { like_count: 12 } }],
+      includes: {
+        users: [{
+          id: "a1", name: "MKBHD", username: "mkbhd", description: "tech",
+          profile_image_url: "https://x/img", verified_type: "blue",
+          public_metrics: { followers_count: 10000, following_count: 5, tweet_count: 300, listed_count: 20, like_count: 90000, media_count: 40 },
+        }],
+      },
+      meta: {},
+    }));
+
+    await runListPostsPoller(baseCtx(linkDb, entityState, { flowQueue }));
+
+    const { payload } = flowQueue.send.mock.calls[0][0];
+    // 两个 like_count 各是各的——这是整个 user. 命名空间存在的理由
+    expect(payload.like_count).toBe(12);          // 这条推文被点赞数
+    expect(payload["user.like_count"]).toBe(90000); // 作者一共点过多少赞
+    expect(payload["user.followers_count"]).toBe(10000);
+    expect(payload["user.source_user_id"]).toBe("a1");
+    // is_followed 是 UserMetadata_X 里写死的 value:1，不得被照抄进来
+    expect(payload["user.is_followed"]).toBeUndefined();
+  });
+
+  it("includes.users[] 里没有这个作者时照常发内容，只是不带 user.*", async () => {
+    // 作者被封/受保护时 X 会省略。整条跳过是错的：内容照发，引用作者字段的条件按
+    // fail-closed 不通过，没配作者条件的 flow 完全不受影响。
+    const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z" });
+    const entityState = createMockEntityState();
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+
+    fetchMock.mockImplementationOnce(() => jsonResponse({
+      data: [{ id: "t1", text: "hello", author_id: "a-missing", public_metrics: { like_count: 12 } }],
+      includes: { users: [] },
+      meta: {},
+    }));
+
+    await runListPostsPoller(baseCtx(linkDb, entityState, { flowQueue }));
+
+    expect(flowQueue.send).toHaveBeenCalledTimes(1);
+    const { payload } = flowQueue.send.mock.calls[0][0];
+    expect(payload.like_count).toBe(12);
+    expect(Object.keys(payload).some((k) => k.startsWith("user."))).toBe(false);
+  });
 });

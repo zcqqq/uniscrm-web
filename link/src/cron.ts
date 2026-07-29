@@ -210,10 +210,10 @@ export async function handlePolling(env: Env): Promise<void> {
   const runDeadline = Date.now() + TOTAL_BUDGET_MS;
 
   const rows = await env.LINK_DB
-    // json_extract is NULL for TikTok rows too (they never carry the key), so the freeze
-    // filter narrows X channels only.
-    .prepare("SELECT id, channel_type FROM channels WHERE channel_type IN ('X', 'TIKTOK') AND is_active = 1 AND json_extract(config, '$.x_frozen_at') IS NULL")
-    .all<{ id: string; channel_type: "X" | "TIKTOK" }>();
+    // json_extract is NULL for TikTok and YOUTUBE_ACCOUNT rows too (they never carry the key),
+    // so the freeze filter narrows X channels only; it's a no-op (always true) for the others.
+    .prepare("SELECT id, channel_type FROM channels WHERE channel_type IN ('X', 'TIKTOK', 'YOUTUBE_ACCOUNT') AND is_active = 1 AND json_extract(config, '$.x_frozen_at') IS NULL")
+    .all<{ id: string; channel_type: "X" | "TIKTOK" | "YOUTUBE_ACCOUNT" }>();
 
   console.log(JSON.stringify({ event: "polling_cron_started", candidateChannels: rows.results.length }));
 

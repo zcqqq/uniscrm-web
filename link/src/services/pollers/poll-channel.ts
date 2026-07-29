@@ -11,11 +11,21 @@ import { runTikTokContentPoller } from "./tiktok-content";
 import { runListPostsPoller } from "./x-list-posts";
 import { EntityStateStore } from "../entity-state";
 import { resolveTenantDb } from "../tenant-db";
+import { syncYouTubeSubscriptionUsers } from "../youtube-account";
 
 const PER_CHANNEL_BUDGET_MS = 20_000;
 const REPOLL_INTERVAL_MS = 55 * 60 * 1000;
+// YouTube 的 10,000 units/天配额是整个 Google Cloud 项目共享的，不是每租户。
+// 每小时刷一次订阅 = 192 units/天/账号，50 个账号就吃光池子并饿死同池的
+// videos.list（content trigger）和写操作（50 units/次）。每天一次 = 8 units/天/账号。
+const YOUTUBE_REPOLL_INTERVAL_MS = 23 * 60 * 60 * 1000;
 
-async function shouldPoll(env: Env, channelId: string, pollerName: string): Promise<boolean> {
+async function shouldPoll(
+  env: Env,
+  channelId: string,
+  pollerName: string,
+  intervalMs: number = REPOLL_INTERVAL_MS
+): Promise<boolean> {
   const state = await env.LINK_DB
     .prepare("SELECT backfill_complete, last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = ?")
     .bind(channelId, pollerName)
@@ -26,7 +36,7 @@ async function shouldPoll(env: Env, channelId: string, pollerName: string): Prom
   }
   if (state.backfill_complete && state.last_polled_at) {
     const elapsedMs = Date.now() - new Date(state.last_polled_at).getTime();
-    if (elapsedMs < REPOLL_INTERVAL_MS) {
+    if (elapsedMs < intervalMs) {
       console.log(JSON.stringify({ event: `${pollerName}_poll_skipped_too_recent`, channel_id: channelId, elapsedMs }));
       return false;
     }
@@ -45,6 +55,8 @@ export async function pollChannelOnce(env: Env, channelType: ChannelType, channe
     await pollXChannel(env, row);
   } else if (channelType === "TIKTOK") {
     await pollTikTokChannel(env, row);
+  } else if (channelType === "YOUTUBE_ACCOUNT") {
+    await pollYouTubeChannel(env, row);
   }
 }
 
@@ -181,6 +193,34 @@ async function pollTikTokChannel(env: Env, row: { id: string; config: string; te
     }
   } catch (e) {
     console.error(JSON.stringify({ event: "tiktok_content_poll_error", channel_id: row.id, error: String(e) }));
+  }
+}
+
+// YouTube 与 X/TikTok 有两处刻意的差异：
+// 1) 没有 channel_poll_state 行 = 从没同步过 = 应该跑（poller 会自播种）。X 那边
+//    「没有行」意味着未授权；YouTube 的授权凭证就在 channels 行的 config 里。
+// 2) 节流 23 小时而不是 55 分钟（共享配额，见 YOUTUBE_REPOLL_INTERVAL_MS）。
+// tenantDb 解析与 token 刷新都在 syncYouTubeSubscriptionUsers 里，这里只做调度判断。
+async function pollYouTubeChannel(env: Env, row: { id: string; config: string; tenant_id: number | null }): Promise<void> {
+  if (!row.tenant_id) return;
+
+  const state = await env.LINK_DB
+    .prepare("SELECT last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = 'subscriptions'")
+    .bind(row.id)
+    .first<{ last_polled_at: string | null }>();
+
+  if (state?.last_polled_at) {
+    const elapsedMs = Date.now() - new Date(state.last_polled_at).getTime();
+    if (elapsedMs < YOUTUBE_REPOLL_INTERVAL_MS) {
+      console.log(JSON.stringify({ event: "youtube_subscriptions_poll_skipped_too_recent", channel_id: row.id, elapsedMs }));
+      return;
+    }
+  }
+
+  try {
+    await syncYouTubeSubscriptionUsers(env, row.id, PER_CHANNEL_BUDGET_MS);
+  } catch (e) {
+    console.error(JSON.stringify({ event: "youtube_subscriptions_poll_error", channel_id: row.id, error: String(e) }));
   }
 }
 

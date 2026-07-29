@@ -26,7 +26,7 @@ describe("handlePolling channel selection", () => {
     await handlePolling(env);
 
     const call = linkDb.prepare.mock.calls[0][0] as string;
-    expect(call).toContain("channel_type IN ('X', 'TIKTOK')");
+    expect(call).toContain("channel_type IN ('X', 'TIKTOK', 'YOUTUBE_ACCOUNT')");
     expect(call).toContain("is_active = 1");
 
     expect(pollChannelOnceMock).toHaveBeenCalledTimes(2);

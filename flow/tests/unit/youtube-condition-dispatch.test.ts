@@ -239,4 +239,39 @@ describe("executeContentActions: youtubeCondition dispatch", () => {
     expect(outcome).toBe("true"); // vacuously true: zero conditions to fail
     expect(reached).toEqual(["aTrue", "aTrue"]);
   });
+
+  it("条件只用内容字段时，请求体的 withAuthor 为 false", async () => {
+    // 不引用作者字段就不该让 link 多打一次 channels.list——YOUTUBE_API_KEY 是全平台
+    // 共享的日配额。
+    const { fetchMock } = await runCondition(
+      graphWithConditions([{ field: "view_count", operator: ">", value: "1000" }]),
+      () => new Response(JSON.stringify({ ok: true, props: { view_count: "12000" } }), { status: 200 }),
+      "content-yt-author-1"
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).withAuthor).toBe(false);
+  });
+
+  it("值里引用 $user.x 时，请求体的 withAuthor 为 true", async () => {
+    // like_count > $user.followers_count * 0.01 —— 字段侧完全是内容字段，只有值里有
+    // 作者引用。只扫 c.field 会漏掉这个形态，而它正是本功能的目标场景。
+    const { fetchMock, outcome } = await runCondition(
+      graphWithConditions([{ field: "like_count", operator: ">", value: "$user.followers_count * 0.01" }]),
+      () => new Response(
+        JSON.stringify({ ok: true, props: { like_count: "150", "user.followers_count": "10000" } }),
+        { status: 200 }
+      ),
+      "content-yt-author-2"
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).withAuthor).toBe(true);
+    expect(outcome).toBe("true"); // 150 > 10000 * 0.01
+  });
+
+  it("字段侧引用作者字段时，请求体的 withAuthor 为 true", async () => {
+    const { fetchMock } = await runCondition(
+      graphWithConditions([{ field: "user.followers_count", operator: ">", value: "1000" }]),
+      () => new Response(JSON.stringify({ ok: true, props: { "user.followers_count": "10000" } }), { status: 200 }),
+      "content-yt-author-3"
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).withAuthor).toBe(true);
+  });
 });

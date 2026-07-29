@@ -8,7 +8,7 @@ import { r2Query, latestRowsSql, sqlStr, sqlInt } from "../../shared/r2-sql";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY } from "../nodeTypeRegistry";
 import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage } from "./trigger-health";
-import { youtubeConditionRequest, resolveYouTubeCondition, type VideoStatsResponse } from "./youtube-condition";
+import { conditionsNeedAuthor, youtubeConditionRequest, resolveYouTubeCondition, type VideoStatsResponse } from "./youtube-condition";
 
 // node ids are NOT always UUIDs: flow/frontend/config/templates.ts hardcodes short ids like
 // "t1"/"w1"/"a1" for template-instantiated flows, and those ids persist forever unless the node
@@ -893,7 +893,8 @@ async function executeContentActions(
       const rawConditions = graph.nodes.find((n) => n.id === nodeId)?.data?.conditions;
       const conditions = (Array.isArray(rawConditions) ? rawConditions : []) as
         { field: string; operator: string; value: string }[];
-      const { url, body } = youtubeConditionRequest({ env, contentId, flowId, payload });
+      const withAuthor = conditionsNeedAuthor(conditions);
+      const { url, body } = youtubeConditionRequest({ env, contentId, flowId, payload, withAuthor });
 
       let resp: VideoStatsResponse;
       try {
@@ -912,7 +913,7 @@ async function executeContentActions(
       const outcome = resolveYouTubeCondition(conditions, payload, resp);
       // reason 一并打出来：Finding 2 之后 link 的 reason 是有界的短码，flow 这边不再有
       // 别的地方留下"为什么 failed"。
-      console.log(JSON.stringify({ event: "content_condition_youtube", contentId, flowId: flowId || null, nodeId, branch: outcome.branch, ok: resp.ok, reason: outcome.failureReason || resp.reason || null }));
+      console.log(JSON.stringify({ event: "content_condition_youtube", contentId, flowId: flowId || null, nodeId, branch: outcome.branch, ok: resp.ok, withAuthor, reason: outcome.failureReason || resp.reason || null }));
 
       const resumed = resumeFromNode(graph, nodeId, outcome.payload, outcome.branch, outcome.failureReason);
       if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, outcome.payload);

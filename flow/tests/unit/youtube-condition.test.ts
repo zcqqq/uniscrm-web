@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { youtubeConditionRequest, resolveYouTubeCondition } from "../../src/youtube-condition";
+import { conditionsNeedAuthor, youtubeConditionRequest, resolveYouTubeCondition } from "../../src/youtube-condition";
 
 describe("youtubeConditionRequest", () => {
   it("posts the trigger video's id to link's video-stats route", () => {
@@ -109,7 +109,7 @@ describe("resolveYouTubeCondition", () => {
       { ok: true, props: { source_content_id: "vid123", view_count: "12000" } }
     );
     expect(r.branch).toBe("failed");
-    expect(r.failureReason).toBe("stat_unavailable: like_count not returned by videos.list");
+    expect(r.failureReason).toBe("stat_unavailable: like_count not returned by YouTube");
     expect(r.payload).toEqual(stale);
   });
 
@@ -121,7 +121,7 @@ describe("resolveYouTubeCondition", () => {
       { ok: true, props: { source_content_id: "vid123", view_count: "12000" } }
     );
     expect(r.branch).toBe("failed");
-    expect(r.failureReason).toBe("stat_unavailable: duration not returned by videos.list");
+    expect(r.failureReason).toBe("stat_unavailable: duration not returned by YouTube");
   });
 
   it("reports the first missing field only once, and still merges nothing on failure", () => {
@@ -133,7 +133,7 @@ describe("resolveYouTubeCondition", () => {
       stale,
       { ok: true, props: { view_count: "12000" } }
     );
-    expect(r.failureReason).toBe("stat_unavailable: like_count not returned by videos.list");
+    expect(r.failureReason).toBe("stat_unavailable: like_count not returned by YouTube");
     expect(r.payload.view_count).toBe("10");
   });
 
@@ -182,5 +182,80 @@ describe("resolveYouTubeCondition", () => {
   it("treats an ok response with no props as a failure rather than guessing", () => {
     const r = resolveYouTubeCondition([], stale, { ok: true });
     expect(r.branch).toBe("failed");
+  });
+});
+
+describe("conditionsNeedAuthor", () => {
+  it("字段侧引用作者字段 → true", () => {
+    expect(conditionsNeedAuthor([{ field: "user.followers_count", operator: ">", value: "1000" }])).toBe(true);
+  });
+
+  it("值侧表达式引用作者字段 → true", () => {
+    // like_count > $user.followers_count * 0.01 —— 字段侧是内容字段，只有值里有作者引用
+    expect(conditionsNeedAuthor([{ field: "like_count", operator: ">", value: "$user.followers_count * 0.01" }])).toBe(true);
+  });
+
+  it("只有内容字段 → false", () => {
+    expect(conditionsNeedAuthor([
+      { field: "view_count", operator: ">", value: "1000" },
+      { field: "like_count", operator: ">", value: "$view_count * 0.01" },
+    ])).toBe(false);
+  });
+
+  it("空条件 / 半成品条目 → false", () => {
+    expect(conditionsNeedAuthor([])).toBe(false);
+    expect(conditionsNeedAuthor([{ field: "", operator: "==", value: "" }])).toBe(false);
+  });
+});
+
+describe("youtubeConditionRequest — withAuthor", () => {
+  it("withAuthor 进请求体", () => {
+    const { body } = youtubeConditionRequest({
+      env: { LINK_URL: "https://link", INTERNAL_SECRET: "s" },
+      contentId: "c1",
+      flowId: "f1",
+      payload: { source_content_id: "v1" },
+      withAuthor: true,
+    });
+    expect(JSON.parse(body)).toEqual({ videoId: "v1", contentId: "c1", flowId: "f1", withAuthor: true });
+  });
+});
+
+describe("resolveYouTubeCondition — 作者字段", () => {
+  it("合并后的新鲜 props 里作者字段可参与判定", () => {
+    const payload = { source_content_id: "v1", like_count: 10, "user.followers_count": 10000 };
+    const resp = { ok: true, props: { like_count: 150, "user.followers_count": 10000 } };
+    const out = resolveYouTubeCondition(
+      [{ field: "like_count", operator: ">", value: "$user.followers_count * 0.01" }],
+      payload,
+      resp
+    );
+    expect(out.branch).toBe("true");
+    expect(out.payload.like_count).toBe(150);
+  });
+
+  it("频道隐藏了订阅数（新数据缺 user.followers_count，旧 payload 有）→ failed", () => {
+    // YouTube 允许频道隐藏订阅数（hiddenSubscriberCount），此时 statistics.subscriberCount
+    // 不返回。浅合并会把 trigger 时的旧值补回来，条件判的是一个已经不存在的数。
+    const payload = { source_content_id: "v1", like_count: 10, "user.followers_count": 10000 };
+    const resp = { ok: true, props: { like_count: 150 } };
+    const out = resolveYouTubeCondition(
+      [{ field: "like_count", operator: ">", value: "$user.followers_count * 0.01" }],
+      payload,
+      resp
+    );
+    expect(out.branch).toBe("failed");
+    expect(out.failureReason).toContain("stat_unavailable");
+    expect(out.failureReason).toContain("user.followers_count");
+  });
+
+  it("channel_unavailable 走 failed 分支并原样带上 reason", () => {
+    const out = resolveYouTubeCondition(
+      [{ field: "user.followers_count", operator: ">", value: "100" }],
+      { source_content_id: "v1" },
+      { ok: false, reason: "channel_unavailable" }
+    );
+    expect(out.branch).toBe("failed");
+    expect(out.failureReason).toBe("channel_unavailable");
   });
 });

@@ -21,7 +21,7 @@ vi.mock("arctic", () => ({
 
 const syncYouTubeSubscriptionsMock = vi.fn().mockResolvedValue(undefined);
 vi.mock("../src/services/youtube-account", () => ({
-  syncYouTubeSubscriptions: (...args: unknown[]) => syncYouTubeSubscriptionsMock(...args),
+  syncYouTubeSubscriptionUsers: (...args: unknown[]) => syncYouTubeSubscriptionsMock(...args),
 }));
 
 vi.mock("../src/services/app-credentials", () => ({ getAppCredentials: vi.fn() }));
@@ -177,8 +177,9 @@ describe("GET /youtube/callback", () => {
 
     // The follow-up SELECT resolves the real row id (post-upsert), and that's
     // what gets passed to the sync — not the pre-generated (possibly discarded)
-    // channelId from the INSERT.
-    expect(syncYouTubeSubscriptionsMock).toHaveBeenCalledWith(expect.anything(), "row-1", "access-tok");
+    // channelId from the INSERT. The new entry point resolves its own access
+    // token via YouTubeTokenService.getValidToken, so no token is passed in.
+    expect(syncYouTubeSubscriptionsMock).toHaveBeenCalledWith(expect.anything(), "row-1");
   });
 
   it("stores the channel's own title (channels.list) instead of relying on the OAuth email for display", async () => {
@@ -322,7 +323,7 @@ describe("GET /youtube/callback", () => {
     const insertCall = linkDb.calls.find((c) => c.sql.includes("INSERT INTO channels"));
     expect(insertCall!.sql).toContain("ON CONFLICT(channel_type, source_channel_id) DO UPDATE");
 
-    expect(syncYouTubeSubscriptionsMock).toHaveBeenCalledWith(expect.anything(), "existing-row-id", "access-tok-2");
+    expect(syncYouTubeSubscriptionsMock).toHaveBeenCalledWith(expect.anything(), "existing-row-id");
   });
 
   it("persists the refresh token from a fresh consent grant", async () => {

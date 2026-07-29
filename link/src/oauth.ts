@@ -6,7 +6,7 @@ import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, X_BYOK_SCOPES, type ByokConfig } from "./services/app-credentials";
 import { pollChannelOnce } from "./services/pollers/poll-channel";
-import { syncYouTubeSubscriptions } from "./services/youtube-account";
+import { syncYouTubeSubscriptionUsers } from "./services/youtube-account";
 import { getActiveSubscriptionTier } from "../../shared/credit-service";
 import { canUseFeature, LOWEST_TIER } from "../../shared/plans";
 
@@ -632,7 +632,7 @@ export function oauthRoutes() {
       .first<{ id: string }>();
     const actualChannelId = existing?.id || channelId;
 
-    c.executionCtx.waitUntil(syncYouTubeSubscriptions(c.env, actualChannelId, tokens.accessToken()));
+    c.executionCtx.waitUntil(syncYouTubeSubscriptionUsers(c.env, actualChannelId));
 
     return c.redirect(url.origin, 302);
   });

@@ -1,59 +1,83 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { syncYouTubeSubscriptions } from "../../src/services/youtube-account";
-import * as youtubeApi from "../../src/services/youtube-api";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { syncYouTubeSubscriptionUsers } from "../../src/services/youtube-account";
 
-function createMockLinkDb(overrides: { selectResult?: unknown; existingRow?: unknown } = {}) {
-  const runMock = vi.fn().mockResolvedValue({ success: true });
-  const bind = vi.fn().mockReturnValue({
-    first: vi.fn().mockResolvedValue(overrides.existingRow ?? null),
-    run: runMock,
-  });
-  const prepare = vi.fn().mockReturnValue({ bind });
-  return { prepare, _run: runMock, _bind: bind };
+vi.mock("../../src/services/pollers/youtube-subscriptions", () => ({
+  runYouTubeSubscriptionsPoller: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../../src/services/tenant-db", () => ({
+  resolveTenantDb: vi.fn(),
+}));
+import { runYouTubeSubscriptionsPoller } from "../../src/services/pollers/youtube-subscriptions";
+import { resolveTenantDb } from "../../src/services/tenant-db";
+
+function createEnv(channelRow: Record<string, unknown> | null) {
+  const runs: { sql: string; params: unknown[] }[] = [];
+  const LINK_DB = {
+    prepare: vi.fn().mockImplementation((sql: string) => ({
+      bind: vi.fn().mockImplementation((...params: unknown[]) => ({
+        first: vi.fn().mockResolvedValue(channelRow),
+        run: vi.fn().mockImplementation(async () => { runs.push({ sql, params }); return { success: true }; }),
+      })),
+    })),
+  };
+  return { env: { LINK_DB, KV: { get: vi.fn(), put: vi.fn() } } as any, runs };
 }
 
-describe("syncYouTubeSubscriptions", () => {
-  afterEach(() => vi.restoreAllMocks());
+const CHANNEL_ROW = {
+  id: "acct-1",
+  tenant_id: 42,
+  config: JSON.stringify({ access_token: "tok", expires_at: new Date(Date.now() + 3600_000).toISOString() }),
+};
 
-  it("fetches subscriptions and marks sync_status done", async () => {
-    vi.spyOn(youtubeApi, "fetchAllSubscriptions").mockResolvedValue([
-      { channelId: "UCabc", channelName: "Channel A", thumbnailUrl: "https://img/a.jpg" },
-    ]);
-    const linkDb = createMockLinkDb({
-      existingRow: { config: JSON.stringify({ google_user_id: "g1", email: "a@b.com", sync_status: "pending", subscriptions: [] }) },
-    });
-    const env = { LINK_DB: linkDb } as any;
+describe("syncYouTubeSubscriptionUsers", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.unstubAllGlobals());
 
-    await syncYouTubeSubscriptions(env, "chan1", "access-tok");
+  it("租户 D1 未 provision 时，在任何 YouTube API 调用前就退出", async () => {
+    (resolveTenantDb as any).mockResolvedValue(null);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { env } = createEnv(CHANNEL_ROW);
 
-    const updateCall = linkDb._bind.mock.calls.find((c: unknown[]) => typeof c[0] === "string" && (c[0] as string).includes("Channel A"));
-    expect(updateCall).toBeTruthy();
-    const savedConfig = JSON.parse(updateCall![0] as string);
-    expect(savedConfig.sync_status).toBe("done");
-    expect(savedConfig.subscriptions).toEqual([{ channelId: "UCabc", channelName: "Channel A", thumbnailUrl: "https://img/a.jpg" }]);
-    expect(savedConfig.last_synced_at).toBeTruthy();
+    await syncYouTubeSubscriptionUsers(env, "acct-1");
+
+    expect(runYouTubeSubscriptionsPoller).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("marks sync_status error and does not throw when the API call fails", async () => {
-    vi.spyOn(youtubeApi, "fetchAllSubscriptions").mockRejectedValue(new Error("quota exceeded"));
-    const linkDb = createMockLinkDb({
-      existingRow: { config: JSON.stringify({ google_user_id: "g1", email: "a@b.com", sync_status: "pending", subscriptions: [] }) },
-    });
-    const env = { LINK_DB: linkDb } as any;
+  it("channels 行不存在时静默返回", async () => {
+    (resolveTenantDb as any).mockResolvedValue({ query: vi.fn() });
+    const { env } = createEnv(null);
 
-    await expect(syncYouTubeSubscriptions(env, "chan1", "access-tok")).resolves.toBeUndefined();
+    await syncYouTubeSubscriptionUsers(env, "missing");
 
-    const updateCall = linkDb._bind.mock.calls.find((c: unknown[]) => typeof c[0] === "string" && (c[0] as string).includes("error"));
-    expect(updateCall).toBeTruthy();
+    expect(runYouTubeSubscriptionsPoller).not.toHaveBeenCalled();
   });
 
-  it("does nothing when the channel row no longer exists", async () => {
-    const linkDb = createMockLinkDb({ existingRow: null });
-    const env = { LINK_DB: linkDb } as any;
-    const spy = vi.spyOn(youtubeApi, "fetchAllSubscriptions");
+  it("正常路径调 poller，并把 sync_status 写成 done", async () => {
+    (resolveTenantDb as any).mockResolvedValue({ query: vi.fn() });
+    vi.stubGlobal("fetch", vi.fn());
+    const { env, runs } = createEnv(CHANNEL_ROW);
 
-    await syncYouTubeSubscriptions(env, "gone", "access-tok");
+    await syncYouTubeSubscriptionUsers(env, "acct-1");
 
-    expect(spy).not.toHaveBeenCalled();
+    expect(runYouTubeSubscriptionsPoller).toHaveBeenCalledTimes(1);
+    const statusWrite = runs.find((r) => r.sql.includes("json_set"));
+    expect(statusWrite).toBeTruthy();
+    // 整体重写 config 会与 token 刷新互相覆盖 —— 必须是 json_set 定点改
+    expect(statusWrite!.sql).toContain("$.sync_status");
+    expect(statusWrite!.sql).not.toMatch(/SET\s+config\s*=\s*\?/);
+    expect(statusWrite!.params).toContain("done");
+  });
+
+  it("poller 抛错时把 sync_status 写成 error 而不是让异常逃逸", async () => {
+    (resolveTenantDb as any).mockResolvedValue({ query: vi.fn() });
+    (runYouTubeSubscriptionsPoller as any).mockRejectedValueOnce(new Error("boom"));
+    vi.stubGlobal("fetch", vi.fn());
+    const { env, runs } = createEnv(CHANNEL_ROW);
+
+    await expect(syncYouTubeSubscriptionUsers(env, "acct-1")).resolves.toBeUndefined();
+
+    expect(runs.find((r) => r.sql.includes("json_set"))!.params).toContain("error");
   });
 });

@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { XTokenService } from "../../src/services/x-token";
 
-function createMockDb(config: Record<string, unknown>, opts: { lockChanges?: number } = {}) {
+function createMockDb(config: Record<string, unknown>, opts: { lockChanges?: number; isActive?: number } = {}) {
   let stored = JSON.stringify(config);
   const lockChanges = opts.lockChanges ?? 1;
+  const isActive = opts.isActive ?? 1;
 
   const prepare = vi.fn().mockImplementation((sql: string) => ({
     bind: vi.fn().mockImplementation((...bindArgs: unknown[]) => ({
-      first: vi.fn().mockImplementation(async () => ({ config: stored })),
+      first: vi.fn().mockImplementation(async () => ({ config: stored, is_active: isActive })),
       run: vi.fn().mockImplementation(async () => {
         if (sql.includes("token_refresh_lock_until = datetime")) {
           return { success: true, meta: { changes: lockChanges } };
@@ -82,6 +83,32 @@ describe("XTokenService", () => {
 
     expect(token).toBe("refreshed");
     expect(fetchMock).toHaveBeenCalled();
+  });
+
+  // `is_active = 0` is the pause switch used when X freezes an account: no token, and above all
+  // no call to X — every extra request with a frozen account's token risks extending the freeze.
+  it("getValidToken refuses a deactivated channel without calling X", async () => {
+    const db = createMockDb(
+      { access_token: "still-good", refresh_token: "r", expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString() },
+      { isActive: 0 }
+    );
+    const service = new XTokenService(db as any, "client-id", "client-secret");
+
+    await expect(service.getValidToken("chan-1")).rejects.toThrow("channel_inactive");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // The proactive-refresh branch fires before the token is read, so the guard has to sit ahead
+  // of it — an expiring token on a deactivated channel must not reach /2/oauth2/token either.
+  it("getValidToken refuses a deactivated channel even when the token is expiring", async () => {
+    const db = createMockDb(
+      { access_token: "expiring-soon", refresh_token: "r", expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString() },
+      { isActive: 0 }
+    );
+    const service = new XTokenService(db as any, "client-id", "client-secret");
+
+    await expect(service.getValidToken("chan-1")).rejects.toThrow("channel_inactive");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("refreshAccessToken releases the lock after a successful refresh", async () => {

@@ -60,11 +60,15 @@ function withFakeD1(businessFetch: (...args: unknown[]) => unknown) {
 // either call might read) satisfies both, same pattern pollers/poll-channel.test.ts uses.
 // mockLinkDb now also routes SQL to a generic `run` handler for EntityStateStore's
 // entity_state INSERT OR IGNORE / UPDATE (recordPublishedContent's claim()).
-function mockLinkDb(channelRow: { config: string; channel_type: string; tenant_id: number } | null) {
+// `is_active` defaults to 1 — every real channels row has it, and the X routes refuse a
+// deactivated channel outright (the account-freeze pause switch), so a mock row without it
+// would fail every test for the wrong reason. Pass `is_active: 0` to exercise that guard.
+function mockLinkDb(channelRow: { config: string; channel_type: string; tenant_id: number; is_active?: number } | null) {
+  const row = channelRow ? { is_active: 1, ...channelRow } : null;
   return {
     prepare: vi.fn().mockImplementation((sql: string) => ({
       bind: vi.fn().mockReturnValue({
-        first: vi.fn().mockResolvedValue(sql.includes("FROM channels") ? channelRow : null),
+        first: vi.fn().mockResolvedValue(sql.includes("FROM channels") ? row : null),
         run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
       }),
     })),
@@ -827,11 +831,68 @@ describe("stub content-flow action endpoints", () => {
     vi.unstubAllGlobals();
   });
 
+  // The pause switch for a frozen/suspended X account: flipping channels.is_active to 0 has to
+  // stop the flow-driven publish path too, not just cron and the pollers (which already filter
+  // on it). Every extra call carrying a frozen account's token risks extending the freeze, so
+  // the guard sits ahead of both the text generation and the X call.
+  it("POST /internal/content/create-post refuses a deactivated channel without calling X", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok" }),
+      channel_type: "X",
+      tenant_id: 1,
+      is_active: 0,
+    };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+    const pipelineContent = mockPipelineContent();
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ contentId: "content-1", interpolatedPrompt: "literal text", provider: "none", channelId: "tgt-chan", flowId: "flow-1", skillId: "none" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1"), PIPELINE_CONTENT: pipelineContent }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^channel_inactive(:|$)/) });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(pipelineContent.send).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("POST /internal/x/action refuses a deactivated channel without calling X", async () => {
+    const channelRow = {
+      config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", is_byok: true }),
+      channel_type: "X",
+      tenant_id: 1,
+      is_active: 0,
+    };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/x/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ channelId: "src-chan", targetUserId: "target-1", action: "follow", flowId: "flow-1" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: false, reason: expect.stringMatching(/^channel_inactive(:|$)/) });
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it("POST /internal/content/create-post returns channel_not_authorized instead of a 500 when the token refresh fails", async () => {
     const channelRow = {
       config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: "rt", expires_at: new Date(Date.now() - 1000).toISOString() }),
       channel_type: "X",
       tenant_id: 1,
+      is_active: 1,
     };
     const linkDb = {
       prepare: vi.fn().mockReturnValue({
@@ -972,6 +1033,7 @@ describe("stub content-flow action endpoints", () => {
         config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: "rt", expires_at: new Date(Date.now() - 1000).toISOString() }),
         channel_type: "X",
         tenant_id: 1,
+        is_active: 1,
       };
       const linkDb = {
         prepare: vi.fn().mockReturnValue({

@@ -81,6 +81,14 @@ async function uploadVideoToX(
   return { ok: true, mediaId: init.mediaId!, state: final.state, checkAfterSecs: final.checkAfterSecs };
 }
 
+// A deactivated channel must never reach the X API — when X freezes an account, every further
+// call carrying its token risks extending the freeze, so `is_active = 0` doubles as the pause
+// switch (XTokenService.getValidToken is the backstop). Answering 200 with a reason sends the
+// flow node down its failed branch without a retry; a throw would read as transient and requeue.
+function inactiveChannel(channelId: string) {
+  return { ok: false, reason: `channel_inactive: channel ${channelId} is deactivated` };
+}
+
 export function internalRoutes() {
   const router = new Hono<{ Bindings: Env }>();
 
@@ -93,9 +101,10 @@ export function internalRoutes() {
       return c.json({ error: "channelId, targetUserId, action required" }, 400);
     }
 
-    const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id FROM channels WHERE id = ?")
-      .bind(channelId).first<{ config: string; tenant_id: number }>();
+    const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id, is_active FROM channels WHERE id = ?")
+      .bind(channelId).first<{ config: string; tenant_id: number; is_active: number }>();
     if (!channel) return c.json({ error: "Channel not found" }, 404);
+    if (!channel.is_active) return c.json(inactiveChannel(channelId));
 
     const config = JSON.parse(channel.config);
     const sourceUserId = config.x_user_id;
@@ -287,9 +296,10 @@ export function internalRoutes() {
       channelId: string; contentId: string; tweetId: string; flowId?: string | null;
     }>();
 
-    const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id FROM channels WHERE id = ?")
-      .bind(channelId).first<{ config: string; tenant_id: number }>();
+    const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id, is_active FROM channels WHERE id = ?")
+      .bind(channelId).first<{ config: string; tenant_id: number; is_active: number }>();
     if (!channel) return c.json({ ok: false, reason: "channel_not_found" }, 200);
+    if (!channel.is_active) return c.json(inactiveChannel(channelId));
 
     const config = JSON.parse(channel.config);
     const sourceUserId = config.x_user_id;
@@ -314,9 +324,10 @@ export function internalRoutes() {
       channelId: string; contentId: string; tweetId: string; flowId?: string | null;
     }>();
 
-    const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id FROM channels WHERE id = ?")
-      .bind(channelId).first<{ config: string; tenant_id: number }>();
+    const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id, is_active FROM channels WHERE id = ?")
+      .bind(channelId).first<{ config: string; tenant_id: number; is_active: number }>();
     if (!channel) return c.json({ ok: false, reason: "channel_not_found" }, 200);
+    if (!channel.is_active) return c.json(inactiveChannel(channelId));
 
     const config = JSON.parse(channel.config);
     const sourceUserId = config.x_user_id;
@@ -341,9 +352,10 @@ export function internalRoutes() {
       channelId: string; contentId: string; tweetId: string; flowId?: string | null;
     }>();
 
-    const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id FROM channels WHERE id = ?")
-      .bind(channelId).first<{ config: string; tenant_id: number }>();
+    const channel = await c.env.LINK_DB.prepare("SELECT config, tenant_id, is_active FROM channels WHERE id = ?")
+      .bind(channelId).first<{ config: string; tenant_id: number; is_active: number }>();
     if (!channel) return c.json({ ok: false, reason: "channel_not_found" }, 200);
+    if (!channel.is_active) return c.json(inactiveChannel(channelId));
 
     const config = JSON.parse(channel.config);
     const sourceUserId = config.x_user_id;
@@ -446,9 +458,10 @@ export function internalRoutes() {
       contentId: string; interpolatedPrompt: string; provider: "default" | "openai" | "anthropic" | "none"; channelId: string; flowId?: string | null; skillId?: string; videoUrl?: string;
     }>();
 
-    const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
-      .bind(channelId).first<{ config: string; channel_type: string; tenant_id: number }>();
+    const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id, is_active FROM channels WHERE id = ?")
+      .bind(channelId).first<{ config: string; channel_type: string; tenant_id: number; is_active: number }>();
     if (!channel) return c.json({ ok: false, reason: "channel_not_found" }, 200);
+    if (!channel.is_active) return c.json(inactiveChannel(channelId));
 
     if (channel.channel_type !== "X") {
       console.log(JSON.stringify({ event: "create_post_unsupported_platform", contentId, channelId, channelType: channel.channel_type }));
@@ -552,9 +565,10 @@ export function internalRoutes() {
       channelId: string; mediaId: string; text: string; contentId: string; flowId?: string | null;
     }>();
 
-    const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
-      .bind(channelId).first<{ config: string; channel_type: string; tenant_id: number }>();
+    const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id, is_active FROM channels WHERE id = ?")
+      .bind(channelId).first<{ config: string; channel_type: string; tenant_id: number; is_active: number }>();
     if (!channel || channel.channel_type !== "X") return c.json({ ok: false, reason: "unsupported_channel_type: expected X" }, 200);
+    if (!channel.is_active) return c.json(inactiveChannel(channelId));
     // channels.tenant_id is nullable — see /content/create-post's guard comment for why this
     // must be checked before the (already-uploaded, about-to-be-posted) tweet goes out.
     if (!channel.tenant_id) {

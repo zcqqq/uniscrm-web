@@ -13,6 +13,7 @@ interface FakeRow {
   id: string;
   config: string;
   tenant_id: number;
+  is_active?: number;
 }
 
 function createMockLinkDb() {
@@ -28,14 +29,15 @@ function createMockLinkDb() {
             return { config: row.config } as unknown as T;
           }
           // XTokenService.getValidToken issues its own untenanted lookup
-          // (`SELECT config FROM channels WHERE id = ?`) — answer that shape
+          // (`SELECT config, is_active FROM channels WHERE id = ?`) — answer that shape
           // too, without the tenant check, so the route's downstream token
           // lookup succeeds for a channel already confirmed to belong to the
-          // tenant by the check above.
-          if (sql.includes("SELECT config FROM channels WHERE id = ?")) {
+          // tenant by the check above. is_active matters: getValidToken refuses a
+          // deactivated channel (the account-freeze pause switch).
+          if (sql.includes("SELECT config, is_active FROM channels WHERE id = ?")) {
             const [id] = args as [string];
             const row = rows.get(id);
-            return (row ? { config: row.config } : null) as unknown as T;
+            return (row ? { config: row.config, is_active: row.is_active ?? 1 } : null) as unknown as T;
           }
           return null;
         },
@@ -74,6 +76,9 @@ describe("GET /x/:channelId/lists", () => {
     linkDb._rows.set("chan1", {
       id: "chan1",
       tenant_id: 1,
+      // getValidToken refuses a deactivated channel (the account-freeze pause switch), so the
+      // fixture has to carry the column a real row always has.
+      is_active: 1,
       config: JSON.stringify({
         is_byok: true, x_user_id: "xu1", access_token: "valid-token",
         app_client_id: encClientId, app_client_secret: encClientSecret, app_consumer_secret: encConsumerSecret,

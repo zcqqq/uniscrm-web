@@ -104,11 +104,18 @@ export class XTokenService {
 
   async getValidToken(channelId: string): Promise<string> {
     const row = await this.db
-      .prepare(`SELECT config FROM channels WHERE id = ?`)
+      .prepare(`SELECT config, is_active FROM channels WHERE id = ?`)
       .bind(channelId)
-      .first<{ config: string }>();
+      .first<{ config: string; is_active: number }>();
 
     if (!row) throw new Error("Channel not found");
+
+    // A deactivated channel must never reach the X API. When X freezes/suspends an account,
+    // every further call carrying that account's token risks extending the freeze — so
+    // `is_active = 0` doubles as the pause switch. Cron and the pollers already filter on it;
+    // this is the backstop for the flow-driven paths (x/action, content/create-post,
+    // content/x-video-status) that look a channel up by id alone.
+    if (!row.is_active) throw new Error(`channel_inactive: channel ${channelId} is deactivated`);
 
     const config = JSON.parse(row.config) as ChannelConfig;
 

@@ -41,6 +41,25 @@ const SearchIcon = () => (
   </svg>
 );
 
+// Exported (rather than inlined in handleSelect) so this decision can be unit-tested without
+// rendering: this repo's flow module runs tests under @cloudflare/vitest-pool-workers (workerd),
+// which has no `document` — @testing-library/react's render() cannot run here, and no DOM/
+// react-test-renderer package is installed for this repo either. Pure logic needs no DOM.
+//
+// Content field values are resolved by engine.ts's resolveStringValue, whose regex only
+// recognizes an optional event./user. prefix — a $content. prefix would not be stripped
+// and the field would fail to resolve, so content refs are inserted bare ($field).
+//
+// opt.id 可能**已经是限定名**（content flow 的作者字段是 "user.<propId>"，与 payload
+// 键逐字相同）。那种 id 只加 "$"，再拼一次分组前缀会变成 $user.user.x —— engine 的
+// PROP_REF_RE 会把它整段当成引用名，payload 里没有这个键，条件静默恒不通过。
+export function computeInsertPrefix(opt: Pick<PropOption, "id" | "group">): string {
+  const qualified = opt.id.includes(".");
+  return qualified
+    ? "$"
+    : opt.group === "event" ? "$event." : opt.group === "user" ? "$user." : "$";
+}
+
 export function SelectPropsValue({ value, onChange, options, placeholder = "Select field...", variant = "select", open: externalOpen, onOpenChange }: SelectPropsProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -81,11 +100,7 @@ export function SelectPropsValue({ value, onChange, options, placeholder = "Sele
 
   const handleSelect = (opt: PropOption) => {
     if (isInsert) {
-      // Content field values are resolved by engine.ts's resolveStringValue, whose regex only
-      // recognizes an optional event./user. prefix — a $content. prefix would not be stripped
-      // and the field would fail to resolve, so content refs are inserted bare ($field).
-      const prefix = opt.group === "event" ? "$event." : opt.group === "user" ? "$user." : "$";
-      onChange(prefix + opt.id);
+      onChange(computeInsertPrefix(opt) + opt.id);
     } else {
       onChange(opt.id);
     }

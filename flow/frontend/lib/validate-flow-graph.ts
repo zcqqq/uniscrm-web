@@ -42,15 +42,50 @@ export function findMisplacedYouTubeConditionIds(
   return nodes.filter((n) => n.type === "youtubeCondition").map((n) => n.id);
 }
 
+// 条件为空的 youtubeCondition 是个"只烧配额的空操作"：evaluateCondition 那套「全部通过
+// 才算通过」的语义下，空数组的 every() 恒为 true，节点永远走 true 分支——却仍然为每一条
+// 内容打一次 videos.list，而 YOUTUBE_API_KEY 是全平台共享的 10000 units/天免费配额。
+// 用户几乎不可能是故意这么配的（ConditionsEditor 的 "+ Add" 就会先插一个空行），发布前挡住。
+export function findEmptyYouTubeConditionIds(
+  nodes: { id: string; type?: string; data?: Record<string, unknown> }[]
+): string[] {
+  return nodes
+    .filter((n) => n.type === "youtubeCondition")
+    .filter((n) => countUsableConditions(n.data?.conditions) === 0)
+    .map((n) => n.id);
+}
+
+// 与运行时对"有几条条件"的判断保持一致，否则会出现「发布拦不住但运行时当没条件」或反之。
+// - 非数组一律算 0：executeContentActions 的 Array.isArray 守卫（index.ts）会把手改坏的
+//   或 AI 生成的畸形值降级成"没有条件"，运行时行为与空数组完全相同。
+// - field 为空的半成品行算 0 条：evaluateCondition 与 resolveYouTubeCondition 都显式跳过
+//   `!c.field` 的条目，所以只有空行的节点在运行时同样恒为 true。
+function countUsableConditions(raw: unknown): number {
+  if (!Array.isArray(raw)) return 0;
+  return raw.filter(
+    (c) => c && typeof c === "object" && String((c as { field?: unknown }).field ?? "") !== ""
+  ).length;
+}
+
 export function validateFlowGraph(
-  nodes: { id: string; type?: string }[],
+  nodes: { id: string; type?: string; data?: Record<string, unknown> }[],
   edges: { source: string; target: string }[]
-): { valid: boolean; orphanNodeIds: string[]; misplacedNodeIds: string[] } {
+): {
+  valid: boolean;
+  orphanNodeIds: string[];
+  misplacedNodeIds: string[];
+  emptyConditionNodeIds: string[];
+} {
   const orphanNodeIds = findOrphanNodeIds(nodes, edges);
   const misplacedNodeIds = findMisplacedYouTubeConditionIds(nodes);
+  const emptyConditionNodeIds = findEmptyYouTubeConditionIds(nodes);
   return {
-    valid: orphanNodeIds.length === 0 && misplacedNodeIds.length === 0,
+    valid:
+      orphanNodeIds.length === 0 &&
+      misplacedNodeIds.length === 0 &&
+      emptyConditionNodeIds.length === 0,
     orphanNodeIds,
     misplacedNodeIds,
+    emptyConditionNodeIds,
   };
 }

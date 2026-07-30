@@ -76,6 +76,18 @@ export function isValidConnection(source: Node | undefined, target: Node | undef
   return false;
 }
 
+// React Flow 的 onNodesChange/onEdgesChange 不只在用户编辑时触发：挂载时它会先测量每个节点
+// 的尺寸并派发一批 type:"dimensions"，点选节点派发 type:"select"。这两种都不是编辑，却曾经
+// 被无条件记成 isDirty —— 结果打开一个已保存的 flow 立刻显示 "Unsaved"，这个提示因此完全
+// 失去意义（也让人误以为自己动过什么，进而担心覆盖）。
+// 只有真正会改变 graph_json 的变更才算脏：position（节点坐标是持久化的）、add/remove/replace。
+// 用 union 的 type 字面量而不是判断字段有无，改动 React Flow 版本时才会在类型上暴露出来。
+const EDITING_CHANGE_TYPES = ["position", "add", "remove", "replace"];
+
+function isEditingChange(change: { type?: string }): boolean {
+  return EDITING_CHANGE_TYPES.includes(change.type ?? "");
+}
+
 export const useFlowEditor = create<FlowEditorState>((set, get) => ({
   flowId: null,
   flowName: "Untitled Flow",
@@ -92,10 +104,16 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
     set({ flowId: id, flowName: name, flowEnabled: enabled, flowDomain: domain, nodes, edges, isDirty: false, selectedNodeId: null, errorNodeIds: [] }),
 
   onNodesChange: (changes) =>
-    set((state) => ({ nodes: applyNodeChanges(changes, state.nodes), isDirty: true })),
+    set((state) => ({
+      nodes: applyNodeChanges(changes, state.nodes),
+      isDirty: state.isDirty || changes.some(isEditingChange),
+    })),
 
   onEdgesChange: (changes) =>
-    set((state) => ({ edges: applyEdgeChanges(changes, state.edges), isDirty: true })),
+    set((state) => ({
+      edges: applyEdgeChanges(changes, state.edges),
+      isDirty: state.isDirty || changes.some(isEditingChange),
+    })),
 
   onConnect: (connection) => {
     const { nodes } = get();

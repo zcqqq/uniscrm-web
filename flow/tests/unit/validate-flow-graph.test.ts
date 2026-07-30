@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findOrphanNodeIds, validateFlowGraph, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
+import { findOrphanNodeIds, validateFlowGraph, findEmptyYouTubeConditionIds, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
 
 describe("TRIGGER_NODE_TYPES", () => {
   it("lists the flow-execution entry-point node types", () => {
@@ -90,7 +90,7 @@ describe("validateFlowGraph", () => {
   it("is valid when there are no orphan nodes", () => {
     const nodes = [{ id: "t1", type: "xTrigger" }, { id: "a1", type: "action" }];
     const edges = [{ source: "t1", target: "a1" }];
-    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [] });
+    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [] });
   });
 
   it("is invalid and lists orphan ids when nodes are unreachable", () => {
@@ -115,9 +115,10 @@ describe("validateFlowGraph", () => {
   });
 
   it("accepts a youtubeCondition under a YouTube trigger", () => {
+    // 带一条真条件：这个 case 要验的是"位置对不对"，不能让空条件那条规则顺带把它判失败。
     const nodes = [
       { id: "t1", type: "youtubeContentTrigger" },
-      { id: "yc1", type: "youtubeCondition" },
+      { id: "yc1", type: "youtubeCondition", data: { conditions: [{ field: "view_count", operator: ">", value: "1" }] } },
     ];
     const edges = [{ source: "t1", target: "yc1" }];
     const result = validateFlowGraph(nodes, edges);
@@ -159,5 +160,132 @@ describe("validateFlowGraph", () => {
     const nodes = [{ id: "t1", type: "xContentTrigger" }, { id: "a1", type: "action" }];
     const edges = [{ source: "t1", target: "a1" }];
     expect(validateFlowGraph(nodes, edges).misplacedNodeIds).toEqual([]);
+  });
+});
+
+describe("findEmptyYouTubeConditionIds", () => {
+  // 条件为空的 youtubeCondition 恒走 true 分支（every() on [] === true），却仍然为每条内容
+  // 打一次 videos.list——全平台共享的 10000 units/天配额。发布前必须挡住。
+  const ytTrigger = { id: "t1", type: "youtubeContentTrigger" };
+
+  it("flags a youtubeCondition whose conditions array is empty", () => {
+    const nodes = [ytTrigger, { id: "yc1", type: "youtubeCondition", data: { conditions: [] } }];
+    expect(findEmptyYouTubeConditionIds(nodes)).toEqual(["yc1"]);
+  });
+
+  it("flags a youtubeCondition with no data at all", () => {
+    expect(findEmptyYouTubeConditionIds([ytTrigger, { id: "yc1", type: "youtubeCondition" }])).toEqual(["yc1"]);
+  });
+
+  it("accepts a youtubeCondition with one usable condition", () => {
+    const nodes = [
+      ytTrigger,
+      { id: "yc1", type: "youtubeCondition", data: { conditions: [{ field: "view_count", operator: ">", value: "1000" }] } },
+    ];
+    expect(findEmptyYouTubeConditionIds(nodes)).toEqual([]);
+  });
+
+  it("accepts a condition whose only reference is an author field on the value side", () => {
+    // like_count > $user.followers_count * 0.01 —— field 侧是内容字段，作者引用只在 value 里。
+    const nodes = [
+      ytTrigger,
+      { id: "yc1", type: "youtubeCondition", data: { conditions: [{ field: "like_count", operator: ">", value: "$user.followers_count * 0.01" }] } },
+    ];
+    expect(findEmptyYouTubeConditionIds(nodes)).toEqual([]);
+  });
+
+  it("treats a row with a blank field as no condition — ConditionsEditor's '+ Add' inserts one", () => {
+    // evaluateCondition 与 resolveYouTubeCondition 都跳过 !c.field 的条目，所以只有空行的
+    // 节点在运行时同样恒为 true。发布校验必须与运行时的判断一致。
+    const nodes = [
+      ytTrigger,
+      { id: "yc1", type: "youtubeCondition", data: { conditions: [{ field: "", operator: "==", value: "" }] } },
+    ];
+    expect(findEmptyYouTubeConditionIds(nodes)).toEqual(["yc1"]);
+  });
+
+  it("keeps a node that has one blank row alongside one real condition", () => {
+    const nodes = [
+      ytTrigger,
+      { id: "yc1", type: "youtubeCondition", data: { conditions: [{ field: "", operator: "==", value: "" }, { field: "view_count", operator: ">", value: "10" }] } },
+    ];
+    expect(findEmptyYouTubeConditionIds(nodes)).toEqual([]);
+  });
+
+  it("treats a non-array conditions value as empty, matching the runtime Array.isArray guard", () => {
+    // executeContentActions 把畸形值降级成"没有条件"，运行时恒为 true —— 校验必须一致。
+    for (const conditions of ["view_count > 1000", 42, { field: "view_count" }, null]) {
+      const nodes = [ytTrigger, { id: "yc1", type: "youtubeCondition", data: { conditions } }];
+      expect(findEmptyYouTubeConditionIds(nodes), String(conditions)).toEqual(["yc1"]);
+    }
+  });
+
+  it("ignores nodes that are not youtubeCondition, even with empty conditions", () => {
+    const nodes = [
+      ytTrigger,
+      { id: "vc1", type: "videoCondition", data: { conditions: [] } },
+      { id: "a1", type: "action", data: { conditions: [] } },
+    ];
+    expect(findEmptyYouTubeConditionIds(nodes)).toEqual([]);
+  });
+
+  it("flags every empty youtubeCondition, not just the first", () => {
+    const nodes = [
+      ytTrigger,
+      { id: "yc1", type: "youtubeCondition", data: { conditions: [] } },
+      { id: "yc2", type: "youtubeCondition", data: { conditions: [] } },
+    ];
+    expect(findEmptyYouTubeConditionIds(nodes)).toEqual(["yc1", "yc2"]);
+  });
+});
+
+describe("validateFlowGraph — empty youtubeCondition conditions", () => {
+  it("blocks publish and reports the node id", () => {
+    const nodes = [
+      { id: "t1", type: "youtubeContentTrigger" },
+      { id: "w1", type: "wait" },
+      { id: "yc1", type: "youtubeCondition", data: { conditions: [] } },
+    ];
+    const edges = [{ source: "t1", target: "w1" }, { source: "w1", target: "yc1" }];
+    const result = validateFlowGraph(nodes, edges);
+    expect(result.valid).toBe(false);
+    expect(result.emptyConditionNodeIds).toEqual(["yc1"]);
+    // 这条图的连线和 trigger 都是对的——不能顺带误报另外两类
+    expect(result.orphanNodeIds).toEqual([]);
+    expect(result.misplacedNodeIds).toEqual([]);
+  });
+
+  it("passes a fully configured YouTube condition flow", () => {
+    const nodes = [
+      { id: "t1", type: "youtubeContentTrigger" },
+      { id: "w1", type: "wait" },
+      { id: "yc1", type: "youtubeCondition", data: { conditions: [{ field: "view_count", operator: ">=", value: "$user.view_count / 1000" }] } },
+      { id: "a1", type: "action" },
+    ];
+    const edges = [
+      { source: "t1", target: "w1" },
+      { source: "w1", target: "yc1" },
+      { source: "yc1", target: "a1" },
+    ];
+    expect(validateFlowGraph(nodes, edges)).toEqual({
+      valid: true,
+      orphanNodeIds: [],
+      misplacedNodeIds: [],
+      emptyConditionNodeIds: [],
+    });
+  });
+
+  it("reports all three categories at once when a graph has all three problems", () => {
+    const nodes = [
+      { id: "t1", type: "xContentTrigger" },
+      { id: "yc1", type: "youtubeCondition", data: { conditions: [] } },
+      { id: "orphan", type: "action" },
+    ];
+    const edges = [{ source: "t1", target: "yc1" }];
+    const result = validateFlowGraph(nodes, edges);
+    expect(result.valid).toBe(false);
+    expect(result.orphanNodeIds).toEqual(["orphan"]);
+    expect(result.misplacedNodeIds).toEqual(["yc1"]);
+    expect(result.emptyConditionNodeIds).toEqual(["yc1"]);
   });
 });

@@ -104,19 +104,26 @@ function EditorToolbar() {
         size="sm"
         onClick={async () => {
           const { nodes, edges } = useFlowEditor.getState();
-          const { valid, orphanNodeIds, misplacedNodeIds } = validateFlowGraph(nodes, edges);
+          const { valid, orphanNodeIds, misplacedNodeIds, emptyConditionNodeIds } =
+            validateFlowGraph(nodes, edges);
           // Always resolve against the current graph first, so a second Publish click
           // after a partial fix doesn't compound a stale highlight from the first click.
-          useFlowEditor.getState().setErrorNodeIds([...orphanNodeIds, ...misplacedNodeIds]);
+          useFlowEditor
+            .getState()
+            .setErrorNodeIds([...orphanNodeIds, ...misplacedNodeIds, ...emptyConditionNodeIds]);
           if (!valid) {
-            // 两类错误的修法完全不同（连线 vs 换 trigger），文案必须分开，否则用户会对着
-            // 一个连得好好的节点找"哪里没连上"。孤儿优先——它更常见也更基础。
-            toast({
-              title: orphanNodeIds.length > 0
+            // 三类错误的修法完全不同（连线 / 换 trigger / 填条件），文案必须分开，否则用户
+            // 会对着一个连得好好的节点找"哪里没连上"。孤儿优先——它更常见也更基础。
+            // 「换 trigger」的文案不能说成"需要 YouTube Trigger"：这一条在"图里有两个
+            // trigger、其中一个正是 YouTube Trigger"时也会触发，那样会把人打发去找一个
+            // 明明已经在那儿的节点。
+            const title =
+              orphanNodeIds.length > 0
                 ? `${orphanNodeIds.length} 个节点未连接，无法发布`
-                : `YouTube Condition 需要 YouTube Trigger 才能工作，无法发布`,
-              variant: "destructive",
-            });
+                : emptyConditionNodeIds.length > 0
+                  ? `YouTube Condition 没有设置条件，无法发布`
+                  : `YouTube Condition 只能用在唯一 trigger 是 YouTube Trigger 的流程里，无法发布`;
+            toast({ title, variant: "destructive" });
             return;
           }
           await handleSave();

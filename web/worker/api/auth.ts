@@ -43,8 +43,15 @@ export function createAuthRouter() {
   const INVALID_CREDENTIALS = "Invalid email or password";
 
   router.post("/password-login", async (c) => {
-    const { email, password } = await c.req.json<{ email?: string; password?: string }>();
-    if (!email || !password) {
+    let body: { email?: unknown; password?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      // 请求体缺失或不是合法 JSON——不回显任何请求内容，统一走跟字段缺失一样的 400。
+      return c.json({ error: "Email and password are required" }, 400);
+    }
+    const { email, password } = body;
+    if (typeof email !== "string" || typeof password !== "string") {
       return c.json({ error: "Email and password are required" }, 400);
     }
 
@@ -86,16 +93,23 @@ export function createAuthRouter() {
 
     await throttle.clear(email);
 
-    // 存储串自带参数，所以提高迭代数不需要迁移：验证通过的那一刻用新参数重算一次即可。
-    if (needsUpgrade(member.password_hash)) {
-      const upgraded = await hashPassword(password);
-      // tenant-scope-ok: id 来自刚刚通过校验的那一行 member
-      await c.env.WEB_DB.prepare("UPDATE members SET password_hash = ? WHERE id = ?")
-        .bind(upgraded, member.id)
-        .run();
-    }
-
     await issueSession(c, member);
+
+    // 存储串自带参数，所以提高迭代数不需要迁移：验证通过的那一刻用新参数重算一次即可。放在
+    // issueSession 之后并且 try/catch 包住：这一步纯粹是优化，写失败不该把一次密码正确的登录
+    // 变成 500——session 已经发出去了，响应必须照样返回。
+    if (needsUpgrade(member.password_hash)) {
+      try {
+        const upgraded = await hashPassword(password);
+        // tenant-scope-ok: id 来自刚刚通过校验的那一行 member
+        await c.env.WEB_DB.prepare("UPDATE members SET password_hash = ? WHERE id = ?")
+          .bind(upgraded, member.id)
+          .run();
+      } catch (e) {
+        // 只记录“重算失败”本身，绝不记录哈希、密码或派生密钥。
+        console.error("Password rehash failed for member", member.id);
+      }
+    }
 
     return c.json({
       ok: true,

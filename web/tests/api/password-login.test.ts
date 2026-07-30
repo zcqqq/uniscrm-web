@@ -116,6 +116,19 @@ describe("POST /auth/password-login", () => {
     expect(verify).not.toHaveBeenCalled();
   });
 
+  it("邮箱不存在时也计入失败次数，达到阈值后同样 429", async () => {
+    const { app } = makeApp(null, kvStore);
+
+    for (let i = 0; i < 5; i++) {
+      await post(app, { email: "nobody@example.com", password: "whatever12" });
+    }
+    expect(kvStore.get("login_fail:nobody@example.com")).toBe("5");
+
+    const res = await post(app, { email: "nobody@example.com", password: "whatever12" });
+
+    expect(res.status).toBe(429);
+  });
+
   it("成功登录后失败计数清零", async () => {
     const verify = vi.spyOn(password, "verifyPassword").mockResolvedValue(false);
     const { app } = makeApp(MEMBER, kvStore);
@@ -135,6 +148,43 @@ describe("POST /auth/password-login", () => {
     expect((await post(app, { password: "hunter22222" })).status).toBe(400);
   });
 
+  it("请求体缺失时返回 400 而不是 500", async () => {
+    const { app } = makeApp(MEMBER, kvStore);
+
+    const res = await app.request(
+      "/auth/password-login",
+      { method: "POST", headers: { "Content-Type": "application/json" } },
+      undefined,
+      { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json() as any).error).toBe("Email and password are required");
+  });
+
+  it("请求体不是合法 JSON 时返回 400 而不是 500", async () => {
+    const { app } = makeApp(MEMBER, kvStore);
+
+    const res = await app.request(
+      "/auth/password-login",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{not valid json" },
+      undefined,
+      { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json() as any).error).toBe("Email and password are required");
+  });
+
+  it("email 或 password 不是字符串时返回 400 而不是 500", async () => {
+    const { app } = makeApp(MEMBER, kvStore);
+
+    const res = await post(app, { email: { $ne: null }, password: [] });
+
+    expect(res.status).toBe(400);
+    expect((await res.json() as any).error).toBe("Email and password are required");
+  });
+
   it("哈希参数低于当前标准时登录成功后就地重算回写", async () => {
     vi.spyOn(password, "verifyPassword").mockResolvedValue(true);
     vi.spyOn(password, "hashPassword").mockResolvedValue("pbkdf2$sha256$600000$bmV3c2FsdG5ld3NhbHQ=$bmV3aGFzaG5ld2hhc2g=");
@@ -144,5 +194,41 @@ describe("POST /auth/password-login", () => {
 
     const updates = db.prepare.mock.calls.map((c: any[]) => c[0]).filter((s: string) => s.startsWith("UPDATE members SET password_hash"));
     expect(updates).toHaveLength(1);
+  });
+
+  it("重算哈希写入失败时登录依然成功，返回 200 与 session cookie", async () => {
+    vi.spyOn(password, "verifyPassword").mockResolvedValue(true);
+    vi.spyOn(password, "hashPassword").mockResolvedValue("pbkdf2$sha256$600000$bmV3c2FsdG5ld3NhbHQ=$bmV3aGFzaG5ld2hhc2g=");
+
+    const memberRow = { ...MEMBER, password_hash: "pbkdf2$sha256$1000$c2FsdA==$aGFzaA==" };
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        bind: vi.fn(() => ({
+          first: vi.fn(async () => (sql.includes("FROM members WHERE email") ? memberRow : null)),
+          run: vi.fn(async () => {
+            if (sql.startsWith("UPDATE members SET password_hash")) {
+              throw new Error("simulated D1 write failure");
+            }
+            return {};
+          }),
+        })),
+      })),
+    };
+    const kv = {
+      get: async (k: string) => (kvStore.has(k) ? kvStore.get(k)! : null),
+      put: async (k: string, v: string) => { kvStore.set(k, v); },
+      delete: async (k: string) => { kvStore.delete(k); },
+    };
+    const app = new Hono();
+    app.use("/*", (c, next) => {
+      (c.env as any) = { WEB_DB: db, KV: kv, WEB_URL: "https://app.example.com" };
+      return next();
+    });
+    app.route("/auth", createAuthRouter());
+
+    const res = await post(app, { email: "a@example.com", password: "hunter22222" });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.getSetCookie().some((c) => c.startsWith("session=") && !c.includes("Max-Age=0"))).toBe(true);
   });
 });

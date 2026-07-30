@@ -1,3 +1,5 @@
+import { normalizeEmail } from "./email-identity";
+
 export interface OAuthState {
   codeVerifier: string;
   mode: "login" | "link" | "channel";
@@ -68,10 +70,12 @@ export class OAuthService {
       return { memberId: existing.member_id, tenantId: member!.tenant_id, isNew: false };
     }
 
-    if (email) {
+    const normalizedEmail = email ? normalizeEmail(email) : null;
+
+    if (normalizedEmail) {
       const memberByEmail = await this.db
         .prepare("SELECT id, tenant_id FROM members WHERE email = ?")
-        .bind(email)
+        .bind(normalizedEmail)
         .first<{ id: string; tenant_id: number }>();
 
       if (memberByEmail) {
@@ -91,27 +95,47 @@ export class OAuthService {
 
     await this.db
       .prepare("INSERT INTO tenants (email, created_at) VALUES (?, ?)")
-      .bind(email, now)
+      .bind(normalizedEmail, now)
       .run();
     const tenant = await this.db
       .prepare("SELECT tenant_id FROM tenants WHERE email = ?")
-      .bind(email)
+      .bind(normalizedEmail)
       .first<{ tenant_id: number }>();
     const tenantId = tenant!.tenant_id;
 
-    await this.db
-      .prepare("INSERT INTO members (id, tenant_id, email, preferred_location, timezone, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-      .bind(memberId, tenantId, email, "global", timezone, now)
-      .run();
+    let winnerId: string = memberId;
+    let winnerTenantId: number = tenantId;
+    let isNew = true;
+    try {
+      await this.db
+        .prepare("INSERT INTO members (id, tenant_id, email, preferred_location, timezone, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(memberId, tenantId, normalizedEmail, "global", timezone, now)
+        .run();
+    } catch (e) {
+      // members.email 上的唯一索引堵住了上面那次「按邮箱查无此人」与这次 INSERT 之间的窗口。并发
+      // 走到这里的两个请求（两个 OAuth 登录，或者一个 OAuth 一个 magic link）用同一个邮箱时，慢的
+      // 这个请求会到这里；重新读出先赢的那一行继续走完登录，而不是把 500 丢给用户。上面那条
+      // tenants INSERT 已经落库了，会留下一行没人引用的 tenant——在这个极窄的竞态里宁可留个孤儿
+      // 行，也不能让同一个邮箱存在两个 member。isNew 必须报 false：调用方（oauth.ts 的三个回调）
+      // 靠这个字段决定要不要再发一遍 provision-db / activate-trial，输的一方绝不能重新触发。
+      const raced = await this.db
+        .prepare("SELECT id, tenant_id FROM members WHERE email = ?")
+        .bind(normalizedEmail)
+        .first<{ id: string; tenant_id: number }>();
+      if (!raced) throw e;
+      winnerId = raced.id;
+      winnerTenantId = raced.tenant_id;
+      isNew = false;
+    }
 
     await this.db
       .prepare(
         "INSERT INTO oauth_accounts (provider, provider_user_id, member_id, tenant_id, created_at) VALUES (?, ?, ?, ?, ?)"
       )
-      .bind(provider, providerUserId, memberId, tenantId, now)
+      .bind(provider, providerUserId, winnerId, winnerTenantId, now)
       .run();
 
-    return { memberId, tenantId, isNew: true };
+    return { memberId: winnerId, tenantId: winnerTenantId, isNew };
   }
 
   async linkAccount(

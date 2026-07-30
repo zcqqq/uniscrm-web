@@ -6,11 +6,13 @@
 // 计数维度取邮箱而不是 IP：撞库的特征是同一个账号被反复尝试，邮箱维度更贴合，也不会被换出口 IP
 // 绕开。查无此人时同样计数，这样 429 不会反过来暴露「这个邮箱是注册过的」。
 
+import { normalizeEmail } from "./email-identity";
+
 export const MAX_FAILURES = 5;
 export const WINDOW_SECONDS = 15 * 60;
 
 function key(email: string): string {
-  return `login_fail:${email.trim().toLowerCase()}`;
+  return `login_fail:${normalizeEmail(email)}`;
 }
 
 export class LoginThrottle {

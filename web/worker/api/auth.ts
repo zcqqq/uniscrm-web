@@ -9,6 +9,7 @@ import { executePendingTask } from "../services/task-executor";
 import { cfTimezone, resolveSignupTimezone } from "../services/timezone";
 import { dummyVerify, hashPassword, needsUpgrade, verifyPassword } from "../services/password";
 import { LoginThrottle } from "../services/login-throttle";
+import { normalizeEmail } from "../services/email-identity";
 
 export function createAuthRouter() {
   const router = new Hono<{ Bindings: Env }>();
@@ -67,7 +68,7 @@ export function createAuthRouter() {
     const member = await c.env.WEB_DB.prepare(
       "SELECT id, tenant_id, email, preferred_location, language, timezone, password_hash FROM members WHERE email = ?"
     )
-      .bind(email)
+      .bind(normalizeEmail(email))
       .first<{
         id: string;
         tenant_id: number;
@@ -142,10 +143,12 @@ export function createAuthRouter() {
       .bind(token)
       .run();
 
+    const normalizedEmail = normalizeEmail(link.email);
+
     let member = await c.env.WEB_DB.prepare(
       "SELECT id, tenant_id, email, preferred_location, language, timezone FROM members WHERE email = ?"
     )
-      .bind(link.email)
+      .bind(normalizedEmail)
       .first<{ id: string; tenant_id: number; email: string; preferred_location: string; language: string; timezone: string }>();
 
     if (!member) {
@@ -154,10 +157,10 @@ export function createAuthRouter() {
 
       // tenant-scope-ok: registration — this INSERT creates the tenant row; no tenant scope exists yet
       await c.env.WEB_DB.prepare("INSERT INTO tenants (email, created_at) VALUES (?, ?)")
-        .bind(link.email, now)
+        .bind(normalizedEmail, now)
         .run();
       const tenant = await c.env.WEB_DB.prepare("SELECT tenant_id FROM tenants WHERE email = ?")
-        .bind(link.email)
+        .bind(normalizedEmail)
         .first<{ tenant_id: number }>();
       const tenantId = tenant!.tenant_id;
 
@@ -167,7 +170,7 @@ export function createAuthRouter() {
         await c.env.WEB_DB.prepare(
           "INSERT INTO members (id, tenant_id, email, preferred_location, timezone, created_at) VALUES (?, ?, ?, ?, ?, ?)"
         )
-          .bind(memberId, tenantId, link.email, "global", tz, now)
+          .bind(memberId, tenantId, normalizedEmail, "global", tz, now)
           .run();
       } catch (e) {
         // members.email 上的唯一索引堵住了上面那次 SELECT 与这次 INSERT 之间的窗口。并发点开同一
@@ -177,7 +180,7 @@ export function createAuthRouter() {
         const raced = await c.env.WEB_DB.prepare(
           "SELECT id, tenant_id, email, preferred_location, language, timezone FROM members WHERE email = ?"
         )
-          .bind(link.email)
+          .bind(normalizedEmail)
           .first<{ id: string; tenant_id: number; email: string; preferred_location: string; language: string; timezone: string }>();
         if (!raced) throw e;
         member = raced;
@@ -191,7 +194,7 @@ export function createAuthRouter() {
         c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t1));
         c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t2));
 
-        member = { id: memberId, tenant_id: tenantId, email: link.email, preferred_location: "global", language: "en", timezone: tz };
+        member = { id: memberId, tenant_id: tenantId, email: normalizedEmail, preferred_location: "global", language: "en", timezone: tz };
       }
     }
 

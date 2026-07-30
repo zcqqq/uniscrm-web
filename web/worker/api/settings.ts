@@ -95,7 +95,14 @@ export function createSettingsRouter() {
 
   router.post("/password", async (c) => {
     const memberId = c.get("memberId" as never) as string;
-    const { current_password, new_password } = await c.req.json<{ current_password?: string; new_password?: string }>();
+    let body: { current_password?: string; new_password?: string };
+    try {
+      body = await c.req.json<{ current_password?: string; new_password?: string }>();
+    } catch {
+      // 请求体缺失或不是合法 JSON——跟 /auth/password-login 一样统一走 400，不让解析异常冒泡成 500。
+      return c.json({ error: "Invalid request body" }, 400);
+    }
+    const { current_password, new_password } = body;
 
     const invalid = validatePassword(new_password ?? "");
     if (invalid) return c.json({ error: invalid }, 400);

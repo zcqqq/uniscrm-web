@@ -64,6 +64,41 @@ describe("POST /auth/password-login", () => {
     expect(res.headers.getSetCookie().some((c) => c.startsWith("session=") && !c.includes("Max-Age=0"))).toBe(true);
   });
 
+  // members.email 存的是 normalizeEmail 之后的规范形式（全小写、去空格）。这个用例锁住的是
+  // Finding 1 的回归：提交邮箱的大小写不能决定 SELECT 能不能查到人。
+  it("stored email 是小写、提交邮箱大小写不同时依然能查到并登录成功", async () => {
+    vi.spyOn(password, "verifyPassword").mockResolvedValue(true);
+    const statements: { sql: string; args: any[] }[] = [];
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        bind: vi.fn((...args: any[]) => {
+          statements.push({ sql, args });
+          return {
+            first: vi.fn(async () => (sql.includes("FROM members WHERE email") ? MEMBER : null)),
+            run: vi.fn(async () => ({})),
+          };
+        }),
+      })),
+    };
+    const kv = {
+      get: async () => null,
+      put: async () => {},
+      delete: async () => {},
+    };
+    const app = new Hono();
+    app.use("/*", (c, next) => {
+      (c.env as any) = { WEB_DB: db, KV: kv, WEB_URL: "https://app.example.com" };
+      return next();
+    });
+    app.route("/auth", createAuthRouter());
+
+    const res = await post(app, { email: "  A@Example.COM  ", password: "hunter22222" });
+
+    expect(res.status).toBe(200);
+    const memberSelect = statements.find((s) => s.sql.includes("FROM members WHERE email"));
+    expect(memberSelect!.args).toEqual(["a@example.com"]);
+  });
+
   it("密码错误时返回 401 与统一提示", async () => {
     vi.spyOn(password, "verifyPassword").mockResolvedValue(false);
     const { app } = makeApp(MEMBER, kvStore);

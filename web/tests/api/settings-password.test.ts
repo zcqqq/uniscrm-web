@@ -91,6 +91,33 @@ describe("POST /settings/password", () => {
     expect(del!.args).toEqual(["m1", "sess-current"]);
   });
 
+  // /auth/password-login 已经把「请求体缺失或不是合法 JSON」硬化成 400；这条兄弟路由此前是裸
+  // await c.req.json()，同样的输入会让 .json() 抛异常、冒泡成 500。
+  it("请求体不是合法 JSON 时返回 400 而不是 500", async () => {
+    const { app } = makeApp(WITH_PASSWORD);
+
+    const res = await app.request("/settings/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: "session=sess-current" },
+      body: "{not valid json",
+    });
+
+    expect(res.status).toBe(400);
+    expect((await res.json() as any).error).toBe("Invalid request body");
+  });
+
+  it("请求体缺失时返回 400 而不是 500", async () => {
+    const { app } = makeApp(WITH_PASSWORD);
+
+    const res = await app.request("/settings/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: "session=sess-current" },
+    });
+
+    expect(res.status).toBe(400);
+    expect((await res.json() as any).error).toBe("Invalid request body");
+  });
+
   it("新密码不合规时返回 400 且不写库", async () => {
     const { app, statements } = makeApp(WITHOUT_PASSWORD);
 

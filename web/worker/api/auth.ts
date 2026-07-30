@@ -1,7 +1,8 @@
 import { Hono } from "hono";
-import { setCookie, getCookie, deleteCookie } from "hono/cookie";
+import { getCookie, deleteCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { SessionService } from "../auth/session";
+import { issueSession } from "../auth/issue-session";
 import { EmailService } from "../services/email";
 import { PendingTaskService } from "../services/pending-tasks";
 import { executePendingTask } from "../services/task-executor";
@@ -106,36 +107,7 @@ export function createAuthRouter() {
       }
     }
 
-    const sessions = new SessionService(c.env.WEB_DB);
-    const sessionId = await sessions.create(member.id, member.tenant_id, member.email, member.language || "en");
-
-    setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/" });
-    setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/", domain: "uni-scrm.com" });
-    setCookie(c, "session", sessionId, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "Lax",
-      maxAge: 7 * 24 * 60 * 60,
-      path: "/",
-      domain: "uni-scrm.com",
-    });
-    setCookie(c, "tier", "basic", {
-      httpOnly: false,
-      secure: true,
-      sameSite: "Lax",
-      maxAge: 30 * 24 * 60 * 60,
-      path: "/",
-      domain: "uni-scrm.com",
-    });
-    // Readable by the static help center (help.uni-scrm.com) to pick the doc language
-    setCookie(c, "lang", member.language || "en", {
-      httpOnly: false,
-      secure: true,
-      sameSite: "Lax",
-      maxAge: 365 * 24 * 60 * 60,
-      path: "/",
-      domain: "uni-scrm.com",
-    });
+    await issueSession(c, member);
 
     return c.json({
       ok: true,

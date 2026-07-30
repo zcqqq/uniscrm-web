@@ -19,7 +19,8 @@
 - 不要 `git stash`，也不要让文件跨工具调用停留在暂存区——本仓库有并发 session，暂存区是共享的。`git add` 与 `git commit` 必须在同一条命令里完成。
 - 除非用户明确说 push to main，否则只在本地提交，不要 push。
 - 密码长度限制逐字为：最少 8 字符，最多 128 字符，不强制大小写/数字/符号组成规则。
-- 当前哈希参数逐字为：PBKDF2-HMAC-SHA256，600000 迭代，16 字节 salt，256 位输出。
+- ~~当前哈希参数逐字为：PBKDF2-HMAC-SHA256，600000 迭代，16 字节 salt，256 位输出。~~ **已作废，见 Task 10。** 线上 Workers 硬性拒绝迭代数超过 100000 的 PBKDF2（`NotSupportedError: iteration counts above 100000 are not supported`），而本地 workerd 不执行该限制——Task 1 的全部单测因此是绿的，问题直到部署 web-dev 才暴露。现行参数逐字为：**scrypt，N=16384，r=8，p=1，16 字节 salt，32 字节输出**，经 `node:crypto` 调用（`nodejs_compat` 已开启）。
+- **凡是涉及运行时能力的结论，本地 workerd 的测试结果不作数**，必须部署到 `web-dev.uni-scrm.com` 后用真实请求复核。这条限制就是本地测全绿、线上全 500 换来的。
 - 登录失败提示逐字为：`Invalid email or password`（三种失败情况共用这一条）。
 - 限流参数逐字为：连续失败 5 次锁定，窗口 15 分钟（900 秒）。
 - 用 `vi.spyOn(moduleNamespace, "fn")` 打桩 ESM 具名导出在本仓库是可行的，已有先例：`web/tests/api/oauth.test.ts:100` 就是这么给 `task-executor` 的具名导出打的桩，而 `oauth.ts` 用的是具名 import。看到 Task 5 / Task 6 里 spy `password` 模块时不必改写成依赖注入。
@@ -1646,3 +1647,295 @@ Expected: 每行 `prefix` 均形如 `pbkdf2$sha256$600000$`，不含任何明文
 - [ ] **Step 5: 汇报**
 
 向用户汇报实测结果，包括第 3 步七项逐条的结论。不要 push 到 main——除非用户明确说了 push to main。
+
+---
+
+### Task 10: 把哈希算法从 PBKDF2 换成 scrypt
+
+线上 Workers 把 PBKDF2 的迭代数硬性限制在 100000，Task 1 选的 600000 在生产运行时直接抛
+`NotSupportedError`。本地 workerd 不执行这条限制，所以 Task 1 的 18 个单测、以及写计划时那次
+"600000 迭代只要 36ms"的实测，全都是在一个不具代表性的运行时里跑出来的绿灯。
+
+被压到 100000 并不只是"少一点强度"：PBKDF2 需要高迭代数，正是因为它在 GPU 上极易并行；封顶
+反而把这个弱点放大。scrypt 是内存硬的，抵抗力来自内存占用而非迭代次数，正好绕开这个封顶。
+`node:crypto` 的 `scryptSync` 已在 `web-dev` 线上实测可用（N=16384 与 N=32768 均通过）。
+
+**Files:**
+- Modify: `web/worker/services/password.ts`（整体替换哈希实现）
+- Modify: `web/tests/unit/password.test.ts`
+- Test: 上述测试文件
+
+**Interfaces:**
+- Consumes: 无
+- Produces: 导出名与签名**全部保持不变**——`hashPassword`、`verifyPassword`、`parseHash`、
+  `needsUpgrade`、`dummyVerify`、`validatePassword`、`PASSWORD_MIN_LENGTH`、`PASSWORD_MAX_LENGTH`。
+  调用方（`auth.ts` 的 password-login、`settings.ts` 的 POST /password）**一行都不用改**。
+  `CURRENT_ITERATIONS` 被 `CURRENT_PARAMS` 取代。
+
+**不需要向后兼容 PBKDF2。** 已核实 dev 与生产两个库里 `password_hash` 全部为 NULL，没有任何已
+存在的哈希需要迁移，所以直接整体替换，不要为读旧格式保留分支——那是纯粹的 YAGNI。
+
+- [ ] **Step 1: 改测试**
+
+把 `web/tests/unit/password.test.ts` 中所有 PBKDF2 专属的部分替换掉。保留全部行为契约用例
+（往返成功、错误密码被拒、每次换 salt、畸形串返回 null 且不抛、`verifyPassword` 遇畸形串返回
+false、长度边界 7/8/128/129），并把格式与升级相关的用例改成：
+
+```ts
+import { describe, it, expect } from "vitest";
+import {
+  hashPassword,
+  verifyPassword,
+  parseHash,
+  needsUpgrade,
+  validatePassword,
+  CURRENT_PARAMS,
+} from "../../worker/services/password";
+
+describe("hashPassword / verifyPassword", () => {
+  it("正确密码往返成功", async () => {
+    const encoded = await hashPassword("correct horse battery");
+    expect(await verifyPassword("correct horse battery", encoded)).toBe(true);
+  });
+
+  it("错误密码被拒绝", async () => {
+    const encoded = await hashPassword("correct horse battery");
+    expect(await verifyPassword("Correct horse battery", encoded)).toBe(false);
+  });
+
+  it("每次哈希都换 salt，同一密码不会编码成同一个串", async () => {
+    const a = await hashPassword("same password");
+    const b = await hashPassword("same password");
+    expect(a).not.toBe(b);
+    expect(await verifyPassword("same password", a)).toBe(true);
+    expect(await verifyPassword("same password", b)).toBe(true);
+  });
+
+  it("把用到的参数写进串里", async () => {
+    const encoded = await hashPassword("whatever you like");
+    expect(encoded.startsWith(`scrypt$${CURRENT_PARAMS.N}$${CURRENT_PARAMS.r}$${CURRENT_PARAMS.p}$`)).toBe(true);
+  });
+
+  // 参数内联的意义：按串里携带的参数验证，而不是按代码里的常量
+  it("能验证用更弱参数存下来的旧串", async () => {
+    const weak = await hashPassword("legacy secret", { N: 1024, r: 8, p: 1 });
+    expect(await verifyPassword("legacy secret", weak)).toBe(true);
+  });
+});
+
+describe("parseHash", () => {
+  it("畸形串一律返回 null 且不抛异常", () => {
+    const bad = [
+      "",
+      "not-a-hash",
+      "scrypt$16384$8$1$onlyfive",
+      "pbkdf2$sha256$600000$c2FsdA==$aGFzaA==",
+      "scrypt$abc$8$1$c2FsdA==$aGFzaA==",
+      "scrypt$0$8$1$c2FsdA==$aGFzaA==",
+      "scrypt$16384$8$1$!!!$aGFzaA==",
+    ];
+    for (const s of bad) expect(parseHash(s)).toBeNull();
+  });
+});
+
+describe("verifyPassword 遇到畸形的库内串", () => {
+  it("返回 false 而不是抛异常", async () => {
+    expect(await verifyPassword("anything", "not-a-hash")).toBe(false);
+  });
+
+  // scrypt 的 timingSafeEqual 对长度不等的输入会抛，必须自己先挡住
+  it("哈希段长度异常时也返回 false 而不是抛异常", async () => {
+    expect(await verifyPassword("anything", "scrypt$16384$8$1$c2FsdHNhbHRzYWx0c2Ex$c2hvcnQ=")).toBe(false);
+  });
+});
+
+describe("needsUpgrade", () => {
+  it("弱于当前参数的串被标记为需要升级", async () => {
+    expect(needsUpgrade(await hashPassword("x", { N: 1024, r: 8, p: 1 }))).toBe(true);
+  });
+
+  it("当前参数的串不需要升级", async () => {
+    expect(needsUpgrade(await hashPassword("current"))).toBe(false);
+  });
+
+  it("畸形串不会被误判成需要升级", () => {
+    expect(needsUpgrade("nonsense")).toBe(false);
+  });
+});
+
+describe("validatePassword", () => {
+  it("7 字符被拒", () => expect(validatePassword("1234567")).toBeTruthy());
+  it("8 字符通过", () => expect(validatePassword("12345678")).toBeNull());
+  it("128 字符通过", () => expect(validatePassword("a".repeat(128))).toBeNull());
+  it("129 字符被拒", () => expect(validatePassword("a".repeat(129))).toBeTruthy());
+});
+```
+
+- [ ] **Step 2: 跑测试确认它失败**
+
+Run: `npx vitest run tests/unit/password.test.ts`
+Expected: FAIL —— `CURRENT_PARAMS` 尚未导出，`hashPassword` 也还不接受第二个参数
+
+- [ ] **Step 3: 重写实现**
+
+把 `web/worker/services/password.ts` 整体替换为：
+
+```ts
+// member 密码的哈希与校验。
+//
+// 用 node:crypto 的 scrypt（`nodejs_compat` 已在 wrangler.toml 中开启）。这里**不能**用
+// WebCrypto 的 PBKDF2：线上 Workers 拒绝迭代数超过 100000 的 PBKDF2，直接抛
+// NotSupportedError，而本地 workerd 不执行这条限制——本模块的单测曾因此在 600000 迭代下全绿，
+// 直到部署 web-dev 才发现两条新路由在线上恒定 500。
+//
+// 被压到 100000 并不只是少一点强度：PBKDF2 需要高迭代数，正是因为它在 GPU 上极易并行，封顶
+// 等于把这个弱点放大。scrypt 的抵抗力来自内存占用而不是迭代次数，正好绕开这个封顶。
+//
+// N=16384/r=8/p=1 每次哈希约占 16MB（128*N*r）。Workers 单实例内存上限 128MB，所以这个取值
+// 在并发登录时仍留有余量；线上实测 N=32768（32MB）同样可用，将来要提高强度有空间。
+//
+// 编码串自带参数：
+//   scrypt$<N>$<r>$<p>$<salt_b64>$<hash_b64>
+// 校验时读的是串里携带的参数而非下面的常量，所以日后调参既不用改表也不用做数据迁移——老串照样
+// 验证通过，再由 needsUpgrade 触发就地重算。
+
+import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
+
+export interface ScryptParams {
+  N: number;
+  r: number;
+  p: number;
+}
+
+export const CURRENT_PARAMS: ScryptParams = { N: 16384, r: 8, p: 1 };
+export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_MAX_LENGTH = 128;
+
+const SALT_BYTES = 16;
+const HASH_BYTES = 32;
+// 128 * N * r 是 scrypt 的内存开销；给足两倍余量，避免 node 默认 32MB 上限在调参后突然拦下来。
+const MAXMEM = 128 * 1024 * 1024;
+
+export interface ParsedHash extends ScryptParams {
+  salt: Buffer;
+  hash: Buffer;
+}
+
+function derive(password: string, salt: Buffer, params: ScryptParams): Buffer {
+  return scryptSync(password, salt, HASH_BYTES, { ...params, maxmem: MAXMEM });
+}
+
+// 只限长度，不强制组成规则——NIST SP 800-63B 现行建议是长度优先，组成规则反而促使用户选出可预测
+// 的密码。上限是为了挡住拿超长输入压 CPU 的请求。
+export function validatePassword(password: string): string | null {
+  if (typeof password !== "string" || password.length < PASSWORD_MIN_LENGTH) {
+    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters`;
+  }
+  if (password.length > PASSWORD_MAX_LENGTH) {
+    return `Password must be at most ${PASSWORD_MAX_LENGTH} characters`;
+  }
+  return null;
+}
+
+export async function hashPassword(password: string, params: ScryptParams = CURRENT_PARAMS): Promise<string> {
+  const salt = randomBytes(SALT_BYTES);
+  const hash = derive(password, salt, params);
+  return `scrypt$${params.N}$${params.r}$${params.p}$${salt.toString("base64")}$${hash.toString("base64")}`;
+}
+
+export function parseHash(encoded: string): ParsedHash | null {
+  const parts = encoded.split("$");
+  if (parts.length !== 6) return null;
+  const [scheme, nRaw, rRaw, pRaw, saltRaw, hashRaw] = parts;
+  if (scheme !== "scrypt") return null;
+  const N = Number(nRaw);
+  const r = Number(rRaw);
+  const p = Number(pRaw);
+  // N 必须是大于 1 的 2 的幂，否则 scryptSync 会抛；r/p 必须是正整数。
+  if (!Number.isInteger(N) || N < 2 || (N & (N - 1)) !== 0) return null;
+  if (!Number.isInteger(r) || r < 1 || !Number.isInteger(p) || p < 1) return null;
+  try {
+    const salt = Buffer.from(saltRaw, "base64");
+    const hash = Buffer.from(hashRaw, "base64");
+    if (salt.length === 0 || hash.length === 0) return null;
+    return { N, r, p, salt, hash };
+  } catch {
+    return null;
+  }
+}
+
+export async function verifyPassword(password: string, encoded: string): Promise<boolean> {
+  const parsed = parseHash(encoded);
+  if (!parsed) return false;
+  let candidate: Buffer;
+  try {
+    candidate = derive(password, parsed.salt, parsed);
+  } catch {
+    // 参数虽然通过了校验，但仍可能超出 maxmem 之类的运行时限制；此时按验证失败处理，不要把异常
+    // 抛给调用方——那会让一个畸形的库内行把整条登录路由变成 500。
+    return false;
+  }
+  // node 的 timingSafeEqual 对长度不等的输入会直接抛异常，必须先自己挡住。
+  if (candidate.length !== parsed.hash.length) return false;
+  return timingSafeEqual(candidate, parsed.hash);
+}
+
+// 给「查无此人」和「这个 member 从没设过密码」两种情况烧掉与真实校验等量的 CPU。少了这一步，
+// 「这个邮箱 2ms 就返回，那个要几十毫秒」本身就是一台 member 表的枚举器。
+export async function dummyVerify(password: string): Promise<void> {
+  derive(password, Buffer.alloc(SALT_BYTES), CURRENT_PARAMS);
+}
+
+// 只在参数确实弱于当前标准时才要求升级；更强的参数（例如手工调高过 N 的行）不该被降回来。
+export function needsUpgrade(encoded: string): boolean {
+  const parsed = parseHash(encoded);
+  if (!parsed) return false;
+  return parsed.N < CURRENT_PARAMS.N || parsed.r < CURRENT_PARAMS.r || parsed.p < CURRENT_PARAMS.p;
+}
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+Run: `npx vitest run tests/unit tests/api`
+Expected: PASS。`password.test.ts` 全绿，且 `password-login.test.ts` 与 `settings-password.test.ts`
+**不需要任何改动**就继续通过——导出名与签名没变。若它们坏了，说明改动越界了。
+
+- [ ] **Step 5: 全量回归**
+
+Run: `npx vitest run`
+Expected: 8 failed / 其余通过，与既有基线一致。
+
+- [ ] **Step 6: 部署 dev 并用真实请求复核（本任务的关键一步，不可跳过）**
+
+在 `uniscrm-web/web/` 下：
+
+```bash
+npm run deploy:dev
+```
+
+然后从终端 curl，验证线上运行时真的接受这套实现：
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://web-dev.uni-scrm.com/api/auth/password-login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"nobody@example.com","password":"aaaaaaaaaa"}'
+```
+
+Expected: **401**（凭证无效，统一响应）。若是 **500**，说明线上运行时仍然拒绝这套哈希参数——
+本地测试再绿也不算数，必须先解决再继续。
+
+再确认响应体是统一的那句：
+
+```bash
+curl -s -X POST https://web-dev.uni-scrm.com/api/auth/password-login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"nobody@example.com","password":"aaaaaaaaaa"}'
+```
+
+Expected: `{"error":"Invalid email or password"}`
+
+- [ ] **Step 7: 提交**
+
+```bash
+git add web/worker/services/password.ts web/tests/unit/password.test.ts && git commit -m "fix(web): hash passwords with scrypt — Workers caps PBKDF2 at 100k iterations"
+```

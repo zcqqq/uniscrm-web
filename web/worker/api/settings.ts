@@ -1,9 +1,11 @@
 import { Hono } from "hono";
-import { setCookie } from "hono/cookie";
+import { getCookie, setCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { RecommendService } from "../services/recommend";
 import { OAuthService } from "../services/oauth";
 import { isValidTimezone } from "../services/timezone";
+import { SessionService } from "../auth/session";
+import { hashPassword, validatePassword, verifyPassword } from "../services/password";
 
 const VALID_LOCATIONS = ["global", "china"];
 const VALID_LANGUAGES = ["en", "zh"];
@@ -14,10 +16,15 @@ export function createSettingsRouter() {
   router.get("/", async (c) => {
     const memberId = c.get("memberId" as never) as string;
     // tenant-scope-ok: id bound to session memberId (a member belongs to one tenant — the scoping key)
-    const member = await c.env.WEB_DB.prepare("SELECT preferred_location, timezone FROM members WHERE id = ?")
+    const member = await c.env.WEB_DB.prepare("SELECT preferred_location, timezone, password_hash FROM members WHERE id = ?")
       .bind(memberId)
-      .first<{ preferred_location: string; timezone: string }>();
-    return c.json({ preferred_location: member?.preferred_location ?? "global", timezone: member?.timezone ?? "UTC" });
+      .first<{ preferred_location: string; timezone: string; password_hash: string | null }>();
+    return c.json({
+      preferred_location: member?.preferred_location ?? "global",
+      timezone: member?.timezone ?? "UTC",
+      // 前端据此决定显示「设置密码」还是「修改密码」；只回布尔值，永远不把哈希发给浏览器
+      has_password: member?.password_hash != null,
+    });
   });
 
   router.patch("/", async (c) => {
@@ -84,6 +91,39 @@ export function createSettingsRouter() {
       .run();
 
     return c.json({ ok: true, timezone });
+  });
+
+  router.post("/password", async (c) => {
+    const memberId = c.get("memberId" as never) as string;
+    const { current_password, new_password } = await c.req.json<{ current_password?: string; new_password?: string }>();
+
+    const invalid = validatePassword(new_password ?? "");
+    if (invalid) return c.json({ error: invalid }, 400);
+
+    // tenant-scope-ok: id bound to session memberId (a member belongs to one tenant — the scoping key)
+    const member = await c.env.WEB_DB.prepare("SELECT password_hash FROM members WHERE id = ?")
+      .bind(memberId)
+      .first<{ password_hash: string | null }>();
+    if (!member) return c.json({ error: "Unauthorized" }, 401);
+
+    // 从没设过密码的 member，手里这个有效 session 就是身份证明——OAuth 注册的用户正是走这条路。
+    // 一旦有了密码，再改就必须先证明自己知道旧的。
+    if (member.password_hash) {
+      if (!current_password) return c.json({ error: "Current password is required" }, 400);
+      if (!(await verifyPassword(current_password, member.password_hash))) {
+        return c.json({ error: "Current password is incorrect" }, 401);
+      }
+    }
+
+    const hash = await hashPassword(new_password!);
+    // tenant-scope-ok: id bound to session memberId (a member belongs to one tenant — the scoping key)
+    await c.env.WEB_DB.prepare("UPDATE members SET password_hash = ? WHERE id = ?").bind(hash, memberId).run();
+
+    // 改密码的典型动机就是怀疑凭证已经泄露，所以别处还登着的一律踢掉，只留当前这个。
+    const sessionId = getCookie(c, "session") ?? "";
+    await new SessionService(c.env.WEB_DB).destroyOthers(memberId, sessionId);
+
+    return c.json({ ok: true });
   });
 
   router.get("/linked-accounts", async (c) => {

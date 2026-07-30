@@ -25,4 +25,12 @@ export class SessionService {
   async destroy(sessionId: string): Promise<void> {
     await this.db.prepare("DELETE FROM sessions WHERE id = ?").bind(sessionId).run();
   }
+
+  // 改密码后调用：别处还登着的会话必须失效，只留下发起这次修改的那个。
+  async destroyOthers(memberId: string, keepSessionId: string): Promise<void> {
+    await this.db
+      .prepare("DELETE FROM sessions WHERE member_id = ? AND id != ?")
+      .bind(memberId, keepSessionId)
+      .run();
+  }
 }

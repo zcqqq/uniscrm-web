@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- 模块为 `uniscrm-web/web`，所有命令在 `uniscrm-web/web/` 目录下执行。
+- 模块为 `uniscrm-web/web`。**npm / vitest / tsc / vite / wrangler 命令在 `uniscrm-web/web/` 下执行；`git` 命令在仓库根 `uniscrm-web/` 下执行**（各任务 git 步骤里写的 `web/...` 路径就是相对仓库根的）。
 - 后端路由一律挂在 `/api/` 下（`/internal/` 留给服务间调用）。
 - 前端不用 inline CSS，复用 `shared/frontend/ui/` 的既有组件。
 - 所有对 `members` 的 SQL 必须带 tenant 作用域，否则要写 `// tenant-scope-ok: <理由>` 注释，`scripts/tenant-scope-audit.mjs` 会检查。
@@ -1618,8 +1618,10 @@ Expected: `0010_member_password.sql` 显示为已应用；若未应用，执行 
 
 - [ ] **Step 2: 部署**
 
+在 `uniscrm-web/web/` 下执行：
+
 ```bash
-cd uniscrm-web/web && npm run deploy:dev
+npm run deploy:dev
 ```
 
 Expected: 输出 `web-dev.uni-scrm.com (custom domain)`

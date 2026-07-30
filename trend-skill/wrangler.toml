@@ -41,7 +41,7 @@ TREND_RETENTION_DAYS = "30"
 
 [[env.production.kv_namespaces]]
 binding = "TREND_KV"
-id = "58fa452dbfa94c308d8aaa21fb6c8e0a"
+id = "9711f082ac234089a86d5a4a21d57f1e"
 
 [[env.production.d1_databases]]
 binding = "TREND_DB"

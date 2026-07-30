@@ -56,6 +56,24 @@ export function createAuthRouter() {
       return c.json({ error: "Email and password are required" }, 400);
     }
 
+    // 按 IP 的第二道闸，跟按邮箱的 LoginThrottle 正交：后者防的是「同一账号被撞库」，换随机邮箱就绕
+    // 过去了；这里防的是「同一来源把这条路由当 CPU 放大器」，不管它打的邮箱是否存在或是否重复。
+    // 但别高估它：实测跨请求的拦截率极低（120 次并发请求只拦下 2 次），因为计数器是 isolate 本地的。
+    // 详见 wrangler.toml 里 ratelimits 段的实测记录。真正的全局限流要靠 zone 级 WAF 规则。
+    // 放在邮箱节流与数据库查询之前——这是最便宜的一道闸，应该最早挡掉流量。
+    // 没有 CF-Connecting-IP 时跳过而不是退化成共享 key：本地 wrangler dev、测试环境的 mock env
+    // 都没有这个 binding/header，共享一个 key 会让一个客户端的请求把所有人都锁死。
+    const ip = c.req.header("CF-Connecting-IP");
+    if (c.env.LOGIN_RATE_LIMITER && ip) {
+      const { success } = await c.env.LOGIN_RATE_LIMITER.limit({ key: `password-login:${ip}` });
+      if (!success) {
+        return c.json(
+          { error: "Too many failed attempts. Try again in 15 minutes, or sign in with an email link." },
+          429
+        );
+      }
+    }
+
     const throttle = new LoginThrottle(c.env.KV);
     if (await throttle.isLocked(email)) {
       return c.json(

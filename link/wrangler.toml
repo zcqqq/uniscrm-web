@@ -119,7 +119,7 @@ database_id = "ecf7a3be-2457-4e40-a537-bab4cc0ec281"
 
 [[env.production.kv_namespaces]]
 binding = "KV"
-id = "9f65b37e6ac94f81948a0018f816f89f"
+id = "33170f0c2f944111865fdcc3019add31"
 
 [[env.production.vectorize]]
 binding = "VECTORIZE"

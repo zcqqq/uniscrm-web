@@ -16,6 +16,10 @@ export interface Env {
   LINK_URL: string;
   INTERNAL_SECRET: string;
   ADMIN_URL: string;
+  // 密码登录的按 IP 限流。原生 Workers Rate Limiting binding；计数器落在触发请求的那个 Cloudflare
+  // 边缘节点本地，不是全局的——同一 IP 打到不同边缘节点会各自计数，这里接受这个折衷。
+  // 本地 wrangler dev 与现有单测的 mock env 都没有这个 binding，调用处必须显式容错。
+  LOGIN_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
 
 export interface Tenant {

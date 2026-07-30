@@ -13,7 +13,7 @@ const MEMBER = {
   password_hash: "pbkdf2$sha256$600000$c2FsdHNhbHRzYWx0c2Ex$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYQ==",
 };
 
-function makeApp(memberRow: any, kvStore: Map<string, string>) {
+function makeApp(memberRow: any, kvStore: Map<string, string>, envOverrides: Record<string, unknown> = {}) {
   const db = {
     prepare: vi.fn((sql: string) => ({
       bind: vi.fn(() => ({
@@ -29,17 +29,17 @@ function makeApp(memberRow: any, kvStore: Map<string, string>) {
   };
   const app = new Hono();
   app.use("/*", (c, next) => {
-    (c.env as any) = { WEB_DB: db, KV: kv, WEB_URL: "https://app.example.com" };
+    (c.env as any) = { WEB_DB: db, KV: kv, WEB_URL: "https://app.example.com", ...envOverrides };
     return next();
   });
   app.route("/auth", createAuthRouter());
   return { app, db };
 }
 
-function post(app: Hono, body: object) {
+function post(app: Hono, body: object, headers: Record<string, string> = {}) {
   return app.request(
     "/auth/password-login",
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) },
     undefined,
     { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
   );
@@ -265,5 +265,57 @@ describe("POST /auth/password-login", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.getSetCookie().some((c) => c.startsWith("session=") && !c.includes("Max-Age=0"))).toBe(true);
+  });
+
+  // 按 IP 的限流是第二道闸，跟按邮箱的 LoginThrottle 正交。这四个用例锁住：命中时直接 429 且不碰
+  // 数据库/verifyPassword；放行时正常走完；没有 CF-Connecting-IP 时整个跳过而不是共享一个 key；
+  // 以及 key 本身带着路由前缀，不会跟别的地方的限流器撞车。
+  describe("按 IP 的限流闸", () => {
+    it("binding 命中限流且带 CF-Connecting-IP 时返回 429，且不查库、不跑 verifyPassword", async () => {
+      const verify = vi.spyOn(password, "verifyPassword");
+      const limit = vi.fn(async () => ({ success: false }));
+      const { app, db } = makeApp(MEMBER, kvStore, { LOGIN_RATE_LIMITER: { limit } });
+
+      const res = await post(app, { email: "a@example.com", password: "hunter22222" }, { "CF-Connecting-IP": "1.2.3.4" });
+
+      expect(res.status).toBe(429);
+      expect((await res.json() as any).error).toBe(
+        "Too many failed attempts. Try again in 15 minutes, or sign in with an email link."
+      );
+      expect(db.prepare).not.toHaveBeenCalled();
+      expect(verify).not.toHaveBeenCalled();
+    });
+
+    it("binding 放行（success: true）时正常走完登录", async () => {
+      vi.spyOn(password, "verifyPassword").mockResolvedValue(true);
+      const limit = vi.fn(async () => ({ success: true }));
+      const { app } = makeApp(MEMBER, kvStore, { LOGIN_RATE_LIMITER: { limit } });
+
+      const res = await post(app, { email: "a@example.com", password: "hunter22222" }, { "CF-Connecting-IP": "1.2.3.4" });
+
+      expect(res.status).toBe(200);
+      expect(limit).toHaveBeenCalledTimes(1);
+    });
+
+    it("缺 CF-Connecting-IP 时不调用 limit()，请求照常放行——避免退化成全局共享一个 key", async () => {
+      vi.spyOn(password, "verifyPassword").mockResolvedValue(true);
+      const limit = vi.fn(async () => ({ success: false }));
+      const { app } = makeApp(MEMBER, kvStore, { LOGIN_RATE_LIMITER: { limit } });
+
+      const res = await post(app, { email: "a@example.com", password: "hunter22222" });
+
+      expect(res.status).toBe(200);
+      expect(limit).not.toHaveBeenCalled();
+    });
+
+    it("传给 limit() 的 key 由 IP 派生并带上这条路由的前缀，不会跟别处的限流器撞车", async () => {
+      vi.spyOn(password, "verifyPassword").mockResolvedValue(true);
+      const limit = vi.fn(async () => ({ success: true }));
+      const { app } = makeApp(MEMBER, kvStore, { LOGIN_RATE_LIMITER: { limit } });
+
+      await post(app, { email: "a@example.com", password: "hunter22222" }, { "CF-Connecting-IP": "9.8.7.6" });
+
+      expect(limit).toHaveBeenCalledWith({ key: "password-login:9.8.7.6" });
+    });
   });
 });

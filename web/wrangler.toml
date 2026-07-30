@@ -48,6 +48,23 @@ binding = "AI"
 name = "EMAIL_WEB"
 allowed_sender_addresses = ["noreply@uni-scrm.com"]
 
+# 密码登录按 IP 限流。计数器是每个 Cloudflare 边缘节点本地维护的，不是账号级全局计数——同一 IP
+# 实测结论（2026-07-30 在 web-dev 上测得）：这道闸只是廉价的次要防线，不是本路由的主要防护。
+# 同一固定 key 在「单个请求内」连打 25 次，第 21 次起返回 success:false，阈值精确；
+# 但换成「120 个独立请求 / 25 并发 / 同一出口 IP / 14 秒打完」，只有 2 次被拦下。
+# 计数器实际是 isolate 本地的：高并发下请求被摊到很多 isolate，每个都远达不到阈值。
+# 把 period 收到 10 秒反而更差（同样 120 次请求，0 次被拦）——窗口重置更快，更攒不满。
+# 而要把阈值压到单个 isolate 也能触发（2-3 次），就会误伤正常用户输错一次密码后的重试。
+# 真正管用的是 zone 级 WAF Rate Limiting 规则（全局精确计数），只能在面板或 API 配，不在这里。
+# 主要防护仍是 login-throttle.ts 的按邮箱计数；这道闸只额外挡一挡同源的持续冲刷。
+[[env.dev.ratelimits]]
+name = "LOGIN_RATE_LIMITER"
+namespace_id = "1001"
+
+  [env.dev.ratelimits.simple]
+  limit = 20
+  period = 60
+
 [env.production]
 name = "web"
 routes = [{ pattern = "web.uni-scrm.com", custom_domain = true }]
@@ -64,7 +81,7 @@ ADMIN_URL = "https://admin.uni-scrm.com"
 
 [[env.production.kv_namespaces]]
 binding = "KV"
-id = "9f65b37e6ac94f81948a0018f816f89f"
+id = "33170f0c2f944111865fdcc3019add31"
 
 [[env.production.d1_databases]]
 binding = "WEB_DB"
@@ -81,3 +98,12 @@ binding = "AI"
 [[env.production.send_email]]
 name = "EMAIL_WEB"
 allowed_sender_addresses = ["noreply@uni-scrm.com"]
+
+# 密码登录按 IP 限流，见 env.dev 侧注释。
+[[env.production.ratelimits]]
+name = "LOGIN_RATE_LIMITER"
+namespace_id = "1001"
+
+  [env.production.ratelimits.simple]
+  limit = 20
+  period = 60

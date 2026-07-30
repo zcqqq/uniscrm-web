@@ -21,6 +21,7 @@ interface AuthState {
   tenant: TenantData | null;
   loading: boolean;
   login: (email: string, trial?: string) => Promise<void>;
+  passwordLogin: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   updateLocation: (location: string) => Promise<void>;
@@ -54,6 +55,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, trial?: string) => {
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     await api.auth.login(email, trial, timezone);
+  };
+
+  const passwordLogin = async (email: string, password: string) => {
+    const res = await api.auth.passwordLogin(email, password);
+    setMember(res.member);
+    setTenant(res.tenant);
+    i18n.changeLanguage(res.member.language || "en");
   };
 
   const logout = async () => {
@@ -90,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ member, tenant, loading, login, logout, refresh, updateLocation, updateLanguage, updateTimezone }}>
+    <AuthContext.Provider value={{ member, tenant, loading, login, passwordLogin, logout, refresh, updateLocation, updateLanguage, updateTimezone }}>
       {children}
     </AuthContext.Provider>
   );

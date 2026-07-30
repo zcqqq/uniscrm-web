@@ -7,23 +7,34 @@ import { Card, CardHeader, CardTitle, CardContent } from "../../../shared/fronte
 import { Separator } from "../../../shared/frontend/ui/separator";
 
 export function Login() {
-  const { login, member, loading } = useAuth();
-  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
-  if (member) return <Navigate to="/" replace />;
+  const { login, passwordLogin, member, loading } = useAuth();
   const [searchParams] = useSearchParams();
-  const trial = searchParams.get("trial");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [usePassword, setUsePassword] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
+
+  const trial = searchParams.get("trial");
+
+  // Early returns must come after all hooks: while logged out, loading flips
+  // from true to false, and if an early return sat between hooks, the two
+  // renders would call a different number of hooks.
+  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  if (member) return <Navigate to="/" replace />;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     try {
-      await login(email, trial ?? undefined);
-      setSent(true);
+      if (usePassword) {
+        await passwordLogin(email, password);
+      } else {
+        await login(email, trial ?? undefined);
+        setSent(true);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send");
+      setError(err instanceof Error ? err.message : "Failed to sign in");
     }
   };
 
@@ -94,9 +105,34 @@ export function Login() {
               placeholder="your@email.com"
               required
             />
+            {usePassword && (
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Your password"
+                required
+                autoFocus
+              />
+            )}
             <Button type="submit" className="w-full">
-              Sign in with Email
+              {usePassword ? "Sign in" : "Sign in with Email"}
             </Button>
+            {usePassword ? (
+              <p className="text-sm text-muted-foreground text-center">
+                Forgot your password? {" "}
+                <button type="button" className="underline" onClick={() => { setUsePassword(false); setPassword(""); setError(""); }}>
+                  Sign in with an email link
+                </button>
+                {" "} instead, then reset it in Settings.
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center">
+                <button type="button" className="underline" onClick={() => { setUsePassword(true); setError(""); }}>
+                  Sign in with password
+                </button>
+              </p>
+            )}
           </form>
         </CardContent>
       </Card>

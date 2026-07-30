@@ -20,6 +20,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ email, trial, timezone }),
       }),
+    passwordLogin: (email: string, password: string) =>
+      request<{ ok: boolean; member: { id: string; email: string; preferred_location: string; language: string; timezone: string }; tenant: { id: string; email: string } }>(
+        "/auth/password-login",
+        { method: "POST", body: JSON.stringify({ email, password }) },
+      ),
     verify: (token: string) =>
       request<{ member: { id: string; email: string; preferred_location: string; language: string; timezone: string }; tenant: { id: string; email: string } }>(
         `/auth/verify?token=${token}`,

@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
 import { createAuthRouter } from "../../worker/api/auth";
+import { PendingTaskService } from "../../worker/services/pending-tasks";
+import * as taskExecutor from "../../worker/services/task-executor";
 
 // members.email 上的唯一索引把 /verify 里「先 SELECT 再 INSERT」的窗口给收窄了：并发点开同一个
 // 邮箱的两条 magic link 时，慢的那个请求会撞上唯一约束。它应该重新读到先赢的那一行继续走完登录，
@@ -64,7 +66,18 @@ describe("POST /auth/verify 撞上唯一约束时", () => {
     app.route("/auth", createAuthRouter());
   });
 
-  it("重新读到先赢的那一行并正常登录", async () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("重新读到先赢的那一行并正常登录，且不重复触发 provision-db / activate-trial", async () => {
+    // 这两个 spy 守的是本任务真正要防的回归：如果未来有人把 member 重赋值收进了
+    // if (createdMember)，却漏掉了同一段里的建任务代码，响应形状（200 + member-winner）
+    // 完全不变，但会给一个已经 provision 过的 tenant 重新建 provision-db / activate-trial
+    // 任务。只靠断言响应体是测不出这种部分回归的。
+    const createSpy = vi.spyOn(PendingTaskService.prototype, "create");
+    const execSpy = vi.spyOn(taskExecutor, "executePendingTask");
+
     const res = await app.request("/auth/verify?token=t1", {}, undefined, ctx);
 
     expect(insertAttempts).toBe(1);
@@ -72,5 +85,9 @@ describe("POST /auth/verify 撞上唯一约束时", () => {
     const body = (await res.json()) as any;
     expect(body.member.id).toBe("member-winner");
     expect(body.tenant.id).toBe(42);
+
+    expect(createSpy).toHaveBeenCalledTimes(0);
+    expect(execSpy).toHaveBeenCalledTimes(0);
+    expect(ctx.waitUntil).toHaveBeenCalledTimes(0);
   });
 });

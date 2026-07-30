@@ -9,6 +9,7 @@ import { Label } from "../../../shared/frontend/ui/label";
 export function PasswordCard() {
   const { t } = useTranslation();
   const [hasPassword, setHasPassword] = useState<boolean | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -17,8 +18,17 @@ export function PasswordCard() {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const fetchStatus = () => {
+    setLoadError(false);
+    api.settings.get()
+      .then((res) => setHasPassword(res.has_password))
+      // A failed fetch must not masquerade as a known answer (e.g. "not set") — keep
+      // hasPassword null so the toggle stays disabled, and surface a distinct retry state.
+      .catch(() => setLoadError(true));
+  };
+
   useEffect(() => {
-    api.settings.get().then((res) => setHasPassword(res.has_password)).catch(() => setHasPassword(false));
+    fetchStatus();
   }, []);
 
   const reset = () => {
@@ -56,9 +66,16 @@ export function PasswordCard() {
         <CardTitle className="text-lg">{t("password.title")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          {hasPassword === null ? "" : hasPassword ? t("password.isSet") : t("password.notSet")}
-        </p>
+        {loadError ? (
+          <div className="space-y-2">
+            <p className="text-sm text-destructive">{t("password.loadError")}</p>
+            <Button variant="outline" size="sm" onClick={fetchStatus}>{t("password.retry")}</Button>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {hasPassword === null ? t("password.loading") : hasPassword ? t("password.isSet") : t("password.notSet")}
+          </p>
+        )}
         {saved && <p className="text-sm text-primary">{t("password.saved")}</p>}
 
         {!open ? (

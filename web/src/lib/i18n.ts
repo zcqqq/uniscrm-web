@@ -9,6 +9,9 @@ const resources = {
       region: { global: "Global", china: "China" },
       password: {
         title: "Password",
+        loading: "Loading…",
+        loadError: "Couldn't load password status. Please try again.",
+        retry: "Retry",
         notSet: "Not set — you sign in with an email link or a connected account",
         isSet: "Password is set",
         set: "Set password",
@@ -30,6 +33,9 @@ const resources = {
       region: { global: "全球", china: "中国" },
       password: {
         title: "密码",
+        loading: "加载中…",
+        loadError: "密码状态加载失败，请重试。",
+        retry: "重试",
         notSet: "未设置——你目前通过邮件登录链接或已连接的账号登录",
         isSet: "已设置密码",
         set: "设置密码",

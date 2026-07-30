@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
+import { PasswordCard } from "../components/PasswordCard";
 import { applyTheme, getTheme, type Theme } from "../../../shared/frontend/theme";
 import { Card, CardHeader, CardTitle, CardContent } from "../../../shared/frontend/ui/card";
 import { Select } from "../../../shared/frontend/ui/select";
@@ -80,6 +81,8 @@ export function Settings() {
           </div>
         </CardContent>
       </Card>
+
+      <PasswordCard />
 
       <Card>
         <CardHeader>

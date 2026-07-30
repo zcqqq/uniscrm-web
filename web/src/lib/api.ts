@@ -64,7 +64,12 @@ export const api = {
       }>(`/billing/credit-usage?limit=${limit}&offset=${offset}`),
   },
   settings: {
-    get: () => request<{ preferred_location: string }>("/settings"),
+    get: () => request<{ preferred_location: string; timezone: string; has_password: boolean }>("/settings"),
+    setPassword: (new_password: string, current_password?: string) =>
+      request<{ ok: boolean }>("/settings/password", {
+        method: "POST",
+        body: JSON.stringify({ new_password, current_password }),
+      }),
     update: (preferred_location: string) =>
       request<{ ok: boolean; preferred_location: string }>("/settings", {
         method: "PATCH",

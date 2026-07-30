@@ -7,6 +7,8 @@ import { EmailService } from "../services/email";
 import { PendingTaskService } from "../services/pending-tasks";
 import { executePendingTask } from "../services/task-executor";
 import { cfTimezone, resolveSignupTimezone } from "../services/timezone";
+import { dummyVerify, hashPassword, needsUpgrade, verifyPassword } from "../services/password";
+import { LoginThrottle } from "../services/login-throttle";
 
 export function createAuthRouter() {
   const router = new Hono<{ Bindings: Env }>();
@@ -34,6 +36,78 @@ export function createAuthRouter() {
     }
 
     return c.json({ ok: true });
+  });
+
+  // 三种失败情况——查无此人、该 member 没设过密码、密码不对——共用这一条提示。任何区分都会把这条
+  // 路由变成邮箱枚举器。
+  const INVALID_CREDENTIALS = "Invalid email or password";
+
+  router.post("/password-login", async (c) => {
+    const { email, password } = await c.req.json<{ email?: string; password?: string }>();
+    if (!email || !password) {
+      return c.json({ error: "Email and password are required" }, 400);
+    }
+
+    const throttle = new LoginThrottle(c.env.KV);
+    if (await throttle.isLocked(email)) {
+      return c.json(
+        { error: "Too many failed attempts. Try again in 15 minutes, or sign in with an email link." },
+        429
+      );
+    }
+
+    // tenant-scope-ok: 登录入口——这条查询的作用正是解析出该 member 属于哪个 tenant，此刻还没有会话
+    const member = await c.env.WEB_DB.prepare(
+      "SELECT id, tenant_id, email, preferred_location, language, timezone, password_hash FROM members WHERE email = ?"
+    )
+      .bind(email)
+      .first<{
+        id: string;
+        tenant_id: number;
+        email: string;
+        preferred_location: string;
+        language: string;
+        timezone: string;
+        password_hash: string | null;
+      }>();
+
+    // 没有这一行、或这一行没有密码时，照样烧掉一次哈希的 CPU 并照样计数。否则「2ms 就返回」和
+    // 「这个邮箱永远不会被锁」这两个信号都能拿来枚举邮箱。
+    if (!member?.password_hash) {
+      await dummyVerify(password);
+      await throttle.recordFailure(email);
+      return c.json({ error: INVALID_CREDENTIALS }, 401);
+    }
+
+    if (!(await verifyPassword(password, member.password_hash))) {
+      await throttle.recordFailure(email);
+      return c.json({ error: INVALID_CREDENTIALS }, 401);
+    }
+
+    await throttle.clear(email);
+
+    // 存储串自带参数，所以提高迭代数不需要迁移：验证通过的那一刻用新参数重算一次即可。
+    if (needsUpgrade(member.password_hash)) {
+      const upgraded = await hashPassword(password);
+      // tenant-scope-ok: id 来自刚刚通过校验的那一行 member
+      await c.env.WEB_DB.prepare("UPDATE members SET password_hash = ? WHERE id = ?")
+        .bind(upgraded, member.id)
+        .run();
+    }
+
+    await issueSession(c, member);
+
+    return c.json({
+      ok: true,
+      member: {
+        id: member.id,
+        email: member.email,
+        preferred_location: member.preferred_location,
+        language: member.language || "en",
+        timezone: member.timezone || "UTC",
+      },
+      tenant: { id: member.tenant_id, email: member.email },
+    });
   });
 
   router.get("/verify", async (c) => {

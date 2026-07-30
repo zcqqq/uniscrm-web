@@ -1,0 +1,148 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { Hono } from "hono";
+import { createAuthRouter } from "../../worker/api/auth";
+import * as password from "../../worker/services/password";
+
+const MEMBER = {
+  id: "m1",
+  tenant_id: 7,
+  email: "a@example.com",
+  preferred_location: "global",
+  language: "en",
+  timezone: "Asia/Shanghai",
+  password_hash: "pbkdf2$sha256$600000$c2FsdHNhbHRzYWx0c2Ex$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYQ==",
+};
+
+function makeApp(memberRow: any, kvStore: Map<string, string>) {
+  const db = {
+    prepare: vi.fn((sql: string) => ({
+      bind: vi.fn(() => ({
+        first: vi.fn(async () => (sql.includes("FROM members WHERE email") ? memberRow : null)),
+        run: vi.fn(async () => ({})),
+      })),
+    })),
+  };
+  const kv = {
+    get: async (k: string) => (kvStore.has(k) ? kvStore.get(k)! : null),
+    put: async (k: string, v: string) => { kvStore.set(k, v); },
+    delete: async (k: string) => { kvStore.delete(k); },
+  };
+  const app = new Hono();
+  app.use("/*", (c, next) => {
+    (c.env as any) = { WEB_DB: db, KV: kv, WEB_URL: "https://app.example.com" };
+    return next();
+  });
+  app.route("/auth", createAuthRouter());
+  return { app, db };
+}
+
+function post(app: Hono, body: object) {
+  return app.request(
+    "/auth/password-login",
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    undefined,
+    { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
+  );
+}
+
+describe("POST /auth/password-login", () => {
+  let kvStore: Map<string, string>;
+
+  beforeEach(() => { kvStore = new Map(); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("密码正确时建立 session 并返回 member 与 tenant", async () => {
+    vi.spyOn(password, "verifyPassword").mockResolvedValue(true);
+    const { app } = makeApp(MEMBER, kvStore);
+
+    const res = await post(app, { email: "a@example.com", password: "hunter22222" });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.member.id).toBe("m1");
+    expect(body.tenant.id).toBe(7);
+    expect(res.headers.getSetCookie().some((c) => c.startsWith("session=") && !c.includes("Max-Age=0"))).toBe(true);
+  });
+
+  it("密码错误时返回 401 与统一提示", async () => {
+    vi.spyOn(password, "verifyPassword").mockResolvedValue(false);
+    const { app } = makeApp(MEMBER, kvStore);
+
+    const res = await post(app, { email: "a@example.com", password: "wrongpassword" });
+
+    expect(res.status).toBe(401);
+    expect((await res.json() as any).error).toBe("Invalid email or password");
+  });
+
+  // 下面三个用例是同一件事的三个面：这条路由不能变成邮箱枚举器
+  it("邮箱不存在时返回与密码错误完全一致的响应", async () => {
+    const { app } = makeApp(null, kvStore);
+
+    const res = await post(app, { email: "nobody@example.com", password: "whatever12" });
+
+    expect(res.status).toBe(401);
+    expect((await res.json() as any).error).toBe("Invalid email or password");
+  });
+
+  it("member 存在但从没设过密码时同样返回统一响应", async () => {
+    const { app } = makeApp({ ...MEMBER, password_hash: null }, kvStore);
+
+    const res = await post(app, { email: "a@example.com", password: "whatever12" });
+
+    expect(res.status).toBe(401);
+    expect((await res.json() as any).error).toBe("Invalid email or password");
+  });
+
+  // 用 spy 断言哈希确实被算了，而不是断言响应耗时——耗时断言必然不稳定
+  it("邮箱不存在时依然烧掉一次哈希的 CPU", async () => {
+    const dummy = vi.spyOn(password, "dummyVerify");
+    const { app } = makeApp(null, kvStore);
+
+    await post(app, { email: "nobody@example.com", password: "whatever12" });
+
+    expect(dummy).toHaveBeenCalledTimes(1);
+  });
+
+  it("连续失败达阈值后直接 429，且不再比对哈希", async () => {
+    const verify = vi.spyOn(password, "verifyPassword").mockResolvedValue(false);
+    const { app } = makeApp(MEMBER, kvStore);
+
+    for (let i = 0; i < 5; i++) await post(app, { email: "a@example.com", password: "wrongpassword" });
+    verify.mockClear();
+
+    const res = await post(app, { email: "a@example.com", password: "wrongpassword" });
+
+    expect(res.status).toBe(429);
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it("成功登录后失败计数清零", async () => {
+    const verify = vi.spyOn(password, "verifyPassword").mockResolvedValue(false);
+    const { app } = makeApp(MEMBER, kvStore);
+
+    for (let i = 0; i < 3; i++) await post(app, { email: "a@example.com", password: "wrongpassword" });
+    expect(kvStore.get("login_fail:a@example.com")).toBe("3");
+
+    verify.mockResolvedValue(true);
+    await post(app, { email: "a@example.com", password: "hunter22222" });
+
+    expect(kvStore.has("login_fail:a@example.com")).toBe(false);
+  });
+
+  it("缺 email 或 password 时返回 400", async () => {
+    const { app } = makeApp(MEMBER, kvStore);
+    expect((await post(app, { email: "a@example.com" })).status).toBe(400);
+    expect((await post(app, { password: "hunter22222" })).status).toBe(400);
+  });
+
+  it("哈希参数低于当前标准时登录成功后就地重算回写", async () => {
+    vi.spyOn(password, "verifyPassword").mockResolvedValue(true);
+    vi.spyOn(password, "hashPassword").mockResolvedValue("pbkdf2$sha256$600000$bmV3c2FsdG5ld3NhbHQ=$bmV3aGFzaG5ld2hhc2g=");
+    const { app, db } = makeApp({ ...MEMBER, password_hash: "pbkdf2$sha256$1000$c2FsdA==$aGFzaA==" }, kvStore);
+
+    await post(app, { email: "a@example.com", password: "hunter22222" });
+
+    const updates = db.prepare.mock.calls.map((c: any[]) => c[0]).filter((s: string) => s.startsWith("UPDATE members SET password_hash"));
+    expect(updates).toHaveLength(1);
+  });
+});

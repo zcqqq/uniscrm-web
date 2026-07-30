@@ -73,19 +73,37 @@ export function createAuthRouter() {
       const tenantId = tenant!.tenant_id;
 
       const tz = resolveSignupTimezone(link.timezone, cfTimezone(c.req.raw));
-      await c.env.WEB_DB.prepare(
-        "INSERT INTO members (id, tenant_id, email, preferred_location, timezone, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-      )
-        .bind(memberId, tenantId, link.email, "global", tz, now)
-        .run();
+      let createdMember = true;
+      try {
+        await c.env.WEB_DB.prepare(
+          "INSERT INTO members (id, tenant_id, email, preferred_location, timezone, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+        )
+          .bind(memberId, tenantId, link.email, "global", tz, now)
+          .run();
+      } catch (e) {
+        // members.email 上的唯一索引堵住了上面那次 SELECT 与这次 INSERT 之间的窗口。并发点开同一
+        // 邮箱的两条 magic link 时，慢的这个请求会到这里；重新读出先赢的那一行继续走完登录，而不是
+        // 把 500 丢给用户。上面那条 tenants INSERT 已经落库了，会留下一行没人引用的 tenant——在这个
+        // 极窄的竞态里宁可留个孤儿行，也不能让同一个邮箱存在两个 member。
+        const raced = await c.env.WEB_DB.prepare(
+          "SELECT id, tenant_id, email, preferred_location, language, timezone FROM members WHERE email = ?"
+        )
+          .bind(link.email)
+          .first<{ id: string; tenant_id: number; email: string; preferred_location: string; language: string; timezone: string }>();
+        if (!raced) throw e;
+        member = raced;
+        createdMember = false;
+      }
 
-      const tasks = new PendingTaskService(c.env.WEB_DB);
-      const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
-      const t2 = await tasks.create("activate-trial", { tenant_id: tenantId, tier: "basic", days: 30 });
-      c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t1));
-      c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t2));
+      if (createdMember) {
+        const tasks = new PendingTaskService(c.env.WEB_DB);
+        const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
+        const t2 = await tasks.create("activate-trial", { tenant_id: tenantId, tier: "basic", days: 30 });
+        c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t1));
+        c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t2));
 
-      member = { id: memberId, tenant_id: tenantId, email: link.email, preferred_location: "global", language: "en", timezone: tz };
+        member = { id: memberId, tenant_id: tenantId, email: link.email, preferred_location: "global", language: "en", timezone: tz };
+      }
     }
 
     const sessions = new SessionService(c.env.WEB_DB);

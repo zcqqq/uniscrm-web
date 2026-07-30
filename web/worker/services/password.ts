@@ -1,43 +1,45 @@
 // member 密码的哈希与校验。
 //
-// 用 WebCrypto 的 PBKDF2-HMAC-SHA256：workerd 原生支持，不需要 npm 包也不需要 WASM。在 workerd
-// 里实测 600,000 迭代约 36ms CPU，远在 Workers 限制之内，所以用得起 OWASP 当前的建议值。
+// 用 node:crypto 的 scrypt（`nodejs_compat` 已在 wrangler.toml 中开启）。这里**不能**用
+// WebCrypto 的 PBKDF2：线上 Workers 拒绝迭代数超过 100000 的 PBKDF2，直接抛
+// NotSupportedError，而本地 workerd 不执行这条限制——本模块的单测曾因此在 600000 迭代下全绿，
+// 直到部署 web-dev 才发现两条新路由在线上恒定 500。
+//
+// 被压到 100000 并不只是"少一点强度"：PBKDF2 需要高迭代数，正是因为它在 GPU 上极易并行，封顶
+// 等于把这个弱点放大。scrypt 的抵抗力来自内存占用而不是迭代次数，正好绕开这个封顶。
+//
+// N=16384/r=8/p=1 每次哈希约占 16MB（128*N*r）。Workers 单实例内存上限 128MB，所以这个取值
+// 在并发登录时仍留有余量；线上实测 N=32768（32MB）同样可用，将来要提高强度有空间。
 //
 // 编码串自带参数：
-//   pbkdf2$sha256$<iterations>$<salt_b64>$<hash_b64>
-// 校验时读的是串里携带的参数，而不是下面的常量。这样以后提高迭代数或更换算法，既不用改表结构
-// 也不用做一次性数据迁移——老串照样能验证通过，然后由 needsUpgrade 触发就地重算。
+//   scrypt$<N>$<r>$<p>$<salt_b64>$<hash_b64>
+// 校验时读的是串里携带的参数而非下面的常量，所以日后调参既不用改表也不用做数据迁移——老串照样
+// 验证通过，再由 needsUpgrade 触发就地重算。
 
-export const CURRENT_ITERATIONS = 600000;
+import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
+
+export interface ScryptParams {
+  N: number;
+  r: number;
+  p: number;
+}
+
+export const CURRENT_PARAMS: ScryptParams = { N: 16384, r: 8, p: 1 };
 export const PASSWORD_MIN_LENGTH = 8;
 export const PASSWORD_MAX_LENGTH = 128;
 
 const SALT_BYTES = 16;
-const HASH_BITS = 256;
+const HASH_BYTES = 32;
+// 128 * N * r 是 scrypt 的内存开销；给足两倍余量，避免 node 默认 32MB 上限在调参后突然拦下来。
+const MAXMEM = 128 * 1024 * 1024;
 
-export interface ParsedHash {
-  iterations: number;
-  salt: Uint8Array;
-  hash: Uint8Array;
+export interface ParsedHash extends ScryptParams {
+  salt: Buffer;
+  hash: Buffer;
 }
 
-function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary);
-}
-
-function fromBase64(value: string): Uint8Array {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
-async function derive(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, HASH_BITS);
-  return new Uint8Array(bits);
+function derive(password: string, salt: Buffer, params: ScryptParams): Buffer {
+  return scryptSync(password, salt, HASH_BYTES, { ...params, maxmem: MAXMEM });
 }
 
 // 只限长度，不强制组成规则——NIST SP 800-63B 现行建议是长度优先，组成规则反而促使用户选出可预测
@@ -52,49 +54,58 @@ export function validatePassword(password: string): string | null {
   return null;
 }
 
-export async function hashPassword(password: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
-  const hash = await derive(password, salt, CURRENT_ITERATIONS);
-  return `pbkdf2$sha256$${CURRENT_ITERATIONS}$${toBase64(salt)}$${toBase64(hash)}`;
+export async function hashPassword(password: string, params: ScryptParams = CURRENT_PARAMS): Promise<string> {
+  const salt = randomBytes(SALT_BYTES);
+  const hash = derive(password, salt, params);
+  return `scrypt$${params.N}$${params.r}$${params.p}$${salt.toString("base64")}$${hash.toString("base64")}`;
 }
 
 export function parseHash(encoded: string): ParsedHash | null {
   const parts = encoded.split("$");
-  if (parts.length !== 5) return null;
-  const [scheme, hashName, iterationsRaw, saltRaw, hashRaw] = parts;
-  if (scheme !== "pbkdf2" || hashName !== "sha256") return null;
-  const iterations = Number(iterationsRaw);
-  if (!Number.isInteger(iterations) || iterations < 1) return null;
+  if (parts.length !== 6) return null;
+  const [scheme, nRaw, rRaw, pRaw, saltRaw, hashRaw] = parts;
+  if (scheme !== "scrypt") return null;
+  const N = Number(nRaw);
+  const r = Number(rRaw);
+  const p = Number(pRaw);
+  // N 必须是大于 1 的 2 的幂，否则 scryptSync 会抛；r/p 必须是正整数。
+  if (!Number.isInteger(N) || N < 2 || (N & (N - 1)) !== 0) return null;
+  if (!Number.isInteger(r) || r < 1 || !Number.isInteger(p) || p < 1) return null;
   try {
-    return { iterations, salt: fromBase64(saltRaw), hash: fromBase64(hashRaw) };
+    const salt = Buffer.from(saltRaw, "base64");
+    const hash = Buffer.from(hashRaw, "base64");
+    if (salt.length === 0 || hash.length === 0) return null;
+    return { N, r, p, salt, hash };
   } catch {
     return null;
   }
 }
 
-// 常数时间比较。两边比的都已经是哈希而不是密码本身，但「两个哈希在第几字节开始不同」这点信息
-// 白送出去没有任何好处，而杜绝它是免费的。
-function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-  return diff === 0;
-}
-
 export async function verifyPassword(password: string, encoded: string): Promise<boolean> {
   const parsed = parseHash(encoded);
   if (!parsed) return false;
-  const candidate = await derive(password, parsed.salt, parsed.iterations);
+  let candidate: Buffer;
+  try {
+    candidate = derive(password, parsed.salt, parsed);
+  } catch {
+    // 参数虽然通过了校验，但仍可能超出 maxmem 之类的运行时限制；此时按验证失败处理，不要把异常
+    // 抛给调用方——那会让一个畸形的库内行把整条登录路由变成 500。
+    return false;
+  }
+  // node 的 timingSafeEqual 对长度不等的输入会直接抛异常，必须先自己挡住。
+  if (candidate.length !== parsed.hash.length) return false;
   return timingSafeEqual(candidate, parsed.hash);
 }
 
 // 给「查无此人」和「这个 member 从没设过密码」两种情况烧掉与真实校验等量的 CPU。少了这一步，
-// 「这个邮箱 2ms 就返回，那个要 36ms」本身就是一台 member 表的枚举器。
+// 「这个邮箱 2ms 就返回，那个要几十毫秒」本身就是一台 member 表的枚举器。
 export async function dummyVerify(password: string): Promise<void> {
-  await derive(password, new Uint8Array(SALT_BYTES), CURRENT_ITERATIONS);
+  derive(password, Buffer.alloc(SALT_BYTES), CURRENT_PARAMS);
 }
 
+// 只在参数确实弱于当前标准时才要求升级；更强的参数（例如手工调高过 N 的行）不该被降回来。
 export function needsUpgrade(encoded: string): boolean {
   const parsed = parseHash(encoded);
-  return parsed !== null && parsed.iterations < CURRENT_ITERATIONS;
+  if (!parsed) return false;
+  return parsed.N < CURRENT_PARAMS.N || parsed.r < CURRENT_PARAMS.r || parsed.p < CURRENT_PARAMS.p;
 }

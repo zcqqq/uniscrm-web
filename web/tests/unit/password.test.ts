@@ -5,17 +5,8 @@ import {
   parseHash,
   needsUpgrade,
   validatePassword,
-  CURRENT_ITERATIONS,
+  CURRENT_PARAMS,
 } from "../../worker/services/password";
-
-// 造一个「旧版本写下的」低迭代串，用来验证升级路径是真的可用，而不是只有一个布尔判断
-async function legacyEncoded(password: string, iterations: number): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, 256);
-  const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
-  return `pbkdf2$sha256$${iterations}$${b64(salt)}$${b64(new Uint8Array(bits))}`;
-}
 
 describe("hashPassword / verifyPassword", () => {
   it("正确密码往返成功", async () => {
@@ -38,13 +29,13 @@ describe("hashPassword / verifyPassword", () => {
 
   it("把用到的参数写进串里", async () => {
     const encoded = await hashPassword("whatever you like");
-    expect(encoded.startsWith(`pbkdf2$sha256$${CURRENT_ITERATIONS}$`)).toBe(true);
+    expect(encoded.startsWith(`scrypt$${CURRENT_PARAMS.N}$${CURRENT_PARAMS.r}$${CURRENT_PARAMS.p}$`)).toBe(true);
   });
 
-  // 参数内联的意义就在这里：按串里的迭代数验证，而不是按代码里的常量
-  it("能验证用更低迭代数存下来的旧串", async () => {
-    const old = await legacyEncoded("legacy secret", 1000);
-    expect(await verifyPassword("legacy secret", old)).toBe(true);
+  // 参数内联的意义：按串里携带的参数验证，而不是按代码里的常量
+  it("能验证用更弱参数存下来的旧串", async () => {
+    const weak = await hashPassword("legacy secret", { N: 1024, r: 8, p: 1 });
+    expect(await verifyPassword("legacy secret", weak)).toBe(true);
   });
 });
 
@@ -53,12 +44,11 @@ describe("parseHash", () => {
     const bad = [
       "",
       "not-a-hash",
-      "pbkdf2$sha256$600000$onlyfour",
-      "pbkdf2$sha512$600000$c2FsdA==$aGFzaA==",
-      "pbkdf2$sha256$abc$c2FsdA==$aGFzaA==",
-      "pbkdf2$sha256$0$c2FsdA==$aGFzaA==",
-      "pbkdf2$sha256$600000$!!!$aGFzaA==",
-      "scrypt$sha256$600000$c2FsdA==$aGFzaA==",
+      "scrypt$16384$8$1$onlyfive",
+      "pbkdf2$sha256$600000$c2FsdA==$aGFzaA==",
+      "scrypt$abc$8$1$c2FsdA==$aGFzaA==",
+      "scrypt$0$8$1$c2FsdA==$aGFzaA==",
+      "scrypt$16384$8$1$!!!$aGFzaA==",
     ];
     for (const s of bad) expect(parseHash(s)).toBeNull();
   });
@@ -68,14 +58,19 @@ describe("verifyPassword 遇到畸形的库内串", () => {
   it("返回 false 而不是抛异常", async () => {
     expect(await verifyPassword("anything", "not-a-hash")).toBe(false);
   });
+
+  // scrypt 的 timingSafeEqual 对长度不等的输入会抛，必须自己先挡住
+  it("哈希段长度异常时也返回 false 而不是抛异常", async () => {
+    expect(await verifyPassword("anything", "scrypt$16384$8$1$c2FsdHNhbHRzYWx0c2Ex$c2hvcnQ=")).toBe(false);
+  });
 });
 
 describe("needsUpgrade", () => {
-  it("低于当前标准的串被标记为需要升级", async () => {
-    expect(needsUpgrade(await legacyEncoded("x", 1000))).toBe(true);
+  it("弱于当前参数的串被标记为需要升级", async () => {
+    expect(needsUpgrade(await hashPassword("x", { N: 1024, r: 8, p: 1 }))).toBe(true);
   });
 
-  it("当前标准的串不需要升级", async () => {
+  it("当前参数的串不需要升级", async () => {
     expect(needsUpgrade(await hashPassword("current"))).toBe(false);
   });
 

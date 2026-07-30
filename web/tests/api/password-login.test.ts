@@ -188,7 +188,7 @@ describe("POST /auth/password-login", () => {
   it("哈希参数低于当前标准时登录成功后就地重算回写", async () => {
     vi.spyOn(password, "verifyPassword").mockResolvedValue(true);
     vi.spyOn(password, "hashPassword").mockResolvedValue("pbkdf2$sha256$600000$bmV3c2FsdG5ld3NhbHQ=$bmV3aGFzaG5ld2hhc2g=");
-    const { app, db } = makeApp({ ...MEMBER, password_hash: "pbkdf2$sha256$1000$c2FsdA==$aGFzaA==" }, kvStore);
+    const { app, db } = makeApp({ ...MEMBER, password_hash: "scrypt$1024$8$1$c2FsdHNhbHRzYWx0c2Ex$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYQ==" }, kvStore);
 
     await post(app, { email: "a@example.com", password: "hunter22222" });
 
@@ -200,7 +200,7 @@ describe("POST /auth/password-login", () => {
     vi.spyOn(password, "verifyPassword").mockResolvedValue(true);
     vi.spyOn(password, "hashPassword").mockResolvedValue("pbkdf2$sha256$600000$bmV3c2FsdG5ld3NhbHQ=$bmV3aGFzaG5ld2hhc2g=");
 
-    const memberRow = { ...MEMBER, password_hash: "pbkdf2$sha256$1000$c2FsdA==$aGFzaA==" };
+    const memberRow = { ...MEMBER, password_hash: "scrypt$1024$8$1$c2FsdHNhbHRzYWx0c2Ex$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYQ==" };
     const db = {
       prepare: vi.fn((sql: string) => ({
         bind: vi.fn(() => ({

@@ -15,7 +15,7 @@ function b64urlJson(obj: unknown): string {
   return b64url(new TextEncoder().encode(JSON.stringify(obj)));
 }
 
-async function makeKeys(): Promise<{ privateKey: CryptoKey; jwk: AccessJwk }> {
+async function makeKeys(kid: string = KID): Promise<{ privateKey: CryptoKey; jwk: AccessJwk }> {
   const pair = await crypto.subtle.generateKey(
     { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
     true,
@@ -24,7 +24,7 @@ async function makeKeys(): Promise<{ privateKey: CryptoKey; jwk: AccessJwk }> {
   const exported = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as { kty: string; e: string; n: string };
   return {
     privateKey: pair.privateKey,
-    jwk: { kid: KID, kty: exported.kty, alg: "RS256", e: exported.e, n: exported.n },
+    jwk: { kid, kty: exported.kty, alg: "RS256", e: exported.e, n: exported.n },
   };
 }
 
@@ -115,6 +115,27 @@ describe("verifyAccessJwt", () => {
     const { privateKey, jwk } = await makeKeys();
     const token = await signToken(privateKey, validPayload({ aud: AUD }));
     expect((await verifyAccessJwt(token, { teamDomain: TEAM, audTag: AUD, jwks: [jwk], now: NOW }))?.sub).toBe("user-1");
+  });
+
+  it("rejects alg:HS256 (algorithm confusion) even when the payload is otherwise perfect", async () => {
+    const { jwk } = await makeKeys();
+    // 签名段内容无所谓 —— header.alg !== "RS256" 应在验签之前就挡住。
+    const token = `${b64urlJson({ alg: "HS256", kid: KID, typ: "JWT" })}.${b64urlJson(validPayload())}.bm90LWEtcmVhbC1zaWc`;
+    expect(await verifyAccessJwt(token, { teamDomain: TEAM, audTag: AUD, jwks: [jwk], now: NOW })).toBeNull();
+  });
+
+  it("verifies against the correct key when the JWKS has multiple entries and the signer's key isn't first", async () => {
+    const a = await makeKeys("kid-a");
+    const b = await makeKeys("kid-b");
+    const token = await signToken(b.privateKey, validPayload(), { alg: "RS256", kid: "kid-b", typ: "JWT" });
+    const result = await verifyAccessJwt(token, { teamDomain: TEAM, audTag: AUD, jwks: [a.jwk, b.jwk], now: NOW });
+    expect(result?.sub).toBe("user-1");
+  });
+
+  it("rejects a token with a well-formed header/payload but a malformed signature segment", async () => {
+    const { jwk } = await makeKeys();
+    const token = `${b64urlJson({ alg: "RS256", kid: KID, typ: "JWT" })}.${b64urlJson(validPayload())}.!!!`;
+    expect(await verifyAccessJwt(token, { teamDomain: TEAM, audTag: AUD, jwks: [jwk], now: NOW })).toBeNull();
   });
 });
 

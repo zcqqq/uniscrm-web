@@ -16,9 +16,11 @@ export interface AccessJwtPayload {
   iat: number;
   iss: string;
   sub: string;
+  nbf?: number;
 }
 
 const JWKS_TTL_SECONDS = 3600;
+const CLOCK_SKEW_SECONDS = 60;
 
 function base64UrlToBytes(input: string): Uint8Array {
   const b64 = input.replace(/-/g, "+").replace(/_/g, "/");
@@ -103,6 +105,12 @@ export async function verifyAccessJwt(
 
   const now = opts.now ?? Math.floor(Date.now() / 1000);
   if (typeof payload.exp !== "number" || payload.exp <= now) return null;
+
+  // nbf/iat 只在存在且明显指向未来时才拒绝。留 60 秒容差：Worker 与 Cloudflare
+  // 之间的时钟偏差不该把合法用户挡在门外。
+  if (typeof payload.nbf === "number" && payload.nbf > now + CLOCK_SKEW_SECONDS) return null;
+  if (typeof payload.iat === "number" && payload.iat > now + CLOCK_SKEW_SECONDS) return null;
+
   if (payload.iss !== `https://${opts.teamDomain}`) return null;
 
   const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];

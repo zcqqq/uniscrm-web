@@ -3,6 +3,7 @@ import AnalyticsBadges from "./AnalyticsBadges";
 import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 import { YouTubeIcon } from "../../../shared/frontend/ui/icons";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
+import { conditionSummary } from "../lib/condition-logic";
 
 export default function YouTubeConditionNode({ data, selected }: NodeProps) {
   const conditions = (data.conditions as unknown[]) || [];
@@ -21,7 +22,7 @@ export default function YouTubeConditionNode({ data, selected }: NodeProps) {
         <span className="font-semibold text-sm text-purple-700">{NODE_TYPE_REGISTRY.youtubeCondition.label}</span>
       </div>
       <p className="text-xs text-gray-700">
-        {condCount === 0 ? "No conditions" : `${condCount} condition${condCount > 1 ? "s" : ""}`}
+        {condCount === 0 ? "No conditions" : conditionSummary(condCount, data.conditionLogic)}
       </p>
       <AnalyticsBadges analytics={data._analytics as any} />
       <span className="absolute right-1 text-[10px] text-green-600" style={{ top: "25%", transform: "translateY(-50%)" }}>True</span>

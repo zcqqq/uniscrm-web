@@ -3,6 +3,7 @@ import AnalyticsBadges from "./AnalyticsBadges";
 import { NODE_TYPE_REGISTRY, CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../../nodeTypeRegistry";
 import { XIcon } from "../../../shared/frontend/ui/icons";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
+import { conditionSummary } from "../lib/condition-logic";
 
 export default function XContentTriggerNode({ data, selected }: NodeProps) {
   const conditions = (data.conditions as unknown[]) || [];
@@ -29,7 +30,7 @@ export default function XContentTriggerNode({ data, selected }: NodeProps) {
           <span className="font-semibold text-sm text-purple-700">{NODE_TYPE_REGISTRY.xContentTrigger.label}</span>
           <p className="text-xs text-gray-500">{subtitle}</p>
           {condCount > 0 && (
-            <p className="text-xs text-purple-500">{condCount} condition{condCount > 1 ? "s" : ""}</p>
+            <p className="text-xs text-purple-500">{conditionSummary(condCount, data.conditionLogic)}</p>
           )}
         </div>
       </div>

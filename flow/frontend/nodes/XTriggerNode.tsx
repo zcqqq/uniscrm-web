@@ -2,6 +2,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { CHANNEL_TYPES } from "../config/trigger-fields";
 import AnalyticsBadges from "./AnalyticsBadges";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
+import { conditionSummary } from "../lib/condition-logic";
 
 export default function TriggerNode({ data, selected }: NodeProps) {
   const channelType = data.channelType as string | undefined;
@@ -42,7 +43,7 @@ export default function TriggerNode({ data, selected }: NodeProps) {
             <p className="text-xs text-gray-400 italic">Not configured</p>
           )}
           {condCount > 0 && (
-            <p className="text-xs text-purple-500">{condCount} condition{condCount > 1 ? "s" : ""}</p>
+            <p className="text-xs text-purple-500">{conditionSummary(condCount, data.conditionLogic)}</p>
           )}
         </div>
       </div>

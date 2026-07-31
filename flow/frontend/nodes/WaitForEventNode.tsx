@@ -2,6 +2,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { CHANNEL_TYPES } from "../config/trigger-fields";
 import AnalyticsBadges from "./AnalyticsBadges";
 import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
+import { conditionSummary } from "../lib/condition-logic";
 
 export default function EventHistoryNode({ data, selected }: NodeProps) {
   const eventType = data.eventType as string;
@@ -14,9 +15,11 @@ export default function EventHistoryNode({ data, selected }: NodeProps) {
 
   const duration = data.duration as number;
   const unit = data.unit as string;
-  const conditions = (data.conditions as any[]) || [];
+  const conditions = (data.conditions as unknown[]) || [];
+  // 与另外四个卡片同一口径：空 field 的半成品行不计数（"+ Add" 会先插一个空行）。
+  const condCount = conditions.filter((c: any) => c?.field).length;
   const timeStr = duration ? ` within ${duration} ${unit}` : "";
-  const condStr = conditions.length > 0 ? ` (${conditions.length} filter${conditions.length > 1 ? "s" : ""})` : "";
+  const condStr = condCount > 0 ? ` (${conditionSummary(condCount, data.conditionLogic)})` : "";
   const summary = eventType ? `${eventLabel}${timeStr}${condStr}` : "Configure...";
 
   return (

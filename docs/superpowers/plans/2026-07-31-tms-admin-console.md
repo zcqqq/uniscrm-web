@@ -674,7 +674,6 @@ const fullEnv = { ACCESS_TEAM_DOMAIN: TEAM, ACCESS_AUD_TAG: AUD, ADMIN_EMAILS: O
 
 function makeApp() {
   const app = new Hono();
-  app.use("/tms", accessAuth as never);
   app.use("/tms/*", accessAuth as never);
   app.get("/tms", (c) => c.json({ ok: true, email: c.get("adminEmail" as never) }));
   app.get("/tms/api/x-usage", (c) => c.json({ ok: true }));
@@ -1106,8 +1105,9 @@ import { tmsXUsageRoute } from "./routes/tms-x-usage";
 
 ```ts
 // TMS 管理控制台。第一道防线是 Cloudflare Access（边缘），accessAuth 是第二道。
-// "/tms" 与 "/tms/*" 两条都要挂 —— Hono 的 "/tms/*" 不匹配裸 "/tms"，漏一条就是个洞。
-app.use("/tms", accessAuth);
+// 一条就够：实测（hono ^4.7.0）"/tms/*" 同时匹配裸 "/tms" 和它下面的所有路径。
+// 反过来只挂 "/tms" 才是洞 —— 那样 /tms/api/x-usage 完全不过中间件。
+// 曾经写成 "/tms" + "/tms/*" 两条，结果裸 "/tms" 每次请求把 JWKS 拉取和验签跑两遍。
 app.use("/tms/*", accessAuth);
 app.get("/tms/api/x-usage", tmsXUsageRoute);
 ```

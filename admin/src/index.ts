@@ -11,6 +11,8 @@ import { webhookRoute } from "./routes/webhook";
 import { activateTrialRoute } from "./routes/activate-trial";
 import { TenantProvisioning } from "./services/tenant-provisioning";
 import { SubscriptionDB } from "./services/subscription-db";
+import { accessAuth } from "./middleware/access-auth";
+import { tmsXUsageRoute } from "./routes/tms-x-usage";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -37,6 +39,13 @@ app.post("/internal/tenants/:tenantId/provision-db", async (c) => {
 });
 
 app.post("/webhooks/stripe", webhookRoute);
+
+// TMS 管理控制台。第一道防线是 Cloudflare Access（边缘），accessAuth 是第二道。
+// 一条就够：实测（hono ^4.7.0）"/tms/*" 同时匹配裸 "/tms" 和它下面的所有路径。
+// 反过来只挂 "/tms" 才是洞 —— 那样 /tms/api/x-usage 完全不过中间件。
+// 曾经写成 "/tms" + "/tms/*" 两条，结果裸 "/tms" 每次请求把 JWKS 拉取和验签跑两遍。
+app.use("/tms/*", accessAuth);
+app.get("/tms/api/x-usage", tmsXUsageRoute);
 
 export default {
   fetch: app.fetch,

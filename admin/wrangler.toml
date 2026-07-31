@@ -18,6 +18,10 @@ crons = ["0 */6 * * *"]
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 ENVIRONMENT = "dev"
 INTERNAL_SECRET = "dev-internal-secret"
+LINK_URL = "https://link-dev.uni-scrm.com"
+ACCESS_TEAM_DOMAIN = "billowing-brook-6d76.cloudflareaccess.com"
+ACCESS_AUD_TAG = "72723d319f12e151dd364f9185e93f82717ba42f567d3b0a7a90926d2d16321b"
+ADMIN_EMAILS = "zhengchao.qqqqq@gmail.com"
 
 [[env.dev.d1_databases]]
 binding = "ADMIN_DB"
@@ -41,6 +45,10 @@ routes = [{ pattern = "admin.uni-scrm.com", custom_domain = true }]
 [env.production.vars]
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 ENVIRONMENT = "production"
+LINK_URL = "https://link.uni-scrm.com"
+ACCESS_TEAM_DOMAIN = "billowing-brook-6d76.cloudflareaccess.com"
+ACCESS_AUD_TAG = "72723d319f12e151dd364f9185e93f82717ba42f567d3b0a7a90926d2d16321b"
+ADMIN_EMAILS = "zhengchao.qqqqq@gmail.com"
 
 [[env.production.d1_databases]]
 binding = "ADMIN_DB"

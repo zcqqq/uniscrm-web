@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -11,4 +11,7 @@ export default defineConfig({
     emptyOutDir: true,
   },
   plugins: [react(), tailwindcss()],
+  // build 的 root 是 ./frontend，但测试在 admin/tests/ 下 —— 不覆盖的话 vitest
+  // 会把 frontend/ 当测试根目录，直接报 "No test files found"。
+  test: { root: "." },
 });

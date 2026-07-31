@@ -30,9 +30,7 @@ export async function accessAuth(c: Context<{ Bindings: Env }>, next: Next) {
 
   let payload: Awaited<ReturnType<typeof verifyAccessJwt>>;
   try {
-    // DOM lib 的 CacheStorage 接口没有 `default`（那是 workers-types 独有的扩展）；
-    // 两者同时在 lib 里时 TS 只看到 DOM 那份声明，故此处断言，不改变运行时行为。
-    const cache = typeof caches !== "undefined" ? (caches as unknown as { default: Cache }).default : undefined;
+    const cache = typeof caches !== "undefined" ? caches.default : undefined;
     const jwks = await fetchAccessJwks(teamDomain, cache);
     payload = await verifyAccessJwt(token, { teamDomain, audTag, jwks });
   } catch (err) {

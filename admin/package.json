@@ -9,8 +9,8 @@
     "dev:worker": "wrangler dev --env dev --port 8792 --config wrangler.toml",
     "deploy:dev": "vite build --mode development && wrangler deploy --env dev --config wrangler.toml",
     "deploy:prod": "vite build && wrangler deploy --env production --config wrangler.toml",
-    "test": "vitest run --root .",
-    "typecheck": "tsc --noEmit"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p frontend/tsconfig.json"
   },
   "dependencies": {
     "hono": "^4.7.0",

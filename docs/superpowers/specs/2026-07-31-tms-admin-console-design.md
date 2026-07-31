@@ -1,7 +1,7 @@
 # TMS 管理控制台（第一个页面：X API 平台用量）
 
 日期：2026-07-31
-状态：设计已确认，待写实施计划
+状态：设计已确认；Cloudflare Access 侧已配置并实测通过；待写实施计划
 
 ## 目标
 
@@ -41,28 +41,54 @@
 
 ### 第一层：Cloudflare Access（边缘）
 
-**一个** self-hosted application，挂**两个域名**，**路径只覆盖 `/tms`**：
+**一个** self-hosted application，挂两个域名 ×
+两条路径 = **4 条 public destination**：
 
 | 项 | 值 |
 |---|---|
-| Application domains | `admin.uni-scrm.com/tms` 与 `admin-dev.uni-scrm.com/tms`（第二条用 "Add domain" 添加） |
-| 策略 | Allow → Include → Emails → `zhengchao.qqqqq@gmail.com` |
+| Application | `UniSCRM TMS Console`，id `c4fefcbc-9c2a-48ae-a43d-7f075522b4b7` |
+| Destinations | `admin.uni-scrm.com/tms`、`admin.uni-scrm.com/tms/*`、`admin-dev.uni-scrm.com/tms`、`admin-dev.uni-scrm.com/tms/*` |
+| 策略 | `Owner only`：Allow → Include → Emails → `zhengchao.qqqqq@gmail.com` |
+| IdP | `cloudflare`（One-time PIN，邮箱验证码）—— 无需注册任何外部 OAuth 应用 |
+| Session duration | 24h |
+
+**为什么每个域名要两条路径**：Access 的路径匹配**不覆盖子路径**。按
+[app paths 文档](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/)，
+`example.com/alpha/*` 覆盖 `/alpha/one` 但**不覆盖** `/alpha` 本身；反之 `/tms` 也不覆盖
+`/tms/api/x-usage`。只配 `/tms` 会让 API 与静态资源在边缘完全敞开（Worker 的 JWT 中间件仍会拦，
+但那是第二道防线，不该被当成第一道用）。已实测确认。
 
 用 [multi-domain application](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/#multi-domain-applications)
 而非两个独立 app：同一 application 下所有域名共用同一套策略和**同一个 AUD tag**，因此 dev 与 prod 的
-`wrangler.toml` 填入的是完全相同的两行，只需从 Cloudflare 抄回两个字符串。代价是 dev 与 prod
-无法有不同策略 —— 本场景下策略本就相同（同一个人），不构成限制。
+`wrangler.toml` 填入完全相同的两行。代价是 dev 与 prod 无法有不同策略 —— 本场景下策略本就相同，
+不构成限制。
 
-关键点：app 的路径是 `/tms` 而非 `/`。`/`、`/health`、`/internal/*`、`/webhooks/stripe`
+关键点：destination 都带 `/tms` 前缀而非裸域名。`/`、`/health`、`/internal/*`、`/webhooks/stripe`
 **不属于任何 Access application**，行为与今天完全一致。默认是"不保护"，只有新增路径被保护 ——
 这样策略配置出错的失败方向是"新页面进不去"，而不是"Stripe webhook 全挂"。
 
-**这一步是人工操作**（Zero Trust 控制台），实施时无法自动化，且是实施的**前置阻塞项**。
-配置完成后需要取回两项值供 Worker 使用：
+### 已完成的配置与实测结果
 
-- **team domain**：`<team>.cloudflareaccess.com` —— Zero Trust → Settings 顶部显示
-- **AUD tag**：Zero Trust → Access → Applications → 该 app → Overview →
-  "Application Audience (AUD) Tag"，有复制按钮。只有一个，dev 与 prod 共用
+application 与策略已于 2026-07-31 经 Cloudflare API 创建完毕，取回的两项值：
+
+- **team domain**：`billowing-brook-6d76.cloudflareaccess.com`
+- **AUD tag**：`72723d319f12e151dd364f9185e93f82717ba42f567d3b0a7a90926d2d16321b`
+
+（AUD tag 不是机密 —— 它以 `kid` 参数明文出现在 Access 登录跳转 URL 中，放 `wrangler.toml` vars 即可。）
+
+实测（创建后约 1 分钟内 prod 的精确路径规则仍有传播延迟，之后恢复正常）：
+
+| URL | 结果 |
+|---|---|
+| `admin.uni-scrm.com/tms` | 302 → Access 登录页 |
+| `admin.uni-scrm.com/tms/api/x-usage` | 302 → Access 登录页 |
+| `admin-dev.uni-scrm.com/tms` | 302 → Access 登录页 |
+| `admin-dev.uni-scrm.com/tms/api/x-usage` | 302 → Access 登录页 |
+| `admin.uni-scrm.com/health` | 200（未受影响）|
+| `admin.uni-scrm.com/` | 404（未受影响）|
+| `admin.uni-scrm.com/webhooks/stripe` | 404（GET 无此路由，未被 Access 拦截）|
+| `admin.uni-scrm.com/internal/plans` | 401（内部鉴权照旧）|
+| `admin-dev.uni-scrm.com/health` | 200（未受影响）|
 
 ### 第二层：Worker JWT 中间件
 
@@ -121,11 +147,11 @@ RS256 验签，不自行实现密码学算法。
 | 名称 | 类型 | dev | production |
 |---|---|---|---|
 | `LINK_URL` | var | `https://link-dev.uni-scrm.com` | `https://link.uni-scrm.com` |
-| `ACCESS_TEAM_DOMAIN` | var | 待 Access 配置后填入 | **与 dev 相同** |
-| `ACCESS_AUD_TAG` | var | 待 Access 配置后填入 | **与 dev 相同**（单 app 单 AUD） |
+| `ACCESS_TEAM_DOMAIN` | var | `billowing-brook-6d76.cloudflareaccess.com` | **与 dev 相同** |
+| `ACCESS_AUD_TAG` | var | `72723d319f12e151dd364f9185e93f82717ba42f567d3b0a7a90926d2d16321b` | **与 dev 相同**（单 app 单 AUD） |
 | `ADMIN_EMAILS` | var | `zhengchao.qqqqq@gmail.com` | 同左 |
 
-只有前两项需要从 Cloudflare 抄回来，且两个环境填相同值。后两项是自己写的常量。
+全部四项均已确定，Access 侧无遗留待办。
 
 `INTERNAL_SECRET` 无需改动：dev 已在 `wrangler.toml` 中明文为 `dev-internal-secret`，production 已是 secret。
 

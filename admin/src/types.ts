@@ -10,6 +10,12 @@ export interface Env {
   CF_ACCOUNT_ID: string;
   CF_D1_API_TOKEN: string;
   ENVIRONMENT: string;
+  // TMS 管理控制台（/tms）
+  LINK_URL: string;
+  ACCESS_TEAM_DOMAIN: string;
+  ACCESS_AUD_TAG: string;
+  ADMIN_EMAILS: string;
+  ASSETS: Fetcher;
 }
 
 export interface SubscriptionRow {

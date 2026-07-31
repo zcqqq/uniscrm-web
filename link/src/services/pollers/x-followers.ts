@@ -8,6 +8,17 @@ import { UserMetadata_X } from "../../../../metadata/x-byok";
 
 const FOLLOWERS_METADATA = UserMetadata_X.find((m) => m.sourceUserType === "own:get-followers")!;
 
+// 粉丝轮询总开关，默认关。
+// GET /2/users/:id/followers 没有任何增量参数（只有 max_results + pagination_token），
+// 每次调用必然把整份粉丝表拿回来；而 X 的 owned read 按返回的资源条数计费
+// （$0.001/条，同一 UTC 日内同一条去重），所以只要一天跑过一次，当天就得为每一个粉丝付费。
+// 实测 dev 上 379 个粉丝 + 自有帖 ≈ 每天 400+ owned read，7/24 起持续把 app 的 spend cap
+// 打满、连带 Account Activity webhook 一起被切断。
+// 粉丝增减改由 XAA webhook（follow.follow / follow.followed）承担 —— 那条路不计 owned read。
+// 需要全量对账时把这里改回 true（并考虑把 REPOLL_INTERVAL_MS 提到「每周一次」量级，
+// 跨过按天去重的边界才真正省钱），posts 那边的 since_id 水位方案对这个端点不适用。
+export const FOLLOWERS_POLLING_ENABLED = false;
+
 export interface FollowersPollerContext {
   channelId: string;
   xUserId: string;
@@ -31,6 +42,9 @@ interface PollStateRow {
   last_polled_at: string | null;
 }
 
+// 注意：本函数**不**自己检查 FOLLOWERS_POLLING_ENABLED —— 开关在唯一的调用方
+// poll-channel.ts 的 pollXChannel 里，这样这个文件的单测仍然测的是真实轮询逻辑
+// （开关一旦翻回 true 就立刻生效）。新增调用方时记得连开关一起判。
 export async function runFollowersPoller(ctx: FollowersPollerContext): Promise<void> {
   const state = await ctx.linkDb
     .prepare("SELECT cursor, backfill_complete, last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = 'followers'")

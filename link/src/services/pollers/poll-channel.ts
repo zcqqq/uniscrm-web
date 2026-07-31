@@ -5,7 +5,7 @@ import { TikTokTokenService } from "../tiktok-token";
 import { XUnauthorizedError, XAccountFrozenError } from "../x-errors";
 import { markChannelFrozen } from "../x-freeze";
 import { TikTokUnauthorizedError } from "../tiktok-errors";
-import { runFollowersPoller } from "./x-followers";
+import { runFollowersPoller, FOLLOWERS_POLLING_ENABLED } from "./x-followers";
 import { runPostsPoller } from "./x-posts";
 import { runTikTokContentPoller } from "./tiktok-content";
 import { runListPostsPoller } from "./x-list-posts";
@@ -58,7 +58,8 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
   if (!config.is_byok) return;
   if (!config.x_user_id || !row.tenant_id) return;
 
-  const pollFollowers = await shouldPoll(env, row.id, "followers");
+  // 开关关掉时连 shouldPoll 的那次 D1 读都省掉 —— 见 x-followers.ts 的 FOLLOWERS_POLLING_ENABLED。
+  const pollFollowers = FOLLOWERS_POLLING_ENABLED && (await shouldPoll(env, row.id, "followers"));
   const pollPosts = await shouldPoll(env, row.id, "posts");
   if (!pollFollowers && !pollPosts) return;
 

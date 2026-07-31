@@ -12,8 +12,13 @@ const refreshAccessTokenMock = vi.fn().mockResolvedValue("refreshed-tok");
 const tiktokGetValidTokenMock = vi.fn().mockResolvedValue("tt-tok");
 const tiktokRefreshAccessTokenMock = vi.fn().mockResolvedValue("tt-refreshed-tok");
 
+// 粉丝轮询的总开关（x-followers.ts 的 FOLLOWERS_POLLING_ENABLED，生产上是 false）。
+// 这里用 getter 暴露成可变值：默认 true，让下面那些「调度/换 token」的用例继续测真实接线，
+// 另有一个用例把它翻成 false，验证关掉之后一次 X 调用都不会发生。
+let followersPollingEnabled = true;
 vi.mock("../../../src/services/pollers/x-followers", () => ({
   runFollowersPoller: (...args: unknown[]) => runFollowersPollerMock(...args),
+  get FOLLOWERS_POLLING_ENABLED() { return followersPollingEnabled; },
 }));
 vi.mock("../../../src/services/pollers/x-posts", () => ({
   runPostsPoller: (...args: unknown[]) => runPostsPollerMock(...args),
@@ -73,6 +78,7 @@ function mockWebDb(d1DatabaseId: string | null = "tenant-db-1") {
 
 describe("pollChannelOnce", () => {
   beforeEach(() => {
+    followersPollingEnabled = true;
     runFollowersPollerMock.mockClear().mockResolvedValue(undefined);
     runPostsPollerMock.mockClear().mockResolvedValue(undefined);
     runTikTokContentPollerMock.mockClear().mockResolvedValue(undefined);
@@ -115,6 +121,32 @@ describe("pollChannelOnce", () => {
     await pollChannelOnce(baseEnv(linkDb, mockWebDb()), "X", "chan-1");
     expect(runFollowersPollerMock).toHaveBeenCalledTimes(1);
     expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("X: FOLLOWERS_POLLING_ENABLED=false 时不跑粉丝轮询，posts 不受影响", async () => {
+    followersPollingEnabled = false;
+    const polledNames: string[] = [];
+    const linkDb = {
+      prepare: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes("FROM channels")) {
+          return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({
+            id: "chan-1", tenant_id: 1, config: JSON.stringify({ is_byok: true, x_user_id: "u1" }),
+          }) }) };
+        }
+        // channel_poll_state 的 poller_name 是绑定参数，不在 SQL 文本里 —— 记 bind 实参
+        return {
+          bind: vi.fn().mockImplementation((_channelId: string, pollerName: string) => {
+            polledNames.push(pollerName);
+            return { first: vi.fn().mockResolvedValue({ backfill_complete: 0, last_polled_at: null }) };
+          }),
+        };
+      }),
+    };
+    await pollChannelOnce(baseEnv(linkDb, mockWebDb()), "X", "chan-1");
+    expect(runFollowersPollerMock).not.toHaveBeenCalled();
+    expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
+    // 短路要发生在 shouldPoll 之前：关掉之后连 followers 那行的 D1 读都不该发生
+    expect(polledNames).toEqual(["posts"]);
   });
 
   it("X: force-refreshes and retries once on XUnauthorizedError (followers)", async () => {

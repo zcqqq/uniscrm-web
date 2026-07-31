@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runPostsPoller } from "../../src/services/pollers/x-posts";
 
-function createMockLinkDb(initialState: { cursor: string | null; backfill_complete: number; last_polled_at: string | null } | null) {
+function createMockLinkDb(initialState: { cursor: string | null; backfill_complete: number; last_polled_at: string | null; since_id?: string | null } | null) {
   const state = { ...initialState } as any;
   const first = vi.fn().mockImplementation(() => Promise.resolve(state ? { ...state } : null));
   const run = vi.fn().mockImplementation(() => Promise.resolve({ success: true }));
@@ -224,6 +224,76 @@ describe("runPostsPoller", () => {
 
     // stops after page 2 (zero new tweets there) even though a next_token existed
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // X 的 owned read 按返回条数计费（UTC 日内同一条去重），所以增量轮询必须带 since_id
+  // 水位，否则每天第一次轮询都会把整份自有帖重新买一遍。
+  // https://docs.x.com/x-api/posts/user-posts-timeline-by-user-id
+  describe("x-posts poller: since_id 水位", () => {
+    function sinceIdOf(call: unknown[]) {
+      return new URL(String(call[0])).searchParams.get("since_id");
+    }
+
+    it("增量轮询把存着的 since_id 带进请求", async () => {
+      const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z", since_id: "t100" });
+      const tenantDb = createMockTenantDb();
+
+      fetchMock.mockImplementationOnce(() => jsonResponse({ data: [], meta: {} }));
+
+      await runPostsPoller(baseCtx(linkDb, tenantDb));
+
+      expect(sinceIdOf(fetchMock.mock.calls[0])).toBe("t100");
+    });
+
+    it("backfill 不带 since_id —— 那一轮要往回走完整个历史", async () => {
+      const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null, since_id: "t100" });
+      const tenantDb = createMockTenantDb();
+
+      fetchMock.mockImplementationOnce(() => jsonResponse({ data: [{ id: "t1", text: "a" }], meta: {} }));
+
+      await runPostsPoller(baseCtx(linkDb, tenantDb));
+
+      expect(sinceIdOf(fetchMock.mock.calls[0])).toBeNull();
+    });
+
+    it("跑完一轮后把 meta.newest_id 写回 since_id", async () => {
+      const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z", since_id: null });
+      const tenantDb = createMockTenantDb();
+
+      fetchMock.mockImplementationOnce(() => jsonResponse({ data: [{ id: "t9", text: "a" }], meta: { newest_id: "t9" } }));
+
+      await runPostsPoller(baseCtx(linkDb, tenantDb));
+
+      const wrote = linkDb._bind.mock.calls.some((args: unknown[]) => args.includes("t9"));
+      expect(wrote).toBe(true);
+    });
+
+    it("空页（result_count=0，X 不返回 newest_id）时保留旧水位，不写 null", async () => {
+      const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z", since_id: "t100" });
+      const tenantDb = createMockTenantDb();
+
+      fetchMock.mockImplementationOnce(() => jsonResponse({ data: [], meta: {} }));
+
+      await runPostsPoller(baseCtx(linkDb, tenantDb));
+
+      const updates = linkDb.prepare.mock.calls.map((c: unknown[]) => String(c[0]));
+      expect(updates.some((s: string) => s.includes("SET since_id"))).toBe(false);
+    });
+
+    it("撞 deadline / 被限流时不推进水位 —— 后面还欠着更旧的新帖，推进会永久跳过它们", async () => {
+      const linkDb = createMockLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "2026-07-10T00:00:00.000Z", since_id: "t100" });
+      const tenantDb = createMockTenantDb();
+
+      // 第一页有新帖且还有下一页 → 继续；第二页 429 → stopReason = rate_limited
+      fetchMock
+        .mockImplementationOnce(() => jsonResponse({ data: [{ id: "t9", text: "a" }], meta: { newest_id: "t9", next_token: "p2" } }))
+        .mockImplementationOnce(() => jsonResponse({}, 429));
+
+      await runPostsPoller(baseCtx(linkDb, tenantDb));
+
+      const updates = linkDb.prepare.mock.calls.map((c: unknown[]) => String(c[0]));
+      expect(updates.some((s: string) => s.includes("SET since_id"))).toBe(false);
+    });
   });
 
   describe("x-posts poller: content.created emission gating", () => {

@@ -30,11 +30,12 @@ interface PollStateRow {
   cursor: string | null;
   backfill_complete: number;
   last_polled_at: string | null;
+  since_id: string | null;
 }
 
 export async function runPostsPoller(ctx: PostsPollerContext): Promise<void> {
   const state = await ctx.linkDb
-    .prepare("SELECT cursor, backfill_complete, last_polled_at FROM channel_poll_state WHERE channel_id = ? AND poller_name = 'posts'")
+    .prepare("SELECT cursor, backfill_complete, last_polled_at, since_id FROM channel_poll_state WHERE channel_id = ? AND poller_name = 'posts'")
     .bind(ctx.channelId)
     .first<PollStateRow>();
 
@@ -50,7 +51,7 @@ export async function runPostsPoller(ctx: PostsPollerContext): Promise<void> {
   if (!state.backfill_complete) {
     await runBackfill(ctx, contentService, state.cursor);
   } else {
-    await runIncrementalPoll(ctx, contentService);
+    await runIncrementalPoll(ctx, contentService, state.since_id);
   }
 }
 
@@ -124,15 +125,23 @@ async function runBackfill(
   console.log(JSON.stringify({ event: "posts_poll_deadline_reached", channel_id: ctx.channelId, phase: "backfill", pagesFetched }));
 }
 
-async function runIncrementalPoll(ctx: PostsPollerContext, contentService: ContentService): Promise<void> {
+async function runIncrementalPoll(
+  ctx: PostsPollerContext,
+  contentService: ContentService,
+  sinceId: string | null
+): Promise<void> {
   let cursor: string | undefined;
   let pagesFetched = 0;
   let totalNew = 0;
+  let newestId: string | undefined;
   let stopReason: "rate_limited" | "no_new_content" | "no_next_page" | "deadline" = "deadline";
 
   while (Date.now() < ctx.deadline) {
-    const { page, rateLimited } = await fetchPostsPage(ctx.accessToken, ctx.xUserId, cursor);
+    const { page, rateLimited } = await fetchPostsPage(ctx.accessToken, ctx.xUserId, cursor, sinceId ?? undefined);
     if (rateLimited) { stopReason = "rate_limited"; break; }
+
+    // 结果倒序，第一页的 newest_id 就是本轮最新的一条 —— 只记第一次拿到的那个。
+    if (newestId === undefined && page.newestId) newestId = page.newestId;
 
     pagesFetched++;
     const newCount = await upsertPage(contentService, page.data, ctx.channelId, true);
@@ -143,7 +152,24 @@ async function runIncrementalPoll(ctx: PostsPollerContext, contentService: Conte
     cursor = page.nextToken;
   }
 
-  console.log(JSON.stringify({ event: "posts_poll_incremental_complete", channel_id: ctx.channelId, pagesFetched, totalNew, stopReason }));
+  // 水位只在「新帖已经全部翻完」时才推进。撞 deadline 或被限流时后面还欠着更旧的新帖，
+  // 此时推进 since_id 会把它们永久跳过 —— 宁可下一轮重拉一遍（同一 UTC 日内 X 对同一条
+  // 资源只计一次费，重拉基本不额外花钱），也不能丢数据。
+  const advanceWaterMark = newestId !== undefined && (stopReason === "no_new_content" || stopReason === "no_next_page");
+
+  console.log(JSON.stringify({
+    event: "posts_poll_incremental_complete",
+    channel_id: ctx.channelId, pagesFetched, totalNew, stopReason,
+    since_id: sinceId, new_since_id: advanceWaterMark ? newestId : null,
+  }));
+
+  if (advanceWaterMark) {
+    await ctx.linkDb
+      .prepare("UPDATE channel_poll_state SET since_id = ?, last_polled_at = datetime('now'), updated_at = datetime('now') WHERE channel_id = ? AND poller_name = 'posts'")
+      .bind(newestId, ctx.channelId)
+      .run();
+    return;
+  }
 
   await ctx.linkDb
     .prepare("UPDATE channel_poll_state SET last_polled_at = datetime('now'), updated_at = datetime('now') WHERE channel_id = ? AND poller_name = 'posts'")

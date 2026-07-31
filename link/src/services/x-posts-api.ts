@@ -36,6 +36,10 @@ const AUTHOR_USER_FIELDS = "id,name,username,description,profile_image_url,verif
 export interface XPostsPage {
   data: Record<string, unknown>[];
   nextToken?: string;
+  // meta.newest_id —— 本页里最新的一条 Post id。结果是倒序的，所以第一页的 newest_id
+  // 就是整轮里最新的那条，增量轮询把它存回 channel_poll_state.since_id 当下一轮的水位。
+  // 空页（result_count = 0）时 X 不返回这个字段，调用方必须保留旧水位而不是写 undefined。
+  newestId?: string;
   // includes.users[] 按 id 索引好的作者对象。只有请求了 expansions=author_id 的端点会填
   // （目前只有 fetchListPostsPage）。调用方按 tweet.author_id 查；查不到是正常情况
   // （作者被封/受保护时 X 会省略），不是错误。
@@ -50,13 +54,19 @@ export interface XPostsFetchResult {
 export async function fetchPostsPage(
   accessToken: string,
   xUserId: string,
-  paginationToken?: string
+  paginationToken?: string,
+  sinceId?: string
 ): Promise<XPostsFetchResult> {
   const url = new URL(`https://api.x.com/2/users/${xUserId}/tweets`);
   url.searchParams.set("max_results", "100");
   url.searchParams.set("exclude", "replies,retweets");
   url.searchParams.set("tweet.fields", TWEET_FIELDS);
   if (paginationToken) url.searchParams.set("pagination_token", paginationToken);
+  // X 的 owned read 按「返回了多少条资源」计费（$0.001/条，UTC 日内同一条去重）。不带
+  // since_id 的话每小时那次增量轮询都会把全部自有帖再拉一遍，于是每个 UTC 日都要为整份
+  // 帖子表付一次钱。带上水位后没有新帖就返回 0 条，也就不计费。
+  // https://docs.x.com/x-api/posts/user-posts-timeline-by-user-id
+  if (sinceId) url.searchParams.set("since_id", sinceId);
 
   const res = await fetch(url.toString(), {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -77,8 +87,11 @@ export async function fetchPostsPage(
     throw new Error(`X get-posts failed: ${res.status} ${errorBody}`);
   }
 
-  const body = (await res.json()) as { data?: Record<string, unknown>[]; meta?: { next_token?: string } };
-  return { page: { data: body.data || [], nextToken: body.meta?.next_token }, rateLimited: false };
+  const body = (await res.json()) as { data?: Record<string, unknown>[]; meta?: { next_token?: string; newest_id?: string } };
+  return {
+    page: { data: body.data || [], nextToken: body.meta?.next_token, newestId: body.meta?.newest_id },
+    rateLimited: false,
+  };
 }
 
 export interface XOwnedList {

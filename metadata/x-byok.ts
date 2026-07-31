@@ -3,6 +3,13 @@ import type { UserMetadata, ContentMetadata } from "./dataTypes";
 
 export const UserMetadata_X: UserMetadata[] = [
   {
+    // 「拉自己的粉丝列表」这个**轮询**已经停用（不能增量、太费钱：
+    // GET /2/users/:id/followers 只有 max_results + pagination_token，没有任何增量参数，
+    // 而 X 的 owned read 按返回条数计费，等于每天把整份粉丝表重新买一遍）。开关在
+    // link/src/services/pollers/x-followers.ts 的 FOLLOWERS_POLLING_ENABLED。
+    // 但这份 metadata 必须留着：它描述的是 **X user 对象的字段映射**，webhook 入库
+    // （services/users.ts 的 X_USER_META，处理 follow.follow / follow.followed）同样靠它。
+    // 删掉的话 webhook 进来的用户会一个结构化字段都不写，全部糊进 raw_data。
     sourceUserType: "own:get-followers", // https://docs.x.com/x-api/users/get-followers
     linkPrefix: "data[]",
     userProps: [

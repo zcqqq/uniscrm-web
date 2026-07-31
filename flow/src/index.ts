@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Env, FlowQueueMessage } from "./types";
-import { executeFlow, resumeFromNode, evaluateCondition, evaluateFaceRatioBranch, evaluateOrientationBranch, type FlowGraph, type ActionResult, type NodeLog } from "./engine";
+import { executeFlow, resumeFromNode, evaluateFaceRatioBranch, evaluateOrientationBranch, conditionsPass, type FlowGraph, type ActionResult, type NodeLog } from "./engine";
 import { EventMetadata_X } from "../../metadata/x";
 import { passesPropsFilter } from "../../metadata/props-filter";
 import { r2Query, latestRowsSql, sqlStr, sqlInt } from "../../shared/r2-sql";
@@ -415,13 +415,14 @@ async function executeActions(
     // none of them. Mirrors executeContentActions, which likewise INSERTs its resumed waits inline.
     for (const wait of resumed.pendingWaits) {
       await env.FLOW_DB.prepare(
-        `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions, condition_logic)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         crypto.randomUUID(), flowId || "", wait.nodeId, userId, tenantId,
         JSON.stringify(payload || {}), new Date(Date.now() + wait.durationMs).toISOString(),
         new Date().toISOString(), wait.awaitingEvent || "",
-        wait.conditions ? JSON.stringify(wait.conditions) : ""
+        wait.conditions ? JSON.stringify(wait.conditions) : "",
+        wait.conditionLogic || ""
       ).run();
       console.log(JSON.stringify({ event: "flow_wait_scheduled", flowId, nodeId: wait.nodeId, awaitingEvent: wait.awaitingEvent || "", viaBranch: branch }));
     }
@@ -1821,12 +1822,13 @@ export default {
           for (const wait of result.pendingWaits) {
             const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
             await env.FLOW_DB.prepare(
-              `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions, condition_logic)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             ).bind(
               crypto.randomUUID(), flow.id, wait.nodeId, userId, tenantId,
               JSON.stringify(payload), executeAt, new Date().toISOString(), wait.awaitingEvent || "",
-              wait.conditions ? JSON.stringify(wait.conditions) : ""
+              wait.conditions ? JSON.stringify(wait.conditions) : "",
+              wait.conditionLogic || ""
             ).run();
             console.log(JSON.stringify({ event: "flow_wait_scheduled", flowId: flow.id, nodeId: wait.nodeId, executeAt, awaitingEvent: wait.awaitingEvent || "" }));
           }
@@ -1834,19 +1836,26 @@ export default {
 
         // Resolve any pending Wait-for-Event waits that match this event
         const pendingMatches = await env.FLOW_DB.prepare(
-          `SELECT id, flow_id, node_id, user_id, tenant_id, payload, conditions FROM flow_pending
+          `SELECT id, flow_id, node_id, user_id, tenant_id, payload, conditions, condition_logic FROM flow_pending
            WHERE user_id = ? AND awaiting_event = ? AND execute_at > ?`
         )
           .bind(userId, eventType, new Date().toISOString())
-          .all<{ id: string; flow_id: string; node_id: string; user_id: string; tenant_id: string; payload: string; conditions: string }>();
+          .all<{ id: string; flow_id: string; node_id: string; user_id: string; tenant_id: string; payload: string; conditions: string; condition_logic: string }>();
 
         for (const pending of pendingMatches.results) {
-          // Check conditions against the incoming event payload
-          if (pending.conditions) {
-            const conditions = JSON.parse(pending.conditions) as { field: string; operator: string; value: string }[];
-            const allPass = conditions.every((c) => evaluateCondition(c.field, c.operator, c.value, payload));
-            if (!allPass) continue; // Keep waiting — event doesn't match conditions
+          // conditions 与 logic 都取自建 wait 时的快照，不看 live graph——等待期间用户改了
+          // flow，不能让旧条件套上新逻辑。
+          // JSON.parse 必须被 try 包住：坏 JSON 抛出去会让整条队列消息重试，把这一批里
+          // 已经执行过的 action 全部重跑。降级成"没有条件"是可接受的最坏情况，崩溃不是。
+          let snapshotConditions: unknown = [];
+          try {
+            snapshotConditions = pending.conditions ? JSON.parse(pending.conditions) : [];
+          } catch {
+            snapshotConditions = [];
           }
+          // 不再用 `if (pending.conditions)` 做前置守卫：OR + 0 条恒不通过是有语义的，
+          // 跳过检查会把它错当成放行。conditionsPass 自己处理空集。
+          if (!conditionsPass(snapshotConditions, pending.condition_logic, payload)) continue;
 
           // Atomically claim this pending row before doing any async work. A duplicate/redelivered
           // event (e.g. X webhook at-least-once delivery) or an overlapping queue invocation could
@@ -2158,12 +2167,13 @@ export default {
                 }
                 for (const wait of failedResult.pendingWaits) {
                   await env.FLOW_DB.prepare(
-                    `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                    `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions, condition_logic)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
                   ).bind(
                     crypto.randomUUID(), row.flow_id, wait.nodeId, retryUserId, row.tenant_id, row.payload,
                     new Date(Date.now() + wait.durationMs).toISOString(), now,
-                    wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
+                    wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : "",
+                    wait.conditionLogic || ""
                   ).run();
                 }
               }
@@ -2211,9 +2221,17 @@ export default {
           const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
           stmts.push(
             env.FLOW_DB.prepare(
-              `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, awaiting_event)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            ).bind(crypto.randomUUID(), row.flow_id, wait.nodeId, row.user_id, row.tenant_id, row.payload, executeAt, now, wait.awaitingEvent || "")
+              // conditions 与 condition_logic 都必须写：此前这一处只写 awaiting_event，
+              // 于是 sweep 里重新排期的 waitForEvent 会被任意匹配事件唤醒，用户设的条件
+              // 全部失效。其余三处 INSERT 一直是写的，只有这里漏了。
+              `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions, condition_logic)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            ).bind(
+              crypto.randomUUID(), row.flow_id, wait.nodeId, row.user_id, row.tenant_id, row.payload,
+              executeAt, now, wait.awaitingEvent || "",
+              wait.conditions ? JSON.stringify(wait.conditions) : "",
+              wait.conditionLogic || ""
+            )
           );
         }
 

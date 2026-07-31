@@ -25,6 +25,9 @@ export interface PendingWait {
   durationMs: number;
   awaitingEvent?: string;
   conditions?: { field: string; operator: string; value: string }[];
+  // 与 conditions 同源快照，一起写进 flow_pending。等待期间用户改了 flow 的 AND/OR，
+  // 不能让已经排期的旧条件套上新逻辑。空串 = AND。
+  conditionLogic?: string;
 }
 
 export interface ActionResult {
@@ -469,7 +472,15 @@ function processTargetNode(
     const unit = String(targetNode.data.unit || "days");
     const conditions = (targetNode.data.conditions as { field: string; operator: string; value: string }[]) || [];
     if (awaitingEvent) {
-      pendingWaits.push({ nodeId: targetNode.id, durationMs: durationToMs(duration, unit), awaitingEvent, conditions: conditions.length > 0 ? conditions : undefined });
+      pendingWaits.push({
+        nodeId: targetNode.id,
+        durationMs: durationToMs(duration, unit),
+        awaitingEvent,
+        conditions: conditions.length > 0 ? conditions : undefined,
+        // 无条件带上：OR + 0 条是有语义的（恒不通过），丢了会让它在 resume 时被当成 AND 放行。
+        // String() 规整畸形值——D1 的 bind 不接受对象。
+        conditionLogic: String(targetNode.data.conditionLogic ?? ""),
+      });
     }
     // eventHistory: enter logged, exit will be logged on resolution
     return;

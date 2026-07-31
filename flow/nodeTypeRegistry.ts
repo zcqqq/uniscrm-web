@@ -329,3 +329,11 @@ export const CONTENT_FLOW_SIDEBAR_ORDER: string[] = [
   "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition", "youtubeCondition",
   "wait", "timeCondition", "abSplit", "webhook",
 ];
+
+// 条件组的连接词，存在节点的 data.conditionLogic 上。判定只认 CONDITION_LOGIC_OR 这一个
+// 字面量：缺省（存量 graph 没这个键）、"and"、以及任何畸形值（AI 生成的 true / null /
+// 对象 / 数字 / 大写 "OR"）一律走 AND —— 与本功能上线前的行为逐字相同。
+// 前后端共用：后端 engine.ts 的 conditionsPass 与前端 validate-flow-graph.ts 的
+// findOrLogicEmptyNodeIds 必须判同一个值，否则会出现"发布拦不住但运行时按别的语义跑"。
+export const CONDITION_LOGIC_OR = "or";
+export const CONDITION_LOGIC_AND = "and";

@@ -1,4 +1,4 @@
-import { CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../nodeTypeRegistry";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, CONDITION_LOGIC_OR } from "../nodeTypeRegistry";
 import { USER_PROP_PREFIX } from "../../metadata/dataTypes";
 
 export interface FlowNode {
@@ -208,6 +208,35 @@ export function evaluateCondition(
   }
 }
 
+export type Condition = { field: string; operator: string; value: string };
+
+// 三处求值点共用：executeFlow 里的 trigger、flow_pending sweep 里的 waitForEvent、
+// 以及 youtubeCondition。改这里就是三处一起改，不会再漂移。
+//
+// 空 field 的半成品行一律不参与判定 —— UI 的 "+ Add" 会先插一个空行，用户还没选字段时
+// 它不该影响结果。这个口径与前端 publish 校验的 countUsableConditions
+// （validate-flow-graph.ts）必须逐字一致，否则会出现"发布拦不住但运行时当没条件"。
+//
+// 可用条件为 0 时结果直接落在语言的恒等元上，不需要任何特判：
+//   AND → [].every() === true  （没有过滤器 = 全部放行，与本功能上线前一致）
+//   OR  → [].some()  === false （OR 的恒等元就是 false；这种节点由发布期校验挡住上线）
+//
+// conditions / logic 都收 unknown：AI 生成或手改的 graph 会带任意形状。这里必须把它们
+// 全部降级成"没有条件 / AND"，绝不许升级成异常 —— 一次抛出会逃出 executeContentActions，
+// 队列消息整条重试，这一批里已经执行过的 action 全部重跑（重复发帖 / 私信）。
+export function conditionsPass(
+  conditions: unknown,
+  logic: unknown,
+  payload: Record<string, unknown>
+): boolean {
+  const usable = (Array.isArray(conditions) ? conditions : []).filter(
+    (c) => c && typeof c === "object" && String((c as { field?: unknown }).field ?? "") !== ""
+  ) as Condition[];
+  const check = (c: Condition) =>
+    evaluateCondition(c.field, c.operator, String(c.value), payload);
+  return logic === CONDITION_LOGIC_OR ? usable.some(check) : usable.every(check);
+}
+
 export function executeFlow(
   graph: FlowGraph,
   eventType: string,
@@ -235,10 +264,7 @@ export function executeFlow(
 
   for (const trigger of triggerNodes) {
     nodeLogs.push({ nodeId: trigger.id, direction: "enter" });
-    const conditions = (trigger.data.conditions as { field: string; operator: string; value: string }[]) || [];
-    const allPass = conditions.every((c) =>
-      !c.field || evaluateCondition(c.field, c.operator, String(c.value), payload)
-    );
+    const allPass = conditionsPass(trigger.data.conditions, trigger.data.conditionLogic, payload);
     if (allPass) {
       nodeLogs.push({ nodeId: trigger.id, direction: "exit" });
       collectActions(graph, trigger.id, payload, actions, pendingWaits, nodeLogs);

@@ -1,4 +1,4 @@
-import { evaluateCondition, conditionsPass } from "./engine";
+import { conditionsPass } from "./engine";
 import { USER_PROP_PREFIX } from "../../metadata/dataTypes";
 
 export interface VideoStatsResponse {

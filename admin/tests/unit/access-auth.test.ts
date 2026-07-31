@@ -38,7 +38,6 @@ const fullEnv = { ACCESS_TEAM_DOMAIN: TEAM, ACCESS_AUD_TAG: AUD, ADMIN_EMAILS: O
 
 function makeApp() {
   const app = new Hono();
-  app.use("/tms", accessAuth as never);
   app.use("/tms/*", accessAuth as never);
   app.get("/tms", (c) => c.json({ ok: true, email: c.get("adminEmail" as never) }));
   app.get("/tms/api/x-usage", (c) => c.json({ ok: true }));
@@ -46,7 +45,11 @@ function makeApp() {
 }
 
 function stubJwks(jwk: AccessJwk) {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ keys: [jwk] }), { status: 200 })));
+  const fetchMock = vi.fn().mockImplementation(
+    async () => new Response(JSON.stringify({ keys: [jwk] }), { status: 200 })
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -155,5 +158,19 @@ describe("accessAuth", () => {
     stubJwks(jwk);
     const res = await makeApp().request("/tms/api/x-usage", {}, fullEnv);
     expect(res.status).toBe(403);
+  });
+
+  // 钉死"每个请求只跑一遍"：/tms 只挂了一条 "/tms/*" 中间件，裸路径请求不该
+  // 触发重复验证 / 重复拉取 JWKS。
+  it("runs the middleware exactly once per request for the bare /tms path", async () => {
+    const { privateKey, jwk } = await makeKeys();
+    const fetchMock = stubJwks(jwk);
+    const res = await makeApp().request(
+      "/tms",
+      { headers: { "Cf-Access-Jwt-Assertion": await signToken(privateKey, OWNER) } },
+      fullEnv
+    );
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

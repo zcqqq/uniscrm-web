@@ -64,7 +64,7 @@ Flow 编辑器里所有 props condition 支持 AND / OR 切换，默认 AND。UI
 
 ### D3 — 存储：`data.conditionLogic`
 
-**决定**：与 `data.conditions` 同级新增 `data.conditionLogic`。**只在选 OR 时写入字符串 `"or"`**；缺省、`"and"`、以及任何畸形值（AI 生成的 `true` / `null` / 对象 / 数字）一律判定为 AND。
+**决定**：与 `data.conditions` 同级新增 `data.conditionLogic`。判定只认一个字面量：`=== "or"` 才是 OR，**缺省、`"and"`、以及任何畸形值（AI 生成的 `true` / `null` / 对象 / 数字）一律判定为 AND**。存量 graph 没有这个键，天然走 AND。用户显式点 AND 时写入 `"and"`（而非留空），让 `graph_json` 的读者看得出这是一个明确选择。
 
 **理由**：存量 graph 零迁移，不需要给现有 flow 补字段；畸形值自然降级成今天的行为，而不是抛异常。判定写成 `logic === "or"` 这一个表达式，没有别的分支可以写错。
 

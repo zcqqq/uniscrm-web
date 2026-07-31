@@ -163,6 +163,15 @@ describe("verifyAccessJwt", () => {
     const result = await verifyAccessJwt(token, { teamDomain: TEAM, audTag: AUD, jwks: [jwk], now: NOW });
     expect(result).not.toBeNull();
   });
+
+  // 纵深防御：email claim 过了 RSA 验签，攻击者控制不了它的形状，但下游消费方
+  // （如 accessAuth 中间件）会直接对 payload.email 调用 .toLowerCase()，所以
+  // 这里必须把非 string 的 email 当成校验失败，而不只是真值判断。
+  it("rejects a token whose email claim is not a string", async () => {
+    const { privateKey, jwk } = await makeKeys();
+    const token = await signToken(privateKey, validPayload({ email: ["a@b.com"] }));
+    expect(await verifyAccessJwt(token, { teamDomain: TEAM, audTag: AUD, jwks: [jwk], now: NOW })).toBeNull();
+  });
 });
 
 describe("fetchAccessJwks", () => {

@@ -115,7 +115,7 @@ export async function verifyAccessJwt(
 
   const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
   if (!aud.includes(opts.audTag)) return null;
-  if (!payload.email) return null;
+  if (typeof payload.email !== "string" || !payload.email) return null;
 
   return payload;
 }

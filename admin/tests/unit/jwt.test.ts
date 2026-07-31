@@ -137,6 +137,32 @@ describe("verifyAccessJwt", () => {
     const token = `${b64urlJson({ alg: "RS256", kid: KID, typ: "JWT" })}.${b64urlJson(validPayload())}.!!!`;
     expect(await verifyAccessJwt(token, { teamDomain: TEAM, audTag: AUD, jwks: [jwk], now: NOW })).toBeNull();
   });
+
+  it("rejects a token whose nbf is clearly in the future", async () => {
+    const { privateKey, jwk } = await makeKeys();
+    const token = await signToken(privateKey, validPayload({ nbf: NOW + 3600 }));
+    expect(await verifyAccessJwt(token, { teamDomain: TEAM, audTag: AUD, jwks: [jwk], now: NOW })).toBeNull();
+  });
+
+  it("accepts a token whose nbf is within the clock-skew tolerance", async () => {
+    const { privateKey, jwk } = await makeKeys();
+    const token = await signToken(privateKey, validPayload({ nbf: NOW + 30 }));
+    const result = await verifyAccessJwt(token, { teamDomain: TEAM, audTag: AUD, jwks: [jwk], now: NOW });
+    expect(result?.email).toBe("zhengchao.qqqqq@gmail.com");
+  });
+
+  it("rejects a token whose iat is clearly in the future", async () => {
+    const { privateKey, jwk } = await makeKeys();
+    const token = await signToken(privateKey, validPayload({ iat: NOW + 3600 }));
+    expect(await verifyAccessJwt(token, { teamDomain: TEAM, audTag: AUD, jwks: [jwk], now: NOW })).toBeNull();
+  });
+
+  it("accepts a token whose iat is within the clock-skew tolerance", async () => {
+    const { privateKey, jwk } = await makeKeys();
+    const token = await signToken(privateKey, validPayload({ iat: NOW + 30 }));
+    const result = await verifyAccessJwt(token, { teamDomain: TEAM, audTag: AUD, jwks: [jwk], now: NOW });
+    expect(result).not.toBeNull();
+  });
 });
 
 describe("fetchAccessJwks", () => {

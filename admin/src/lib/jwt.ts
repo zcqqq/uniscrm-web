@@ -95,7 +95,9 @@ export async function verifyAccessJwt(
     ok = await crypto.subtle.verify(
       "RSASSA-PKCS1-v1_5",
       key,
-      base64UrlToBytes(signatureB64),
+      // 加了 DOM lib 后 BufferSource 要求 ArrayBuffer 而非 ArrayBufferLike，纯 TS 类型层面的
+      // 分歧（这里的字节确实来自 ArrayBuffer，非 SharedArrayBuffer），断言不改变运行时行为。
+      base64UrlToBytes(signatureB64) as BufferSource,
       new TextEncoder().encode(`${headerB64}.${payloadB64}`)
     );
   } catch {

@@ -13,6 +13,18 @@ import { TenantProvisioning } from "./services/tenant-provisioning";
 import { SubscriptionDB } from "./services/subscription-db";
 import { accessAuth } from "./middleware/access-auth";
 import { tmsXUsageRoute } from "./routes/tms-x-usage";
+import type { Context } from "hono";
+
+// vite 的 base "/tms/" 让产物里的引用变成 /tms/assets/xxx，而 dist 中的实际路径是
+// /assets/xxx，所以转发给 ASSETS 之前必须把 /tms 前缀剥掉。
+export async function serveTmsAsset(c: Context<{ Bindings: Env }>) {
+  const url = new URL(c.req.url);
+  const stripped = url.pathname.replace(/^\/tms/, "") || "/";
+  const assetRes = await c.env.ASSETS.fetch(new Request(new URL(stripped, url).toString(), { method: "GET" }));
+  if (assetRes.status !== 404) return assetRes;
+  // SPA 回退。走到这里说明 accessAuth 已经放行过了。
+  return c.env.ASSETS.fetch(new Request(new URL("/index.html", url).toString(), { method: "GET" }));
+}
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -46,6 +58,9 @@ app.post("/webhooks/stripe", webhookRoute);
 // 曾经写成 "/tms" + "/tms/*" 两条，结果裸 "/tms" 每次请求把 JWKS 拉取和验签跑两遍。
 app.use("/tms/*", accessAuth);
 app.get("/tms/api/x-usage", tmsXUsageRoute);
+
+app.get("/tms", serveTmsAsset);
+app.get("/tms/*", serveTmsAsset);
 
 export default {
   fetch: app.fetch,

@@ -12,7 +12,9 @@ export async function tmsXUsageRoute(c: Context<{ Bindings: Env }>) {
     return c.json({ error: "days must be an integer between 1 and 90" }, 400);
   }
 
-  const cache = typeof caches !== "undefined" ? caches.default : undefined;
+  // DOM lib 的 CacheStorage 接口没有 `default`（那是 workers-types 独有的扩展）；
+  // 两者同时在 lib 里时 TS 只看到 DOM 那份声明，故此处断言，不改变运行时行为。
+  const cache = typeof caches !== "undefined" ? (caches as unknown as { default: Cache }).default : undefined;
   // 自造 cache key，不复用真实请求 URL，免得和受 Access 保护的路径响应混淆。
   const cacheKey = new Request(`https://cache.internal/x-usage?days=${days}`);
 

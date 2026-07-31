@@ -1,0 +1,3 @@
+@import "tailwindcss";
+@import "../../shared/frontend/index.css";
+@source "../../shared/frontend";

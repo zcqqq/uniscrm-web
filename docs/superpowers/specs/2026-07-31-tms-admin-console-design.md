@@ -28,7 +28,7 @@
 
 | 决策点 | 选择 | 理由 |
 |---|---|---|
-| 认证 | Cloudflare Access（Zero Trust） | 边缘拦截，租户请求根本到不了 Worker；≤50 用户免费；零自研认证代码 |
+| 认证 | Cloudflare Access（Zero Trust），单个多域名 application | 边缘拦截，租户请求根本到不了 Worker；≤50 用户免费；零自研认证代码；单 app 意味着只有一个 AUD tag 要配 |
 | 部署位置 | 复用现有 `admin` worker | 不新增 worker |
 | 路径前缀 | `/tms`（UI + API + 静态资源全在其下） | Access app 一条路径盖全；`/internal/*` 与 `/webhooks/stripe` 完全不在 Access app 内，策略写错也炸不到 Stripe |
 | X 凭据 | 保留在 `link`，admin 经 `/internal/x-usage` 取数 | X 凭据单一来源，admin 永不持有 |
@@ -41,21 +41,28 @@
 
 ### 第一层：Cloudflare Access（边缘）
 
-两个 self-hosted application，**路径只覆盖 `/tms`**：
+**一个** self-hosted application，挂**两个域名**，**路径只覆盖 `/tms`**：
 
-| app | 域名 + 路径 | 策略 |
-|---|---|---|
-| tms-dev | `admin-dev.uni-scrm.com/tms` | Allow → Include → Emails → `zhengchao.qqqqq@gmail.com` |
-| tms | `admin.uni-scrm.com/tms` | 同上 |
+| 项 | 值 |
+|---|---|
+| Application domains | `admin.uni-scrm.com/tms` 与 `admin-dev.uni-scrm.com/tms`（第二条用 "Add domain" 添加） |
+| 策略 | Allow → Include → Emails → `zhengchao.qqqqq@gmail.com` |
+
+用 [multi-domain application](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/#multi-domain-applications)
+而非两个独立 app：同一 application 下所有域名共用同一套策略和**同一个 AUD tag**，因此 dev 与 prod 的
+`wrangler.toml` 填入的是完全相同的两行，只需从 Cloudflare 抄回两个字符串。代价是 dev 与 prod
+无法有不同策略 —— 本场景下策略本就相同（同一个人），不构成限制。
 
 关键点：app 的路径是 `/tms` 而非 `/`。`/`、`/health`、`/internal/*`、`/webhooks/stripe`
 **不属于任何 Access application**，行为与今天完全一致。默认是"不保护"，只有新增路径被保护 ——
 这样策略配置出错的失败方向是"新页面进不去"，而不是"Stripe webhook 全挂"。
 
-**这一步是人工操作**（Zero Trust 控制台），实施时无法自动化。配置完成后需要取回两项值供 Worker 使用：
+**这一步是人工操作**（Zero Trust 控制台），实施时无法自动化，且是实施的**前置阻塞项**。
+配置完成后需要取回两项值供 Worker 使用：
 
-- team domain：`<team>.cloudflareaccess.com`
-- 每个 app 的 **AUD tag**（dev 与 prod 各一个，不同值）
+- **team domain**：`<team>.cloudflareaccess.com` —— Zero Trust → Settings 顶部显示
+- **AUD tag**：Zero Trust → Access → Applications → 该 app → Overview →
+  "Application Audience (AUD) Tag"，有复制按钮。只有一个，dev 与 prod 共用
 
 ### 第二层：Worker JWT 中间件
 
@@ -114,9 +121,11 @@ RS256 验签，不自行实现密码学算法。
 | 名称 | 类型 | dev | production |
 |---|---|---|---|
 | `LINK_URL` | var | `https://link-dev.uni-scrm.com` | `https://link.uni-scrm.com` |
-| `ACCESS_TEAM_DOMAIN` | var | 待 Access 配置后填入 | 同左 |
-| `ACCESS_AUD_TAG` | var | dev app 的 AUD | prod app 的 AUD |
+| `ACCESS_TEAM_DOMAIN` | var | 待 Access 配置后填入 | **与 dev 相同** |
+| `ACCESS_AUD_TAG` | var | 待 Access 配置后填入 | **与 dev 相同**（单 app 单 AUD） |
 | `ADMIN_EMAILS` | var | `zhengchao.qqqqq@gmail.com` | 同左 |
+
+只有前两项需要从 Cloudflare 抄回来，且两个环境填相同值。后两项是自己写的常量。
 
 `INTERNAL_SECRET` 无需改动：dev 已在 `wrangler.toml` 中明文为 `dev-internal-secret`，production 已是 secret。
 

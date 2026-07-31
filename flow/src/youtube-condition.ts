@@ -1,4 +1,4 @@
-import { evaluateCondition } from "./engine";
+import { evaluateCondition, conditionsPass } from "./engine";
 import { USER_PROP_PREFIX } from "../../metadata/dataTypes";
 
 export interface VideoStatsResponse {
@@ -75,7 +75,10 @@ export function youtubeConditionRequest(args: {
 export function resolveYouTubeCondition(
   conditions: { field: string; operator: string; value: string }[],
   payload: Record<string, unknown>,
-  resp: VideoStatsResponse
+  resp: VideoStatsResponse,
+  // 节点的 data.conditionLogic。收 unknown：AI 生成的 graph 会带任意形状。
+  // 缺省 / 畸形一律走 AND，与本功能上线前逐字相同。
+  logic?: unknown
 ): YouTubeConditionOutcome {
   if (!resp.ok || !resp.props) {
     return {
@@ -119,9 +122,6 @@ export function resolveYouTubeCondition(
     }
   }
 
-  // field 为空的半成品条目跳过——与 executeFlow 里 trigger 的 allPass 写法逐字一致。
-  const allPass = (conditions || []).every(
-    (c) => !c.field || evaluateCondition(c.field, c.operator, String(c.value), merged)
-  );
-  return { branch: allPass ? "true" : "false", payload: merged };
+  // AND/OR 与空 field 跳过全部收在 conditionsPass 里（engine.ts），与 trigger 侧同一份实现。
+  return { branch: conditionsPass(conditions, logic, merged) ? "true" : "false", payload: merged };
 }

@@ -295,3 +295,47 @@ describe("resolveYouTubeCondition — 作者字段", () => {
     expect(out.failureReason).toBeUndefined();
   });
 });
+
+describe("resolveYouTubeCondition — AND/OR", () => {
+  const FRESH = { view_count: "100", like_count: "5" };
+  const STALE = { view_count: "1", like_count: "1" };
+  const HIT = { field: "view_count", operator: ">", value: "50" };
+  const MISS = { field: "like_count", operator: ">", value: "500" };
+
+  it("不传 logic 时走 AND：一真一假 → false", () => {
+    const r = resolveYouTubeCondition([HIT, MISS], STALE, { ok: true, props: FRESH });
+    expect(r.branch).toBe("false");
+  });
+
+  it("logic 为 'or' 时一真一假 → true", () => {
+    const r = resolveYouTubeCondition([HIT, MISS], STALE, { ok: true, props: FRESH }, "or");
+    expect(r.branch).toBe("true");
+  });
+
+  it("logic 为 'or' 且全假 → false", () => {
+    const r = resolveYouTubeCondition([MISS, MISS], STALE, { ok: true, props: FRESH }, "or");
+    expect(r.branch).toBe("false");
+  });
+
+  it("logic 为 'or' 且 0 条 → false（AND 下同样输入是 true）", () => {
+    expect(resolveYouTubeCondition([], STALE, { ok: true, props: FRESH }, "or").branch).toBe("false");
+    expect(resolveYouTubeCondition([], STALE, { ok: true, props: FRESH }).branch).toBe("true");
+  });
+
+  it("畸形 logic 走 AND", () => {
+    const r = resolveYouTubeCondition([HIT, MISS], STALE, { ok: true, props: FRESH }, true);
+    expect(r.branch).toBe("false");
+  });
+
+  it("stat_unavailable 守卫与 logic 无关：OR 下另一条已通过，仍然 failed", () => {
+    // 设计决策 D6：守卫逐字不改。like_count 在新鲜数据里缺失、旧快照里有 → 整个节点 failed，
+    // 即便 view_count 那条在 OR 下已经足以判 true。
+    const freshMissingLike = { view_count: "100" };
+    const r = resolveYouTubeCondition(
+      [HIT, MISS], { view_count: "1", like_count: "1" },
+      { ok: true, props: freshMissingLike }, "or"
+    );
+    expect(r.branch).toBe("failed");
+    expect(r.failureReason).toContain("stat_unavailable: like_count");
+  });
+});

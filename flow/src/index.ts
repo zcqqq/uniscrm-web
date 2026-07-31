@@ -6,7 +6,7 @@ import { EventMetadata_X } from "../../metadata/x";
 import { passesPropsFilter } from "../../metadata/props-filter";
 import { r2Query, latestRowsSql, sqlStr, sqlInt } from "../../shared/r2-sql";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
-import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY } from "../nodeTypeRegistry";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY, CONDITION_LOGIC_OR } from "../nodeTypeRegistry";
 import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage } from "./trigger-health";
 import { conditionsNeedAuthor, youtubeConditionRequest, resolveYouTubeCondition, type VideoStatsResponse } from "./youtube-condition";
 
@@ -890,9 +890,12 @@ async function executeContentActions(
       // or a string would throw ".every is not a function" inside resolveYouTubeCondition — and in
       // the queue path a throw means the message is retried, re-running every action already
       // executed in that batch. An unusable value degrades to "no conditions" instead.
-      const rawConditions = graph.nodes.find((n) => n.id === nodeId)?.data?.conditions;
+      const conditionNode = graph.nodes.find((n) => n.id === nodeId);
+      const rawConditions = conditionNode?.data?.conditions;
       const conditions = (Array.isArray(rawConditions) ? rawConditions : []) as
         { field: string; operator: string; value: string }[];
+      // 与 conditions 同一份 node data 读出来，两者必须同源，否则会出现"旧条件 + 新逻辑"。
+      const conditionLogic = conditionNode?.data?.conditionLogic;
       const withAuthor = conditionsNeedAuthor(conditions);
       const { url, body } = youtubeConditionRequest({ env, contentId, flowId, payload, withAuthor });
 
@@ -910,10 +913,10 @@ async function executeContentActions(
         resp = { ok: false, reason: `youtube_api_error: ${String(e)}` };
       }
 
-      const outcome = resolveYouTubeCondition(conditions, payload, resp);
+      const outcome = resolveYouTubeCondition(conditions, payload, resp, conditionLogic);
       // reason 一并打出来：Finding 2 之后 link 的 reason 是有界的短码，flow 这边不再有
       // 别的地方留下"为什么 failed"。
-      console.log(JSON.stringify({ event: "content_condition_youtube", contentId, flowId: flowId || null, nodeId, branch: outcome.branch, ok: resp.ok, withAuthor, reason: outcome.failureReason || resp.reason || null }));
+      console.log(JSON.stringify({ event: "content_condition_youtube", contentId, flowId: flowId || null, nodeId, branch: outcome.branch, ok: resp.ok, withAuthor, logic: conditionLogic === CONDITION_LOGIC_OR ? "or" : "and", reason: outcome.failureReason || resp.reason || null }));
 
       const resumed = resumeFromNode(graph, nodeId, outcome.payload, outcome.branch, outcome.failureReason);
       if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, outcome.payload);

@@ -33,7 +33,23 @@ Flow 编辑器里所有 props condition 支持 AND / OR 切换，默认 AND。UI
 | `flow/src/index.ts:1844` | `flow_pending` sweep，解析 Wait For Event | **D1 快照**（`flow_pending.conditions` 列） |
 | `flow/src/youtube-condition.ts:123` | YouTube Condition | live graph |
 
-三处的空 field 跳过写法各不相同但语义一致：`!c.field` 的条目不参与判定。
+**（Finding F 更正）** 三处的空 field 跳过写法并不是"各不相同但语义一致"——sweep 那一处
+（`flow/src/index.ts`）改动前是：
+
+```js
+conditions.every((c) => evaluateCondition(c.field, c.operator, c.value, payload))
+```
+
+没有任何 `!c.field` 跳过。`evaluateCondition("", ...)` 对空 field 恒为 false（`payload[""]` 恒
+undefined），所以一条带着半成品空白条件行（Inspector "+ Add" 插入、用户没选字段就保存）的
+已发布 waitForEvent，此前**永远无法解析、只会超时走 "No" 分支**——空 field 行不是"不参与
+判定"，而是直接让整个 `.every()` 恒 false。统一到 `conditionsPass` 之后，空 field 行被过滤
+掉不参与判定，其余条件正常求值，这类 wait 从"必超时"变成"能正常解析并执行下游 action"。
+
+这是一个**知情接受**的行为变化，方向是"让已上线的 flow 在这一种边界情况下变得更容易触发"，
+不是逐字保持既有语义。已实测影响面：prod 上已发布且含 waitForEvent 节点的 flow 共 1 条，
+其中含空 field 条件行的 0 条；`flow_pending` 表当前 0 行。即这个行为变化在当下的实际影响
+为零，只是未来可能出现的空白行不再让 wait 必然超时。
 
 ### 1.3 不在范围内
 
@@ -168,10 +184,15 @@ ALTER TABLE flow_pending ADD COLUMN condition_logic TEXT NOT NULL DEFAULT '';
 
 **节点卡片**：logic 为 `or` 且可用条件 ≥2 时加 `(any)` 后缀，AND 保持原样。卡片常是画布上唯一可见的信息，不标出来等于藏了一半语义。四个节点文案一致，第五个有既有分叉：
 
+**（Finding F 更正）** 下表原写的 `N conditions (any)` / `(N filters)` / `(N filters, any)`
+与实现的实际措辞不符——`conditionSummary()`（`flow/frontend/lib/condition-logic.ts:5`）产出的
+分隔符是 `·` 不是括号+`any`，且 `WaitForEventNode`（`flow/frontend/nodes/WaitForEventNode.tsx:22`）
+已按 D2 统一用 `conditionSummary()`，"filters" 这个词没有留下来：
+
 | 节点 | 现在 | OR 且 ≥2 条 |
 |---|---|---|
-| `XTriggerNode:45` / `XContentTriggerNode:32` / `YouTubeContentTriggerNode:29` / `YouTubeConditionNode:24` | `N conditions` | `N conditions (any)` |
-| `WaitForEventNode:19` | `(N filters)` | `(N filters, any)` |
+| `XTriggerNode:45` / `XContentTriggerNode:32` / `YouTubeContentTriggerNode:29` / `YouTubeConditionNode:24` | `N conditions` | `N conditions · any` |
+| `WaitForEventNode:22` | `(N conditions)` | `(N conditions · any)` |
 
 `WaitForEventNode` 另有一处既有不一致：它按 `conditions.length` 原始长度计数，没有像另外四个那样过滤掉 `!c.field` 的空行，所以一个刚点了「+ Add」还没选字段的空行会被算进去。顺手对齐成 `?.field` 过滤 —— 否则 `(any)` 的显示门槛（可用条件 ≥2）与它自己显示的数字对不上。
 

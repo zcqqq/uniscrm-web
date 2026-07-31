@@ -19,6 +19,7 @@ import type { PropFilter } from "../../../metadata/dataTypes";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
 import { OperationSelect } from "./OperationSelect";
 import { Toggle } from "../../../shared/frontend/ui/toggle";
+import { cn } from "../../../shared/frontend/lib/utils";
 import { nextConditionLogic } from "../lib/condition-logic";
 
 type SelectChange = React.ChangeEvent<HTMLSelectElement>;
@@ -97,6 +98,14 @@ function ConditionLogicToggle({
     const next = nextConditionLogic(logic, clicked);
     if (next !== null) onChange(next);
   };
+  // 选中态不能靠 Toggle 自己的 data-[state=on] 类名（shared/frontend/ui/toggle.tsx）——
+  // TooltipTrigger asChild 会把自己的 data-state（"closed"/"delayed-open"/"instant-open"）
+  // 克隆到子元素上，覆盖掉 Radix Toggle 的 data-state="on"/"off"，那组类名永远不匹配。
+  // 改用基于 isOr 的显式条件类名；cn() 走 twMerge，className 在最后，能盖过 cva 变体的
+  // bg-transparent。bg-accent 在浅色主题下对比很弱（实测肉眼难辨），改用 Button 默认态
+  // 同款的 bg-primary/text-primary-foreground——同一份 --color-primary token，浅色/深色
+  // 主题都有明确对比度，不是新配色。
+  const selectedClass = "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground";
   return (
     <TooltipProvider>
       <div className="inline-flex rounded border border-input overflow-hidden">
@@ -106,7 +115,7 @@ function ConditionLogicToggle({
               size="sm"
               pressed={!isOr}
               onPressedChange={() => click(CONDITION_LOGIC_AND)}
-              className="h-6 px-1.5 text-[10px] rounded-none"
+              className={cn("h-6 px-1.5 text-[10px] rounded-none", !isOr && selectedClass)}
             >
               AND
             </Toggle>
@@ -119,7 +128,7 @@ function ConditionLogicToggle({
               size="sm"
               pressed={isOr}
               onPressedChange={() => click(CONDITION_LOGIC_OR)}
-              className="h-6 px-1.5 text-[10px] rounded-none"
+              className={cn("h-6 px-1.5 text-[10px] rounded-none", isOr && selectedClass)}
             >
               OR
             </Toggle>
@@ -289,7 +298,7 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
           <Label className="text-xs block mb-1">Event</Label>
           <Select
             value={eventType || ""}
-            onChange={(e: SelectChange) => updateNodeData(nodeId, { eventType: e.target.value, channelId: "", conditions: [] })}
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { eventType: e.target.value, channelId: "", conditions: [], conditionLogic: "" })}
             className="w-full text-sm"
           >
             <option value="">Select event...</option>
@@ -564,7 +573,7 @@ function WaitForEventInspector({ nodeId, data }: { nodeId: string; data: Record<
           <Label className="text-xs block mb-1">Wait for event</Label>
           <Select
             value={data.eventType || ""}
-            onChange={(e: SelectChange) => updateNodeData(nodeId, { eventType: e.target.value, conditions: [] })}
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { eventType: e.target.value, conditions: [], conditionLogic: "" })}
             className="w-full text-sm"
           >
             <option value="">Select event...</option>

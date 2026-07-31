@@ -40,6 +40,7 @@ export function conditionsNeedAuthor(
   conditions: { field: string; operator: string; value: string }[]
 ): boolean {
   return (conditions || []).some((c) => {
+    if (!c || typeof c !== "object") return false;
     if (typeof c.field === "string" && c.field.startsWith(USER_PROP_PREFIX)) return true;
     if (typeof c.value !== "string") return false;
     return new RegExp(USER_VALUE_REF_RE.source).test(c.value);
@@ -106,6 +107,7 @@ export function resolveYouTubeCondition(
   // $user.x 引用一并纳入检查。
   const props = resp.props;
   for (const c of conditions || []) {
+    if (!c || typeof c !== "object") continue;
     if (!c.field) continue;
     const refs = new Set<string>([c.field]);
     for (const m of String(c.value ?? "").matchAll(new RegExp(USER_VALUE_REF_RE.source, "g"))) {

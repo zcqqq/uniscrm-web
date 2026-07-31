@@ -224,6 +224,16 @@ describe("conditionsNeedAuthor", () => {
     ).not.toThrow();
     expect(conditionsNeedAuthor([{ field: "like_count", operator: ">", value: 5 as unknown as string }])).toBe(false);
   });
+
+  it("Finding B：数组元素本身是 null（不只是 field/value 畸形）不抛异常，结果与忽略它一致", () => {
+    // conditionsPass（engine.ts）已经对非对象元素做了防护，但 conditionsNeedAuthor 的
+    // typeof c.field 判断在它之前跑——对 c === null 取 c.field 会直接 TypeError，
+    // 抛出去同样会让队列消息整条重试。
+    const normal = { field: "user.followers_count", operator: ">", value: "1000" };
+    const withNull = [null as unknown as { field: string; operator: string; value: string }, normal];
+    expect(() => conditionsNeedAuthor(withNull)).not.toThrow();
+    expect(conditionsNeedAuthor(withNull)).toBe(conditionsNeedAuthor([normal]));
+  });
 });
 
 describe("youtubeConditionRequest — withAuthor", () => {
@@ -337,5 +347,15 @@ describe("resolveYouTubeCondition — AND/OR", () => {
     );
     expect(r.branch).toBe("failed");
     expect(r.failureReason).toContain("stat_unavailable: like_count");
+  });
+
+  it("Finding B：conditions 数组里的 null 元素在 stat_unavailable 守卫循环里不抛异常，结果与忽略它一致", () => {
+    // resolveYouTubeCondition 的 stat_unavailable 守卫（`if (!c.field) continue`）跑在
+    // conditionsPass 之前，对 c === null 取 c.field 会直接 TypeError——抛出去逃出
+    // executeContentActions，队列消息整条重试，这一批已执行过的 action 全部重跑。
+    const withNull = [null as unknown as { field: string; operator: string; value: string }, HIT];
+    const resp = { ok: true, props: FRESH };
+    expect(() => resolveYouTubeCondition(withNull, STALE, resp)).not.toThrow();
+    expect(resolveYouTubeCondition(withNull, STALE, resp)).toEqual(resolveYouTubeCondition([HIT], STALE, resp));
   });
 });

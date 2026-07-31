@@ -1855,6 +1855,11 @@ export default {
           }
           // 不再用 `if (pending.conditions)` 做前置守卫：OR + 0 条恒不通过是有语义的，
           // 跳过检查会把它错当成放行。conditionsPass 自己处理空集。
+          // 顺带改了空 field 半成品行的语义（design doc §1.2）：这里改动前是裸的
+          // `conditions.every((c) => evaluateCondition(c.field, ...))`，没有任何空 field 跳过——
+          // 一条带半成品空白条件行的 waitForEvent 此前 evaluateCondition("", ...) 恒 false，
+          // 永远无法解析、只会超时走 "No"。统一到 conditionsPass 之后空 field 行被过滤掉，
+          // 其余条件正常求值——这是知情接受的行为变化，见 design doc，不是本次改动的意外副作用。
           if (!conditionsPass(snapshotConditions, pending.condition_logic, payload)) continue;
 
           // Atomically claim this pending row before doing any async work. A duplicate/redelivered

@@ -29,7 +29,8 @@ describe("POST /api/flows/:id/unpublish — tenant isolation", () => {
       `CREATE TABLE IF NOT EXISTS flow_pending (
          id TEXT PRIMARY KEY, flow_id TEXT NOT NULL, node_id TEXT NOT NULL DEFAULT '',
          user_id TEXT NOT NULL DEFAULT '', tenant_id INTEGER NOT NULL, payload TEXT NOT NULL DEFAULT '',
-         execute_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT ''
+         execute_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '',
+         condition_logic TEXT NOT NULL DEFAULT ''
        )`
     ).run();
     await env.WEB_DB.prepare(

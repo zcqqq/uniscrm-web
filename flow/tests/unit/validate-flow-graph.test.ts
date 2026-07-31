@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { findOrphanNodeIds, validateFlowGraph, findEmptyYouTubeConditionIds, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
+import { findOrphanNodeIds, validateFlowGraph, findEmptyYouTubeConditionIds, findOrLogicEmptyNodeIds, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
+import { CONDITION_LOGIC_OR } from "../../nodeTypeRegistry";
 
 describe("TRIGGER_NODE_TYPES", () => {
   it("lists the flow-execution entry-point node types", () => {
@@ -90,7 +91,7 @@ describe("validateFlowGraph", () => {
   it("is valid when there are no orphan nodes", () => {
     const nodes = [{ id: "t1", type: "xTrigger" }, { id: "a1", type: "action" }];
     const edges = [{ source: "t1", target: "a1" }];
-    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [] });
+    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [], orLogicEmptyNodeIds: [] });
   });
 
   it("is invalid and lists orphan ids when nodes are unreachable", () => {
@@ -272,6 +273,7 @@ describe("validateFlowGraph — empty youtubeCondition conditions", () => {
       orphanNodeIds: [],
       misplacedNodeIds: [],
       emptyConditionNodeIds: [],
+      orLogicEmptyNodeIds: [],
     });
   });
 
@@ -287,5 +289,70 @@ describe("validateFlowGraph — empty youtubeCondition conditions", () => {
     expect(result.orphanNodeIds).toEqual(["orphan"]);
     expect(result.misplacedNodeIds).toEqual(["yc1"]);
     expect(result.emptyConditionNodeIds).toEqual(["yc1"]);
+  });
+});
+
+describe("findOrLogicEmptyNodeIds", () => {
+  const OR = CONDITION_LOGIC_OR;
+  const REAL = [{ field: "view_count", operator: ">", value: "10" }];
+  const BLANK = [{ field: "", operator: "==", value: "" }];
+
+  it("OR + 空数组 → 命中", () => {
+    expect(findOrLogicEmptyNodeIds([
+      { id: "n1", type: "xContentTrigger", data: { conditions: [], conditionLogic: OR } },
+    ])).toEqual(["n1"]);
+  });
+
+  it("OR + 全是空行 → 命中（与运行时口径一致）", () => {
+    expect(findOrLogicEmptyNodeIds([
+      { id: "n1", type: "waitForEvent", data: { conditions: BLANK, conditionLogic: OR } },
+    ])).toEqual(["n1"]);
+  });
+
+  it("OR + 非数组 conditions → 命中", () => {
+    expect(findOrLogicEmptyNodeIds([
+      { id: "n1", type: "youtubeCondition", data: { conditions: { bad: 1 }, conditionLogic: OR } },
+    ])).toEqual(["n1"]);
+  });
+
+  it("OR + 有真条件 → 不命中", () => {
+    expect(findOrLogicEmptyNodeIds([
+      { id: "n1", type: "xTrigger", data: { conditions: REAL, conditionLogic: OR } },
+    ])).toEqual([]);
+  });
+
+  it("AND + 空条件 → 不命中：AND 的 0 条恒通过，是合法常态", () => {
+    expect(findOrLogicEmptyNodeIds([
+      { id: "n1", type: "xTrigger", data: { conditions: [] } },
+      { id: "n2", type: "xTrigger", data: { conditions: [], conditionLogic: "and" } },
+    ])).toEqual([]);
+  });
+
+  it("非 condition 节点即使带了这两个字段也不命中", () => {
+    expect(findOrLogicEmptyNodeIds([
+      { id: "n1", type: "action", data: { conditions: [], conditionLogic: OR } },
+      { id: "n2", type: "abSplit", data: { conditions: [], conditionLogic: OR } },
+    ])).toEqual([]);
+  });
+
+  it("5 种 condition 节点全覆盖", () => {
+    const types = ["xTrigger", "xContentTrigger", "youtubeContentTrigger", "waitForEvent", "youtubeCondition"];
+    const nodes = types.map((t, i) => ({ id: `n${i}`, type: t, data: { conditions: [], conditionLogic: OR } }));
+    expect(findOrLogicEmptyNodeIds(nodes)).toEqual(types.map((_, i) => `n${i}`));
+  });
+
+  it("没有 data 的节点不炸", () => {
+    expect(findOrLogicEmptyNodeIds([{ id: "n1", type: "xTrigger" }])).toEqual([]);
+  });
+});
+
+describe("validateFlowGraph 返回第 4 类", () => {
+  it("OR 空条件节点使 valid 为 false 并出现在 orLogicEmptyNodeIds", () => {
+    const nodes = [
+      { id: "t1", type: "youtubeContentTrigger", data: { conditions: [], conditionLogic: CONDITION_LOGIC_OR } },
+    ];
+    const r = validateFlowGraph(nodes, []);
+    expect(r.valid).toBe(false);
+    expect(r.orLogicEmptyNodeIds).toEqual(["t1"]);
   });
 });

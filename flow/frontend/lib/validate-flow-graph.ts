@@ -1,3 +1,5 @@
+import { CONDITION_LOGIC_OR } from "../../nodeTypeRegistry";
+
 export const TRIGGER_NODE_TYPES = ["xTrigger", "cronTrigger", "xContentTrigger", "youtubeContentTrigger"];
 
 export function findOrphanNodeIds(
@@ -67,6 +69,30 @@ function countUsableConditions(raw: unknown): number {
   ).length;
 }
 
+// 带 props condition 的 5 种节点，与 Inspector 里用 ConditionsEditor 的 5 个调用点一一对应。
+// userPropsCondition / abSplit 也有 data.conditions，但它们既不用 ConditionsEditor、引擎里
+// 也从未被求值（engine.ts 只把它们 push 成 action，没有消费者），加进来只会挡住一个本就无效
+// 的节点。
+const CONDITION_NODE_TYPES = [
+  "xTrigger",
+  "xContentTrigger",
+  "youtubeContentTrigger",
+  "waitForEvent",
+  "youtubeCondition",
+];
+
+// OR 且一条可用条件都没有 = 恒不通过（[].some() === false），整条 flow 静默死掉，而画布上
+// 完全看不出异常——AND 的 0 条恒通过是合法常态，两者在 UI 上只差一个小开关。所以挡在上线之前。
+export function findOrLogicEmptyNodeIds(
+  nodes: { id: string; type?: string; data?: Record<string, unknown> }[]
+): string[] {
+  return nodes
+    .filter((n) => CONDITION_NODE_TYPES.includes(n.type ?? ""))
+    .filter((n) => n.data?.conditionLogic === CONDITION_LOGIC_OR)
+    .filter((n) => countUsableConditions(n.data?.conditions) === 0)
+    .map((n) => n.id);
+}
+
 export function validateFlowGraph(
   nodes: { id: string; type?: string; data?: Record<string, unknown> }[],
   edges: { source: string; target: string }[]
@@ -75,17 +101,21 @@ export function validateFlowGraph(
   orphanNodeIds: string[];
   misplacedNodeIds: string[];
   emptyConditionNodeIds: string[];
+  orLogicEmptyNodeIds: string[];
 } {
   const orphanNodeIds = findOrphanNodeIds(nodes, edges);
   const misplacedNodeIds = findMisplacedYouTubeConditionIds(nodes);
   const emptyConditionNodeIds = findEmptyYouTubeConditionIds(nodes);
+  const orLogicEmptyNodeIds = findOrLogicEmptyNodeIds(nodes);
   return {
     valid:
       orphanNodeIds.length === 0 &&
       misplacedNodeIds.length === 0 &&
-      emptyConditionNodeIds.length === 0,
+      emptyConditionNodeIds.length === 0 &&
+      orLogicEmptyNodeIds.length === 0,
     orphanNodeIds,
     misplacedNodeIds,
     emptyConditionNodeIds,
+    orLogicEmptyNodeIds,
   };
 }

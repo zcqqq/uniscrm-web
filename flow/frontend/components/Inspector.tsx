@@ -13,11 +13,13 @@ import { ContentMetadata_YouTube } from "../../../metadata/youtube";
 import { PROPS } from "../../../metadata/props";
 import { t as localizeLabel } from "../../../metadata/locale";
 import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
-import { NODE_TYPE_REGISTRY, CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../../nodeTypeRegistry";
+import { NODE_TYPE_REGISTRY, CONTENT_X_TRIGGER_MODE_LIST_POSTS, CONDITION_LOGIC_OR, CONDITION_LOGIC_AND } from "../../nodeTypeRegistry";
 import { EventMetadata_X } from "../../../metadata/x";
 import type { PropFilter } from "../../../metadata/dataTypes";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
 import { OperationSelect } from "./OperationSelect";
+import { Toggle } from "../../../shared/frontend/ui/toggle";
+import { nextConditionLogic } from "../lib/condition-logic";
 
 type SelectChange = React.ChangeEvent<HTMLSelectElement>;
 type InputChange = React.ChangeEvent<HTMLInputElement>;
@@ -79,17 +81,70 @@ function ValueInput({
   );
 }
 
+// 分段控件而不是 shadcn 的 Switch：Switch 是个无字圆胶囊，看不出哪边是 AND。两个选项都
+// 可见、当前生效项高亮，不存在"这个字是当前状态还是点了会变成的状态"的经典歧义。
+// 始终显示，不因条件数 <2 隐藏——隐藏会造成陷阱：设了 OR → 删到 0 条 → 开关消失 →
+// 卡在恒不通过且无法改回。
+function ConditionLogicToggle({
+  logic,
+  onChange,
+}: {
+  logic: unknown;
+  onChange: (logic: string) => void;
+}) {
+  const isOr = logic === CONDITION_LOGIC_OR;
+  const click = (clicked: string) => {
+    const next = nextConditionLogic(logic, clicked);
+    if (next !== null) onChange(next);
+  };
+  return (
+    <TooltipProvider>
+      <div className="inline-flex rounded border border-input overflow-hidden">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Toggle
+              size="sm"
+              pressed={!isOr}
+              onPressedChange={() => click(CONDITION_LOGIC_AND)}
+              className="h-6 px-1.5 text-[10px] rounded-none"
+            >
+              AND
+            </Toggle>
+          </TooltipTrigger>
+          <TooltipContent>所有条件都满足才通过</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Toggle
+              size="sm"
+              pressed={isOr}
+              onPressedChange={() => click(CONDITION_LOGIC_OR)}
+              className="h-6 px-1.5 text-[10px] rounded-none"
+            >
+              OR
+            </Toggle>
+          </TooltipTrigger>
+          <TooltipContent>任一条件满足即通过</TooltipContent>
+        </Tooltip>
+      </div>
+    </TooltipProvider>
+  );
+}
+
 function ConditionsEditor({
   conditions,
   fields,
   onChange,
-  label = "Conditions",
+  logic,
+  onLogicChange,
   systemFilters,
 }: {
   conditions: Condition[];
   fields: TriggerFieldDefinition[];
   onChange: (conditions: Condition[]) => void;
-  label?: string;
+  // 节点的 data.conditionLogic。收 unknown：存量 graph 没这个键。
+  logic: unknown;
+  onLogicChange: (logic: string) => void;
   // 系统级 contentPropsFilter（metadata 声明、link 端入队前强制执行）。这里只做展示——
   // 不进 data.conditions（避免 graph_json 快照过期阈值、污染用户可编辑数组），值实时读 metadata。
   systemFilters?: PropFilter[];
@@ -105,8 +160,11 @@ function ConditionsEditor({
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <Label className="text-xs">{label}</Label>
-        <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={addCondition}>+ Add</Button>
+        <Label className="text-xs">Condition</Label>
+        <div className="flex items-center gap-2">
+          <ConditionLogicToggle logic={logic} onChange={onLogicChange} />
+          <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={addCondition}>+ Add</Button>
+        </div>
       </div>
       {systemFilters?.map((f, idx) => {
         const fieldDef = fields.find((fd) => fd.id === f.propId);
@@ -134,6 +192,10 @@ function ConditionsEditor({
           </div>
         );
       })}
+      {systemFilters?.length && conditions.length > 0 ? (
+        // 🔒 行由 link 在入队前强制执行，永远是无条件的与关系，不受上面那个 AND/OR 开关影响。
+        <p className="text-[10px] text-muted-foreground mb-2">and</p>
+      ) : null}
       {conditions.length === 0 && !systemFilters?.length && (
         <p className="text-xs text-muted-foreground italic">No filters — all matching events pass.</p>
       )}
@@ -264,7 +326,8 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
             conditions={conditions}
             fields={evDef.contextFields}
             onChange={(c) => updateNodeData(nodeId, { conditions: c })}
-            label="Event Props"
+            logic={data.conditionLogic}
+            onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
           />
         )}
       </div>
@@ -362,7 +425,8 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
           conditions={conditions}
           fields={getContentTriggerFields(ContentMetadata_X, data.mode || CONTENT_X_TRIGGER_MODE_LIST_POSTS)}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
-          label="Condition"
+          logic={data.conditionLogic}
+          onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
         />
       </div>
     </div>
@@ -442,7 +506,8 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
           conditions={conditions}
           fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos")}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
-          label="Condition"
+          logic={data.conditionLogic}
+          onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
           systemFilters={YOUTUBE_TRIGGER_META.contentPropsFilter}
         />
       </div>
@@ -536,6 +601,8 @@ function WaitForEventInspector({ nodeId, data }: { nodeId: string; data: Record<
             conditions={conditions}
             fields={selectedEvent.contextFields}
             onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+            logic={data.conditionLogic}
+            onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
           />
         )}
       </div>
@@ -983,7 +1050,8 @@ function YouTubeConditionInspector({ nodeId, data }: { nodeId: string; data: Rec
           conditions={conditions}
           fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos")}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
-          label="Condition"
+          logic={data.conditionLogic}
+          onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
         />
         <p className="text-xs text-muted-foreground">
           Re-reads the video's current stats from YouTube. Put a Wait node before this to check it some time after publication.

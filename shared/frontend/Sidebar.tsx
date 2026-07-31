@@ -5,6 +5,7 @@ import { UpgradeIcon } from "./UpgradeIcon";
 import { useTier } from "./useTier";
 import { authFetch } from "./lib/auth-fetch";
 import { resolveHref } from "./urls";
+import { groupCookieString, parseGroupCookie, SIDEBAR_GROUPS_COOKIE } from "./sidebar-state";
 
 export interface SidebarUrls {
   web: string;
@@ -55,9 +56,9 @@ interface MenuGroup {
 
 export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
-    if (typeof window === "undefined") return new Set(["social"]);
-    const saved = localStorage.getItem("sidebar-groups");
-    return saved ? new Set(JSON.parse(saved)) : new Set([currentModule || "social"]);
+    if (typeof document === "undefined") return new Set(["social"]);
+    const saved = parseGroupCookie(document.cookie);
+    return new Set(saved ?? [currentModule || "social"]);
   });
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof document === "undefined") return true;
@@ -77,7 +78,7 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("sidebar-groups", JSON.stringify([...expandedGroups]));
+    document.cookie = groupCookieString([...expandedGroups]);
   }, [expandedGroups]);
 
   useEffect(() => {
@@ -181,9 +182,13 @@ export function Sidebar({ urls, tier: tierProp, currentModule }: SidebarProps) {
   };
 
   useEffect(() => {
-    const activeGroup = groups.find((g) => isActive(g));
-    if (activeGroup && !expandedGroups.has(activeGroup.id)) {
-      setExpandedGroups((prev) => new Set([...prev, activeGroup.id]));
+    // Per-origin leftovers from before the state moved to a cross-module cookie.
+    localStorage.removeItem(SIDEBAR_GROUPS_COOKIE);
+    // Reveal where the member currently is, but never touch the other groups — a group with no
+    // sub-items has nothing to reveal, and adding it would only pollute the stored set.
+    const activeGroup = groups.find((g) => g.items && isActive(g));
+    if (activeGroup) {
+      setExpandedGroups((prev) => (prev.has(activeGroup.id) ? prev : new Set([...prev, activeGroup.id])));
     }
   }, []);
 

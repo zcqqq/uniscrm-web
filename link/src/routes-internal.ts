@@ -239,6 +239,47 @@ export function internalRoutes() {
     });
   });
 
+  // 平台级 X API 用量（TMS 管理控制台用）。link 是 X_BEARER_TOKEN 的唯一持有方，
+  // admin worker 通过本路由取数，自己不持有 X 凭据。
+  const X_USAGE_FIELDS =
+    "cap_reset_day,daily_client_app_usage,daily_project_usage,project_cap,project_id,project_usage";
+
+  router.get("/x-usage", async (c) => {
+    const daysRaw = c.req.query("days");
+    const days = daysRaw === undefined ? 30 : Number(daysRaw);
+    if (!Number.isInteger(days) || days < 1 || days > 90) {
+      return c.json({ error: "days must be an integer between 1 and 90" }, 400);
+    }
+    if (!c.env.X_BEARER_TOKEN) {
+      return c.json({ error: "x_bearer_not_configured" }, 500);
+    }
+
+    const url = new URL("https://api.x.com/2/usage/tweets");
+    url.searchParams.set("days", String(days));
+    url.searchParams.set("usage.fields", X_USAGE_FIELDS);
+
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${c.env.X_BEARER_TOKEN}` },
+    });
+    const text = await res.text();
+    // 全量 payload 只进日志，不入库。
+    console.log(JSON.stringify({ event: "x_usage_fetch", status: res.status, days, body: text.slice(0, 4000) }));
+
+    if (!res.ok) {
+      return c.json({ error: "x_api_error", upstream_status: res.status }, 502);
+    }
+    let parsed: { data?: unknown };
+    try {
+      parsed = JSON.parse(text) as { data?: unknown };
+    } catch {
+      return c.json({ error: "x_api_bad_json", upstream_status: res.status }, 502);
+    }
+    if (!parsed.data) {
+      return c.json({ error: "x_api_no_data", upstream_status: res.status }, 502);
+    }
+    return c.json({ data: parsed.data });
+  });
+
   // flow 用来判断一个 published flow 的 trigger 绑的 channel 是否还活着。只回 id 集合，
   // 不回类型或名字 —— flow 只需要判断"在不在"，展示文案由它自己的 trigger 节点类型决定。
   router.get("/channels/active", async (c) => {

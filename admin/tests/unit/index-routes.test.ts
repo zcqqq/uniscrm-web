@@ -111,4 +111,32 @@ describe("src/index.ts real route table", () => {
     expect(await res.text()).toBe("<html>SPA</html>");
     expect(assets.fetch).toHaveBeenCalled();
   });
+
+  // 核心安全不变量：accessAuth 必须先于 serveTmsAsset 跑，且必须挡住 ASSETS.fetch 本身
+  // 被调用。如果将来有人把 app.use("/tms/*", accessAuth) 挪到 handler 注册之后（hono 里
+  // use 晚于 handler 注册即不生效），这两条会立刻从绿变红；此前的用例全带合法 token，
+  // 挪动注册顺序时全部继续通过，测不出这个洞。
+  it("rejects bare /tms with no Access JWT and never touches ASSETS", async () => {
+    const assets = makeAssets();
+
+    const res = await worker.fetch(
+      new Request("https://admin.uni-scrm.com/tms"),
+      { ...baseEnv, ASSETS: assets } as never
+    );
+
+    expect(res.status).toBe(403);
+    expect(assets.fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a /tms/assets/* static asset request with no Access JWT and never touches ASSETS", async () => {
+    const assets = makeAssets();
+
+    const res = await worker.fetch(
+      new Request("https://admin.uni-scrm.com/tms/assets/index-abc.js"),
+      { ...baseEnv, ASSETS: assets } as never
+    );
+
+    expect(res.status).toBe(403);
+    expect(assets.fetch).not.toHaveBeenCalled();
+  });
 });

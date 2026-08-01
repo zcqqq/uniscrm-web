@@ -110,6 +110,35 @@ describe("ingestYouTubeVideo", () => {
     expect(flowQueue.send.mock.calls[0][0].payload).toMatchObject({ content_url: "https://www.youtube.com/watch?v=vid5" });
   });
 
+  it("maps statistics.commentCount to reply_count, and leaves it absent when comments are disabled", async () => {
+    vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
+      id: "vid6",
+      snippet: { title: "Commented", publishedAt: "2026-07-18T00:00:00Z", thumbnails: { default: { url: "https://img/t.jpg" } } },
+      contentDetails: { duration: "PT1M" },
+      statistics: { viewCount: "100", likeCount: "10", commentCount: "25" },
+    });
+
+    const flowQueue = { send: vi.fn().mockResolvedValue(undefined) };
+    const ctx = baseCtx({ flowQueue });
+    await ingestYouTubeVideo(ctx, "vid6");
+
+    expect(flowQueue.send.mock.calls[0][0].payload).toMatchObject({ reply_count: "25" });
+
+    // 作者关闭评论区时 commentCount 整个字段缺席（同 likeCount 隐藏）——绝不能变成 0。
+    vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
+      id: "vid7",
+      snippet: { title: "No comments", publishedAt: "2026-07-18T00:00:00Z", thumbnails: { default: { url: "https://img/t.jpg" } } },
+      contentDetails: { duration: "PT1M" },
+      statistics: { viewCount: "100", likeCount: "10" },
+    });
+    const flowQueue2 = { send: vi.fn().mockResolvedValue(undefined) };
+    const ctx2 = baseCtx({ flowQueue: flowQueue2 });
+    await ingestYouTubeVideo(ctx2, "vid7");
+
+    const payload = flowQueue2.send.mock.calls[0][0].payload;
+    expect(payload.reply_count ?? null).toBeNull();
+  });
+
   it("does not emit content.created when the video was already seen (markSeen reports false)", async () => {
     vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
       id: "vid4",

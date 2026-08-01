@@ -44,6 +44,7 @@ describe("getContentTriggerFields", () => {
     // 这些是随时间会变、值得一天后复查的字段——少了任何一个，这个节点就没法表达核心场景。
     expect(ids).toContain("view_count");
     expect(ids).toContain("like_count");
+    expect(ids).toContain("reply_count");
     expect(ids).toContain("title");
     expect(ids).toContain("duration");
     // 每个字段都得有可选操作符，否则条件行渲染出来是空的下拉框。

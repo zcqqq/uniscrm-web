@@ -16,6 +16,10 @@ export const ContentMetadata_YouTube: ContentMetadata[] = [
       { propId: "cover_image_url", dataId: "{linkPrefix}.snippet.thumbnails.default.url" },
       { propId: "view_count", dataId: "{linkPrefix}.statistics.viewCount" },
       { propId: "like_count", dataId: "{linkPrefix}.statistics.likeCount" },
+      // YouTube 视频级只有 commentCount（评论总数，含楼中楼回复），映射到跨平台的
+      // reply_count（TikTok 的 comment_count 同此）。videos.list 本就带 part=statistics，
+      // 零额外配额。作者关闭评论区时该字段整个缺席（同 likeCount 隐藏），下游保持 null。
+      { propId: "reply_count", dataId: "{linkPrefix}.statistics.commentCount" },
       // duration is computed (not resolveProps-mapped) — declared here with no dataId/value
       // purely so the flow Inspector's ConditionsEditor field list includes it (see
       // getContentTriggerFields). resolveProps skips entries with neither `value` nor

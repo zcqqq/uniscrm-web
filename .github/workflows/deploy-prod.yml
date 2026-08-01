@@ -126,8 +126,36 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
+
+  typecheck:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 棘轮：只列当前 typecheck 干净的模块，清一个加一个。截至 2026-08-01 剩余错误数
+        # 为 web=20、link=20、insight-segment=3、content=1、flow=1，都是各模块自身的既有
+        # 问题（不是 shared/ 的），清掉后就把模块名加进这个列表。
+        module: [admin, analytics]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # shared/frontend/* 的 React 类型从仓库根解析（@types/react 只装在根一份，与已在
+      # 根的 @radix-ui/* 同一模式），所以根依赖必须先装，否则模块内 tsc 找不到 React 类型。
+      - name: Install shared dependencies
+        run: npm ci
+
+      - name: Install module dependencies
+        run: cd ${{ matrix.module }} && npm ci
+
+      - name: Typecheck
+        run: cd ${{ matrix.module }} && npm run typecheck
+
   deploy:
-    needs: [migrate, migrate-tenant-dbs]
+    needs: [migrate, migrate-tenant-dbs, typecheck]
     runs-on: ubuntu-latest
     environment: production
     strategy:

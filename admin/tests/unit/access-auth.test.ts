@@ -173,4 +173,27 @@ describe("accessAuth", () => {
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  // Access 轮换签名密钥后，Cache API 里还是旧 key 集合，直到它过期（最长 1 小时）。
+  // 这里模拟"缓存命中了旧 JWKS"：第一次验签用旧 key 必然失败，中间件应当强制重取
+  // 一次再验，第二次用新 key 就该通过 —— 否则唯一能修的控制台会把管理员锁在门外。
+  it("recovers when the first JWKS fetch returns a stale key set that doesn't match the signer", async () => {
+    const stale = await makeKeys();
+    const fresh = await makeKeys();
+    const token = await signToken(fresh.privateKey, OWNER);
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      const respondWith = fetchMock.mock.calls.length === 1 ? stale.jwk : fresh.jwk;
+      return new Response(JSON.stringify({ keys: [respondWith] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await makeApp().request(
+      "/tms",
+      { headers: { "Cf-Access-Jwt-Assertion": token } },
+      fullEnv
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, email: OWNER });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

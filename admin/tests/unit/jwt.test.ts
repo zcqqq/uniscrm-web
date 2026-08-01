@@ -212,4 +212,38 @@ describe("fetchAccessJwks", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 500 })));
     await expect(fetchAccessJwks(TEAM)).rejects.toThrow(/500/);
   });
+
+  // 轮换密钥自愈路径依赖这个行为：即便缓存里有内容，skipCacheRead 也必须绕过它去打网络，
+  // 否则中间件重取一次 JWKS 的兜底逻辑什么都没做。
+  it("hits the network even when the cache has content, when skipCacheRead is set", async () => {
+    const stale = await makeKeys("stale-kid");
+    const fresh = await makeKeys("fresh-kid");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ keys: [fresh.jwk] }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const cache = {
+      match: vi.fn().mockResolvedValue(new Response(JSON.stringify({ keys: [stale.jwk] }))),
+      put: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Cache;
+
+    const keys = await fetchAccessJwks(TEAM, cache, { skipCacheRead: true });
+    expect(keys).toEqual([fresh.jwk]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((cache.match as unknown as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+
+  // 写缓存是可降级操作：Cache API 写入抛错不该让验签整体失败，唯一的管理员不该被
+  // 一次 cache.put 的偶发失败锁在唯一的控制台外。
+  it("still returns keys when cache.put throws", async () => {
+    const { jwk } = await makeKeys();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ keys: [jwk] }), { status: 200 })));
+    const cache = {
+      match: vi.fn().mockResolvedValue(undefined),
+      put: vi.fn().mockRejectedValue(new Error("cache put boom")),
+    } as unknown as Cache;
+
+    await expect(fetchAccessJwks(TEAM, cache)).resolves.toEqual([jwk]);
+  });
 });

@@ -36,11 +36,15 @@ function base64UrlToJson<T>(input: string): T {
 }
 
 // Access 会轮换签名密钥，所以 JWKS 只能短期缓存，不能常驻。
-export async function fetchAccessJwks(teamDomain: string, cache?: Cache): Promise<AccessJwk[]> {
+export async function fetchAccessJwks(
+  teamDomain: string,
+  cache?: Cache,
+  opts?: { skipCacheRead?: boolean }
+): Promise<AccessJwk[]> {
   const url = `https://${teamDomain}/cdn-cgi/access/certs`;
   const cacheKey = new Request(url);
 
-  if (cache) {
+  if (cache && !opts?.skipCacheRead) {
     const hit = await cache.match(cacheKey);
     if (hit) return ((await hit.json()) as { keys: AccessJwk[] }).keys;
   }
@@ -50,12 +54,17 @@ export async function fetchAccessJwks(teamDomain: string, cache?: Cache): Promis
   const body = (await res.json()) as { keys: AccessJwk[] };
 
   if (cache) {
-    await cache.put(
-      cacheKey,
-      new Response(JSON.stringify(body), {
-        headers: { "Content-Type": "application/json", "Cache-Control": `max-age=${JWKS_TTL_SECONDS}` },
-      })
-    );
+    try {
+      await cache.put(
+        cacheKey,
+        new Response(JSON.stringify(body), {
+          headers: { "Content-Type": "application/json", "Cache-Control": `max-age=${JWKS_TTL_SECONDS}` },
+        })
+      );
+    } catch (err) {
+      // 写缓存是可降级的：失败只意味着下次要重新拉 JWKS，绝不该让验签整体失败。
+      console.warn(JSON.stringify({ event: "access_jwks_cache_put_failed", error: String(err) }));
+    }
   }
   return body.keys;
 }

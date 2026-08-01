@@ -33,6 +33,13 @@ export async function accessAuth(c: Context<{ Bindings: Env }>, next: Next) {
     const cache = typeof caches !== "undefined" ? caches.default : undefined;
     const jwks = await fetchAccessJwks(teamDomain, cache);
     payload = await verifyAccessJwt(token, { teamDomain, audTag, jwks });
+    // Access 轮换签名密钥后，缓存里还是旧 key 集合，新 token 的 kid 找不到。
+    // 缓存最长 1 小时，而唯一能修的控制台正是被挡住的这个 —— 所以未通过时
+    // 强制重取一次 JWKS 再验，让轮换能自愈。
+    if (!payload) {
+      const freshJwks = await fetchAccessJwks(teamDomain, cache, { skipCacheRead: true });
+      payload = await verifyAccessJwt(token, { teamDomain, audTag, jwks: freshJwks });
+    }
   } catch (err) {
     console.error(JSON.stringify({ event: "tms_access_verify_error", error: String(err) }));
     return c.json({ error: "Forbidden" }, 403);

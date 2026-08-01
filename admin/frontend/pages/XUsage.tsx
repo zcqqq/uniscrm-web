@@ -34,7 +34,13 @@ interface ApiError {
 
 const DAY_OPTIONS = [7, 30, 90] as const;
 
-function describeError(status: number, upstream?: number): ApiError {
+function describeError(status: number, upstream?: number, linkStatus?: number): ApiError {
+  // link 的 internalAuth 拒绝（admin 与 link 的 INTERNAL_SECRET 不一致）会让 link 自身
+  // 返回 403 —— 这是唯一能触发它的场景，跟 X 的凭据完全无关，必须先判掉，否则会落进
+  // 下面 upstream === 403 分支给出与实际原因不符的诊断。
+  if (linkStatus === 403) {
+    return { title: "内部鉴权失败", detail: "admin 与 link 的 INTERNAL_SECRET 不一致，检查两个 worker 的 secret 配置。" };
+  }
   if (upstream === 401 || upstream === 403) {
     return {
       title: "X API 凭据无效",
@@ -57,19 +63,24 @@ async function fetchUsage(days: number): Promise<UsageData> {
   const res = await fetch(`/tms/api/x-usage?days=${days}`);
   if (!res.ok) {
     let upstream: number | undefined;
+    let linkStatus: number | undefined;
     try {
-      upstream = ((await res.json()) as { upstream_status?: number }).upstream_status;
+      const body = (await res.json()) as { upstream_status?: number; link_status?: number };
+      upstream = body.upstream_status;
+      linkStatus = body.link_status;
     } catch {
       upstream = undefined;
+      linkStatus = undefined;
     }
-    const e = describeError(res.status, upstream);
+    const e = describeError(res.status, upstream, linkStatus);
     throw Object.assign(new Error(e.title), e);
   }
   return ((await res.json()) as { data: UsageData }).data;
 }
 
 function formatDay(iso: string): string {
-  return iso.slice(5, 10);
+  // X 省略空字段这一族的隐患：u.date 缺失时 undefined.slice 会直接把整页拖白屏。
+  return String(iso ?? "").slice(5, 10);
 }
 
 export function XUsage() {
@@ -149,7 +160,7 @@ export function XUsage() {
               <CardHeader>
                 <CardTitle>本周期用量</CardTitle>
                 <CardDescription>
-                  project {data.project_id} · 每月 {data.cap_reset_day} 日重置
+                  project {data.project_id} · 每月 {data.cap_reset_day ?? "—"} 日重置
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">

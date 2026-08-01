@@ -37,7 +37,22 @@ export async function tmsXUsageRoute(c: Context<{ Bindings: Env }>) {
       status: res.status,
       body: text.slice(0, 1000),
     }));
-    return c.json({ error: "upstream_error", upstream_status: res.status }, 502);
+    // link 会把 X 的 401/429 统一映射成它自己的 502，X 的真实状态藏在 body 的
+    // upstream_status 里。只透传 res.status 会让前端永远看不到 X 的状态。
+    let inner: { error?: string; upstream_status?: number } = {};
+    try {
+      inner = JSON.parse(text) as typeof inner;
+    } catch {
+      inner = {};
+    }
+    return c.json(
+      {
+        error: inner.error ?? "upstream_error",
+        link_status: res.status,
+        upstream_status: inner.upstream_status ?? res.status,
+      },
+      502
+    );
   }
 
   if (cache) {

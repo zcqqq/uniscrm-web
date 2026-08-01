@@ -64,13 +64,20 @@ describe("GET /tms/api/x-usage", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("maps a link 502 to 502 with upstream_status", async () => {
+  it("passes through link's inner error and X's real upstream_status, keeping link's own status separate", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ error: "x_api_error", upstream_status: 429 }), { status: 502 })
     ));
     const res = await makeApp().request("/tms/api/x-usage?days=7", {}, baseEnv);
     expect(res.status).toBe(502);
-    expect(await res.json()).toEqual({ error: "upstream_error", upstream_status: 502 });
+    expect(await res.json()).toEqual({ error: "x_api_error", link_status: 502, upstream_status: 429 });
+  });
+
+  it("falls back to link_status as upstream_status when link's body isn't JSON (e.g. internalAuth's plain-text 403)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("Forbidden", { status: 403 })));
+    const res = await makeApp().request("/tms/api/x-usage?days=7", {}, baseEnv);
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "upstream_error", link_status: 403, upstream_status: 403 });
   });
 
   it("serves a cache hit without calling link", async () => {

@@ -19,6 +19,7 @@
     "html-to-image": "^1.11.13",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-is": "^19.2.8",
     "react-router-dom": "^7.17.0",
     "recharts": "^3.9.0"
   },
@@ -26,8 +27,6 @@
     "@cloudflare/vitest-pool-workers": "^0.8.0",
     "@cloudflare/workers-types": "^4.20250410.0",
     "@tailwindcss/vite": "^4.0.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.0.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.8.0",

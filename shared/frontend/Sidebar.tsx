@@ -49,7 +49,8 @@ interface MenuItem {
 interface MenuGroup {
   id: string;
   label: string;
-  icon: () => JSX.Element;
+  // React 19 的类型包移除了全局 JSX 命名空间，必须走 React.JSX。
+  icon: () => React.JSX.Element;
   items?: MenuItem[];
   href?: string;
 }

@@ -260,3 +260,36 @@ vitest 需按已知问题固定 `miniflare.compatibilityDate`，避免 runner �
 - 平台其他 API 配额（YouTube quota 等）不在本次范围内，虽然 `link` 已有 `recordYouTubeQuota`
 - 多管理员、角色区分、审计日志 —— 当前只有一名运营方，Access 的邮箱白名单已足够
 - 90 天以上的历史归档 —— 若将来需要，再加 cron 快照落库
+
+---
+
+## 附录：X `/2/usage/tweets` 的实际返回行为（2026-08-01 dev 实测）
+
+这些是照文档看不出来、但会直接决定消费端怎么写的事实。**已经因为其中第一条炸过一次整页白屏**，
+所以记在这里。
+
+1. **X 会省略空字段，而不是给空数组。** `daily_client_app_usage` 里 `usage_result_count` 为 0 的
+   条目**完全没有 `usage` 键**（dev 的 8 个 client app 里 7 个如此）。所以消费端对任何嵌套数组
+   都要 `?? []`，哪怕契约里没标 `?`。同理 `date` 等标量字段也可能缺失，取值前要防御。
+2. **所有数值都是字符串。** `"project_cap": "2000000"`、`"project_usage": "1204"`、
+   `"usage": "197"`。前端必须 `Number()` 强转后再计算，否则求和会变成字符串拼接。
+   例外：`cap_reset_day` 是数字。
+3. **`date` 是完整 ISO 时间戳**（`"2026-07-15T00:00:00.000Z"`），不是 `YYYY-MM-DD`。
+4. dev 与 production 是**两个不同的 X app / project**，各自的用量互不相干。上面第 1 条的
+   省略行为只在 dev 的 8 个 client app 上观测过，prod 未验证。
+
+## 附录：dev 部署自测结果（2026-08-01）
+
+| 检查项 | 结果 |
+|---|---|
+| `/tms`、`/tms/api/x-usage`、`/tms/assets/*` | 302 → Access 登录页 |
+| `/`、`/index.html`、`/assets/` | 404（静态资源未从未受保护路径漏出）|
+| `/health`、`/internal/plans` | 200 / 401，行为未变 |
+| 带伪造租户 `session` cookie 请求 `/tms` 与 `/tms/api/x-usage` | 仍 302 → Access |
+| 页面渲染 | 1,204 / 2,000,000 (0.1%)，重置日 10，7 个 client app |
+| 天数切换 | 7/30/90 正常；7 天区间无数据时显示「该区间内没有用量记录。」|
+| 缓存 | `days=90` 首次 `X-Cache: MISS`、二次 `HIT`（自造 key `https://cache.internal/` 在真实运行时可用）|
+| 参数校验 | `days=0` / `days=200` → 400 |
+| 未知 API 路径 | `/tms/api/does-not-exist` → 404 JSON，不回退成 SPA 的 HTML |
+
+Access 登录走的是 `cloudflare` 类型 IdP（Cloudflare 账号登录），不是邮箱一次性验证码。

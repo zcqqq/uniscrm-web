@@ -22,6 +22,11 @@ export async function serveTmsAsset(c: Context<{ Bindings: Env }>) {
   const stripped = url.pathname.replace(/^\/tms/, "") || "/";
   const assetRes = await c.env.ASSETS.fetch(new Request(new URL(stripped, url).toString(), { method: "GET" }));
   if (assetRes.status !== 404) return assetRes;
+  // /tms/api/* 是 API 命名空间，未命中就该是 404 JSON；回退成 SPA 的 HTML 会让
+  // 前端把 HTML 当 JSON 解析，报出与真实原因无关的错误。
+  if (url.pathname.startsWith("/tms/api/")) {
+    return c.json({ error: "Not Found" }, 404);
+  }
   // SPA 回退。走到这里说明 accessAuth 已经放行过了。
   return c.env.ASSETS.fetch(new Request(new URL("/index.html", url).toString(), { method: "GET" }));
 }

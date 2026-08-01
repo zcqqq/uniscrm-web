@@ -51,4 +51,15 @@ describe("serveTmsAsset", () => {
     expect(res.status).toBe(500);
     expect(env.ASSETS.fetch).toHaveBeenCalledTimes(1);
   });
+
+  // /tms/api/* 未命中路由不该走 SPA 回退——前端把 HTML 当 JSON 解析会报出与真实原因
+  // 无关的错误。ASSETS 只应被打一次（探测该路径本身），绝不该再去拉 /index.html。
+  it("returns 404 JSON for an unmatched /tms/api/* path instead of the SPA shell", async () => {
+    const { app, env } = makeApp(async () => new Response("not found", { status: 404 }));
+    const res = await app.request("/tms/api/does-not-exist", {}, env);
+    expect(res.status).toBe(404);
+    expect(res.headers.get("Content-Type")).toContain("application/json");
+    expect(await res.json()).toEqual({ error: "Not Found" });
+    expect(env.ASSETS.fetch).toHaveBeenCalledTimes(1);
+  });
 });

@@ -154,8 +154,45 @@ jobs:
       - name: Typecheck
         run: cd ${{ matrix.module }} && npm run typecheck
 
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [web, link, flow, admin, analytics, content, insight-segment, trend-skill, operation]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # shared/ 下的依赖从仓库根解析，模块测试 import 到它们时需要根依赖在位。
+      - name: Install shared dependencies
+        run: npm ci
+
+      - name: Install module dependencies
+        run: cd ${{ matrix.module }} && npm ci
+
+      # link / flow / content 的 wrangler.toml 里有 AI binding，@cloudflare/vitest-pool-workers
+      # 会为此建立 remote proxy session —— 没有凭据时这些模块的测试根本起不来（本地实测：
+      # "Failed to start the remote proxy session"）。其余模块不需要，多给也无害。
+      # 副作用是这三个模块的测试依赖网络，Cloudflare 侧抖动（曾见 521/522）会让本 job 变红；
+      # 若日后证实不稳，把它们从这个 matrix 拆成单独的非阻塞 job。
+      # 用 --dangerouslyIgnoreUnhandledErrors 而不是裸 npm test：web 与 link 的
+      # @cloudflare/vitest-pool-workers 在收尾时稳定抛 "Worker cloudflare-pool emitted
+      # error"（miniflare/workerd 的关闭竞态，与被测代码无关），vitest 会因此在用例
+      # 全绿的情况下仍然退出 1 —— 不加这个 flag，这道门禁会让每一次部署都失败。
+      # 已验证该 flag 不会让门禁失效：往 link 里塞一个必失败的用例，仍然退出 1。
+      - name: Test
+        run: cd ${{ matrix.module }} && npx vitest run --dangerouslyIgnoreUnhandledErrors
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
   deploy:
-    needs: [migrate, migrate-tenant-dbs, typecheck]
+    needs: [migrate, migrate-tenant-dbs, typecheck, test]
     runs-on: ubuntu-latest
     environment: production
     strategy:

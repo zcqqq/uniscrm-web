@@ -1,7 +1,7 @@
 # TMS 管理控制台（第一个页面：X API 平台用量）
 
 日期：2026-07-31
-状态：设计已确认；Cloudflare Access 侧已配置并实测通过；待写实施计划
+状态：已实现并部署 dev，浏览器自测通过。prod 未部署（待人工确认）。
 
 ## 目标
 
@@ -49,7 +49,7 @@
 | Application | `UniSCRM TMS Console`，id `c4fefcbc-9c2a-48ae-a43d-7f075522b4b7` |
 | Destinations | `admin.uni-scrm.com/tms`、`admin.uni-scrm.com/tms/*`、`admin-dev.uni-scrm.com/tms`、`admin-dev.uni-scrm.com/tms/*` |
 | 策略 | `Owner only`：Allow → Include → Emails → `zhengchao.qqqqq@gmail.com` |
-| IdP | `cloudflare`（One-time PIN，邮箱验证码）—— 无需注册任何外部 OAuth 应用 |
+| IdP | `cloudflare` —— 用 Cloudflare 账号登录（**不是**邮箱一次性验证码，2026-08-01 实测确认）。无需注册任何外部 OAuth 应用，凭据总数为零 |
 | Session duration | 24h |
 
 **为什么每个域名要两条路径**：Access 的路径匹配**不覆盖子路径**。按
@@ -92,7 +92,13 @@ application 与策略已于 2026-07-31 经 Cloudflare API 创建完毕，取回�
 
 ### 第二层：Worker JWT 中间件
 
-新增 `admin/src/middleware/access-auth.ts`，挂载于 `/tms` 与 `/tms/*`：
+新增 `admin/src/middleware/access-auth.ts`，挂载于 `/tms/*`（**只此一条**）：
+
+> 本文档早期版本写"`/tms` 与 `/tms/*` 两条都要挂，因为 Hono 的 `/tms/*` 不匹配裸 `/tms`"。
+> 那句话是错的，已实测推翻（hono ^4.7.0）：`/tms/*` 同时匹配裸 `/tms` 与其下所有路径；
+> 两条并存反而让裸 `/tms` 每次请求把 JWKS 拉取与验签跑两遍。真正的洞是只挂 `/tms` ——
+> 那样 `/tms/api/x-usage` 完全不过中间件。
+
 
 1. 读 `Cf-Access-Jwt-Assertion` 请求头（Access 注入）；缺失 → 403
 2. 从 `https://${ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs` 取 JWKS，用 `caches.default` 缓存 1 小时
@@ -157,8 +163,20 @@ RS256 验签，不自行实现密码学算法。
 
 ### 错误处理
 
-`link` 或 X 返回非 2xx 时，admin 透传结构化错误 `{ error, upstream_status }`，页面据此显示具体原因
-（bearer 失效 / X 限流 429 / link 不可达），而不是渲染一张空图表。
+`link` 或 X 返回非 2xx 时，admin 透传结构化错误，页面据此显示具体原因，而不是渲染一张空图表。
+
+**注意错误码有两层**，这里踩过坑：`link` 会把 X 的 401/429 统一映射成**它自己的** 502，X 的真实状态
+藏在 body 的 `upstream_status` 里。所以 admin 必须解析 `link` 的 body 并同时透出两层：
+
+```json
+{ "error": "x_api_error", "link_status": 502, "upstream_status": 429 }
+```
+
+- `link_status` = `link` 的 HTTP 状态。`403` 意味着 **`INTERNAL_SECRET` 不匹配**，与 X 无关。
+- `upstream_status` = X 的真实状态。`401`/`403` = bearer 失效，`429` = 限流。
+
+只透传 `link_status` 会让前端永远看不到 X 的状态（早期版本正是如此，导致「X 凭据无效」「X 限流」
+两条文案永不可达，而唯一可达的分支给出的是错误诊断）。
 
 ## 三、目录结构与路由
 
@@ -197,11 +215,12 @@ run_worker_first = true
 `src/index.ts` 新增路由（现有路由一行不动）：
 
 ```ts
-app.use("/tms", accessAuth);       // 两条都要：Hono 的 "/tms/*" 不匹配裸 "/tms"
+// 一条就够：hono ^4.7.0 下 "/tms/*" 同时匹配裸 "/tms" 与其下所有路径。
 app.use("/tms/*", accessAuth);
-app.get("/tms/api/x-usage", xUsageRoute);
-app.get("/tms", serveSpa);
-app.get("/tms/*", serveSpa);
+// API 必须注册在通配符之前，否则被 serveTmsAsset 吞掉、返回 HTML。
+app.get("/tms/api/x-usage", tmsXUsageRoute);
+app.get("/tms", serveTmsAsset);
+app.get("/tms/*", serveTmsAsset);
 ```
 
 `serveSpa` 剥掉 `/tms` 前缀后转发给 `ASSETS.fetch()`（vite `base: "/tms/"` 产出的引用是

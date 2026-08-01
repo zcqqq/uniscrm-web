@@ -15,7 +15,7 @@ interface UsageEntry {
 interface ClientAppUsage {
   client_app_id: string;
   usage_result_count: number;
-  usage: UsageEntry[];
+  usage?: UsageEntry[];
 }
 
 interface UsageData {
@@ -109,8 +109,8 @@ export function XUsage() {
   }));
   const apps = (data?.daily_client_app_usage ?? []).map((a) => ({
     id: a.client_app_id,
-    total: a.usage.reduce((sum, u) => sum + Number(u.usage), 0),
-    dayCount: a.usage.length,
+    total: (a.usage ?? []).reduce((sum, u) => sum + Number(u.usage), 0),
+    dayCount: (a.usage ?? []).length,
   }));
 
   return (

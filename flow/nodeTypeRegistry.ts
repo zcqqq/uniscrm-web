@@ -183,9 +183,9 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
     domain: "content",
     role: "trigger",
     generatable: true,
-    promptFragment: `youtubeContentTrigger - triggers when a subscribed YouTube channel publishes a new video
-   data: { channelId: "", subscriptionChannelId: "", subscriptionChannelName: "", conditions: [] }
-   - channelId and subscriptionChannelId are left blank ("") — the user picks a subscription from a dropdown in the Inspector after generation, sourced from their connected YouTube account (OAuth) on the Social page.
+    promptFragment: `youtubeContentTrigger - triggers when any of the selected subscribed YouTube channels publishes a new video
+   data: { channelId: "", subscriptions: [], conditions: [] }
+   - channelId and subscriptions are left blank — the user picks one or more subscriptions from a multi-select in the Inspector after generation, sourced from their connected YouTube account (OAuth) on the Social page.
    - conditions may filter on "duration" (seconds).`,
   },
   xContentAction: {

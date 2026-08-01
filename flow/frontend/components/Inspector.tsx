@@ -13,7 +13,7 @@ import { ContentMetadata_YouTube } from "../../../metadata/youtube";
 import { PROPS } from "../../../metadata/props";
 import { t as localizeLabel } from "../../../metadata/locale";
 import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
-import { NODE_TYPE_REGISTRY, CONTENT_X_TRIGGER_MODE_LIST_POSTS, CONDITION_LOGIC_OR, CONDITION_LOGIC_AND } from "../../nodeTypeRegistry";
+import { NODE_TYPE_REGISTRY, CONTENT_X_TRIGGER_MODE_LIST_POSTS, CONDITION_LOGIC_OR, CONDITION_LOGIC_AND, resolveYouTubeSubscriptions } from "../../nodeTypeRegistry";
 import { EventMetadata_X } from "../../../metadata/x";
 import type { PropFilter } from "../../../metadata/dataTypes";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
@@ -21,6 +21,8 @@ import { OperationSelect } from "./OperationSelect";
 import { Toggle } from "../../../shared/frontend/ui/toggle";
 import { cn } from "../../../shared/frontend/lib/utils";
 import { nextConditionLogic } from "../lib/condition-logic";
+import { MultiSelect } from "../../../shared/frontend/ui/multi-select";
+import { toggleSubscription } from "../lib/subscription-summary";
 
 type SelectChange = React.ChangeEvent<HTMLSelectElement>;
 type InputChange = React.ChangeEvent<HTMLInputElement>;
@@ -447,7 +449,7 @@ const YOUTUBE_TRIGGER_META = ContentMetadata_YouTube.find((m) => m.sourceContent
 function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const { updateNodeData } = useFlowEditor();
   const conditions: Condition[] = data.conditions || [];
-  const subscriptionChannelId = data.subscriptionChannelId as string;
+  const selectedSubs = resolveYouTubeSubscriptions(data);
   const [state, setState] = useState<{ connected: boolean; accountChannelId: string | null; email?: string; subscriptions: { channelId: string; channelName: string; thumbnailUrl: string }[] }>({
     connected: false, accountChannelId: null, subscriptions: [],
   });
@@ -479,37 +481,49 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
         )}
 
         <div>
-          <Label className="text-xs block mb-1">Subscription</Label>
+          <Label className="text-xs block mb-1">Subscriptions</Label>
           {!state.connected ? (
             <p className="text-xs text-muted-foreground italic">
               Connect your YouTube account from the Social page to pick a subscription.
             </p>
-          ) : state.subscriptions.length === 0 ? (
+          ) : state.subscriptions.length === 0 && selectedSubs.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">
               No subscriptions found — check your YouTube account has subscriptions.
             </p>
           ) : (
-            <Select
-              value={subscriptionChannelId || ""}
-              onChange={(e: SelectChange) => {
-                const sub = state.subscriptions.find((s) => s.channelId === e.target.value);
+            <MultiSelect
+              options={(() => {
+                // 已选但已退订（不在接口返回里）的条目也要出现在列表中，
+                // 否则旧 flow 打开后无法取消勾选它。
+                const fetched = state.subscriptions.map((s) => ({ value: s.channelId, label: s.channelName }));
+                const fetchedIds = new Set(state.subscriptions.map((s) => s.channelId));
+                const stale = selectedSubs
+                  .filter((s) => !fetchedIds.has(s.channelId))
+                  .map((s) => ({ value: s.channelId, label: s.channelName || s.channelId }));
+                return [...fetched, ...stale];
+              })()}
+              selectedValues={selectedSubs.map((s) => s.channelId)}
+              onToggle={(channelId) => {
+                const sub = state.subscriptions.find((s) => s.channelId === channelId);
+                const existing = selectedSubs.find((s) => s.channelId === channelId);
                 updateNodeData(nodeId, {
                   channelId: state.accountChannelId || "",
-                  subscriptionChannelId: e.target.value,
-                  subscriptionChannelName: sub?.channelName || "",
+                  subscriptions: toggleSubscription(selectedSubs, {
+                    channelId,
+                    channelName: sub?.channelName || existing?.channelName || "",
+                  }),
+                  // 旧标量一并清空：从此该节点只认数组，避免两套字段并存歧义。
+                  subscriptionChannelId: "",
+                  subscriptionChannelName: "",
                 });
               }}
-              className="w-full text-sm"
-            >
-              <option value="">Select subscription...</option>
-              {state.subscriptions.map((sub) => (
-                <option key={sub.channelId} value={sub.channelId}>{sub.channelName}</option>
-              ))}
-            </Select>
+              placeholder="Select subscriptions..."
+              tooltip="Select one or more subscriptions"
+            />
           )}
         </div>
 
-        <p className="text-xs text-muted-foreground">Fires when this subscription publishes a new video.</p>
+        <p className="text-xs text-muted-foreground">Fires when any selected subscription publishes a new video.</p>
 
         <ConditionsEditor
           conditions={conditions}

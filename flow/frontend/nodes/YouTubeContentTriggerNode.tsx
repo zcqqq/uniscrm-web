@@ -4,11 +4,13 @@ import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 import { YouTubeIcon } from "../../../shared/frontend/ui/icons";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
 import { conditionSummary } from "../lib/condition-logic";
+import { subscriptionSummary } from "../lib/subscription-summary";
+import { resolveYouTubeSubscriptions } from "../../nodeTypeRegistry";
 
 export default function YouTubeContentTriggerNode({ data, selected }: NodeProps) {
   const conditions = (data.conditions as unknown[]) || [];
   const condCount = conditions.filter((c: any) => c?.field).length;
-  const channelName = (data.subscriptionChannelName as string) || "(no subscription selected)";
+  const channelName = subscriptionSummary(resolveYouTubeSubscriptions(data as Record<string, unknown>));
 
   return (
     <div

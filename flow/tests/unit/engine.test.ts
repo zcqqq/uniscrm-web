@@ -622,3 +622,42 @@ describe("resumeFromNode: branch targets that are not action/wait nodes", () => 
     expect(result.actions.map((a) => a.nodeId)).not.toContain("leafB");
   });
 });
+
+describe("executeFlow: youtubeContentTrigger subscriptions", () => {
+  function graphWithYouTubeTrigger(data: Record<string, unknown>): FlowGraph {
+    return {
+      nodes: [
+        { id: "t1", type: "youtubeContentTrigger", data: { channelId: "acct1", conditions: [], ...data }, position: { x: 0, y: 0 } },
+        { id: "a1", type: "action", data: { actionType: "noopLeaf" }, position: { x: 200, y: 0 } },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    };
+  }
+  const payload = (sub: string) => ({ channel_id: "acct1", subscription_channel_id: sub, channel_type: "YOUTUBE" });
+
+  it("matches when the payload subscription is one of the selected subscriptions", () => {
+    const graph = graphWithYouTubeTrigger({ subscriptions: [{ channelId: "UCa", channelName: "A" }, { channelId: "UCb", channelName: "B" }] });
+    expect(executeFlow(graph, "content.created", payload("UCb")).matched).toBe(true);
+  });
+
+  it("does not match a subscription outside the selected list", () => {
+    const graph = graphWithYouTubeTrigger({ subscriptions: [{ channelId: "UCa", channelName: "A" }] });
+    expect(executeFlow(graph, "content.created", payload("UCz")).matched).toBe(false);
+  });
+
+  it("legacy single-scalar graphs still match (regression)", () => {
+    const graph = graphWithYouTubeTrigger({ subscriptionChannelId: "UCa", subscriptionChannelName: "A" });
+    expect(executeFlow(graph, "content.created", payload("UCa")).matched).toBe(true);
+    expect(executeFlow(graph, "content.created", payload("UCb")).matched).toBe(false);
+  });
+
+  it("empty subscriptions never matches", () => {
+    const graph = graphWithYouTubeTrigger({ subscriptions: [] });
+    expect(executeFlow(graph, "content.created", payload("UCa")).matched).toBe(false);
+  });
+
+  it("still requires the account channelId to match", () => {
+    const graph = graphWithYouTubeTrigger({ subscriptions: [{ channelId: "UCa", channelName: "A" }] });
+    expect(executeFlow(graph, "content.created", { channel_id: "other-acct", subscription_channel_id: "UCa", channel_type: "YOUTUBE" }).matched).toBe(false);
+  });
+});

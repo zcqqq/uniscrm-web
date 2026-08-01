@@ -6,7 +6,7 @@ import { EventMetadata_X } from "../../metadata/x";
 import { passesPropsFilter } from "../../metadata/props-filter";
 import { r2Query, latestRowsSql, sqlStr, sqlInt } from "../../shared/r2-sql";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
-import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY, CONDITION_LOGIC_OR } from "../nodeTypeRegistry";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY, CONDITION_LOGIC_OR, resolveYouTubeSubscriptions } from "../nodeTypeRegistry";
 import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage } from "./trigger-health";
 import { conditionsNeedAuthor, youtubeConditionRequest, resolveYouTubeCondition, type VideoStatsResponse } from "./youtube-condition";
 
@@ -1243,12 +1243,14 @@ app.get("/internal/youtube-watches", async (c) => {
       if (!node.data) continue;
       if (node.type !== "youtubeContentTrigger") continue;
       const channelId = node.data.channelId as string;
-      const subscriptionChannelId = node.data.subscriptionChannelId as string;
-      if (!channelId || !subscriptionChannelId) continue;
-      const key = `${channelId}:${subscriptionChannelId}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      watches.push({ channelId, subscriptionChannelId });
+      if (!channelId) continue;
+      // 多订阅逐 pair 展开；旧标量经 resolver 回退后与改动前逐字节一致。
+      for (const sub of resolveYouTubeSubscriptions(node.data)) {
+        const key = `${channelId}:${sub.channelId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        watches.push({ channelId, subscriptionChannelId: sub.channelId });
+      }
     }
   }
 

@@ -1,4 +1,4 @@
-import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, CONDITION_LOGIC_OR } from "../nodeTypeRegistry";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, CONDITION_LOGIC_OR, resolveYouTubeSubscriptions } from "../nodeTypeRegistry";
 import { USER_PROP_PREFIX } from "../../metadata/dataTypes";
 
 export interface FlowNode {
@@ -256,7 +256,8 @@ export function executeFlow(
               : payload.list_id === undefined || payload.list_id === null))
       || (n.type === "youtubeContentTrigger" && eventType === "content.created"
           && n.data.channelId === payload.channel_id
-          && n.data.subscriptionChannelId === payload.subscription_channel_id)
+          && resolveYouTubeSubscriptions(n.data)
+               .some((s) => s.channelId === payload.subscription_channel_id))
   );
 
   if (triggerNodes.length === 0) return { matched: false, actions: [], pendingWaits: [], nodeLogs: [] };

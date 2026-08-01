@@ -53,4 +53,47 @@ describe("GET /internal/youtube-watches", () => {
     const body = await res.json() as any;
     expect(body.watches).toEqual([]);
   });
+
+  it("expands a multi-subscription node into one watch per subscription", async () => {
+    const graph = {
+      nodes: [
+        { id: "n1", type: "youtubeContentTrigger", data: { channelId: "acct1", subscriptions: [{ channelId: "UCa", channelName: "A" }, { channelId: "UCb", channelName: "B" }] } },
+      ],
+    };
+    const env = makeEnv([{ graph_json: JSON.stringify(graph) }]);
+    const res = await worker.fetch(req("/internal/youtube-watches", { "X-Internal-Secret": "secret" }), env);
+    const body = await res.json() as any;
+    expect(body.watches).toEqual([
+      { channelId: "acct1", subscriptionChannelId: "UCa" },
+      { channelId: "acct1", subscriptionChannelId: "UCb" },
+    ]);
+  });
+
+  it("dedupes the same pair across legacy-scalar and array-shaped nodes", async () => {
+    const graph = {
+      nodes: [
+        { id: "n1", type: "youtubeContentTrigger", data: { channelId: "acct1", subscriptionChannelId: "UCa" } },
+        { id: "n2", type: "youtubeContentTrigger", data: { channelId: "acct1", subscriptions: [{ channelId: "UCa", channelName: "A" }, { channelId: "UCb", channelName: "B" }] } },
+      ],
+    };
+    const env = makeEnv([{ graph_json: JSON.stringify(graph) }]);
+    const res = await worker.fetch(req("/internal/youtube-watches", { "X-Internal-Secret": "secret" }), env);
+    const body = await res.json() as any;
+    expect(body.watches).toEqual([
+      { channelId: "acct1", subscriptionChannelId: "UCa" },
+      { channelId: "acct1", subscriptionChannelId: "UCb" },
+    ]);
+  });
+
+  it("skips array-shaped nodes with no account channelId", async () => {
+    const graph = {
+      nodes: [
+        { id: "n1", type: "youtubeContentTrigger", data: { channelId: "", subscriptions: [{ channelId: "UCa", channelName: "A" }] } },
+      ],
+    };
+    const env = makeEnv([{ graph_json: JSON.stringify(graph) }]);
+    const res = await worker.fetch(req("/internal/youtube-watches", { "X-Internal-Secret": "secret" }), env);
+    const body = await res.json() as any;
+    expect(body.watches).toEqual([]);
+  });
 });

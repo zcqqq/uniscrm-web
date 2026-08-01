@@ -29,7 +29,8 @@ export function MultiSelect({
   tooltip: string;
   className?: string;
 }) {
-  const selectedLabels = options.filter((o) => selectedValues.includes(o.value)).map((o) => o.label);
+  const labelByValue = new Map(options.map((o) => [o.value, o.label]));
+  const selectedLabels = selectedValues.map((v) => labelByValue.get(v) ?? v);
   return (
     <Popover>
       <Tooltip>

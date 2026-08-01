@@ -108,7 +108,7 @@ function EditorToolbar() {
             validateFlowGraph(nodes, edges);
           // Always resolve against the current graph first, so a second Publish click
           // after a partial fix doesn't compound a stale highlight from the first click.
-          // A single node can land in more than one of these four buckets at once (e.g. an
+          // A single node can land in more than one of these five buckets at once (e.g. an
           // OR + 0-condition youtubeCondition node is both "empty" and "OR-empty") — de-dupe
           // since this array is only ever used for `includes` checks, but a repeated id is
           // still a smell worth not carrying forward.
@@ -116,7 +116,7 @@ function EditorToolbar() {
             .getState()
             .setErrorNodeIds([...new Set([...orphanNodeIds, ...misplacedNodeIds, ...emptyConditionNodeIds, ...orLogicEmptyNodeIds, ...youtubeNoSubscriptionNodeIds])]);
           if (!valid) {
-            // 四类错误的修法完全不同（连线 / 填条件 / 改回 AND / 换 trigger），文案必须分开，
+            // 五类错误的修法完全不同（连线 / 填条件 / 改回 AND / 选订阅 / 换 trigger），文案必须分开，
             // 否则用户会对着一个连得好好的节点找"哪里没连上"。孤儿优先——它更常见也更基础。
             // 「换 trigger」的文案不能说成"需要 YouTube Trigger"：这一条在"图里有两个
             // trigger、其中一个正是 YouTube Trigger"时也会触发，那样会把人打发去找一个

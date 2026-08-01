@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useFlowEditor, ACTION_CHANNEL_TYPE } from "../store/flow-editor";
 import { CHANNEL_TYPES, getContentTriggerFields, type TriggerFieldDefinition } from "../config/trigger-fields";
 import { SelectPropsValue } from "../../../shared/frontend/components/SelectPropsValue";
@@ -450,6 +450,12 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
   const { updateNodeData } = useFlowEditor();
   const conditions: Condition[] = data.conditions || [];
   const selectedSubs = resolveYouTubeSubscriptions(data);
+  // 打开面板那一刻已选的条目快照。stale（已退订但仍被选中）选项要一直留在列表里，
+  // 否则取消勾选的瞬间它就从列表消失、无法再勾回——用快照而不是实时已选值做并集。
+  // Inspector 没有按 nodeId 给这个组件加 key，切换节点时它不会重新挂载，所以用
+  // useMemo 按 nodeId 重新计算快照，而不是 useState 的一次性初始化（否则切节点后
+  // 快照会停留在第一个被选中节点上）。
+  const initialSubs = useMemo(() => resolveYouTubeSubscriptions(data), [nodeId]);
   const [state, setState] = useState<{ connected: boolean; accountChannelId: string | null; email?: string; subscriptions: { channelId: string; channelName: string; thumbnailUrl: string }[] }>({
     connected: false, accountChannelId: null, subscriptions: [],
   });
@@ -497,7 +503,7 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
                 // 否则旧 flow 打开后无法取消勾选它。
                 const fetched = state.subscriptions.map((s) => ({ value: s.channelId, label: s.channelName }));
                 const fetchedIds = new Set(state.subscriptions.map((s) => s.channelId));
-                const stale = selectedSubs
+                const stale = initialSubs
                   .filter((s) => !fetchedIds.has(s.channelId))
                   .map((s) => ({ value: s.channelId, label: s.channelName || s.channelId }));
                 return [...fetched, ...stale];

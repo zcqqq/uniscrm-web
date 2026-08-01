@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findOrphanNodeIds, validateFlowGraph, findEmptyYouTubeConditionIds, findOrLogicEmptyNodeIds, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
+import { findOrphanNodeIds, validateFlowGraph, findEmptyYouTubeConditionIds, findOrLogicEmptyNodeIds, findYouTubeTriggerNoSubscriptionIds, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
 import { CONDITION_LOGIC_OR } from "../../nodeTypeRegistry";
 
 describe("TRIGGER_NODE_TYPES", () => {
@@ -91,7 +91,7 @@ describe("validateFlowGraph", () => {
   it("is valid when there are no orphan nodes", () => {
     const nodes = [{ id: "t1", type: "xTrigger" }, { id: "a1", type: "action" }];
     const edges = [{ source: "t1", target: "a1" }];
-    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [], orLogicEmptyNodeIds: [] });
+    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [], orLogicEmptyNodeIds: [], youtubeNoSubscriptionNodeIds: [] });
   });
 
   it("is invalid and lists orphan ids when nodes are unreachable", () => {
@@ -118,7 +118,7 @@ describe("validateFlowGraph", () => {
   it("accepts a youtubeCondition under a YouTube trigger", () => {
     // 带一条真条件：这个 case 要验的是"位置对不对"，不能让空条件那条规则顺带把它判失败。
     const nodes = [
-      { id: "t1", type: "youtubeContentTrigger" },
+      { id: "t1", type: "youtubeContentTrigger", data: { subscriptions: [{ channelId: "UCa", channelName: "A" }] } },
       { id: "yc1", type: "youtubeCondition", data: { conditions: [{ field: "view_count", operator: ">", value: "1" }] } },
     ];
     const edges = [{ source: "t1", target: "yc1" }];
@@ -258,7 +258,7 @@ describe("validateFlowGraph — empty youtubeCondition conditions", () => {
 
   it("passes a fully configured YouTube condition flow", () => {
     const nodes = [
-      { id: "t1", type: "youtubeContentTrigger" },
+      { id: "t1", type: "youtubeContentTrigger", data: { subscriptions: [{ channelId: "UCa", channelName: "A" }] } },
       { id: "w1", type: "wait" },
       { id: "yc1", type: "youtubeCondition", data: { conditions: [{ field: "view_count", operator: ">=", value: "$user.view_count / 1000" }] } },
       { id: "a1", type: "action" },
@@ -274,6 +274,7 @@ describe("validateFlowGraph — empty youtubeCondition conditions", () => {
       misplacedNodeIds: [],
       emptyConditionNodeIds: [],
       orLogicEmptyNodeIds: [],
+      youtubeNoSubscriptionNodeIds: [],
     });
   });
 
@@ -354,5 +355,43 @@ describe("validateFlowGraph 返回第 4 类", () => {
     const r = validateFlowGraph(nodes, []);
     expect(r.valid).toBe(false);
     expect(r.orLogicEmptyNodeIds).toEqual(["t1"]);
+  });
+});
+
+describe("findYouTubeTriggerNoSubscriptionIds", () => {
+  it("flags youtubeContentTrigger with no usable subscription (missing / empty array / empty legacy scalar)", () => {
+    const nodes = [
+      { id: "t1", type: "youtubeContentTrigger", data: {} },
+      { id: "t2", type: "youtubeContentTrigger", data: { subscriptions: [] } },
+      { id: "t3", type: "youtubeContentTrigger", data: { subscriptionChannelId: "" } },
+    ];
+    expect(findYouTubeTriggerNoSubscriptionIds(nodes)).toEqual(["t1", "t2", "t3"]);
+  });
+
+  it("passes with a non-empty subscriptions array", () => {
+    const nodes = [{ id: "t1", type: "youtubeContentTrigger", data: { subscriptions: [{ channelId: "UCa", channelName: "A" }] } }];
+    expect(findYouTubeTriggerNoSubscriptionIds(nodes)).toEqual([]);
+  });
+
+  it("passes with a legacy scalar selection (published old graphs)", () => {
+    const nodes = [{ id: "t1", type: "youtubeContentTrigger", data: { subscriptionChannelId: "UCa", subscriptionChannelName: "A" } }];
+    expect(findYouTubeTriggerNoSubscriptionIds(nodes)).toEqual([]);
+  });
+
+  it("ignores other node types", () => {
+    const nodes = [{ id: "x1", type: "xContentTrigger", data: {} }];
+    expect(findYouTubeTriggerNoSubscriptionIds(nodes)).toEqual([]);
+  });
+});
+
+describe("validateFlowGraph: youtube trigger without subscription", () => {
+  it("is invalid and lists the trigger id", () => {
+    const nodes = [
+      { id: "t1", type: "youtubeContentTrigger", data: { subscriptions: [] } },
+      { id: "a1", type: "action", data: {} },
+    ];
+    const result = validateFlowGraph(nodes, [{ source: "t1", target: "a1" }]);
+    expect(result.valid).toBe(false);
+    expect(result.youtubeNoSubscriptionNodeIds).toEqual(["t1"]);
   });
 });

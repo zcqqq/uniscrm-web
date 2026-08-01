@@ -104,7 +104,7 @@ function EditorToolbar() {
         size="sm"
         onClick={async () => {
           const { nodes, edges } = useFlowEditor.getState();
-          const { valid, orphanNodeIds, misplacedNodeIds, emptyConditionNodeIds, orLogicEmptyNodeIds } =
+          const { valid, orphanNodeIds, misplacedNodeIds, emptyConditionNodeIds, orLogicEmptyNodeIds, youtubeNoSubscriptionNodeIds } =
             validateFlowGraph(nodes, edges);
           // Always resolve against the current graph first, so a second Publish click
           // after a partial fix doesn't compound a stale highlight from the first click.
@@ -114,7 +114,7 @@ function EditorToolbar() {
           // still a smell worth not carrying forward.
           useFlowEditor
             .getState()
-            .setErrorNodeIds([...new Set([...orphanNodeIds, ...misplacedNodeIds, ...emptyConditionNodeIds, ...orLogicEmptyNodeIds])]);
+            .setErrorNodeIds([...new Set([...orphanNodeIds, ...misplacedNodeIds, ...emptyConditionNodeIds, ...orLogicEmptyNodeIds, ...youtubeNoSubscriptionNodeIds])]);
           if (!valid) {
             // 四类错误的修法完全不同（连线 / 填条件 / 改回 AND / 换 trigger），文案必须分开，
             // 否则用户会对着一个连得好好的节点找"哪里没连上"。孤儿优先——它更常见也更基础。
@@ -128,7 +128,9 @@ function EditorToolbar() {
                   ? `YouTube Condition 没有设置条件，无法发布`
                   : orLogicEmptyNodeIds.length > 0
                     ? `${orLogicEmptyNodeIds.length} 个节点选了 OR 但没有条件，无法发布`
-                    : `YouTube Condition 只能用在唯一 trigger 是 YouTube Trigger 的流程里，无法发布`;
+                    : youtubeNoSubscriptionNodeIds.length > 0
+                      ? `${youtubeNoSubscriptionNodeIds.length} 个 YouTube Trigger 没有选择 subscription，无法发布`
+                      : `YouTube Condition 只能用在唯一 trigger 是 YouTube Trigger 的流程里，无法发布`;
             toast({ title, variant: "destructive" });
             return;
           }

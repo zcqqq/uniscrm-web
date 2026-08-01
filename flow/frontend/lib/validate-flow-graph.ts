@@ -1,4 +1,4 @@
-import { CONDITION_LOGIC_OR } from "../../nodeTypeRegistry";
+import { CONDITION_LOGIC_OR, resolveYouTubeSubscriptions } from "../../nodeTypeRegistry";
 
 export const TRIGGER_NODE_TYPES = ["xTrigger", "cronTrigger", "xContentTrigger", "youtubeContentTrigger"];
 
@@ -93,6 +93,18 @@ export function findOrLogicEmptyNodeIds(
     .map((n) => n.id);
 }
 
+// 多选订阅上线的同时把「一个都没选」从"静默不触发"改为发布前拦截（用户决策，见
+// 2026-08-01 spec D4）。必须用与运行时同一个 resolver：旧图的单标量经回退长度为 1
+// 照常通过，发布校验和 engine.ts 的 membership 判定永远一致。
+export function findYouTubeTriggerNoSubscriptionIds(
+  nodes: { id: string; type?: string; data?: Record<string, unknown> }[]
+): string[] {
+  return nodes
+    .filter((n) => n.type === "youtubeContentTrigger")
+    .filter((n) => resolveYouTubeSubscriptions(n.data).length === 0)
+    .map((n) => n.id);
+}
+
 export function validateFlowGraph(
   nodes: { id: string; type?: string; data?: Record<string, unknown> }[],
   edges: { source: string; target: string }[]
@@ -102,20 +114,24 @@ export function validateFlowGraph(
   misplacedNodeIds: string[];
   emptyConditionNodeIds: string[];
   orLogicEmptyNodeIds: string[];
+  youtubeNoSubscriptionNodeIds: string[];
 } {
   const orphanNodeIds = findOrphanNodeIds(nodes, edges);
   const misplacedNodeIds = findMisplacedYouTubeConditionIds(nodes);
   const emptyConditionNodeIds = findEmptyYouTubeConditionIds(nodes);
   const orLogicEmptyNodeIds = findOrLogicEmptyNodeIds(nodes);
+  const youtubeNoSubscriptionNodeIds = findYouTubeTriggerNoSubscriptionIds(nodes);
   return {
     valid:
       orphanNodeIds.length === 0 &&
       misplacedNodeIds.length === 0 &&
       emptyConditionNodeIds.length === 0 &&
-      orLogicEmptyNodeIds.length === 0,
+      orLogicEmptyNodeIds.length === 0 &&
+      youtubeNoSubscriptionNodeIds.length === 0,
     orphanNodeIds,
     misplacedNodeIds,
     emptyConditionNodeIds,
     orLogicEmptyNodeIds,
+    youtubeNoSubscriptionNodeIds,
   };
 }

@@ -337,3 +337,35 @@ export const CONTENT_FLOW_SIDEBAR_ORDER: string[] = [
 // findOrLogicEmptyNodeIds 必须判同一个值，否则会出现"发布拦不住但运行时按别的语义跑"。
 export const CONDITION_LOGIC_OR = "or";
 export const CONDITION_LOGIC_AND = "and";
+
+export interface YouTubeSubscriptionRef {
+  channelId: string;
+  channelName: string;
+}
+
+// youtubeContentTrigger 的订阅取值，前后端共用的唯一入口：引擎匹配（engine.ts）、
+// watches 端点（index.ts）、发布校验（validate-flow-graph.ts）、Inspector 与节点卡片
+// 必须判同一份值，否则会出现"发布拦不住但运行时不触发"或反之。
+// 优先级：subscriptions 是数组就用它（空数组=用户明确清空，不回退）；否则回退旧标量
+// subscriptionChannelId/subscriptionChannelName（存量已发布 flow 的形状，零迁移）。
+// 对任何畸形输入（AI 生成/手改坏的 graph_json）只降级、不抛异常——本函数在队列 handler
+// 执行路径上，抛出会导致整条消息重试、已执行的 action 重复执行。
+export function resolveYouTubeSubscriptions(
+  data: Record<string, unknown> | null | undefined
+): YouTubeSubscriptionRef[] {
+  if (!data || typeof data !== "object") return [];
+  const raw = (data as { subscriptions?: unknown }).subscriptions;
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((s): s is Record<string, unknown> => !!s && typeof s === "object")
+      .map((s) => ({
+        channelId: typeof s.channelId === "string" ? s.channelId : "",
+        channelName: typeof s.channelName === "string" ? s.channelName : "",
+      }))
+      .filter((s) => s.channelId !== "");
+  }
+  const legacyId = (data as { subscriptionChannelId?: unknown }).subscriptionChannelId;
+  if (typeof legacyId !== "string" || legacyId === "") return [];
+  const legacyName = (data as { subscriptionChannelName?: unknown }).subscriptionChannelName;
+  return [{ channelId: legacyId, channelName: typeof legacyName === "string" ? legacyName : "" }];
+}

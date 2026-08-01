@@ -75,10 +75,19 @@ describe("CreditService", () => {
   });
 
   it("computes full balance with no usage", async () => {
-    const balance = await svc.getBalance(1, "basic", "2026-01-01T00:00:00.000Z", new Date("2026-01-15T00:00:00Z"));
-    expect(balance.monthlyCreditMicros).toBe(5_000_000);
+    const balance = await svc.getBalance(1, "pro", "2026-01-01T00:00:00.000Z", new Date("2026-01-15T00:00:00Z"));
+    expect(balance.monthlyCreditMicros).toBe(100_000_000);
     expect(balance.usedMicros).toBe(0);
-    expect(balance.balanceMicros).toBe(5_000_000);
+    expect(balance.balanceMicros).toBe(100_000_000);
+  });
+
+  // basic 档的 credit 额度在 shared/plans.ts 里被刻意注释掉了。getBalance 对缺失的
+  // credit 键必须兜底为 0 而不是"无限" —— 那正是它绕开 getLimit() 的原因（getLimit()
+  // 对缺失键返回 -1 表示无限，用在钱上是危险默认）。
+  it("treats a tier with no configured credit limit as zero allowance, not unlimited", async () => {
+    const balance = await svc.getBalance(1, "basic", "2026-01-01T00:00:00.000Z", new Date("2026-01-15T00:00:00Z"));
+    expect(balance.monthlyCreditMicros).toBe(0);
+    expect(balance.balanceMicros).toBe(0);
   });
 
   it("deducts logged usage within the current period only", async () => {
@@ -88,9 +97,9 @@ describe("CreditService", () => {
     await svc.logUsage({ tenantId: 1, flowId: "flow-1", channelId: "chan-1", actionEventType: "follow-user", creditMicros: 999_999 });
     fakeDb.usageRows[1].created_at = "2025-12-15T00:00:00.000Z";
 
-    const balance = await svc.getBalance(1, "basic", "2026-01-01T00:00:00.000Z", new Date("2026-01-15T00:00:00Z"));
+    const balance = await svc.getBalance(1, "pro", "2026-01-01T00:00:00.000Z", new Date("2026-01-15T00:00:00Z"));
     expect(balance.usedMicros).toBe(15_000);
-    expect(balance.balanceMicros).toBe(5_000_000 - 15_000);
+    expect(balance.balanceMicros).toBe(100_000_000 - 15_000);
   });
 
   it("balance goes to zero/negative once allowance is exhausted", async () => {

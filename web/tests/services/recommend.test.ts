@@ -73,7 +73,7 @@ describe("RecommendService", () => {
       await service.computeForUser("u1", "global");
 
       expect(kv.put).toHaveBeenCalledWith(
-        "recommendations:u1",
+        "recommendations:tenant-u1",
         expect.any(String)
       );
       const cached = JSON.parse(kv.put.mock.calls[0][1]);
@@ -108,7 +108,7 @@ describe("RecommendService", () => {
     });
   });
 
-  describe("getForUser", () => {
+  describe("getForTenant", () => {
     it("returns cached recommendations", async () => {
       kv.get.mockResolvedValue(
         JSON.stringify([
@@ -116,7 +116,7 @@ describe("RecommendService", () => {
         ])
       );
 
-      const results = await service.getForUser("u1");
+      const results = await service.getForTenant("u1");
       expect(results).toHaveLength(1);
       expect(results[0].sort_score).toBe(0.85);
     });

@@ -223,8 +223,12 @@ jobs:
       # error"（miniflare/workerd 的关闭竞态，与被测代码无关），vitest 会因此在用例
       # 全绿的情况下仍然退出 1 —— 不加这个 flag，这道门禁会让每一次部署都失败。
       # 已验证该 flag 不会让门禁失效：往 link 里塞一个必失败的用例，仍然退出 1。
+      # mkdir dist：dist 被 gitignore，CI checkout 后不存在。analytics 的旧版
+      # defineWorkersConfig（vitest-pool-workers 内嵌 wrangler）会因 wrangler.toml
+      # 顶层 [assets] 的 directory 不存在直接抛错（flow/admin 用新 cloudflareTest 插件
+      # 没这个问题）。wrangler 只要求目录存在，空目录即可；对没有 assets 的模块无害。
       - name: Test
-        run: cd ${{ matrix.module }} && npx vitest run --dangerouslyIgnoreUnhandledErrors
+        run: mkdir -p ${{ matrix.module }}/dist && cd ${{ matrix.module }} && npx vitest run --dangerouslyIgnoreUnhandledErrors
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

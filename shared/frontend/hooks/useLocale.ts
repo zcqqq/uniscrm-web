@@ -27,8 +27,21 @@ function fetchMe(): Promise<{ locale: Locale; timezone: string }> {
   return mePromise;
 }
 
+// lang cookie 由 web worker 在登录与切换语言时写入（domain=uni-scrm.com），全模块同步可读。
+// 拿它做初值可以免掉「先渲染英文再跳中文」的闪烁；fetch 回来后再纠偏。
+export function localeFromCookie(cookie: string): Locale | null {
+  const m = cookie.match(/(?:^|;\s*)lang=([^;]*)/);
+  if (!m) return null;
+  return m[1] === "zh" || m[1] === "en" ? m[1] : null;
+}
+
 export function useLocale(): LocaleState {
-  const [state, setState] = useState<LocaleState>({ locale: "en", timezone: "UTC", loading: true });
+  const [state, setState] = useState<LocaleState>(() => ({
+    locale: (typeof document !== "undefined" && localeFromCookie(document.cookie)) || "en",
+    timezone: "UTC",
+    // cookie 只带语言，时区仍要等 fetch，所以这里依旧是 loading。
+    loading: true,
+  }));
 
   useEffect(() => {
     let mounted = true;

@@ -179,6 +179,8 @@ const BYOK_STRINGS = {
   } as LocalizedString,
   step1: { en: "Step 1 — Copy these URLs into the X Developer Console", zh: "Step 1 — 复制以下 URL 到 X Developer Console" } as LocalizedString,
   step2: { en: "Step 2 — Enter your app credentials", zh: "Step 2 — 填写应用凭证" } as LocalizedString,
+  webhookUrlLabel: { en: "Webhook URL", zh: "Webhook URL" } as LocalizedString,
+  redirectUrlLabel: { en: "Redirect URL (OAuth 2.0)", zh: "重定向 URL (OAuth 2.0)" } as LocalizedString,
   failed: { en: "Failed", zh: "失败" } as LocalizedString,
   saveAndAuthorize: { en: "Save & Authorize", zh: "保存并授权" } as LocalizedString,
   saving: { en: "Saving…", zh: "保存中…" } as LocalizedString,
@@ -263,7 +265,7 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
     <>
       <ChannelCard
         logo={<XIcon className="w-8 h-8" />}
-        name="X (BYOK)"
+        name="X (BYOK)" // i18n-ok: "X (BYOK)" is a brand + technical acronym (BYOK = Bring Your Own Key), not prose
         tagline={{
           en: "More features, cost of your own. Use your own X developer app (Bring Your Own Key).",
           zh: "使用自己的 X 开发者应用（Bring Your Own Key）获得完整控制权和独立 Webhook。",
@@ -343,7 +345,7 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
                 {t(BYOK_STRINGS.step1, locale)}
               </p>
               <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Webhook URL</label>
+                <label className="text-[10px] text-muted-foreground">{t(BYOK_STRINGS.webhookUrlLabel, locale)}</label>
                 <Input
                   value={webhookUrl}
                   readOnly
@@ -352,7 +354,7 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">Redirect URL (OAuth 2.0)</label>
+                <label className="text-[10px] text-muted-foreground">{t(BYOK_STRINGS.redirectUrlLabel, locale)}</label>
                 <Input
                   value={redirectUrl}
                   readOnly
@@ -366,32 +368,36 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
               <p className="text-xs font-medium text-muted-foreground">
                 {t(BYOK_STRINGS.step2, locale)}
               </p>
-              {/* Same order as the X Developer Portal's "Keys and tokens" page, and each
+              {/* Same order as the X Developer Portal's "Keys and tokens" page, and each // i18n-ok: dev-facing code comment quoting the X Developer Portal's own (English-only) page title verbatim, not app copy shown to end users
                   placeholder names the section it is copied from — Consumer Secret and Client
                   Secret are easy to swap, and doing so fails much later (the webhook's CRC
                   challenge) with an error that says nothing about which field was wrong. */}
+              {/* Placeholders below are left in English on purpose (not wrapped in a
+                  LocalizedString) — they must match the X Developer Portal's exact field
+                  names verbatim (that portal is English-only) so users can map credentials
+                  correctly; translating would break the very match this comment relies on. */}
               <Input
-                placeholder="App-Only Authentication Bearer Token"
+                placeholder="App-Only Authentication Bearer Token" // i18n-ok: must match X Developer Portal's exact (English-only) field name so users can map credentials correctly
                 type="password"
                 value={bearerToken}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBearerToken(e.target.value)}
                 className="h-9 text-sm"
               />
               <Input
-                placeholder="Consumer Key Secret (not the Consumer Key)"
+                placeholder="Consumer Key Secret (not the Consumer Key)" // i18n-ok: must match X Developer Portal's exact (English-only) field name so users can map credentials correctly
                 type="password"
                 value={consumerSecret}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConsumerSecret(e.target.value)}
                 className="h-9 text-sm"
               />
               <Input
-                placeholder="OAuth 2.0 Client ID"
+                placeholder="OAuth 2.0 Client ID" // i18n-ok: must match X Developer Portal's exact (English-only) field name so users can map credentials correctly
                 value={clientId}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setClientId(e.target.value)}
                 className="h-9 text-sm"
               />
               <Input
-                placeholder="OAuth 2.0 Client Secret"
+                placeholder="OAuth 2.0 Client Secret" // i18n-ok: must match X Developer Portal's exact (English-only) field name so users can map credentials correctly
                 type="password"
                 value={clientSecret}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setClientSecret(e.target.value)}

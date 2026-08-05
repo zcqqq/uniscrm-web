@@ -5,19 +5,22 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from ".
 import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 import { formatDate } from "../../../shared/frontend/lib/format-time";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { C } from "../../../shared/frontend/i18n-common";
 
 interface Props {
   items: ProductItem[];
-  onDelete: (id: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>; // i18n-ok: TypeScript type signature, not prose (audit false-positives on "> Promise<")
 }
 
 export function ProductTable({ items, onDelete }: Props) {
   const { timezone } = useLocale();
+  const T = useT();
   if (items.length === 0) {
     return (
       <EmptyState
-        title="No products yet"
-        description="Add a link or sync from Shopify."
+        title={T({ en: "No products yet", zh: "暂无商品" })}
+        description={T({ en: "Add a link or sync from Shopify.", zh: "添加链接或从 Shopify 同步。" })}
       />
     );
   }
@@ -26,11 +29,11 @@ export function ProductTable({ items, onDelete }: Props) {
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead className="w-20">Channel</TableHead>
-          <TableHead>Description</TableHead>
-          <TableHead className="w-28">Updated</TableHead>
-          <TableHead className="w-20">Actions</TableHead>
+          <TableHead>{T(C.name)}</TableHead>
+          <TableHead className="w-20">{T({ en: "Channel", zh: "渠道" })}</TableHead>
+          <TableHead>{T(C.description)}</TableHead>
+          <TableHead className="w-28">{T({ en: "Updated", zh: "更新时间" })}</TableHead>
+          <TableHead className="w-20">{T(C.actions)}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -52,7 +55,7 @@ export function ProductTable({ items, onDelete }: Props) {
             </TableCell>
             <TableCell>
               <Badge variant={item.channel_type === "LINK" ? "outline" : "default"}>
-                {item.channel_type === "LINK" ? "Link" : "Shopify"}
+                {item.channel_type === "LINK" ? T({ en: "Link", zh: "链接" }) : "Shopify"}
               </Badge>
             </TableCell>
             <TableCell className="text-muted-foreground truncate max-w-xs">
@@ -65,7 +68,7 @@ export function ProductTable({ items, onDelete }: Props) {
             </TableCell>
             <TableCell>
               <Button variant="ghost" size="sm" className="text-destructive" onClick={() => onDelete(item.id)}>
-                Delete
+                {T(C.delete)}
               </Button>
             </TableCell>
           </TableRow>

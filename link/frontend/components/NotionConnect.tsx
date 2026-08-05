@@ -6,12 +6,15 @@ import { Checkbox } from "../../../shared/frontend/ui/checkbox";
 import { Label } from "../../../shared/frontend/ui/label";
 import { ChannelCard } from "./ChannelCard";
 import { NotionLogo } from "../lib/channelLogos";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { C } from "../../../shared/frontend/i18n-common";
 
 interface Props {
   onSyncComplete: () => void;
 }
 
 export function NotionConnect({ onSyncComplete }: Props) {
+  const T = useT();
   const {
     connected,
     workspaceName,
@@ -39,12 +42,12 @@ export function NotionConnect({ onSyncComplete }: Props) {
     return (
       <ChannelCard
         logo={<NotionLogo />}
-        name="Notion"
-        tagline="Connect to sync your notes"
+        name="Notion" // i18n-ok: third-party brand name, never translated
+        tagline={T({ en: "Connect to sync your notes", zh: "连接后同步你的笔记" })}
         status="disconnected"
         actions={
           <Button className="w-full" onClick={startAuth}>
-            Connect Notion
+            {T({ en: "Connect Notion", zh: "连接 Notion" })}
           </Button>
         }
       />
@@ -76,23 +79,26 @@ export function NotionConnect({ onSyncComplete }: Props) {
   return (
     <ChannelCard
       logo={<NotionLogo />}
-      name="Notion"
-      tagline="Connect to sync your notes"
+      name="Notion" // i18n-ok: third-party brand name, never translated
+      tagline={T({ en: "Connect to sync your notes", zh: "连接后同步你的笔记" })}
       status="connected"
       statusLabel={workspaceName ?? undefined}
       extra={
         <div className="space-y-2">
           {syncResult && (
             <p className="text-xs text-muted-foreground">
-              Added: {syncResult.added}, Updated: {syncResult.updated}, Skipped: {syncResult.skipped}
+              {T({
+                en: `Added: ${syncResult.added}, Updated: ${syncResult.updated}, Skipped: ${syncResult.skipped}`,
+                zh: `新增 ${syncResult.added} 条，更新 ${syncResult.updated} 条，跳过 ${syncResult.skipped} 条`,
+              })}
             </p>
           )}
 
           {showFolders && (
             <div className="pt-2 border-t border-border/60">
-              <h4 className="text-xs font-medium mb-2">Select databases</h4>
+              <h4 className="text-xs font-medium mb-2">{T({ en: "Select databases", zh: "选择数据库" })}</h4>
               {folders.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No databases found</p>
+                <p className="text-xs text-muted-foreground">{T({ en: "No databases found", zh: "未找到数据库" })}</p>
               ) : (
                 <div className="max-h-40 overflow-y-auto space-y-1 mb-3">
                   {folders.map((f) => (
@@ -108,10 +114,10 @@ export function NotionConnect({ onSyncComplete }: Props) {
               )}
               <div className="flex gap-2">
                 <Button size="sm" onClick={handleConfirmFolders}>
-                  Confirm
+                  {T(C.confirm)}
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => setShowFolders(false)}>
-                  Cancel
+                  {T(C.cancel)}
                 </Button>
               </div>
             </div>
@@ -133,10 +139,10 @@ export function NotionConnect({ onSyncComplete }: Props) {
       actions={
         <div className="flex gap-2 w-full">
           <Button variant="outline" className="flex-1" onClick={handleOpenFolders}>
-            Select
+            {T({ en: "Select", zh: "选择" })}
           </Button>
           <Button className="flex-1" onClick={handleSync} disabled={syncing}>
-            {syncing ? "Syncing..." : "Sync"}
+            {syncing ? T({ en: "Syncing...", zh: "同步中…" }) : T({ en: "Sync", zh: "同步" })}
           </Button>
         </div>
       }

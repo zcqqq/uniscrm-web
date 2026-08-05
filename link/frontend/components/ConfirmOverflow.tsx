@@ -6,6 +6,8 @@ import {
 } from "../../../shared/frontend/ui/alert-dialog";
 import { buttonVariants } from "../../../shared/frontend/ui/button";
 import { cn } from "../../../shared/frontend/lib/utils";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { C } from "../../../shared/frontend/i18n-common";
 
 interface ConfirmOverflowProps {
   overflow: number;
@@ -15,13 +17,17 @@ interface ConfirmOverflowProps {
 }
 
 export function ConfirmOverflow({ overflow, wouldDelete, onConfirm, onCancel }: ConfirmOverflowProps) {
+  const T = useT();
   return (
     <AlertDialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Item limit reached</AlertDialogTitle>
+          <AlertDialogTitle>{T({ en: "Item limit reached", zh: "已达数量上限" })}</AlertDialogTitle>
           <AlertDialogDescription>
-            This import will exceed the 100-item limit. The {overflow} oldest item{overflow > 1 ? "s" : ""} will be removed:
+            {T({
+              en: `This import will exceed the 100-item limit. The ${overflow} oldest item${overflow > 1 ? "s" : ""} will be removed:`,
+              zh: `本次导入将超出 100 项上限，最早的 ${overflow} 项将被移除：`,
+            })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <ul className="text-sm text-muted-foreground max-h-40 overflow-y-auto space-y-1">
@@ -30,12 +36,12 @@ export function ConfirmOverflow({ overflow, wouldDelete, onConfirm, onCancel }: 
           ))}
         </ul>
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={onCancel}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel onClick={onCancel}>{T(C.cancel)}</AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
             className={cn(buttonVariants({ variant: "destructive" }))}
           >
-            Continue
+            {T({ en: "Continue", zh: "继续" })}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

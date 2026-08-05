@@ -7,6 +7,9 @@ import { t, type Locale } from "../../../metadata/locale";
 
 export type ChannelStatus = "loading" | "connected" | "disconnected" | "pending";
 
+const READ_MORE: LocalizedString = { en: "Read more", zh: "查看详情" };
+const CONNECTED_ON: LocalizedString = { en: "Connected", zh: "已连接于" };
+
 interface ChannelCardProps {
   logo: React.ReactNode;
   name: string;
@@ -25,7 +28,7 @@ interface ChannelCardProps {
   className?: string;
 }
 
-function StatusDot({ status }: { status: ChannelStatus }) {
+function StatusDot({ status, locale }: { status: ChannelStatus; locale: Locale }) {
   const dotClass = {
     connected: "bg-emerald-500",
     disconnected: "bg-muted-foreground/40",
@@ -33,12 +36,13 @@ function StatusDot({ status }: { status: ChannelStatus }) {
     loading: "bg-muted-foreground/20 animate-pulse",
   }[status];
 
-  const label = {
-    connected: "Connected",
-    disconnected: "Not connected",
-    pending: "Pending auth",
-    loading: "Loading…",
-  }[status];
+  const labels: Record<ChannelStatus, LocalizedString> = {
+    connected: { en: "Connected", zh: "已连接" },
+    disconnected: { en: "Not connected", zh: "未连接" },
+    pending: { en: "Pending auth", zh: "待授权" },
+    loading: { en: "Loading…", zh: "加载中…" },
+  };
+  const label = t(labels[status], locale);
 
   return (
     <span className="inline-flex items-center gap-1.5">
@@ -82,7 +86,7 @@ export function ChannelCard({
           <div className="min-w-0 flex-1">
             <h3 className="text-sm font-semibold leading-tight truncate">{name}</h3>
             <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-              <StatusDot status={status} />
+              <StatusDot status={status} locale={locale} />
               {statusLabel && (
                 <span className="text-xs font-medium text-foreground/70 bg-muted rounded-full px-1.5 py-0.5 truncate max-w-[8rem]">
                   {statusLabel}
@@ -104,8 +108,8 @@ export function ChannelCard({
               href={helpUrl}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={locale === "zh" ? "查看详情" : "Read more"}
-              title={locale === "zh" ? "查看详情" : "Read more"}
+              aria-label={t(READ_MORE, locale)}
+              title={t(READ_MORE, locale)}
               className="inline-flex items-center shrink-0 text-primary hover:text-primary/80"
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -115,7 +119,7 @@ export function ChannelCard({
 
         {createdAt && (
           <p className="text-[11px] text-muted-foreground/60 -mt-1.5">
-            Connected {formatDate(createdAt, timezone)}
+            {t(CONNECTED_ON, locale)} {formatDate(createdAt, timezone)}
           </p>
         )}
 

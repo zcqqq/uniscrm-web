@@ -5,12 +5,15 @@ import { ConfirmOverflow } from "./ConfirmOverflow";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { C } from "../../../shared/frontend/i18n-common";
 
 interface Props {
   onAdded: () => void;
 }
 
 export function LinkAdd({ onAdded }: Props) {
+  const T = useT();
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
@@ -40,15 +43,15 @@ export function LinkAdd({ onAdded }: Props) {
     <>
       <Card className="border-2 border-dashed">
         <CardContent className="p-6 text-center">
-          <div className="text-sm font-medium text-foreground mb-2">Link</div>
-          <p className="text-muted-foreground text-sm mb-3">Add product by URL</p>
+          <div className="text-sm font-medium text-foreground mb-2">{T({ en: "Link", zh: "链接" })}</div>
+          <p className="text-muted-foreground text-sm mb-3">{T({ en: "Add product by URL", zh: "通过 URL 添加商品" })}</p>
 
           {showForm ? (
             <div className="text-left space-y-2">
               <Input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Product name"
+                placeholder={T({ en: "Product name", zh: "商品名称" })}
               />
               <Input
                 value={url}
@@ -61,20 +64,20 @@ export function LinkAdd({ onAdded }: Props) {
                   onClick={() => handleSubmit()}
                   disabled={adding || !title.trim() || !url.trim()}
                 >
-                  {adding ? "Adding..." : "Add"}
+                  {adding ? T({ en: "Adding...", zh: "添加中…" }) : T(C.add)}
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => { setShowForm(false); setTitle(""); setUrl(""); setOverflowInfo(null); }}
                 >
-                  Cancel
+                  {T(C.cancel)}
                 </Button>
               </div>
             </div>
           ) : (
             <Button size="sm" onClick={() => setShowForm(true)}>
-              + Add Link
+              + {T({ en: "Add Link", zh: "添加链接" })}
             </Button>
           )}
         </CardContent>

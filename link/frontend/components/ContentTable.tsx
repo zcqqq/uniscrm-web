@@ -8,19 +8,23 @@ import { DataTable, type Column } from "../../../shared/frontend/components/Data
 import { DateCell } from "../../../shared/frontend/components/CellDate";
 import { buildEntityColumns } from "../../../shared/frontend/lib/metadata-columns";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { C } from "../../../shared/frontend/i18n-common";
 import { PROPS } from "../../../metadata/props";
+import type { LocalizedString } from "../../../metadata/dataTypes";
+import { t } from "../../../metadata/locale";
 
 interface Props {
   items: ContentItem[];
-  onUpdate: (id: string, fields: { title?: string; summary?: string }) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  onUpdate: (id: string, fields: { title?: string; summary?: string }) => Promise<void>; // i18n-ok: TypeScript type signature, not prose
+  onDelete: (id: string) => Promise<void>; // i18n-ok: TypeScript type signature, not prose
 }
 
-const CHANNEL_LABEL: Record<string, string> = {
-  LOCAL: "Local",
-  TIKTOK: "TikTok",
-  NOTION: "Notion",
-  X: "X",
+const CHANNEL_LABEL: Record<string, LocalizedString> = {
+  LOCAL: { en: "Local", zh: "本地" },
+  TIKTOK: { en: "TikTok", zh: "TikTok" },
+  NOTION: { en: "Notion", zh: "Notion" },
+  X: { en: "X", zh: "X" },
 };
 
 const channelVariant = (type: string) => {
@@ -40,6 +44,7 @@ export function ContentTable({ items, onUpdate, onDelete }: Props) {
   const [editTitle, setEditTitle] = useState("");
   const [editSummary, setEditSummary] = useState("");
   const { locale, timezone } = useLocale();
+  const T = useT();
 
   const startEdit = (item: ContentItem) => {
     setEditingId(item.id);
@@ -67,8 +72,8 @@ export function ContentTable({ items, onUpdate, onDelete }: Props) {
                 <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
                 <Textarea value={editSummary} onChange={(e) => setEditSummary(e.target.value)} rows={2} />
                 <div className="flex gap-1">
-                  <Button variant="link" size="sm" onClick={() => saveEdit(item.id)}>Save</Button>
-                  <Button variant="ghost" size="sm" onClick={() => setEditingId(null)}>Cancel</Button>
+                  <Button variant="link" size="sm" onClick={() => saveEdit(item.id)}>{T(C.save)}</Button>
+                  <Button variant="ghost" size="sm" onClick={() => setEditingId(null)}>{T(C.cancel)}</Button>
                 </div>
               </div>
             ) : (
@@ -108,17 +113,17 @@ export function ContentTable({ items, onUpdate, onDelete }: Props) {
     return [
       {
         key: "channel_type",
-        label: "Channel",
+        label: T({ en: "Channel", zh: "渠道" }),
         render: (item) => (
           <Badge variant={channelVariant(item.channel_type)}>
-            {CHANNEL_LABEL[item.channel_type] ?? item.channel_type}
+            {CHANNEL_LABEL[item.channel_type] ? t(CHANNEL_LABEL[item.channel_type], locale) : item.channel_type}
           </Badge>
         ),
       },
       ...generated,
       {
         key: "actions",
-        label: "Actions",
+        label: T(C.actions),
         render: (item) => (
           <Button
             variant="ghost"
@@ -126,12 +131,12 @@ export function ContentTable({ items, onUpdate, onDelete }: Props) {
             className="text-destructive"
             onClick={(e) => { e.stopPropagation(); onDelete(item.id); }}
           >
-            Delete
+            {T(C.delete)}
           </Button>
         ),
       },
     ];
-  }, [locale, timezone, editingId, editTitle, editSummary]);
+  }, [locale, timezone, editingId, editTitle, editSummary, T]);
 
   return (
     <DataTable

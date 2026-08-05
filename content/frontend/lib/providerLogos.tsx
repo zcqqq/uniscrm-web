@@ -7,6 +7,7 @@ import { Sparkles, Brain, Cloud } from "lucide-react";
 export function OpenAiLogo() {
   return (
     <div className="w-full h-full flex items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600">
+      {/* i18n-ok: third-party brand name, never translated */}
       <Sparkles className="w-5 h-5" aria-label="OpenAI" />
     </div>
   );
@@ -15,6 +16,7 @@ export function OpenAiLogo() {
 export function AnthropicLogo() {
   return (
     <div className="w-full h-full flex items-center justify-center rounded-xl bg-orange-500/10 text-orange-600">
+      {/* i18n-ok: third-party brand name, never translated */}
       <Brain className="w-5 h-5" aria-label="Anthropic" />
     </div>
   );
@@ -23,6 +25,7 @@ export function AnthropicLogo() {
 export function WorkersAiLogo() {
   return (
     <div className="w-full h-full flex items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
+      {/* i18n-ok: third-party brand name, never translated */}
       <Cloud className="w-5 h-5" aria-label="Cloudflare Workers AI" />
     </div>
   );

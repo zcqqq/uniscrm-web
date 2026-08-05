@@ -4,7 +4,7 @@ import { authFetch } from "../../../shared/frontend/lib/auth-fetch";
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await authFetch(path, {
     ...options,
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: { "Content-Type": "application/json", ...options?.headers }, // i18n-ok: HTTP header name, not user-facing text
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));

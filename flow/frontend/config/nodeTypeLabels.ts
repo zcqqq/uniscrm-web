@@ -13,7 +13,7 @@ import type { LocalizedString } from "../../../metadata/dataTypes";
 // 渲染时把注册表算好的数字代进去；找不到数字就把占位符整体去掉，不把字面 "{n}" 显示给用户。
 export const NODE_TYPE_LABELS: Record<string, { label: LocalizedString; description?: LocalizedString }> = {
   cronTrigger: {
-    label: { en: "Cron Trigger", zh: "定时触发器" },
+    label: { en: "Cron Trigger", zh: "Cron 触发器" },
     description: { en: "Trigger on a schedule", zh: "按计划定时触发" },
   },
   waitForEvent: {

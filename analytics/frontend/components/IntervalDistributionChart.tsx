@@ -1,11 +1,18 @@
 import { ResponsiveContainer, ComposedChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import type { IntervalPeriodStats } from "../lib/api";
 import { fmtDuration } from "../lib/format";
+import { t } from "../../../metadata/locale";
+import type { LocalizedString } from "../../../metadata/dataTypes";
 
 const UI = {
-  en: { min: "Min", p25: "P25", median: "Median", p75: "P75", max: "Max", count: "Pairs", noData: "No data" },
-  zh: { min: "最小值", p25: "P25", median: "中位数", p75: "P75", max: "最大值", count: "配对数", noData: "无数据" },
-};
+  min: { en: "Min", zh: "最小值" },
+  p25: { en: "P25", zh: "P25" },
+  median: { en: "Median", zh: "中位数" },
+  p75: { en: "P75", zh: "P75" },
+  max: { en: "Max", zh: "最大值" },
+  count: { en: "Pairs", zh: "配对数" },
+  noData: { en: "No data", zh: "无数据" },
+} satisfies Record<string, LocalizedString>;
 
 /**
  * Renders the Interval Analytics "Distribution" chart as a multi-period box
@@ -38,7 +45,7 @@ export function IntervalDistributionChart({
   compact?: boolean;
   tickFormatter?: (period: string) => string;
 }) {
-  const t = UI[locale] || UI.en;
+  const T = (s: LocalizedString) => t(s, locale);
   const tickFontSize = compact ? 9 : 11;
   const axisWidth = compact ? 28 : 40;
   const barSize = compact ? 20 : 40;
@@ -49,7 +56,7 @@ export function IntervalDistributionChart({
   if (!hasAnyData) {
     return (
       <div className="flex items-center justify-center text-muted-foreground text-xs" style={{ height }}>
-        {t.noData}
+        {T(UI.noData)}
       </div>
     );
   }
@@ -87,12 +94,12 @@ export function IntervalDistributionChart({
                   <div className="font-medium text-foreground pb-1 mb-1 border-b border-border">{tickFormatter ? tickFormatter(slot.period) : slot.period}</div>
                   {stats ? (
                     [
-                      [t.count, stats.count.toLocaleString()],
-                      [t.max, fmtDuration(stats.max)],
-                      [t.p75, fmtDuration(stats.p75)],
-                      [t.median, fmtDuration(stats.median)],
-                      [t.p25, fmtDuration(stats.p25)],
-                      [t.min, fmtDuration(stats.min)],
+                      [T(UI.count), stats.count.toLocaleString()],
+                      [T(UI.max), fmtDuration(stats.max)],
+                      [T(UI.p75), fmtDuration(stats.p75)],
+                      [T(UI.median), fmtDuration(stats.median)],
+                      [T(UI.p25), fmtDuration(stats.p25)],
+                      [T(UI.min), fmtDuration(stats.min)],
                     ].map(([label, val]) => (
                       <div key={label} className="flex items-center justify-between gap-4">
                         <span className="text-muted-foreground">{label}</span>
@@ -100,7 +107,7 @@ export function IntervalDistributionChart({
                       </div>
                     ))
                   ) : (
-                    <span className="text-muted-foreground">{t.noData}</span>
+                    <span className="text-muted-foreground">{T(UI.noData)}</span>
                   )}
                 </div>
               );

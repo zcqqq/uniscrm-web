@@ -2,6 +2,9 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { listReports, deleteReport, type ReportSummary } from "../lib/api";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { C } from "../../../shared/frontend/i18n-common";
+import type { LocalizedString } from "../../../metadata/dataTypes";
 import { DateCell } from "../../../shared/frontend/components/CellDate";
 import { StatusCell } from "../../../shared/frontend/components/CellStatus";
 import { OperationCell, type OperationsByStatus } from "../../../shared/frontend/components/CellOperation";
@@ -13,16 +16,32 @@ import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 
 const UI = {
-  en: { newBtn: "New", event: "Event Analytics", interval: "Interval Analytics", user: "User Analytics", content: "Content Analytics", funnel: "Funnel Analytics", name: "Name", type: "Type", status: "Status", created: "Created", empty: "No reports yet", createFirst: "Create your first analytics" },
-  zh: { newBtn: "新建", event: "事件分析", interval: "间隔分析", user: "用户分析", content: "内容分析", funnel: "漏斗分析", name: "名称", type: "类型", status: "状态", created: "创建时间", empty: "暂无报表", createFirst: "创建你的第一个分析" },
-};
+  newBtn: { en: "New", zh: "新建" },
+  event: { en: "Event Analytics", zh: "事件分析" },
+  interval: { en: "Interval Analytics", zh: "间隔分析" },
+  user: { en: "User Analytics", zh: "用户分析" },
+  content: { en: "Content Analytics", zh: "内容分析" },
+  funnel: { en: "Funnel Analytics", zh: "漏斗分析" },
+  name: { en: "Name", zh: "名称" },
+  type: { en: "Type", zh: "类型" },
+  status: { en: "Status", zh: "状态" },
+  created: { en: "Created", zh: "创建时间" },
+  empty: { en: "No reports yet", zh: "暂无报表" },
+  createFirst: { en: "Create your first analytics", zh: "创建你的第一个分析" },
+} satisfies Record<string, LocalizedString>;
 
-const TYPE_LABELS = { en: { event: "Event", interval: "Interval", user: "User", content: "Content", funnel: "Funnel" }, zh: { event: "事件", interval: "间隔", user: "用户", content: "内容", funnel: "漏斗" } };
+const TYPE_LABELS = {
+  event: { en: "Event", zh: "事件" },
+  interval: { en: "Interval", zh: "间隔" },
+  user: { en: "User", zh: "用户" },
+  content: { en: "Content", zh: "内容" },
+  funnel: { en: "Funnel", zh: "漏斗" },
+} satisfies Record<string, LocalizedString>;
 
 export function AnalyticsList() {
   const navigate = useNavigate();
-  const { locale, timezone } = useLocale();
-  const s = UI[locale];
+  const { timezone } = useLocale();
+  const T = useT();
   const [reports, setReports] = useState<ReportSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -48,13 +67,13 @@ export function AnalyticsList() {
   });
 
   const getOperations = (id: string): OperationsByStatus => ({
-    ready: { menu: [{ label: "Delete", onClick: () => handleDelete(id), destructive: true }] },
-    error: { menu: [{ label: "Delete", onClick: () => handleDelete(id), destructive: true }] },
+    ready: { menu: [{ label: T(C.delete), onClick: () => handleDelete(id), destructive: true }] },
+    error: { menu: [{ label: T(C.delete), onClick: () => handleDelete(id), destructive: true }] },
     "*": { menu: [] },
   });
 
   const handleDelete = (id: string) => {
-    if (confirm("Delete?")) deleteReport(id).then(() => setReports((p) => p.filter((x) => x.id !== id)));
+    if (confirm(T({ en: "Delete this report?", zh: "确定删除该报表？" }))) deleteReport(id).then(() => setReports((p) => p.filter((x) => x.id !== id)));
   };
 
   return (
@@ -62,23 +81,23 @@ export function AnalyticsList() {
       <div className="flex items-center gap-4 mb-6">
         <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
           <DropdownMenuTrigger asChild>
-            <Button size="sm">+ {s.newBtn}</Button>
+            <Button size="sm">+ {T(UI.newBtn)}</Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             <DropdownMenuItem onClick={() => navigate("/analytics/event/new")}>
-              {s.event}
+              {T(UI.event)}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => navigate("/analytics/interval/new")}>
-              {s.interval}
+              {T(UI.interval)}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => navigate("/analytics/user/new")}>
-              {s.user}
+              {T(UI.user)}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => navigate("/analytics/content/new")}>
-              {s.content}
+              {T(UI.content)}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => navigate("/analytics/funnel/new")}>
-              {s.funnel}
+              {T(UI.funnel)}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -91,18 +110,18 @@ export function AnalyticsList() {
           <Skeleton className="h-10 w-full" />
         </div>
       ) : reports.length === 0 ? (
-        <EmptyState title={s.empty} description={s.createFirst} />
+        <EmptyState title={T(UI.empty)} description={T(UI.createFirst)} />
       ) : (
         <DataTable total={total} page={page} totalPages={totalPages} onPageChange={setPage}>
           <TableHeader>
             <TableRow className="bg-muted/30">
-              <TableHead>{s.name}</TableHead>
-              <TableHead>{s.type}</TableHead>
-              <TableHead>{s.status}</TableHead>
+              <TableHead>{T(UI.name)}</TableHead>
+              <TableHead>{T(UI.type)}</TableHead>
+              <TableHead>{T(UI.status)}</TableHead>
               <TableHead className="cursor-pointer select-none" onClick={toggleSort}>
-                {s.created} {sortDir === "desc" ? "↓" : "↑"}
+                {T(UI.created)} {sortDir === "desc" ? "↓" : "↑"}
               </TableHead>
-              <TableHead className="text-right">Operations</TableHead>
+              <TableHead className="text-right">{T({ en: "Operations", zh: "操作" })}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -116,7 +135,7 @@ export function AnalyticsList() {
                   {r.name || (r.params as any).name || `${r.type} #${r.id.slice(0, 8)}`}
                 </TableCell>
                 <TableCell>
-                  {TYPE_LABELS[locale][r.type as keyof typeof TYPE_LABELS["en"]] || r.type}
+                  {r.type in TYPE_LABELS ? T(TYPE_LABELS[r.type as keyof typeof TYPE_LABELS]) : r.type}
                 </TableCell>
                 <TableCell>
                   <StatusCell status={r.status} />

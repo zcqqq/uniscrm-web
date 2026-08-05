@@ -4,8 +4,10 @@ import { toPng } from "html-to-image";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { listDashboards, createDashboard, getDashboard, deleteDashboard, updateDashboardItem, deleteDashboardItem, type Dashboard, type DashboardItem, type IntervalResults } from "../lib/api";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
+import { useT } from "../../../shared/frontend/hooks/useT";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { fillTimeSeries } from "../lib/fill-time-series";
+import type { LocalizedString } from "../../../metadata/dataTypes";
 import { fillIntervalPeriods } from "../lib/fill-interval-periods";
 import { formatPeriod } from "../lib/format-period";
 import { IntervalDistributionChart } from "../components/IntervalDistributionChart";
@@ -17,16 +19,29 @@ import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../../shared/frontend/ui/dropdown-menu";
 
 const UI = {
-  en: { allDashboards: "All Dashboards", search: "Search", delete: "Delete", noData: "No data", remove: "Remove", edit: "Edit", empty: "Select or create a dashboard", noItems: "No charts yet. Add reports from Analytics.", small: "S", medium: "M", large: "L" },
-  zh: { allDashboards: "所有仪表盘", search: "搜索", delete: "删除", noData: "暂无数据", remove: "移除", edit: "编辑", empty: "选择或新建一个仪表盘", noItems: "暂无图表，从分析中添加报表。", small: "小", medium: "中", large: "大" },
-};
+  allDashboards: { en: "All Dashboards", zh: "所有仪表盘" },
+  search: { en: "Search", zh: "搜索" },
+  delete: { en: "Delete", zh: "删除" },
+  noData: { en: "No data", zh: "暂无数据" },
+  remove: { en: "Remove", zh: "移除" },
+  edit: { en: "Edit", zh: "编辑" },
+  empty: { en: "Select or create a dashboard", zh: "选择或新建一个仪表盘" },
+  noItems: { en: "No charts yet. Add reports from Analytics.", zh: "暂无图表，从分析中添加报表。" },
+  small: { en: "S", zh: "小" },
+  medium: { en: "M", zh: "中" },
+  large: { en: "L", zh: "大" },
+  dashboardNamePrompt: { en: "Dashboard name", zh: "输入仪表盘名称" },
+  imageDownloaded: { en: "Image downloaded", zh: "图片已下载" },
+  exportFailed: { en: "Export failed", zh: "导出失败" },
+  exportImage: { en: "Export Image", zh: "保存为图片" },
+} satisfies Record<string, LocalizedString>;
 
 const SIZE_VALUES = ["small", "medium", "large"] as const;
 
 export function DashboardPage() {
   const { locale } = useLocale();
   const { toast } = useToast();
-  const s = UI[locale];
+  const T = useT();
   const dashContentRef = useRef<HTMLDivElement>(null);
 
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
@@ -53,7 +68,7 @@ export function DashboardPage() {
   }, [activeDashId]);
 
   const handleCreate = async () => {
-    const name = prompt(locale === "zh" ? "输入仪表盘名称" : "Dashboard name");
+    const name = prompt(T(UI.dashboardNamePrompt));
     if (!name) return;
     const res = await createDashboard(name);
     const newDash = { id: res.dashboard.id, name: res.dashboard.name, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
@@ -62,7 +77,7 @@ export function DashboardPage() {
   };
 
   const handleDelete = async () => {
-    if (!activeDashId || !confirm("Delete?")) return;
+    if (!activeDashId || !confirm(T({ en: "Delete this dashboard?", zh: "确定删除该仪表盘？" }))) return;
     await deleteDashboard(activeDashId);
     const remaining = dashboards.filter((d) => d.id !== activeDashId);
     setDashboards(remaining);
@@ -89,12 +104,12 @@ export function DashboardPage() {
         filter: (node) => !(node as HTMLElement)?.classList?.contains("export-exclude"),
       });
       const link = document.createElement("a");
-      link.download = `${activeDashboard?.name || "dashboard"}-${new Date().toISOString().slice(0, 10)}.png`;
+      link.download = `${activeDashboard?.name || T({ en: "dashboard", zh: "仪表盘" })}-${new Date().toISOString().slice(0, 10)}.png`;
       link.href = dataUrl;
       link.click();
-      toast({ description: locale === "zh" ? "图片已下载" : "Image downloaded" });
+      toast({ description: T(UI.imageDownloaded) });
     } catch {
-      toast({ variant: "destructive", description: locale === "zh" ? "导出失败" : "Export failed" });
+      toast({ variant: "destructive", description: T(UI.exportFailed) });
     } finally {
       setExporting(false);
     }
@@ -109,13 +124,13 @@ export function DashboardPage() {
       {/* Left panel */}
       <div className="w-60 border-r border-border bg-card flex flex-col shrink-0">
         <div className="px-4 py-3 border-b border-border">
-          <div className="text-sm font-medium text-primary mb-2">{s.allDashboards}</div>
+          <div className="text-sm font-medium text-primary mb-2">{T(UI.allDashboards)}</div>
           <div className="flex gap-2">
             <Input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={s.search}
+              placeholder={T(UI.search)}
               className="h-7 flex-1 text-xs"
             />
             <Button size="icon" className="h-7 w-7 shrink-0" onClick={handleCreate}>+</Button>
@@ -139,7 +154,7 @@ export function DashboardPage() {
       <div className="flex-1 overflow-auto">
         {!activeDashboard ? (
           <div className="flex items-center justify-center h-full">
-            <EmptyState title={s.empty} />
+            <EmptyState title={T(UI.empty)} />
           </div>
         ) : (
           <div className="p-6">
@@ -147,14 +162,14 @@ export function DashboardPage() {
               <h1 className="text-xl font-bold text-foreground">{activeDashboard.name}</h1>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || items.length === 0}>
-                  {exporting ? "..." : (locale === "zh" ? "保存为图片" : "Export Image")}
+                  {exporting ? "..." : T(UI.exportImage)}
                 </Button>
-                <Button variant="destructive" size="sm" onClick={handleDelete}>{s.delete}</Button>
+                <Button variant="destructive" size="sm" onClick={handleDelete}>{T(UI.delete)}</Button>
               </div>
             </div>
 
             {items.length === 0 ? (
-              <EmptyState title={s.noItems} />
+              <EmptyState title={T(UI.noItems)} />
             ) : (
               <div ref={dashContentRef}>
                 <h2 className="text-lg font-semibold mb-4 export-only hidden">{activeDashboard.name}</h2>
@@ -175,7 +190,7 @@ export function DashboardPage() {
 function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: DashboardItem; locale: string; onSizeChange: (size: string) => void; onRemove: () => void }) {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
-  const s = UI[locale as "en" | "zh"];
+  const T = useT();
   const colSpan = item.size === "large" ? "col-span-4" : item.size === "small" ? "col-span-1" : "col-span-2";
   const chartHeight = item.size === "large" ? 240 : item.size === "small" ? 80 : 140;
   const isInterval = item.type === "interval";
@@ -240,16 +255,16 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
                       disabled={disabled}
                       onClick={() => { onSizeChange(value); setMenuOpen(false); }}
                     >
-                      {s[value]}
+                      {T(UI[value])}
                     </Button>
                   );
                 })}
               </div>
               <DropdownMenuItem onClick={() => navigate(`/analytics/${item.report_id}`)}>
-                {s.edit}
+                {T(UI.edit)}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={onRemove} className="text-destructive focus:text-destructive">
-                {s.remove}
+                {T(UI.remove)}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -285,7 +300,7 @@ function DashboardCard({ item, locale, onSizeChange, onRemove }: { item: Dashboa
           </ResponsiveContainer>
         ) : (
           <div className="flex items-center justify-center text-muted-foreground text-xs" style={{ height: chartHeight }}>
-            {s.noData}
+            {T(UI.noData)}
           </div>
         )}
       </CardContent>

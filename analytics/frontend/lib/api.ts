@@ -78,6 +78,7 @@ export function createReport(body: {
 }) {
   return request<{ report: { id: string; status: string } }>(BASE, {
     method: "POST",
+    // i18n-ok: HTTP header name/value, not UI copy
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -94,6 +95,7 @@ export function updateReport(id: string, body: {
 }) {
   return request<{ ok: boolean; requeued?: boolean }>(`${BASE}/${id}`, {
     method: "PATCH",
+    // i18n-ok: HTTP header name/value, not UI copy
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -137,6 +139,7 @@ export function listDashboards() {
 export function createDashboard(name: string) {
   return request<{ dashboard: { id: string; name: string } }>("/api/dashboards", {
     method: "POST",
+    // i18n-ok: HTTP header name/value, not UI copy
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   });
@@ -153,6 +156,7 @@ export function deleteDashboard(id: string) {
 export function addDashboardItem(dashboardId: string, reportId: string, size = "medium") {
   return request<{ item: { id: string } }>(`/api/dashboards/${dashboardId}/items`, {
     method: "POST",
+    // i18n-ok: HTTP header name/value, not UI copy
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ report_id: reportId, size }),
   });
@@ -161,6 +165,7 @@ export function addDashboardItem(dashboardId: string, reportId: string, size = "
 export function updateDashboardItem(itemId: string, updates: { size?: string; position?: number }) {
   return request<{ ok: boolean }>(`/api/dashboard-items/${itemId}`, {
     method: "PATCH",
+    // i18n-ok: HTTP header name/value, not UI copy
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
   });

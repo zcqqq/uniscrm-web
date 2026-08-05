@@ -11,11 +11,11 @@ import { Label } from "../../../shared/frontend/ui/label";
 import { ContentMetadata_X } from "../../../metadata/x-byok";
 import { ContentMetadata_YouTube } from "../../../metadata/youtube";
 import { PROPS } from "../../../metadata/props";
-import { t as localizeLabel } from "../../../metadata/locale";
+import { t as localizeLabel, type Locale } from "../../../metadata/locale";
 import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
-import { NODE_TYPE_REGISTRY, CONTENT_X_TRIGGER_MODE_LIST_POSTS, CONDITION_LOGIC_OR, CONDITION_LOGIC_AND, resolveYouTubeSubscriptions } from "../../nodeTypeRegistry";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, CONDITION_LOGIC_OR, CONDITION_LOGIC_AND, resolveYouTubeSubscriptions } from "../../nodeTypeRegistry";
 import { EventMetadata_X } from "../../../metadata/x";
-import type { PropFilter } from "../../../metadata/dataTypes";
+import type { PropFilter, LocalizedString } from "../../../metadata/dataTypes";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
 import { OperationSelect } from "./OperationSelect";
 import { Toggle } from "../../../shared/frontend/ui/toggle";
@@ -23,6 +23,10 @@ import { cn } from "../../../shared/frontend/lib/utils";
 import { nextConditionLogic } from "../lib/condition-logic";
 import { MultiSelect } from "../../../shared/frontend/ui/multi-select";
 import { toggleSubscription } from "../lib/subscription-summary";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
+import { C } from "../../../shared/frontend/i18n-common";
+import { nodeLabel } from "../config/nodeTypeLabels";
 
 type SelectChange = React.ChangeEvent<HTMLSelectElement>;
 type InputChange = React.ChangeEvent<HTMLInputElement>;
@@ -49,6 +53,7 @@ function ValueInput({
   fields: TriggerFieldDefinition[];
   dataType?: string;
 }) {
+  const T = useT();
   const [showFields, setShowFields] = useState(false);
 
   return (
@@ -58,7 +63,7 @@ function ValueInput({
           type="text"
           value={value}
           onChange={(e: InputChange) => onChange(e.target.value)}
-          placeholder="value or $field"
+          placeholder={T({ en: "value or $field", zh: "值或 $字段" })}
           className="flex-1 h-7 text-xs rounded-l rounded-r-none min-w-0"
         />
         <Button
@@ -67,7 +72,7 @@ function ValueInput({
           size="sm"
           onClick={() => setShowFields(!showFields)}
           className="h-7 px-1.5 rounded-l-none text-xs"
-          title="Insert field reference"
+          title={T({ en: "Insert field reference", zh: "插入字段引用" })}
         >
           $
         </Button>
@@ -95,6 +100,7 @@ function ConditionLogicToggle({
   logic: unknown;
   onChange: (logic: string) => void;
 }) {
+  const T = useT();
   const isOr = logic === CONDITION_LOGIC_OR;
   const click = (clicked: string) => {
     const next = nextConditionLogic(logic, clicked);
@@ -119,10 +125,10 @@ function ConditionLogicToggle({
               onPressedChange={() => click(CONDITION_LOGIC_AND)}
               className={cn("h-6 px-1.5 text-[10px] rounded-none", !isOr && selectedClass)}
             >
-              AND
+              {T({ en: "AND", zh: "且" })}
             </Toggle>
           </TooltipTrigger>
-          <TooltipContent>所有条件都满足才通过</TooltipContent>
+          <TooltipContent>{T({ en: "Passes only when every condition is met", zh: "所有条件都满足才通过" })}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -132,10 +138,10 @@ function ConditionLogicToggle({
               onPressedChange={() => click(CONDITION_LOGIC_OR)}
               className={cn("h-6 px-1.5 text-[10px] rounded-none", isOr && selectedClass)}
             >
-              OR
+              {T({ en: "OR", zh: "或" })}
             </Toggle>
           </TooltipTrigger>
-          <TooltipContent>任一条件满足即通过</TooltipContent>
+          <TooltipContent>{T({ en: "Passes when any condition is met", zh: "任一条件满足即通过" })}</TooltipContent>
         </Tooltip>
       </div>
     </TooltipProvider>
@@ -160,6 +166,7 @@ function ConditionsEditor({
   // 不进 data.conditions（避免 graph_json 快照过期阈值、污染用户可编辑数组），值实时读 metadata。
   systemFilters?: PropFilter[];
 }) {
+  const T = useT();
   const addCondition = () => onChange([...conditions, { field: "", operator: "==", value: "" }]);
   const updateCondition = (idx: number, patch: Partial<Condition>) => {
     onChange(conditions.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
@@ -171,10 +178,10 @@ function ConditionsEditor({
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <Label className="text-xs">Condition</Label>
+        <Label className="text-xs">{T({ en: "Condition", zh: "条件" })}</Label>
         <div className="flex items-center gap-2">
           <ConditionLogicToggle logic={logic} onChange={onLogicChange} />
-          <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={addCondition}>+ Add</Button>
+          <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={addCondition}>+ {T(C.add)}</Button>
         </div>
       </div>
       {systemFilters?.map((f, idx) => {
@@ -197,7 +204,7 @@ function ConditionsEditor({
                 <TooltipTrigger asChild>
                   <span className="h-6 w-6 flex items-center justify-center text-xs cursor-default">🔒</span>
                 </TooltipTrigger>
-                <TooltipContent>System limit — cannot be edited or removed</TooltipContent>
+                <TooltipContent>{T({ en: "System limit — cannot be edited or removed", zh: "系统限制——不可编辑或删除" })}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>
@@ -205,10 +212,10 @@ function ConditionsEditor({
       })}
       {systemFilters?.length && conditions.length > 0 ? (
         // 🔒 行由 link 在入队前强制执行，永远是无条件的与关系，不受上面那个 AND/OR 开关影响。
-        <p className="text-[10px] text-muted-foreground mb-2">and</p>
+        <p className="text-[10px] text-muted-foreground mb-2">{T({ en: "and", zh: "且" })}</p>
       ) : null}
       {conditions.length === 0 && !systemFilters?.length && (
-        <p className="text-xs text-muted-foreground italic">No filters — all matching events pass.</p>
+        <p className="text-xs text-muted-foreground italic">{T({ en: "No filters — all matching events pass.", zh: "无过滤条件——所有匹配事件都会通过。" })}</p>
       )}
       {conditions.map((cond, idx) => {
         const fieldDef = fields.find((f) => f.id === cond.field);
@@ -220,7 +227,7 @@ function ConditionsEditor({
                 value={cond.field}
                 onChange={(v) => updateCondition(idx, { field: v, operator: "==", value: "" })}
                 options={fields.map((f) => ({ id: f.id, label: f.label, group: f.group, dataType: f.dataType }))}
-                placeholder="Select field..."
+                placeholder={T({ en: "Select field...", zh: "选择字段…" })}
               />
               {cond.field && (
                 <div className="flex gap-1">
@@ -237,7 +244,7 @@ function ConditionsEditor({
                       onChange={(e: SelectChange) => updateCondition(idx, { value: e.target.value })}
                       className="flex-1 h-7 text-xs"
                     >
-                      <option value="">Select...</option>
+                      <option value="">{T({ en: "Select...", zh: "请选择…" })}</option>
                       {fieldDef.enums.map((opt) => (
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
@@ -262,6 +269,7 @@ function ConditionsEditor({
 }
 
 function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
   const { updateNodeData } = useFlowEditor();
   const [channels, setChannels] = useState<ChannelOption[]>([]);
   const [loadingChannels, setLoadingChannels] = useState(false);
@@ -289,21 +297,21 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
       .finally(() => setLoadingChannels(false));
   }, [eventType, channelType]);
 
-  if (!ctDef) return <p className="text-sm text-muted-foreground">Unknown channel type</p>;
+  if (!ctDef) return <p className="text-sm text-muted-foreground">{T({ en: "Unknown channel type", zh: "未知渠道类型" })}</p>;
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{ctDef.label} Trigger</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{ctDef.label} {T({ en: "Trigger", zh: "触发器" })}</h4>
 
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Event</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Event", zh: "事件" })}</Label>
           <Select
             value={eventType || ""}
             onChange={(e: SelectChange) => updateNodeData(nodeId, { eventType: e.target.value, channelId: "", conditions: [], conditionLogic: "" })}
             className="w-full text-sm"
           >
-            <option value="">Select event...</option>
+            <option value="">{T({ en: "Select event...", zh: "选择事件…" })}</option>
             {ctDef.events.map((ev) => (
               <option key={ev.eventType} value={ev.eventType}>{ev.label}</option>
             ))}
@@ -312,18 +320,18 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
 
         {eventType && (
           <div>
-            <Label className="text-xs block mb-1">Account</Label>
+            <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
             {loadingChannels ? (
-              <p className="text-xs text-muted-foreground">Loading...</p>
+              <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
             ) : channels.length === 0 ? (
-              <p className="text-xs text-muted-foreground italic">No accounts linked</p>
+              <p className="text-xs text-muted-foreground italic">{T({ en: "No accounts linked", zh: "尚未绑定账号" })}</p>
             ) : (
               <Select
                 value={channelId || ""}
                 onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
                 className="w-full text-sm"
               >
-                <option value="">Select account...</option>
+                <option value="">{T({ en: "Select account...", zh: "选择账号…" })}</option>
                 {channels.map((ch) => (
                   <option key={ch.id} value={ch.id}>@{ch.username}</option>
                 ))}
@@ -348,6 +356,7 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
 
 
 function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
   const { updateNodeData } = useFlowEditor();
   const conditions: Condition[] = data.conditions || [];
   const channelId = data.channelId as string;
@@ -378,26 +387,26 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.xContentTrigger.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("xContentTrigger"))}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Event</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Event", zh: "事件" })}</Label>
           <Select value={CONTENT_X_TRIGGER_MODE_LIST_POSTS} disabled className="w-full text-sm">
-            <option value={CONTENT_X_TRIGGER_MODE_LIST_POSTS}>List Posts</option>
+            <option value={CONTENT_X_TRIGGER_MODE_LIST_POSTS}>{T({ en: "List Posts", zh: "名单帖子" })}</option>
           </Select>
         </div>
 
         <div>
-          <Label className="text-xs block mb-1">Account</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
           {channels.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">No X accounts linked</p>
+            <p className="text-xs text-muted-foreground italic">{T({ en: "No X accounts linked", zh: "尚未绑定 X 账号" })}</p>
           ) : (
             <Select
               value={channelId || ""}
               onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value, mode: CONTENT_X_TRIGGER_MODE_LIST_POSTS, listId: "", listName: "" })}
               className="w-full text-sm"
             >
-              <option value="">Select account...</option>
+              <option value="">{T({ en: "Select account...", zh: "选择账号…" })}</option>
               {channels.map((ch) => (
                 <option key={ch.id} value={ch.id}>@{ch.username}</option>
               ))}
@@ -406,13 +415,13 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
         </div>
 
         <div>
-          <Label className="text-xs block mb-1">List</Label>
+          <Label className="text-xs block mb-1">{T({ en: "List", zh: "名单" })}</Label>
           {!channelId ? (
-            <p className="text-xs text-muted-foreground italic">Select an account first</p>
+            <p className="text-xs text-muted-foreground italic">{T({ en: "Select an account first", zh: "请先选择账号" })}</p>
           ) : loadingLists ? (
-            <p className="text-xs text-muted-foreground">Loading...</p>
+            <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
           ) : lists.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">No owned Lists found on this account</p>
+            <p className="text-xs text-muted-foreground italic">{T({ en: "No owned Lists found on this account", zh: "该账号没有自建名单" })}</p>
           ) : (
             <Select
               value={data.listId || ""}
@@ -422,7 +431,7 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
               }}
               className="w-full text-sm"
             >
-              <option value="">Select list...</option>
+              <option value="">{T({ en: "Select list...", zh: "选择名单…" })}</option>
               {lists.map((l) => (
                 <option key={l.id} value={l.id}>{l.name}</option>
               ))}
@@ -430,7 +439,7 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
           )}
         </div>
 
-        <p className="text-xs text-muted-foreground">Fires when a new post appears in this X List (from any account).</p>
+        <p className="text-xs text-muted-foreground">{T({ en: "Fires when a new post appears in this X List (from any account).", zh: "该 X 名单出现新帖子时触发（不限账号）。" })}</p>
 
         <ConditionsEditor
           conditions={conditions}
@@ -447,6 +456,8 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
 const YOUTUBE_TRIGGER_META = ContentMetadata_YouTube.find((m) => m.sourceContentType === "watch:get-videos")!;
 
 function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
+  const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
   const conditions: Condition[] = data.conditions || [];
   const selectedSubs = resolveYouTubeSubscriptions(data);
@@ -468,33 +479,33 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.youtubeContentTrigger.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("youtubeContentTrigger"))}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Event</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Event", zh: "事件" })}</Label>
           <Select value={YOUTUBE_TRIGGER_META.sourceContentType} disabled className="w-full text-sm">
-            <option value={YOUTUBE_TRIGGER_META.sourceContentType}>{localizeLabel(YOUTUBE_TRIGGER_META.label!, "en")}</option>
+            <option value={YOUTUBE_TRIGGER_META.sourceContentType}>{localizeLabel(YOUTUBE_TRIGGER_META.label!, locale)}</option>
           </Select>
         </div>
 
         {state.connected && (
           <div>
-            <Label className="text-xs block mb-1">Account</Label>
+            <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
             <Select value={state.accountChannelId || ""} disabled className="w-full text-sm">
-              <option value={state.accountChannelId || ""}>{state.email || "Connected account"}</option>
+              <option value={state.accountChannelId || ""}>{state.email || T({ en: "Connected account", zh: "已连接账号" })}</option>
             </Select>
           </div>
         )}
 
         <div>
-          <Label className="text-xs block mb-1">Subscriptions</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Subscriptions", zh: "订阅" })}</Label>
           {!state.connected ? (
             <p className="text-xs text-muted-foreground italic">
-              Connect your YouTube account from the Social page to pick a subscription.
+              {T({ en: "Connect your YouTube account from the Social page to pick a subscription.", zh: "请先在社交页面连接 YouTube 账号，再选择订阅。" })}
             </p>
           ) : state.subscriptions.length === 0 && selectedSubs.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">
-              No subscriptions found — check your YouTube account has subscriptions.
+              {T({ en: "No subscriptions found — check your YouTube account has subscriptions.", zh: "未找到订阅——请检查该 YouTube 账号是否有订阅。" })}
             </p>
           ) : (
             <MultiSelect
@@ -523,13 +534,13 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
                   subscriptionChannelName: "",
                 });
               }}
-              placeholder="Select subscriptions..."
-              tooltip="Select one or more subscriptions"
+              placeholder={T({ en: "Select subscriptions...", zh: "选择订阅…" })}
+              tooltip={T({ en: "Select one or more subscriptions", zh: "选择一个或多个订阅" })}
             />
           )}
         </div>
 
-        <p className="text-xs text-muted-foreground">Fires when any selected subscription publishes a new video.</p>
+        <p className="text-xs text-muted-foreground">{T({ en: "Fires when any selected subscription publishes a new video.", zh: "任一选中订阅发布新视频时触发。" })}</p>
 
         <ConditionsEditor
           conditions={conditions}
@@ -545,33 +556,34 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
 }
 
 function WaitInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
   const { updateNodeData } = useFlowEditor();
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.wait.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("wait"))}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Duration</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Duration", zh: "时长" })}</Label>
           <Input
             type="number"
             min="1"
             value={data.duration || ""}
             onChange={(e: InputChange) => updateNodeData(nodeId, { duration: parseInt(e.target.value) || 0 })}
-            placeholder="Enter duration..."
+            placeholder={T({ en: "Enter duration...", zh: "输入时长…" })}
             className="w-full h-9 text-sm"
           />
         </div>
         <div>
-          <Label className="text-xs block mb-1">Unit</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Unit", zh: "单位" })}</Label>
           <Select
             value={data.unit || "minutes"}
             onChange={(e: SelectChange) => updateNodeData(nodeId, { unit: e.target.value })}
             className="w-full text-sm"
           >
-            <option value="minutes">Minutes</option>
-            <option value="hours">Hours</option>
-            <option value="days">Days</option>
+            <option value="minutes">{T({ en: "Minutes", zh: "分钟" })}</option>
+            <option value="hours">{T({ en: "Hours", zh: "小时" })}</option>
+            <option value="days">{T({ en: "Days", zh: "天" })}</option>
           </Select>
         </div>
       </div>
@@ -580,6 +592,7 @@ function WaitInspector({ nodeId, data }: { nodeId: string; data: Record<string, 
 }
 
 function WaitForEventInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
   const { updateNodeData } = useFlowEditor();
   const allEvents = CHANNEL_TYPES.flatMap((ct) => ct.events);
   const selectedEvent = allEvents.find((ev) => ev.eventType === data.eventType);
@@ -587,23 +600,23 @@ function WaitForEventInspector({ nodeId, data }: { nodeId: string; data: Record<
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.waitForEvent.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("waitForEvent"))}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Wait for event</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Wait for event", zh: "等待事件" })}</Label>
           <Select
             value={data.eventType || ""}
             onChange={(e: SelectChange) => updateNodeData(nodeId, { eventType: e.target.value, conditions: [], conditionLogic: "" })}
             className="w-full text-sm"
           >
-            <option value="">Select event...</option>
+            <option value="">{T({ en: "Select event...", zh: "选择事件…" })}</option>
             {allEvents.map((ev) => (
               <option key={ev.eventType} value={ev.eventType}>{ev.label}</option>
             ))}
           </Select>
         </div>
         <div>
-          <Label className="text-xs block mb-1">Timeout</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Timeout", zh: "超时时长" })}</Label>
           <div className="flex gap-2">
             <Input
               type="number"
@@ -618,9 +631,9 @@ function WaitForEventInspector({ nodeId, data }: { nodeId: string; data: Record<
               onChange={(e: SelectChange) => updateNodeData(nodeId, { unit: e.target.value })}
               className="flex-1 text-sm"
             >
-              <option value="minutes">Minutes</option>
-              <option value="hours">Hours</option>
-              <option value="days">Days</option>
+              <option value="minutes">{T({ en: "Minutes", zh: "分钟" })}</option>
+              <option value="hours">{T({ en: "Hours", zh: "小时" })}</option>
+              <option value="days">{T({ en: "Days", zh: "天" })}</option>
             </Select>
           </div>
         </div>
@@ -635,12 +648,13 @@ function WaitForEventInspector({ nodeId, data }: { nodeId: string; data: Record<
           />
         )}
       </div>
-      <p className="text-xs text-muted-foreground mt-3 italic">Yes = matching event received. No = timed out.</p>
+      <p className="text-xs text-muted-foreground mt-3 italic">{T({ en: "Yes = matching event received. No = timed out.", zh: "是 = 收到匹配事件；否 = 已超时。" })}</p>
     </div>
   );
 }
 
 function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
   const { updateNodeData } = useFlowEditor();
   const actionType = data.actionType as string;
   const [lists, setLists] = useState<{ id: string; name: string }[]>([]);
@@ -658,13 +672,13 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
   if (actionType === "addToList") {
     return (
       <div>
-        <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.addToList.label}</h4>
+        <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("addToList"))}</h4>
         <div>
-          <Label className="text-xs block mb-1">List</Label>
+          <Label className="text-xs block mb-1">{T({ en: "List", zh: "名单" })}</Label>
           {loading ? (
-            <p className="text-xs text-muted-foreground">Loading...</p>
+            <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
           ) : lists.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">No lists found. Create one in Profile.</p>
+            <p className="text-xs text-muted-foreground italic">{T({ en: "No lists found. Create one in Profile.", zh: "未找到名单，请先在用户画像中创建。" })}</p>
           ) : (
             <Select
               value={data.listId || ""}
@@ -674,7 +688,7 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
               }}
               className="w-full text-sm"
             >
-              <option value="">Select list...</option>
+              <option value="">{T({ en: "Select list...", zh: "选择名单…" })}</option>
               {lists.map((l) => (
                 <option key={l.id} value={l.id}>{l.name}</option>
               ))}
@@ -705,12 +719,14 @@ function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string
     return <VideoActionInspector nodeId={nodeId} data={data} />;
   }
 
-  return <p className="text-sm text-muted-foreground">Unknown action type</p>;
+  return <p className="text-sm text-muted-foreground">{T({ en: "Unknown action type", zh: "未知动作类型" })}</p>;
 }
 
 const X_ACTION_OPERATIONS = EventMetadata_X.filter((m) => m.flowType === "action");
 
 function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
+  const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
   const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
   const channelType = ACTION_CHANNEL_TYPE[data.actionType as string] || "X";
@@ -731,41 +747,41 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.xAction.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("xAction"))}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Action</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Action", zh: "动作" })}</Label>
           <OperationSelect
             value={data.xEvent || ""}
             onChange={(v) => updateNodeData(nodeId, { xEvent: v, messageText: "" })}
-            options={X_ACTION_OPERATIONS.map((op) => ({ value: op.eventType, label: localizeLabel(op.label, "en"), price: op.price }))}
-            placeholder="Select action..."
+            options={X_ACTION_OPERATIONS.map((op) => ({ value: op.eventType, label: localizeLabel(op.label, locale), price: op.price }))}
+            placeholder={T({ en: "Select action...", zh: "选择动作…" })}
           />
         </div>
         {data.xEvent === "create-dm" && (
           <div>
-            <Label className="text-xs block mb-1">Message</Label>
+            <Label className="text-xs block mb-1">{T({ en: "Message", zh: "消息" })}</Label>
             <Textarea
               value={data.messageText || ""}
               onChange={(e: TextareaChange) => updateNodeData(nodeId, { messageText: e.target.value })}
-              placeholder="Hi $user.username!"
+              placeholder={T({ en: "Hi $user.username!", zh: "你好，$user.username！" })}
               rows={3}
               className="w-full text-sm font-mono"
             />
-            <p className="text-xs text-muted-foreground mt-1">Use $user.name, $event.message_text etc.</p>
+            <p className="text-xs text-muted-foreground mt-1">{T({ en: "Use $user.name, $event.message_text etc.", zh: "可使用 $user.name、$event.message_text 等变量。" })}</p>
           </div>
         )}
         <div>
-          <Label className="text-xs block mb-1">Account</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
           {channels.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">No X accounts linked</p>
+            <p className="text-xs text-muted-foreground italic">{T({ en: "No X accounts linked", zh: "尚未绑定 X 账号" })}</p>
           ) : (
             <Select
               value={data.channelId || ""}
               onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
               className="w-full text-sm"
             >
-              <option value="">Select account...</option>
+              <option value="">{T({ en: "Select account...", zh: "选择账号…" })}</option>
               {channels.map((ch) => (
                 <option key={ch.id} value={ch.id}>@{ch.username}</option>
               ))}
@@ -786,12 +802,14 @@ const TIKTOK_VIDEO_POST_PROPS = CONTENT_TIKTOK_ACTION_OPERATIONS.find((m) => m.s
 
 const CONTENT_YOUTUBE_ACTION_OPERATIONS = ContentMetadata_YouTube.filter((m) => m.flowType === "action");
 
-function propLabel(propId: string): string {
+function propLabel(propId: string, locale: Locale): string {
   const def = PROPS.find((p) => p.propId === propId);
-  return def ? localizeLabel(def.label, "en") : propId;
+  return def ? localizeLabel(def.label, locale) : propId;
 }
 
 function YouTubeContentActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
+  const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
   const [playlists, setPlaylists] = useState<{ id: string; title: string }[]>([]);
   const [needsReconnect, setNeedsReconnect] = useState(false);
@@ -806,23 +824,24 @@ function YouTubeContentActionInspector({ nodeId, data }: { nodeId: string; data:
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.youtubeContentAction.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("youtubeContentAction"))}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Operation</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Operation", zh: "操作" })}</Label>
           <OperationSelect
             value={operation}
             onChange={(v) => updateNodeData(nodeId, { operation: v })}
             options={CONTENT_YOUTUBE_ACTION_OPERATIONS.map((op) => ({
               value: op.sourceContentType,
-              label: op.label ? localizeLabel(op.label, "en") : op.sourceContentType,
+              label: op.label ? localizeLabel(op.label, locale) : op.sourceContentType,
               price: op.price,
             }))}
+            placeholder={T({ en: "Select operation...", zh: "选择操作…" })}
           />
         </div>
         {operation === "save-to-playlist" && (
           <div>
-            <Label className="text-xs block mb-1">Playlist</Label>
+            <Label className="text-xs block mb-1">{T({ en: "Playlist", zh: "播放列表" })}</Label>
             <Select
               value={data.playlistId || ""}
               onChange={(e: SelectChange) => {
@@ -832,14 +851,14 @@ function YouTubeContentActionInspector({ nodeId, data }: { nodeId: string; data:
               }}
               className="w-full text-sm"
             >
-              <option value="">Select a playlist…</option>
+              <option value="">{T({ en: "Select a playlist…", zh: "选择播放列表…" })}</option>
               {playlists.map((p) => (
                 <option key={p.id} value={p.id}>{p.title}</option>
               ))}
             </Select>
             {needsReconnect && (
               <p className="text-xs text-muted-foreground mt-1">
-                Reconnect your YouTube account on the Social page to grant save/like permission.
+                {T({ en: "Reconnect your YouTube account on the Social page to grant save/like permission.", zh: "请在社交页面重新连接 YouTube 账号，以授予收藏/点赞权限。" })}
               </p>
             )}
           </div>
@@ -850,6 +869,8 @@ function YouTubeContentActionInspector({ nodeId, data }: { nodeId: string; data:
 }
 
 function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
+  const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
   const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
   const [providers, setProviders] = useState<{ provider: string; model: string }[]>([]);
@@ -886,34 +907,35 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.xContentAction.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("xContentAction"))}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Target Account</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Target Account", zh: "目标账号" })}</Label>
           {channels.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">No X accounts linked</p>
+            <p className="text-xs text-muted-foreground italic">{T({ en: "No X accounts linked", zh: "尚未绑定 X 账号" })}</p>
           ) : (
             <Select
               value={data.channelId || ""}
               onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
               className="w-full text-sm"
             >
-              <option value="">Select account...</option>
+              <option value="">{T({ en: "Select account...", zh: "选择账号…" })}</option>
               {channels.map((ch) => <option key={ch.id} value={ch.id}>@{ch.username}</option>)}
             </Select>
           )}
         </div>
 
         <div>
-          <Label className="text-xs block mb-1">Operation</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Operation", zh: "操作" })}</Label>
           <OperationSelect
             value={data.operation || "create-post"}
             onChange={(v) => updateNodeData(nodeId, { operation: v })}
             options={CONTENT_ACTION_OPERATIONS.map((op) => ({
               value: op.sourceContentType,
-              label: op.label ? localizeLabel(op.label, "en") : op.sourceContentType,
+              label: op.label ? localizeLabel(op.label, locale) : op.sourceContentType,
               price: op.price,
             }))}
+            placeholder={T({ en: "Select operation...", zh: "选择操作…" })}
           />
         </div>
         {aiProp && (
@@ -924,34 +946,35 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
                 onChange={(e: SelectChange) => updateNodeData(nodeId, { provider: e.target.value })}
                 className="w-full text-sm"
               >
-                <option value="default">Default (free built-in model)</option>
+                <option value="default">{T({ en: "Default (free built-in model)", zh: "默认（免费内置模型）" })}</option>
                 {providers.map((p) => (
+                  // i18n-ok: LLM provider brand names (OpenAI/Anthropic), never localized
                   <option key={p.provider} value={p.provider}>{p.provider === "openai" ? "OpenAI" : "Anthropic"} ({p.model})</option>
                 ))}
-                <option value="none">None (post prompt text as-is)</option>
+                <option value="none">{T({ en: "None (post prompt text as-is)", zh: "不使用（原样发布提示词文本）" })}</option>
               </Select>
             </div>
             <div>
-              <Label className="text-xs block mb-1">{promptLabel ? localizeLabel(promptLabel, "en") : "Prompt"}</Label>
+              <Label className="text-xs block mb-1">{promptLabel ? localizeLabel(promptLabel, locale) : T({ en: "Prompt", zh: "提示词" })}</Label>
               <Textarea
                 value={data.prompt || ""}
                 onChange={(e: TextareaChange) => updateNodeData(nodeId, { prompt: e.target.value })}
-                placeholder="Rewrite this in a punchy tone: $content.content_text"
+                placeholder={T({ en: "Rewrite this in a punchy tone: $content.content_text", zh: "用有冲击力的语气改写：$content.content_text" })}
                 rows={5}
                 className="w-full text-sm font-mono"
               />
-              <p className="text-xs text-muted-foreground mt-1">Use $content.title, $content.content_text etc.</p>
+              <p className="text-xs text-muted-foreground mt-1">{T({ en: "Use $content.title, $content.content_text etc.", zh: "可使用 $content.title、$content.content_text 等变量。" })}</p>
             </div>
             <div>
-              <Label className="text-xs block mb-1">Skill</Label>
+              <Label className="text-xs block mb-1">{T({ en: "Skill", zh: "技能" })}</Label>
               <Select
                 value={data.skillId || "none"}
                 onChange={(e: SelectChange) => updateNodeData(nodeId, { skillId: e.target.value })}
                 className="w-full text-sm"
               >
-                <option value="none">None (current behavior)</option>
+                <option value="none">{T({ en: "None (current behavior)", zh: "不使用（当前默认行为）" })}</option>
                 {skills.map((s) => (
-                  <option key={s.id} value={s.id}>{s.label}{!s.hasCachedContent ? " (not yet fetched)" : ""}</option>
+                  <option key={s.id} value={s.id}>{s.label}{!s.hasCachedContent ? T({ en: " (not yet fetched)", zh: "（尚未抓取）" }) : ""}</option>
                 ))}
               </Select>
             </div>
@@ -966,7 +989,7 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
               onChange={(e) => updateNodeData(nodeId, { attachVideo: e.target.checked })}
             />
             <Label htmlFor={`${nodeId}-attach-video`} className="text-xs cursor-pointer">
-              Attach video (uses this flow's processed video, if any)
+              {T({ en: "Attach video (uses this flow's processed video, if any)", zh: "附加视频（若有，使用本流程处理后的视频）" })}
             </Label>
           </div>
         )}
@@ -975,23 +998,29 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
   );
 }
 
-const VIDEO_CONDITION_OPERATIONS = [
-  { value: "check-face", label: "Check Face" },
-  { value: "check-orientation", label: "Check Orientation" },
+const VIDEO_CONDITION_OPERATIONS: { value: string; label: LocalizedString }[] = [
+  { value: "check-face", label: { en: "Check Face", zh: "检测人脸" } },
+  { value: "check-orientation", label: { en: "Check Orientation", zh: "检测画面方向" } },
 ];
 
 // Equality is deliberately absent: both ratios are floats measured/computed from the video, so
 // "== 0.2" or "== 1" would break on the tiniest floating-point wobble and read as "always False".
 const RATIO_OPERATORS = ["<=", "<", ">=", ">"];
 
-const VIDEO_CONDITION_FIELD_LABEL: Record<string, string> = {
-  "check-face": "Face Ratio",
-  "check-orientation": "Aspect Ratio (width / height)",
+const VIDEO_CONDITION_FIELD_LABEL: Record<string, LocalizedString> = {
+  "check-face": { en: "Face Ratio", zh: "人脸占比" },
+  "check-orientation": { en: "Aspect Ratio (width / height)", zh: "宽高比（宽 / 高）" },
 };
 
-const VIDEO_CONDITION_HELP_TEXT: Record<string, string> = {
-  "check-face": "Share of 20 sampled frames containing a face, 0 to 1. True when the measured ratio satisfies this comparison.",
-  "check-orientation": "Video width divided by height (e.g. 16:9 ≈ 1.78, 9:16 ≈ 0.56, square = 1). True when the measured ratio satisfies this comparison.",
+const VIDEO_CONDITION_HELP_TEXT: Record<string, LocalizedString> = {
+  "check-face": {
+    en: "Share of 20 sampled frames containing a face, 0 to 1. True when the measured ratio satisfies this comparison.",
+    zh: "20 帧采样画面中包含人脸的占比，取值 0 到 1。当该比例满足比较条件时为真。",
+  },
+  "check-orientation": {
+    en: "Video width divided by height (e.g. 16:9 ≈ 1.78, 9:16 ≈ 0.56, square = 1). True when the measured ratio satisfies this comparison.",
+    zh: "视频宽度除以高度（如 16:9 ≈ 1.78，9:16 ≈ 0.56，正方形 = 1）。当该比例满足比较条件时为真。",
+  },
 };
 
 // Each operation's ratio has a different natural comparison boundary -- face ratio's "mostly no
@@ -1004,6 +1033,7 @@ const VIDEO_CONDITION_OPERATION_DEFAULTS: Record<string, { operator: string; thr
 };
 
 function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
   const { updateNodeData } = useFlowEditor();
   const operation = data.operation || "check-face";
   const isOrientation = operation === "check-orientation";
@@ -1019,18 +1049,19 @@ function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Recor
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.videoCondition.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("videoCondition"))}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Operation</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Operation", zh: "操作" })}</Label>
           <OperationSelect
             value={operation}
             onChange={handleOperationChange}
-            options={VIDEO_CONDITION_OPERATIONS}
+            options={VIDEO_CONDITION_OPERATIONS.map((op) => ({ value: op.value, label: T(op.label) }))}
+            placeholder={T({ en: "Select operation...", zh: "选择操作…" })}
           />
         </div>
         <div>
-          <Label className="text-xs block mb-1">{VIDEO_CONDITION_FIELD_LABEL[operation]}</Label>
+          <Label className="text-xs block mb-1">{T(VIDEO_CONDITION_FIELD_LABEL[operation])}</Label>
           <div className="flex items-center gap-2">
             <Select
               value={data.operator || operationDefaults.operator}
@@ -1056,7 +1087,7 @@ function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Recor
             />
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            {VIDEO_CONDITION_HELP_TEXT[operation]}
+            {T(VIDEO_CONDITION_HELP_TEXT[operation])}
           </p>
         </div>
       </div>
@@ -1068,12 +1099,13 @@ function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Recor
 // 与 trigger 完全一致，否则用户要记两套。区别只有一个——不传 systemFilters：trigger 上锁着的
 // duration <= 600 是 link 入队前的摄取门槛，与"发布一天后复查"无关。
 function YouTubeConditionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
   const { updateNodeData } = useFlowEditor();
   const conditions = (data.conditions as Condition[]) || [];
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.youtubeCondition.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("youtubeCondition"))}</h4>
       <div className="space-y-3">
         <ConditionsEditor
           conditions={conditions}
@@ -1083,55 +1115,57 @@ function YouTubeConditionInspector({ nodeId, data }: { nodeId: string; data: Rec
           onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
         />
         <p className="text-xs text-muted-foreground">
-          Re-reads the video's current stats from YouTube. Put a Wait node before this to check it some time after publication.
+          {T({ en: "Re-reads the video's current stats from YouTube. Put a Wait node before this to check it some time after publication.", zh: "重新从 YouTube 读取该视频的当前数据。可在此节点前加一个等待节点，用于发布一段时间后再复查。" })}
         </p>
       </div>
     </div>
   );
 }
 
-const VIDEO_ACTION_LANGUAGES = [
-  { value: "zh", label: "Chinese" },
-  { value: "en", label: "English" },
-  { value: "ja", label: "Japanese" },
-  { value: "ko", label: "Korean" },
-  { value: "es", label: "Spanish" },
-  { value: "fr", label: "French" },
-  { value: "de", label: "German" },
+const VIDEO_ACTION_LANGUAGES: { value: string; label: LocalizedString }[] = [
+  { value: "zh", label: { en: "Chinese", zh: "中文" } },
+  { value: "en", label: { en: "English", zh: "英语" } },
+  { value: "ja", label: { en: "Japanese", zh: "日语" } },
+  { value: "ko", label: { en: "Korean", zh: "韩语" } },
+  { value: "es", label: { en: "Spanish", zh: "西班牙语" } },
+  { value: "fr", label: { en: "French", zh: "法语" } },
+  { value: "de", label: { en: "German", zh: "德语" } },
 ];
 
-const VIDEO_ACTION_OPERATIONS = [
-  { value: "add-subtitle", label: "Add Subtitle" },
-  { value: "rotate-to-vertical", label: "Rotate to Vertical" },
-  { value: "remove-face", label: "Remove Face" },
+const VIDEO_ACTION_OPERATIONS: { value: string; label: LocalizedString }[] = [
+  { value: "add-subtitle", label: { en: "Add Subtitle", zh: "添加字幕" } },
+  { value: "rotate-to-vertical", label: { en: "Rotate to Vertical", zh: "转为竖屏" } },
+  { value: "remove-face", label: { en: "Remove Face", zh: "移除人脸" } },
 ];
 
 function VideoActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
   const { updateNodeData } = useFlowEditor();
   const operation = (data.operation as string) || "add-subtitle";
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.videoAction.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("videoAction"))}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Operation</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Operation", zh: "操作" })}</Label>
           <OperationSelect
             value={operation}
             onChange={(v) => updateNodeData(nodeId, { operation: v })}
-            options={VIDEO_ACTION_OPERATIONS}
+            options={VIDEO_ACTION_OPERATIONS.map((op) => ({ value: op.value, label: T(op.label) }))}
+            placeholder={T({ en: "Select operation...", zh: "选择操作…" })}
           />
         </div>
         {operation === "add-subtitle" && (
           <div>
-            <Label className="text-xs block mb-1">Target Language</Label>
+            <Label className="text-xs block mb-1">{T({ en: "Target Language", zh: "目标语言" })}</Label>
             <Select
               value={data.targetLanguage || "zh"}
               onChange={(e: SelectChange) => updateNodeData(nodeId, { targetLanguage: e.target.value })}
               className="w-full text-sm"
             >
               {VIDEO_ACTION_LANGUAGES.map((l) => (
-                <option key={l.value} value={l.value}>{l.label}</option>
+                <option key={l.value} value={l.value}>{T(l.label)}</option>
               ))}
             </Select>
           </div>
@@ -1142,6 +1176,8 @@ function VideoActionInspector({ nodeId, data }: { nodeId: string; data: Record<s
 }
 
 function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
+  const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
   const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
   const [providers, setProviders] = useState<{ provider: string; model: string }[]>([]);
@@ -1169,73 +1205,78 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.tiktokContentAction.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("tiktokContentAction"))}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Target Account</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Target Account", zh: "目标账号" })}</Label>
           {channels.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">No TikTok accounts linked</p>
+            <p className="text-xs text-muted-foreground italic">{T({ en: "No TikTok accounts linked", zh: "尚未绑定 TikTok 账号" })}</p>
           ) : (
             <Select
               value={data.channelId || ""}
               onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
               className="w-full text-sm"
             >
-              <option value="">Select account...</option>
+              <option value="">{T({ en: "Select account...", zh: "选择账号…" })}</option>
               {channels.map((ch) => <option key={ch.id} value={ch.id}>@{ch.username}</option>)}
             </Select>
           )}
         </div>
 
         <div>
-          <Label className="text-xs block mb-1">Operation</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Operation", zh: "操作" })}</Label>
           <OperationSelect
             value={operation}
             onChange={(v) => updateNodeData(nodeId, { operation: v })}
             options={CONTENT_TIKTOK_ACTION_OPERATIONS.map((op) => ({
               value: op.sourceContentType,
-              label: op.label ? localizeLabel(op.label, "en") : op.sourceContentType,
+              label: op.label ? localizeLabel(op.label, locale) : op.sourceContentType,
             }))}
+            placeholder={T({ en: "Select operation...", zh: "选择操作…" })}
           />
         </div>
 
-        {textProps.map((prop) => (
-          <div key={prop.propId}>
-            <Label className="text-xs block mb-1">{propLabel(prop.propId)} Prompt</Label>
-            <Textarea
-              value={prompts[prop.propId] || ""}
-              onChange={(e: TextareaChange) => updatePrompt(prop.propId, e.target.value)}
-              placeholder={`Write the ${propLabel(prop.propId).toLowerCase()}: $content.title`}
-              rows={prop.propId === "title" ? 2 : 3}
-              className="w-full text-sm font-mono"
-            />
-          </div>
-        ))}
-        <p className="text-xs text-muted-foreground -mt-2">Use $content.title, $content.content_text etc.</p>
+        {textProps.map((prop) => {
+          const propText = propLabel(prop.propId, locale);
+          return (
+            <div key={prop.propId}>
+              <Label className="text-xs block mb-1">{propText} {T({ en: "Prompt", zh: "提示词" })}</Label>
+              <Textarea
+                value={prompts[prop.propId] || ""}
+                onChange={(e: TextareaChange) => updatePrompt(prop.propId, e.target.value)}
+                placeholder={locale === "zh" ? `撰写${propText}：$content.title` : `Write the ${propText.toLowerCase()}: $content.title`}
+                rows={prop.propId === "title" ? 2 : 3}
+                className="w-full text-sm font-mono"
+              />
+            </div>
+          );
+        })}
+        <p className="text-xs text-muted-foreground -mt-2">{T({ en: "Use $content.title, $content.content_text etc.", zh: "可使用 $content.title、$content.content_text 等变量。" })}</p>
         <div>
-          <Label className="text-xs block mb-1">Text Provider</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Text Provider", zh: "文本模型" })}</Label>
           <Select
             value={data.textProvider || "default"}
             onChange={(e: SelectChange) => updateNodeData(nodeId, { textProvider: e.target.value })}
             className="w-full text-sm"
           >
-            <option value="default">Default (free built-in model)</option>
+            <option value="default">{T({ en: "Default (free built-in model)", zh: "默认（免费内置模型）" })}</option>
             {providers.map((p) => (
+              // i18n-ok: LLM provider brand names (OpenAI/Anthropic), never localized
               <option key={p.provider} value={p.provider}>{p.provider === "openai" ? "OpenAI" : "Anthropic"} ({p.model})</option>
             ))}
-            <option value="none">None (post prompt text as-is)</option>
+            <option value="none">{T({ en: "None (post prompt text as-is)", zh: "不使用（原样发布提示词文本）" })}</option>
           </Select>
         </div>
         <div>
-          <Label className="text-xs block mb-1">Text Skill</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Text Skill", zh: "文本技能" })}</Label>
           <Select
             value={data.textSkillId || "none"}
             onChange={(e: SelectChange) => updateNodeData(nodeId, { textSkillId: e.target.value })}
             className="w-full text-sm"
           >
-            <option value="none">None (current behavior)</option>
+            <option value="none">{T({ en: "None (current behavior)", zh: "不使用（当前默认行为）" })}</option>
             {skills.map((s) => (
-              <option key={s.id} value={s.id}>{s.label}{!s.hasCachedContent ? " (not yet fetched)" : ""}</option>
+              <option key={s.id} value={s.id}>{s.label}{!s.hasCachedContent ? T({ en: " (not yet fetched)", zh: "（尚未抓取）" }) : ""}</option>
             ))}
           </Select>
         </div>
@@ -1244,18 +1285,18 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
           <>
             {imageProps.map((prop) => (
               <div key={prop.propId}>
-                <Label className="text-xs block mb-1">{propLabel(prop.propId)} Prompt</Label>
+                <Label className="text-xs block mb-1">{propLabel(prop.propId, locale)} {T({ en: "Prompt", zh: "提示词" })}</Label>
                 <Textarea
                   value={prompts[prop.propId] || ""}
                   onChange={(e: TextareaChange) => updatePrompt(prop.propId, e.target.value)}
-                  placeholder="A photo of: $content.title"
+                  placeholder={T({ en: "A photo of: $content.title", zh: "照片描述：$content.title" })}
                   rows={3}
                   className="w-full text-sm font-mono"
                 />
               </div>
             ))}
             <div>
-              <Label className="text-xs block mb-1">Image Count</Label>
+              <Label className="text-xs block mb-1">{T({ en: "Image Count", zh: "图片数量" })}</Label>
               <Input
                 type="number"
                 min={1}
@@ -1266,28 +1307,29 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
               />
             </div>
             <div>
-              <Label className="text-xs block mb-1">Image Provider</Label>
+              <Label className="text-xs block mb-1">{T({ en: "Image Provider", zh: "图片模型" })}</Label>
               <Select
                 value={data.imageProvider || "default"}
                 onChange={(e: SelectChange) => updateNodeData(nodeId, { imageProvider: e.target.value })}
                 className="w-full text-sm"
               >
-                <option value="default">Default (Cloudflare Workers AI)</option>
+                <option value="default">{T({ en: "Default (Cloudflare Workers AI)", zh: "默认（Cloudflare Workers AI）" })}</option>
                 {providers.filter((p) => p.provider === "openai").map((p) => (
+                  // i18n-ok: provider + model brand name (OpenAI gpt-image-1), never localized
                   <option key={p.provider} value="openai">OpenAI (gpt-image-1)</option>
                 ))}
               </Select>
             </div>
             <div>
-              <Label className="text-xs block mb-1">Image Skill</Label>
+              <Label className="text-xs block mb-1">{T({ en: "Image Skill", zh: "图片技能" })}</Label>
               <Select
                 value={data.imageSkillId || "none"}
                 onChange={(e: SelectChange) => updateNodeData(nodeId, { imageSkillId: e.target.value })}
                 className="w-full text-sm"
               >
-                <option value="none">None (current behavior)</option>
+                <option value="none">{T({ en: "None (current behavior)", zh: "不使用（当前默认行为）" })}</option>
                 {skills.map((s) => (
-                  <option key={s.id} value={s.id}>{s.label}{!s.hasCachedContent ? " (not yet fetched)" : ""}</option>
+                  <option key={s.id} value={s.id}>{s.label}{!s.hasCachedContent ? T({ en: " (not yet fetched)", zh: "（尚未抓取）" }) : ""}</option>
                 ))}
               </Select>
             </div>
@@ -1299,23 +1341,24 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
 }
 
 function CronTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
   const { updateNodeData } = useFlowEditor();
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.cronTrigger.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("cronTrigger"))}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Schedule Type</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Schedule Type", zh: "调度方式" })}</Label>
           <Select value={data.scheduleType || ""} onChange={(e: SelectChange) => updateNodeData(nodeId, { scheduleType: e.target.value })} className="w-full text-sm">
-            <option value="">Select...</option>
-            <option value="daily">Daily at time</option>
-            <option value="interval">Every N minutes/hours</option>
-            <option value="cron">Cron expression</option>
+            <option value="">{T({ en: "Select...", zh: "请选择…" })}</option>
+            <option value="daily">{T({ en: "Daily at time", zh: "每天固定时间" })}</option>
+            <option value="interval">{T({ en: "Every N minutes/hours", zh: "每 N 分钟/小时" })}</option>
+            <option value="cron">{T({ en: "Cron expression", zh: "Cron 表达式" })}</option>
           </Select>
         </div>
         {data.scheduleType === "daily" && (
           <div>
-            <Label className="text-xs block mb-1">Time (UTC)</Label>
+            <Label className="text-xs block mb-1">{T({ en: "Time (UTC)", zh: "时间（UTC）" })}</Label>
             <Input type="time" value={data.dailyTime || "09:00"} onChange={(e: InputChange) => updateNodeData(nodeId, { dailyTime: e.target.value })} className="w-full text-sm" />
           </div>
         )}
@@ -1323,15 +1366,15 @@ function CronTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<s
           <div className="flex gap-2">
             <Input type="number" value={data.intervalValue || 60} onChange={(e: InputChange) => updateNodeData(nodeId, { intervalValue: parseInt(e.target.value) })} className="w-20 text-sm" />
             <Select value={data.intervalUnit || "minutes"} onChange={(e: SelectChange) => updateNodeData(nodeId, { intervalUnit: e.target.value })} className="flex-1 text-sm">
-              <option value="minutes">minutes</option>
-              <option value="hours">hours</option>
-              <option value="days">days</option>
+              <option value="minutes">{T({ en: "minutes", zh: "分钟" })}</option>
+              <option value="hours">{T({ en: "hours", zh: "小时" })}</option>
+              <option value="days">{T({ en: "days", zh: "天" })}</option>
             </Select>
           </div>
         )}
         {data.scheduleType === "cron" && (
           <div>
-            <Label className="text-xs block mb-1">Cron Expression</Label>
+            <Label className="text-xs block mb-1">{T({ en: "Cron Expression", zh: "Cron 表达式" })}</Label>
             <Input value={data.cronExpr || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { cronExpr: e.target.value })} placeholder="*/30 * * * *" className="w-full text-sm font-mono" />
           </div>
         )}
@@ -1340,33 +1383,43 @@ function CronTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<s
   );
 }
 
+const DAY_NAMES: LocalizedString[] = [
+  { en: "Sun", zh: "日" },
+  { en: "Mon", zh: "一" },
+  { en: "Tue", zh: "二" },
+  { en: "Wed", zh: "三" },
+  { en: "Thu", zh: "四" },
+  { en: "Fri", zh: "五" },
+  { en: "Sat", zh: "六" },
+];
+
 function TimeConditionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
   const { updateNodeData } = useFlowEditor();
   const days = (data.daysOfWeek as number[]) || [];
-  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const toggleDay = (d: number) => {
     const next = days.includes(d) ? days.filter(x => x !== d) : [...days, d].sort();
     updateNodeData(nodeId, { daysOfWeek: next });
   };
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.timeCondition.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("timeCondition"))}</h4>
       <div className="space-y-3">
         <div className="flex gap-2">
           <div className="flex-1">
-            <Label className="text-xs block mb-1">From</Label>
+            <Label className="text-xs block mb-1">{T({ en: "From", zh: "起始" })}</Label>
             <Input type="time" value={data.timeFrom || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { timeFrom: e.target.value })} className="w-full text-sm" />
           </div>
           <div className="flex-1">
-            <Label className="text-xs block mb-1">To</Label>
+            <Label className="text-xs block mb-1">{T({ en: "To", zh: "结束" })}</Label>
             <Input type="time" value={data.timeTo || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { timeTo: e.target.value })} className="w-full text-sm" />
           </div>
         </div>
         <div>
-          <Label className="text-xs block mb-1">Days of Week</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Days of Week", zh: "星期几" })}</Label>
           <div className="flex gap-1 flex-wrap">
-            {dayNames.map((name, i) => (
-              <button key={i} type="button" onClick={() => toggleDay(i)} className={`px-2 py-0.5 text-xs rounded border ${days.includes(i) ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"}`}>{name}</button>
+            {DAY_NAMES.map((name, i) => (
+              <button key={i} type="button" onClick={() => toggleDay(i)} className={`px-2 py-0.5 text-xs rounded border ${days.includes(i) ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"}`}>{T(name)}</button>
             ))}
           </div>
         </div>
@@ -1376,6 +1429,7 @@ function TimeConditionInspector({ nodeId, data }: { nodeId: string; data: Record
 }
 
 function UserPropsConditionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
   const { updateNodeData } = useFlowEditor();
   const conditions: { field: string; operator: string; value: string }[] = data.conditions || [];
   const addCondition = () => updateNodeData(nodeId, { conditions: [...conditions, { field: "", operator: "==", value: "" }] });
@@ -1387,21 +1441,21 @@ function UserPropsConditionInspector({ nodeId, data }: { nodeId: string; data: R
 
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.userPropsCondition.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("userPropsCondition"))}</h4>
       <div className="flex items-center justify-between mb-2">
-        <Label className="text-xs">Conditions (all must pass → Yes)</Label>
-        <button type="button" onClick={addCondition} className="text-xs text-primary hover:underline">+ Add</button>
+        <Label className="text-xs">{T({ en: "Conditions (all must pass → Yes)", zh: "条件（全部满足 → 是）" })}</Label>
+        <button type="button" onClick={addCondition} className="text-xs text-primary hover:underline">+ {T(C.add)}</button>
       </div>
       {conditions.map((cond, idx) => (
         <div key={idx} className="flex gap-1 items-center mb-2">
-          <Input value={cond.field} onChange={(e: InputChange) => updateCond(idx, { field: e.target.value })} placeholder="field" className="flex-1 text-xs" />
+          <Input value={cond.field} onChange={(e: InputChange) => updateCond(idx, { field: e.target.value })} placeholder={T({ en: "field", zh: "字段" })} className="flex-1 text-xs" />
           <Select value={cond.operator} onChange={(e: SelectChange) => updateCond(idx, { operator: e.target.value })} className="w-14 text-xs">
             <option value="==">==</option>
             <option value="!=">!=</option>
             <option value=">">&gt;</option>
             <option value="<">&lt;</option>
           </Select>
-          <Input value={cond.value} onChange={(e: InputChange) => updateCond(idx, { value: e.target.value })} placeholder="value" className="flex-1 text-xs" />
+          <Input value={cond.value} onChange={(e: InputChange) => updateCond(idx, { value: e.target.value })} placeholder={T({ en: "value", zh: "值" })} className="flex-1 text-xs" />
           <button type="button" onClick={() => removeCond(idx)} className="text-xs text-destructive">×</button>
         </div>
       ))}
@@ -1410,30 +1464,31 @@ function UserPropsConditionInspector({ nodeId, data }: { nodeId: string; data: R
 }
 
 function AbSplitInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
   const { updateNodeData } = useFlowEditor();
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.abSplit.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("abSplit"))}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Mode</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Mode", zh: "模式" })}</Label>
           <Select value={data.mode || "random"} onChange={(e: SelectChange) => updateNodeData(nodeId, { mode: e.target.value })} className="w-full text-sm">
-            <option value="random">Random %</option>
-            <option value="condition">Condition</option>
+            <option value="random">{T({ en: "Random %", zh: "随机百分比" })}</option>
+            <option value="condition">{T({ en: "Condition", zh: "条件" })}</option>
           </Select>
         </div>
         {data.mode === "random" && (
           <div>
-            <Label className="text-xs block mb-1">Branch A: {data.percentA || 50}%</Label>
+            <Label className="text-xs block mb-1">{T({ en: "Branch A", zh: "分支 A" })}: {data.percentA || 50}%</Label>
             <input type="range" min="0" max="100" value={data.percentA || 50} onChange={(e) => updateNodeData(nodeId, { percentA: parseInt(e.target.value) })} className="w-full" />
-            <p className="text-xs text-muted-foreground">B: {100 - (data.percentA || 50)}%</p>
+            <p className="text-xs text-muted-foreground">{T({ en: "B", zh: "分支 B" })}: {100 - (data.percentA || 50)}%</p>
           </div>
         )}
         {data.mode === "condition" && (
           <div>
-            <Label className="text-xs block mb-1">Condition (A if true, B if false)</Label>
-            <Input value={(data.conditions as any[])?.[0]?.field || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { conditions: [{ field: e.target.value, operator: "==", value: (data.conditions as any[])?.[0]?.value || "" }] })} placeholder="field" className="w-full text-xs mb-1" />
-            <Input value={(data.conditions as any[])?.[0]?.value || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { conditions: [{ field: (data.conditions as any[])?.[0]?.field || "", operator: "==", value: e.target.value }] })} placeholder="value" className="w-full text-xs" />
+            <Label className="text-xs block mb-1">{T({ en: "Condition (A if true, B if false)", zh: "条件（为真走 A，为假走 B）" })}</Label>
+            <Input value={(data.conditions as any[])?.[0]?.field || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { conditions: [{ field: e.target.value, operator: "==", value: (data.conditions as any[])?.[0]?.value || "" }] })} placeholder={T({ en: "field", zh: "字段" })} className="w-full text-xs mb-1" />
+            <Input value={(data.conditions as any[])?.[0]?.value || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { conditions: [{ field: (data.conditions as any[])?.[0]?.field || "", operator: "==", value: e.target.value }] })} placeholder={T({ en: "value", zh: "值" })} className="w-full text-xs" />
           </div>
         )}
       </div>
@@ -1442,13 +1497,14 @@ function AbSplitInspector({ nodeId, data }: { nodeId: string; data: Record<strin
 }
 
 function WebhookInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
   const { updateNodeData } = useFlowEditor();
   return (
     <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{NODE_TYPE_REGISTRY.webhook.label}</h4>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("webhook"))}</h4>
       <div className="space-y-3">
         <div>
-          <Label className="text-xs block mb-1">Method</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Method", zh: "方法" })}</Label>
           <Select value={data.method || "POST"} onChange={(e: SelectChange) => updateNodeData(nodeId, { method: e.target.value })} className="w-full text-sm">
             <option value="GET">GET</option>
             <option value="POST">POST</option>
@@ -1460,9 +1516,9 @@ function WebhookInspector({ nodeId, data }: { nodeId: string; data: Record<strin
           <Input value={data.url || ""} onChange={(e: InputChange) => updateNodeData(nodeId, { url: e.target.value })} placeholder="https://..." className="w-full text-sm" />
         </div>
         <div>
-          <Label className="text-xs block mb-1">Body</Label>
+          <Label className="text-xs block mb-1">{T({ en: "Body", zh: "请求体" })}</Label>
           <Textarea value={data.body || ""} onChange={(e: TextareaChange) => updateNodeData(nodeId, { body: e.target.value })} placeholder='{"userId": "$user.id"}' rows={3} className="w-full text-xs font-mono" />
-          <p className="text-xs text-muted-foreground mt-1">Use $user.name, $event.field etc.</p>
+          <p className="text-xs text-muted-foreground mt-1">{T({ en: "Use $user.name, $event.field etc.", zh: "可使用 $user.name、$event.field 等变量。" })}</p>
         </div>
       </div>
     </div>
@@ -1470,6 +1526,7 @@ function WebhookInspector({ nodeId, data }: { nodeId: string; data: Record<strin
 }
 
 export default function Inspector() {
+  const T = useT();
   const { selectedNodeId, nodes, deleteSelectedNode } = useFlowEditor();
 
   if (!selectedNodeId) return null;
@@ -1480,14 +1537,14 @@ export default function Inspector() {
   return (
     <aside className="w-24 md:w-72 border-l border-border bg-background p-4 overflow-y-auto">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Properties</h3>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{T({ en: "Properties", zh: "属性" })}</h3>
         <Button
           variant="ghost"
           size="sm"
           className="h-auto p-0 text-xs text-destructive hover:text-destructive"
           onClick={deleteSelectedNode}
         >
-          Delete
+          {T(C.delete)}
         </Button>
       </div>
 

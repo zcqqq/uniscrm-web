@@ -7,6 +7,7 @@ import { Label } from "../../../shared/frontend/ui/label";
 import { ChannelCard } from "./ChannelCard";
 import { NotionLogo } from "../lib/channelLogos";
 import { useT } from "../../../shared/frontend/hooks/useT";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { C } from "../../../shared/frontend/i18n-common";
 
 interface Props {
@@ -15,6 +16,7 @@ interface Props {
 
 export function NotionConnect({ onSyncComplete }: Props) {
   const T = useT();
+  const { locale } = useLocale();
   const {
     connected,
     workspaceName,
@@ -45,6 +47,7 @@ export function NotionConnect({ onSyncComplete }: Props) {
         name="Notion" // i18n-ok: third-party brand name, never translated
         tagline={T({ en: "Connect to sync your notes", zh: "连接后同步你的笔记" })}
         status="disconnected"
+        locale={locale}
         actions={
           <Button className="w-full" onClick={startAuth}>
             {T({ en: "Connect Notion", zh: "连接 Notion" })}
@@ -83,6 +86,7 @@ export function NotionConnect({ onSyncComplete }: Props) {
       tagline={T({ en: "Connect to sync your notes", zh: "连接后同步你的笔记" })}
       status="connected"
       statusLabel={workspaceName ?? undefined}
+      locale={locale}
       extra={
         <div className="space-y-2">
           {syncResult && (

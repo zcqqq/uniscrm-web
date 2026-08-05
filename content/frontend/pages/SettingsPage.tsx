@@ -7,6 +7,7 @@ import { Button } from "../../../shared/frontend/ui/button";
 import { Select } from "../../../shared/frontend/ui/select";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { useT } from "../../../shared/frontend/hooks/useT";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { C } from "../../../shared/frontend/i18n-common";
 import type { LocalizedString } from "../../../metadata/dataTypes";
 import { api, type ProviderCredentialInfo, type ProviderName } from "../lib/api";
@@ -165,6 +166,7 @@ function ProviderForm({
 
 export function SettingsPage() {
   const T = useT();
+  const { locale } = useLocale();
   const [providers, setProviders] = useState<ProviderCredentialInfo[]>([]);
   const [defaultModel, setDefaultModelState] = useState<string>("");
   const [editing, setEditing] = useState<ProviderName | null>(null);
@@ -217,6 +219,7 @@ export function SettingsPage() {
               }
               status={provider === "default" || configured ? "connected" : "disconnected"}
               createdAt={configured?.createdAt}
+              locale={locale}
               extra={
                 editing === provider ? (
                   <ProviderForm

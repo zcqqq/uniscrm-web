@@ -22,7 +22,7 @@ interface DatetimeDimensionPopoverProps {
   // Injected rather than imported directly, so this shared component never
   // depends on a specific module's API client (analytics/frontend/lib/api.ts).
   fetchRange: (mode: string, dimension: string) => Promise<{ min: string | null; max: string | null }>; // i18n-ok: TypeScript 类型标注，非文案
-  locale?: Locale;
+  locale: Locale;
 }
 
 const UI: Record<string, LocalizedString> = {
@@ -39,7 +39,7 @@ const UI: Record<string, LocalizedString> = {
 
 const OPTIONS: DatetimeGranularity[] = ["none", "hour", "day", "week", "month", "quarter"];
 
-export function DatetimeDimensionPopover({ dimension, mode, value, onChange, fetchRange, locale = "en" }: DatetimeDimensionPopoverProps) {
+export function DatetimeDimensionPopover({ dimension, mode, value, onChange, fetchRange, locale }: DatetimeDimensionPopoverProps) {
   const s = (key: keyof typeof UI) => t(UI[key], locale);
   const [open, setOpen] = useState(false);
   const [draftValue, setDraftValue] = useState<DatetimeGranularity>(value || "none");

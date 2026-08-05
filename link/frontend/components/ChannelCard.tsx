@@ -15,8 +15,8 @@ interface ChannelCardProps {
   name: string;
   /** Plain string, or an inline { en, zh } object resolved via `locale` */
   tagline: string | LocalizedString;
-  /** Resolves an object `tagline` to a string. Defaults to "en". */
-  locale?: Locale;
+  /** Resolves an object `tagline` to a string. */
+  locale: Locale;
   /** Optional link to a help doc, rendered as a prominent "Read more" link below the tagline */
   helpUrl?: string;
   status: ChannelStatus;
@@ -56,7 +56,7 @@ export function ChannelCard({
   logo,
   name,
   tagline,
-  locale = "en",
+  locale,
   helpUrl,
   status,
   statusLabel,

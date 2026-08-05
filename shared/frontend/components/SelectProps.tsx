@@ -6,11 +6,11 @@ interface SelectPropsProps {
   options: PropDefinition[];
   value: string;
   onChange: (propId: string) => void;
-  locale?: Locale;
+  locale: Locale;
   placeholder?: string;
 }
 
-export function SelectProps({ options, value, onChange, locale = "en", placeholder }: SelectPropsProps) {
+export function SelectProps({ options, value, onChange, locale, placeholder }: SelectPropsProps) {
   return (
     <Select value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">{placeholder || t({ en: "No grouping", zh: "不分组" }, locale)}</option>

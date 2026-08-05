@@ -13,7 +13,7 @@ interface Props {
 }
 
 export function LocalImport({ onImport }: Props) {
-  const { timezone } = useLocale();
+  const { locale, timezone } = useLocale();
   const T = useT();
   const [previewing, setPreviewing] = useState<ParsedMd[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -77,6 +77,7 @@ export function LocalImport({ onImport }: Props) {
           zh: `共 ${previewing.length} 个文件待导入`,
         })}
         status="pending"
+        locale={locale}
         extra={
           <div className="max-h-40 overflow-y-auto rounded-md border border-border">
             {previewing.map((f) => (
@@ -115,6 +116,7 @@ export function LocalImport({ onImport }: Props) {
         tagline={T({ en: "Drag & drop .md files or a folder", zh: "拖拽 .md 文件或文件夹到此处" })}
         status="connected"
         statusLabel={T({ en: "Ready", zh: "就绪" })}
+        locale={locale}
         className={dragging ? "border-primary bg-primary/5" : "border-dashed"}
         actions={
           <Button variant="outline" className="w-full" onClick={() => inputRef.current?.click()}>

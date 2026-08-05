@@ -1374,3 +1374,160 @@ Expected: 6 个模块各自输出自己的 `*-dev.uni-scrm.com (custom domain)`
 - [ ] **Step 8: 汇报**
 
 向用户汇报：审计计数从基线降到 0、6 个模块部署结果、Step 5 的 14 项逐条结论、Step 6 闪烁验收结果、Step 7 英文回归结果。**不要 push 到 main**——除非用户明确说了 push to main。
+
+---
+
+### Task 15: 翻译 shared/plans.ts 的套餐文案，并解开英文嗅探耦合
+
+**这是本计划写成时漏掉的一块**，由 Task 4 的实现者发现、controller 核实：`shared/plans.ts` 里有 9 条用户可见英文（套餐名 + 特性描述），渲染在 Billing、CreditUsage、TierGuard、Sidebar 四处。它既不在 `shared/frontend/` 也不在 `web/src`，审计的 `DIRS` 不扫它，前 14 个任务无一覆盖——不补的话账单页的套餐对比卡片会永远是英文。
+
+已核实这是唯一盲区：`metadata/` 全部是 `{en,zh}` 结构，其余 `shared/*.ts` 无用户可见英文。
+
+**Files:**
+- Modify: `shared/plans.ts`
+- Modify: `web/src/pages/Billing.tsx`
+- Modify: `scripts/i18n-audit.mjs`（把 `shared/plans.ts` 纳入扫描）
+- Test: `web/tests/unit/plans-i18n.test.ts`
+
+**Interfaces:**
+- Consumes: Task 1 的 `useT`；`metadata/locale.ts` 的 `t(s, locale)`
+- Produces: `TIERS[tier].name` 与各 `description` 字段类型由 `string` 变为 `LocalizedString`；`FeatureEntry`/`ModuleEntry`/`LimitEntry` 新增 `isHeader?: boolean`
+
+**必须一并解开的耦合**：`Billing.tsx` 现在用 `f.startsWith("All in")` 嗅探英文文案来判断某一行是"标题行"还是"特性行"（第 85-96 与 168-178 行，两处结构相同）。一旦翻译，这个判断就失效——中文文案不会以 "All in" 开头，标题行会被渲染成带 ✓ 的普通特性行。
+
+用结构化标志替代嗅探。靠显示文本的字面内容决定布局本来就是脆的，与语言无关。
+
+- [ ] **Step 1: 写失败的测试**
+
+创建 `web/tests/unit/plans-i18n.test.ts`：
+
+```ts
+import { describe, it, expect } from "vitest";
+import { TIERS } from "../../../shared/plans";
+
+// 套餐文案会渲染在账单页、额度页、升级提示与侧边栏上，是纯粹的用户可见文案，
+// 必须双语。这里没有「英文回落」——LocalizedString 两个字段都必填。
+describe("TIERS 文案双语", () => {
+  it("每个套餐的 name 都是双语且两种语言都非空", () => {
+    for (const [tier, def] of Object.entries(TIERS)) {
+      expect(def.name.en, `${tier}.name.en`).toBeTruthy();
+      expect(def.name.zh, `${tier}.name.zh`).toBeTruthy();
+    }
+  });
+
+  it("每条 description 都是双语且两种语言都非空", () => {
+    for (const [tier, def] of Object.entries(TIERS)) {
+      const buckets = [def.modules, def.features, def.limits].filter(Boolean);
+      for (const bucket of buckets) {
+        for (const [key, entry] of Object.entries(bucket as Record<string, any>)) {
+          if (!entry.description) continue;
+          expect(entry.description.en, `${tier}.${key}.description.en`).toBeTruthy();
+          expect(entry.description.zh, `${tier}.${key}.description.zh`).toBeTruthy();
+        }
+      }
+    }
+  });
+
+  // 这条守的是那个耦合：标题行原本靠 description 以 "All in" 开头来识别，
+  // 翻译后中文不会有这个前缀。改用结构化标志后，标志必须真的存在。
+  it("标题行用 isHeader 标志标记，不靠文案前缀识别", () => {
+    const headers: string[] = [];
+    for (const def of Object.values(TIERS)) {
+      for (const bucket of [def.modules, def.features, def.limits].filter(Boolean)) {
+        for (const [key, entry] of Object.entries(bucket as Record<string, any>)) {
+          if (entry.isHeader) headers.push(key);
+        }
+      }
+    }
+    // pro 套餐有一条「All in Basic Plan, plus:」性质的标题行
+    expect(headers.length).toBeGreaterThan(0);
+  });
+
+  it("没有任何 description 仍以 All in 开头被当作标题用", () => {
+    for (const def of Object.values(TIERS)) {
+      for (const bucket of [def.modules, def.features, def.limits].filter(Boolean)) {
+        for (const entry of Object.values(bucket as Record<string, any>)) {
+          if (entry.description?.en?.startsWith("All in")) {
+            expect(entry.isHeader, "以 All in 开头的条目必须显式标记 isHeader").toBe(true);
+          }
+        }
+      }
+    }
+  });
+});
+```
+
+- [ ] **Step 2: 跑测试确认它失败**
+
+在 `web/` 下 Run: `npx vitest run tests/unit/plans-i18n.test.ts`
+Expected: FAIL —— `def.name.en` 是 undefined（此时 name 还是裸字符串）
+
+- [ ] **Step 3: 改 plans.ts**
+
+把 `ModuleEntry`、`FeatureEntry`、`LimitEntry` 的 `description?: string` 改为 `description?: LocalizedString`，并各加一个 `isHeader?: boolean`；`TierDefinition` 的 `name: string` 改为 `name: LocalizedString`。顶部 `import type { LocalizedString } from "../metadata/dataTypes";`。
+
+9 条文案的译法：
+
+| en | zh |
+|---|---|
+| Basic | 基础版 |
+| Pro | 专业版 |
+| Connect to your Twitter, TikTok, ... accounts | 连接你的 Twitter、TikTok 等账号 |
+| Automation flows in control | 自动化流程尽在掌握 |
+| Unlimited tracked users | 不限量的用户追踪 |
+| Contents from social channels and content libraries | 来自社交渠道与内容库的内容 |
+| Unlimited analytics and dashboards | 不限量的分析与仪表盘 |
+| $20.00/month of credit (for X paid APIs) | 每月 $20.00 额度（用于 X 付费 API） |
+
+其余条目按同样风格译，术语对齐 Global Constraints 的术语表。以 "All in ... plus:" 开头的那条同时加 `isHeader: true`。
+
+**注意**：`shared/plans.ts` 被后端代码引用（tier 判定逻辑），只有 `name`/`description` 这类展示字段改类型，`enabled`/`value` 等**判定字段一律不动**。改完在仓库根 `npx tsc --noEmit` 看是否有后端文件因此报错——若有，说明某处把 description 当字符串用了，一并修掉。
+
+- [ ] **Step 4: 解开 Billing.tsx 的嗅探耦合**
+
+`Billing.tsx` 两处 `f.startsWith("All in")` 判断改为读结构化标志。`getTierDescriptions()` 的返回值需要同时带上文案与 `isHeader`，例如返回 `Array<{ text: LocalizedString; isHeader: boolean }>`，渲染处：
+
+```tsx
+{getTierDescriptions(plan.tier as "basic" | "pro").map((f, i) => (
+  <li key={i} className={`text-sm flex gap-2 ${f.isHeader ? "text-foreground font-medium mb-1" : "text-muted-foreground"}`}>
+    {!f.isHeader && <span className="text-primary">✓</span>}{T(f.text)}
+  </li>
+))}
+```
+
+同时删掉这两处因嗅探而加的 `// i18n-ok:` 豁免注释——耦合解开后它们没有存在理由了。
+
+- [ ] **Step 5: 把 plans.ts 纳入审计**
+
+`scripts/i18n-audit.mjs` 的 `DIRS` 只含 7 个前端目录，漏掉了这个文件。在 `runAudit` 里补扫这一个文件（`DIRS` 是目录列表，加一个单文件列表更直接）：
+
+```js
+// shared/plans.ts 不在任何前端目录下，但它的套餐文案会渲染在账单页与升级提示上。
+// 这是本计划最初漏扫的地方——补进来，免得下次改套餐文案又只写英文。
+const EXTRA_FILES = ["shared/plans.ts"];
+```
+
+并在 `runAudit` 收集文件时把 `EXTRA_FILES` 里存在的文件也加入 `files`。
+
+- [ ] **Step 6: 跑测试与审计**
+
+在 `web/` 下 Run: `npx vitest run tests/unit/plans-i18n.test.ts` —— 4 个用例全绿
+在 `web/` 下 Run: `npx vitest run` —— 失败数不超过基线
+在仓库根 Run: `node scripts/i18n-audit.mjs | grep -E "plans.ts|web/src"` —— 无输出
+在仓库根 Run: `npx vitest run scripts/i18n-audit.test.mjs` —— 16 个用例仍全绿
+
+- [ ] **Step 7: 构建验证**
+
+`shared/plans.ts` 被多个模块引用，改了它的类型必须确认每个模块都还能编译：
+
+```bash
+for m in web link flow analytics insight-segment content admin; do (cd $m && echo "--- $m ---" && npx vite build --mode development >/dev/null 2>&1 && echo OK || echo BUILD FAILED); done
+```
+
+Expected: 全部 OK。任何 FAILED 都要修好再继续——多半是某处把 `name` 或 `description` 当字符串用了。
+
+- [ ] **Step 8: 提交**
+
+```bash
+git add shared/plans.ts web/src/pages/Billing.tsx scripts/i18n-audit.mjs web/tests/unit/plans-i18n.test.ts && git commit -m "i18n(shared): translate tier copy; replace English prefix sniffing with a structural flag"
+```

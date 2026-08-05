@@ -6,6 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../../shared/frontend/ui/dialog";
+import { useT } from "../../../shared/frontend/hooks/useT";
 
 interface FailureReasonDialogProps {
   /** Machine-stable code, optionally followed by ": " and the external API's own error text. */
@@ -22,9 +23,10 @@ interface FailureReasonDialogProps {
  * genuinely has nothing to report).
  */
 export function FailureReasonDialog({ reason, nodeName, subject }: FailureReasonDialogProps) {
+  const T = useT();
   const [open, setOpen] = useState(false);
 
-  if (!reason) return <p className="text-destructive font-medium">Failed</p>;
+  if (!reason) return <p className="text-destructive font-medium">{T({ en: "Failed", zh: "失败" })}</p>;
 
   // "code: detail" — split on the FIRST colon only, so a detail containing colons (URLs, X's
   // own messages) stays intact.
@@ -42,16 +44,16 @@ export function FailureReasonDialog({ reason, nodeName, subject }: FailureReason
         }}
         className="text-destructive font-medium underline underline-offset-2 hover:no-underline"
       >
-        Failed
+        {T({ en: "Failed", zh: "失败" })}
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{nodeName} failed</DialogTitle>
+            <DialogTitle>{T({ en: `${nodeName} failed`, zh: `${nodeName} 失败` })}</DialogTitle>
             {subject && <DialogDescription className="break-all">{subject}</DialogDescription>}
           </DialogHeader>
           <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">Reason</p>
+            <p className="text-xs font-medium text-muted-foreground">{T({ en: "Reason", zh: "原因" })}</p>
             <p className="text-sm font-mono text-destructive break-all">{code}</p>
             {detail && <p className="text-sm text-foreground break-words whitespace-pre-wrap">{detail}</p>}
           </div>

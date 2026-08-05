@@ -14,12 +14,14 @@ import dagre from "@dagrejs/dagre";
 import { useFlowEditor, isValidConnection as isValidNodeConnection } from "../store/flow-editor";
 import { Button } from "../../../shared/frontend/ui/button";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
+import { useT } from "../../../shared/frontend/hooks/useT";
 import DeletableEdge from "../edges/DeletableEdge";
 
 const edgeTypes = { default: DeletableEdge };
 import { nodeTypes } from "../nodes";
 
 export default function Canvas() {
+  const T = useT();
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
   const { nodes, edges, errorNodeIds, onNodesChange, onEdgesChange, onConnect, addNode, setSelectedNode } =
     useFlowEditor();
@@ -42,10 +44,10 @@ export default function Canvas() {
       });
       const added = addNode(type, position);
       if (!added) {
-        toast({ title: "一个流程只能有一个触发节点", variant: "destructive" });
+        toast({ title: T({ en: "A flow can only have one trigger node", zh: "一个流程只能有一个触发节点" }), variant: "destructive" });
       }
     },
-    [addNode, toast]
+    [addNode, toast, T]
   );
 
   const onNodeClick = useCallback(
@@ -92,6 +94,7 @@ export default function Canvas() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
+        // i18n-ok: React Flow keyboard-event key names (KeyboardEvent.key values), not text
         deleteKeyCode={["Delete", "Backspace"]}
       >
         <Background />
@@ -157,7 +160,7 @@ export default function Canvas() {
               useFlowEditor.setState({ nodes: layouted, isDirty: true });
               setTimeout(() => reactFlowRef.current?.fitView({ padding: 0.2 }), 50);
             }}
-            title="Arrange"
+            title={T({ en: "Arrange", zh: "自动排列" })}
             data-arrange="true"
           >📐</Button>
         </Panel>

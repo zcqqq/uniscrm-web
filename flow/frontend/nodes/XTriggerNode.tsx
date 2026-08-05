@@ -1,20 +1,25 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { CHANNEL_TYPES } from "../config/trigger-fields";
+import { getChannelTypes } from "../config/trigger-fields";
 import AnalyticsBadges from "./AnalyticsBadges";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
 import { conditionSummary } from "../lib/condition-logic";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 
 export default function TriggerNode({ data, selected }: NodeProps) {
+  const T = useT();
+  const { locale } = useLocale();
   const channelType = data.channelType as string | undefined;
   const eventType = data.eventType as string | undefined;
   const conditions = (data.conditions as unknown[]) || [];
   const condCount = conditions.filter((c: any) => c?.field).length;
 
-  const ctDef = CHANNEL_TYPES.find((ct) => ct.channelType === channelType);
+  const ctDef = getChannelTypes(locale).find((ct) => ct.channelType === channelType);
   const evDef = ctDef?.events.find((e) => e.eventType === eventType);
 
-  const title = ctDef ? `${ctDef.label} Trigger` : "Trigger";
-  const subtitle = evDef?.label || "Select event...";
+  const triggerWord = T({ en: "Trigger", zh: "触发器" });
+  const title = ctDef ? `${ctDef.label} ${triggerWord}` : triggerWord;
+  const subtitle = evDef?.label || T({ en: "Select event...", zh: "选择事件…" });
   const Icon = ctDef?.icon;
 
   return (
@@ -29,7 +34,7 @@ export default function TriggerNode({ data, selected }: NodeProps) {
             <TooltipTrigger asChild>
               <span><Icon className="w-4 h-4" /></span>
             </TooltipTrigger>
-            <TooltipContent>{ctDef.label}</TooltipContent>
+            <TooltipContent>{ctDef!.label}</TooltipContent>
           </Tooltip>
         ) : (
           <span className="text-lg">⚡</span>
@@ -40,10 +45,10 @@ export default function TriggerNode({ data, selected }: NodeProps) {
             <p className="text-xs text-gray-500">{subtitle}</p>
           )}
           {!eventType && (
-            <p className="text-xs text-gray-400 italic">Not configured</p>
+            <p className="text-xs text-gray-400 italic">{T({ en: "Not configured", zh: "未配置" })}</p>
           )}
           {condCount > 0 && (
-            <p className="text-xs text-purple-500">{conditionSummary(condCount, data.conditionLogic)}</p>
+            <p className="text-xs text-purple-500">{conditionSummary(condCount, data.conditionLogic, locale)}</p>
           )}
         </div>
       </div>

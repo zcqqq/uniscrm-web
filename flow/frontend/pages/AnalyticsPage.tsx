@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ReactFlowProvider, ReactFlow, Background, Controls } from "@xyflow/react";
 import { nodeTypes } from "../nodes";
-import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 import { api, type FlowDetail } from "../lib/api";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
@@ -11,6 +10,10 @@ import { FailureReasonDialog } from "../components/FailureReasonDialog";
 import { ContentLogLink } from "../components/ContentLogLink";
 import { DateCell } from "../../../shared/frontend/components/CellDate";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { C } from "../../../shared/frontend/i18n-common";
+import { nodeLabel } from "../config/nodeTypeLabels";
+import { unitLabel } from "../lib/unit-label";
 
 interface NodeLogEntry {
   user_id?: string;
@@ -25,9 +28,10 @@ interface NodeLogEntry {
 }
 
 export default function AnalyticsPage() {
+  const T = useT();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { timezone } = useLocale();
+  const { timezone, locale } = useLocale();
   const [flow, setFlow] = useState<FlowDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [counts, setCounts] = useState<Record<string, { enter: number; exit: number }>>({});
@@ -56,7 +60,7 @@ export default function AnalyticsPage() {
   }, [id, selectedNode]);
 
   if (loading) return <div className="flex items-center justify-center h-screen"><Skeleton className="h-8 w-48" /></div>;
-  if (!flow) return <div className="flex items-center justify-center h-screen text-destructive">Flow not found</div>;
+  if (!flow) return <div className="flex items-center justify-center h-screen text-destructive">{T({ en: "Flow not found", zh: "流程未找到" })}</div>;
 
   const graph = JSON.parse(flow.graph_json || '{"nodes":[],"edges":[]}');
   const isContentDomain = flow.domain === "content";
@@ -79,9 +83,9 @@ export default function AnalyticsPage() {
       <ReactFlowProvider>
         <div className="h-screen flex flex-col">
           <div className="flex items-center h-12 px-4 border-b border-border bg-background gap-3">
-            <Button variant="ghost" size="sm" onClick={() => navigate(isContentDomain ? "/content" : "/")}>← Back</Button>
+            <Button variant="ghost" size="sm" onClick={() => navigate(isContentDomain ? "/content" : "/")}>{T({ en: "← Back", zh: "← 返回" })}</Button>
             <span className="text-sm font-medium flex-1">{flow.name}</span>
-            <Button variant="outline" size="sm" onClick={handleUnpublish}>Unpublish</Button>
+            <Button variant="outline" size="sm" onClick={handleUnpublish}>{T({ en: "Unpublish", zh: "取消发布" })}</Button>
           </div>
           <div className="flex-1 relative">
             <ReactFlow
@@ -105,40 +109,40 @@ export default function AnalyticsPage() {
               const nodeType = node?.type || "";
               const nodeData = node?.data || {};
               let nodeName = "";
-              if (nodeType === "xContentTrigger") nodeName = NODE_TYPE_REGISTRY.xContentTrigger.label!;
-              else if (nodeType === "youtubeContentTrigger") nodeName = NODE_TYPE_REGISTRY.youtubeContentTrigger.label!;
-              else if (nodeType === "xTrigger") nodeName = (nodeData.eventType as string) || "Trigger";
+              if (nodeType === "xContentTrigger") nodeName = T(nodeLabel("xContentTrigger"));
+              else if (nodeType === "youtubeContentTrigger") nodeName = T(nodeLabel("youtubeContentTrigger"));
+              else if (nodeType === "xTrigger") nodeName = (nodeData.eventType as string) || T({ en: "Trigger", zh: "触发器" });
               else if (nodeType === "action") {
                 const actionType = nodeData.actionType as string;
-                nodeName = actionType === "xAction" ? "X Action"
-                  : actionType === "addToList" ? "Add to List"
-                  : actionType === "xContentAction" ? NODE_TYPE_REGISTRY.xContentAction.label!
-                  : actionType === "tiktokContentAction" ? NODE_TYPE_REGISTRY.tiktokContentAction.label!
-                  : actionType === "youtubeContentAction" ? NODE_TYPE_REGISTRY.youtubeContentAction.label!
-                  : actionType === "videoAction" ? NODE_TYPE_REGISTRY.videoAction.label!
-                  : "Action";
+                nodeName = actionType === "xAction" ? T(nodeLabel("xAction"))
+                  : actionType === "addToList" ? T(nodeLabel("addToList"))
+                  : actionType === "xContentAction" ? T(nodeLabel("xContentAction"))
+                  : actionType === "tiktokContentAction" ? T(nodeLabel("tiktokContentAction"))
+                  : actionType === "youtubeContentAction" ? T(nodeLabel("youtubeContentAction"))
+                  : actionType === "videoAction" ? T(nodeLabel("videoAction"))
+                  : T({ en: "Action", zh: "动作" });
               }
-              else if (nodeType === "wait") nodeName = `Wait ${nodeData.duration} ${nodeData.unit}`;
-              else if (nodeType === "waitForEvent") nodeName = `Wait for Event`;
+              else if (nodeType === "wait") nodeName = `${T({ en: "Wait", zh: "等待" })} ${nodeData.duration} ${unitLabel(nodeData.unit as string, locale)}`;
+              else if (nodeType === "waitForEvent") nodeName = T(nodeLabel("waitForEvent"));
               else nodeName = nodeType;
               return (
               <div className="absolute right-0 top-0 h-full w-96 bg-background border-l border-border shadow-lg p-4 overflow-y-auto z-10">
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h3 className="text-sm font-semibold text-foreground">{nodeName}</h3>
-                    <p className="text-xs text-muted-foreground">Node Analytics</p>
+                    <p className="text-xs text-muted-foreground">{T({ en: "Node Analytics", zh: "节点分析" })}</p>
                   </div>
                   <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setSelectedNode(null)}>×</Button>
                 </div>
                 <div className="mb-4">
                   <p className="text-2xl font-bold text-primary">{counts[selectedNode]?.enter || 0}</p>
-                  <p className="text-xs text-muted-foreground">Entered</p>
+                  <p className="text-xs text-muted-foreground">{T({ en: "Entered", zh: "进入次数" })}</p>
                 </div>
-                <h4 className="text-xs font-medium text-muted-foreground mb-2">{isContentDomain ? "Content Entered" : "Users Entered"}</h4>
+                <h4 className="text-xs font-medium text-muted-foreground mb-2">{isContentDomain ? T({ en: "Content Entered", zh: "进入的内容" }) : T({ en: "Users Entered", zh: "进入的用户" })}</h4>
                 {logsLoading ? (
-                  <p className="text-xs text-muted-foreground">Loading...</p>
+                  <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
                 ) : nodeLogs.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic">{isContentDomain ? "No content has entered this node yet." : "No users have entered this node yet."}</p>
+                  <p className="text-xs text-muted-foreground italic">{isContentDomain ? T({ en: "No content has entered this node yet.", zh: "还没有内容进入过这个节点。" }) : T({ en: "No users have entered this node yet.", zh: "还没有用户进入过这个节点。" })}</p>
                 ) : isContentDomain ? (
                   <ul className="space-y-3">
                     {nodeLogs.map((log, i) => (

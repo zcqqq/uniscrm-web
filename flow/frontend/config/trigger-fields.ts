@@ -97,6 +97,21 @@ export function getChannelTypes(locale: Locale = "en"): ChannelTypeDefinition[] 
   ];
 }
 
+// i18n-ok: intentionally frozen to English — this is NOT a UI-display constant. Its one
+// remaining consumer is flow/nodeTypeRegistry.ts (outside flow/frontend, out of this task's
+// scope), which reads CHANNEL_TYPES at module-load time (not inside a component, no locale
+// available) to compose LLM prompt fragments (X_TRIGGER_EVENT_LIST, X_ACTION_EVENT_LIST) that
+// are sent to the AI-generate endpoint — those must stay English regardless of the user's
+// locale, same as every other promptFragment in that registry. A "module-level array used for
+// static shape" per the i18n-full-coverage plan's own escape hatch.
+// Every UI-facing consumer inside flow/frontend (XTriggerNode, WaitForEventNode) has been
+// switched to call getChannelTypes(locale) directly instead of importing this constant.
+// Two consumers outside this task's file scope — Inspector.tsx (ctDef/evDef labels,
+// CHANNEL_TYPES.flatMap for the waitForEvent event <select>) and Sidebar.tsx (xTrigger's
+// dynamic per-channel label) — still import this frozen constant and therefore still render
+// X event/action names in English regardless of locale; both were already flagged in Task 8's
+// report as a follow-up and are out of Task 9's file scope (already translated in Tasks 7-8,
+// "do not re-translate"). Left as a known gap — see task-9-report.md.
 export const CHANNEL_TYPES: ChannelTypeDefinition[] = getChannelTypes("en");
 
 export function getEventDefinition(eventType: string, locale: Locale = "en"): EventDefinition | undefined {

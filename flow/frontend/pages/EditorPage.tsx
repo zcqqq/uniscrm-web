@@ -4,9 +4,14 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { useFlowEditor } from "../store/flow-editor";
 import { validateFlowGraph } from "../lib/validate-flow-graph";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
+import { C } from "../../../shared/frontend/i18n-common";
+import { t } from "../../../metadata/locale";
 import { api } from "../lib/api";
 import { FLOW_TEMPLATES } from "../config/templates";
 import { generatableKeysForDomain, NODE_TYPE_REGISTRY, type FlowDomain } from "../../nodeTypeRegistry";
+import { nodeLabel } from "../config/nodeTypeLabels";
 import AiGenerateBar from "../../../shared/frontend/components/BarAiGenerate";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
@@ -20,6 +25,7 @@ import Inspector from "../components/Inspector";
 
 
 function EditorToolbar() {
+  const T = useT();
   const { flowId, flowName, flowDomain, isDirty, setFlowName, markClean, toGraphJson, replaceGraph } =
     useFlowEditor();
   const navigate = useNavigate();
@@ -34,18 +40,18 @@ function EditorToolbar() {
       if (node.type === "action") {
         const { actionType, listId, xEvent, channelId } = node.data as Record<string, string>;
         if (actionType === "addToList" && !listId) {
-          alert("Please select a list for the 'Add to List' action.");
+          alert(T({ en: "Please select a list for the 'Add to List' action.", zh: "请为「加入名单」动作选择一个名单。" }));
           return;
         }
         if (actionType === "xAction" && (!xEvent || !channelId)) {
-          alert("Please select action and account for the 'X Action' node.");
+          alert(T({ en: "Please select action and account for the 'X Action' node.", zh: "请为「X 动作」节点选择动作和账号。" }));
           return;
         }
       }
       if (node.type === "xTrigger") {
         const { eventType } = node.data as Record<string, string>;
         if (!eventType) {
-          alert("Please select an event for the trigger node.");
+          alert(T({ en: "Please select an event for the trigger node.", zh: "请为触发器节点选择一个事件。" }));
           return;
         }
       }
@@ -68,7 +74,7 @@ function EditorToolbar() {
 
   const handleBack = () => {
     if (isDirty) {
-      if (confirm("You have unsaved changes. Save before leaving?")) {
+      if (confirm(T({ en: "You have unsaved changes. Save before leaving?", zh: "你有未保存的修改，离开前要保存吗？" }))) {
         handleSave().then(() => navigate(listPath));
         return;
       }
@@ -79,7 +85,7 @@ function EditorToolbar() {
   return (
     <div className="flex items-center h-12 px-4 border-b border-border bg-card gap-3">
       <Button variant="ghost" size="sm" onClick={handleBack}>
-        ← Back
+        {T({ en: "← Back", zh: "← 返回" })}
       </Button>
       <input
         value={flowName}
@@ -91,7 +97,7 @@ function EditorToolbar() {
         context={(() => { const { nodes, edges } = useFlowEditor.getState(); return { nodes, edges }; })()}
         extraBody={{ domain: flowDomain satisfies FlowDomain }}
         allowedNodeTypes={generatableKeysForDomain(flowDomain)}
-        placeholder="Describe your flow..."
+        placeholder={T({ en: "Describe your flow...", zh: "描述你的流程…" })}
         onResult={(graph) => {
           if (Array.isArray(graph.nodes) && Array.isArray(graph.edges)) {
             replaceGraph(graph.nodes, graph.edges);
@@ -99,7 +105,7 @@ function EditorToolbar() {
           }
         }}
       />
-      {isDirty && <span className="text-xs text-amber-500">Unsaved</span>}
+      {isDirty && <span className="text-xs text-amber-500">{T({ en: "Unsaved", zh: "未保存" })}</span>}
       <Button
         size="sm"
         onClick={async () => {
@@ -121,16 +127,18 @@ function EditorToolbar() {
             // 「换 trigger」的文案不能说成"需要 YouTube Trigger"：这一条在"图里有两个
             // trigger、其中一个正是 YouTube Trigger"时也会触发，那样会把人打发去找一个
             // 明明已经在那儿的节点。
+            const youtubeConditionLabel = T(nodeLabel("youtubeCondition"));
+            const youtubeTriggerLabel = T(nodeLabel("youtubeContentTrigger"));
             const title =
               orphanNodeIds.length > 0
-                ? `${orphanNodeIds.length} 个节点未连接，无法发布`
+                ? T({ en: `${orphanNodeIds.length} node(s) not connected, cannot publish`, zh: `${orphanNodeIds.length} 个节点未连接，无法发布` })
                 : emptyConditionNodeIds.length > 0
-                  ? `YouTube Condition 没有设置条件，无法发布`
+                  ? T({ en: `${youtubeConditionLabel} has no conditions set, cannot publish`, zh: `${youtubeConditionLabel} 没有设置条件，无法发布` })
                   : orLogicEmptyNodeIds.length > 0
-                    ? `${orLogicEmptyNodeIds.length} 个节点选了 OR 但没有条件，无法发布`
+                    ? T({ en: `${orLogicEmptyNodeIds.length} node(s) selected OR but have no conditions, cannot publish`, zh: `${orLogicEmptyNodeIds.length} 个节点选了 OR 但没有条件，无法发布` })
                     : youtubeNoSubscriptionNodeIds.length > 0
-                      ? `${youtubeNoSubscriptionNodeIds.length} 个 YouTube Trigger 没有选择 subscription，无法发布`
-                      : `YouTube Condition 只能用在唯一 trigger 是 YouTube Trigger 的流程里，无法发布`;
+                      ? T({ en: `${youtubeNoSubscriptionNodeIds.length} ${youtubeTriggerLabel}(s) have no subscription selected, cannot publish`, zh: `${youtubeNoSubscriptionNodeIds.length} 个 ${youtubeTriggerLabel} 没有选择 subscription，无法发布` })
+                      : T({ en: `${youtubeConditionLabel} can only be used in a flow whose sole trigger is ${youtubeTriggerLabel}, cannot publish`, zh: `${youtubeConditionLabel} 只能用在唯一 trigger 是 ${youtubeTriggerLabel} 的流程里，无法发布` });
             toast({ title, variant: "destructive" });
             return;
           }
@@ -143,7 +151,7 @@ function EditorToolbar() {
           } catch (e) {
             // 在这之前 api.flows.publish 抛错完全没人接：不跳转、也不提示，publish 失败是静默的。
             // 后端把人话放在响应体的 error 里，request() 已经把它变成 Error.message。
-            toast({ title: (e as Error).message || "Publish failed", variant: "destructive" });
+            toast({ title: (e as Error).message || T({ en: "Publish failed", zh: "发布失败" }), variant: "destructive" });
             // 只有 400（trigger 的 channel 确实断了）才该标红 trigger 节点。503（link 验证不了，
             // 让用户重试）和 404 都跟 trigger 本身无关，标红只会误导用户去修一个没坏的节点。
             if ((e as Error & { status?: number }).status === 400) {
@@ -157,7 +165,7 @@ function EditorToolbar() {
           }
         }}
       >
-        Publish
+        {T({ en: "Publish", zh: "发布" })}
       </Button>
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
@@ -170,7 +178,7 @@ function EditorToolbar() {
             onClick={() => { setMenuOpen(false); handleSave(); }}
             disabled={saving}
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? T({ en: "Saving...", zh: "保存中…" }) : T(C.save)}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -179,6 +187,8 @@ function EditorToolbar() {
 }
 
 export default function EditorPage() {
+  const T = useT();
+  const { locale } = useLocale();
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const { setFlow } = useFlowEditor();
@@ -187,8 +197,9 @@ export default function EditorPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    document.title = `${flowDomain === "content" ? "Content Flow" : "User Flow"} — UniSCRM`;
-  }, [flowDomain]);
+    const domainLabel = T(flowDomain === "content" ? { en: "Content Flow", zh: "内容流程" } : { en: "User Flow", zh: "用户流程" });
+    document.title = `${domainLabel} — UniSCRM`;
+  }, [flowDomain, T]);
 
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
@@ -204,8 +215,10 @@ export default function EditorPage() {
     if (!id) return;
     if (id === "new") {
       const tplId = searchParams.get("template");
-      const tpl = tplId ? FLOW_TEMPLATES.find(t => t.id === tplId) : null;
-      const name = tpl?.name || "Untitled Flow";
+      const tpl = tplId ? FLOW_TEMPLATES.find(t2 => t2.id === tplId) : null;
+      // Must stay byte-identical to the backend/DB default — see store/flow-editor.ts's
+      // i18n-ok: flowName initial value comment for the full byte-identical-default rationale.
+      const name = tpl ? t(tpl.name, locale) : "Untitled Flow";
       const nodes = tpl?.graph.nodes || [];
       const edges = tpl?.graph.edges || [];
       // A template carries its own domain; otherwise it comes from the list page that
@@ -229,6 +242,13 @@ export default function EditorPage() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+    // locale deliberately excluded: this effect's "new" branch has side effects that must run
+    // exactly once per flow (addNode("xContentTrigger", ...), autoFillChannelIds()) — re-running
+    // it when useLocale()'s cookie-guess is corrected by the /api/auth/me fetch shortly after
+    // mount would insert a second content trigger node. The template name is read with whatever
+    // locale is available at that first run (almost always already correct — see useLocale's own
+    // comment on why the cookie value is usable as an initial value, not just a placeholder).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, searchParams, setFlow]);
 
   if (loading) {

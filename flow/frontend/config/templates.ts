@@ -1,9 +1,10 @@
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../../nodeTypeRegistry";
+import type { LocalizedString } from "../../../metadata/dataTypes";
 
 export interface FlowTemplate {
   id: string;
-  name: string;
-  description: string;
+  name: LocalizedString;
+  description: LocalizedString;
   domain: "user" | "content";
   graph: {
     nodes: { id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }[];
@@ -14,8 +15,11 @@ export interface FlowTemplate {
 export const FLOW_TEMPLATES: FlowTemplate[] = [
   {
     id: "tpl-follow-back-blue",
-    name: "Follow back Blue Premium",
-    description: "When a Blue-verified user follows you, automatically follow them back",
+    name: { en: "Follow back Blue Premium", zh: "回关 Blue 认证用户" },
+    description: {
+      en: "When a Blue-verified user follows you, automatically follow them back",
+      zh: "当已通过 Blue 认证的用户关注你时，自动回关",
+    },
     domain: "user",
     graph: {
       nodes: [
@@ -29,8 +33,11 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
   },
   {
     id: "tpl-unfollow-unfollowers",
-    name: "Unfollow who unfollows me",
-    description: "When someone unfollows you, automatically unfollow them back",
+    name: { en: "Unfollow who unfollows me", zh: "取关取关我的人" },
+    description: {
+      en: "When someone unfollows you, automatically unfollow them back",
+      zh: "有人取关你时，自动取关对方",
+    },
     domain: "user",
     graph: {
       nodes: [
@@ -44,8 +51,11 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
   },
   {
     id: "tpl-dm-not-followed-back",
-    name: "DM if not followed back",
-    description: "After following someone, if they don't follow back in 1 day, send a Direct Message; if still no response, unfollow and mute",
+    name: { en: "DM if not followed back", zh: "关注未回关则私信" },
+    description: {
+      en: "After following someone, if they don't follow back in 1 day, send a Direct Message; if still no response, unfollow and mute",
+      zh: "关注对方后，若 1 天内未回关则发送私信；仍无回应则取关并将其静音",
+    },
     domain: "user",
     graph: {
       nodes: [
@@ -70,8 +80,11 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
   },
   {
     id: "tpl-content-rewrite-crosspost",
-    name: "AI-rewrite new List posts",
-    description: "When a new post is ingested from an X List, rewrite it with AI and publish it via the same channel",
+    name: { en: "AI-rewrite new List posts", zh: "AI 改写名单新帖" },
+    description: {
+      en: "When a new post is ingested from an X List, rewrite it with AI and publish it via the same channel",
+      zh: "当 X 名单中出现新帖子时，用 AI 改写后通过同一账号发布",
+    },
     domain: "content",
     graph: {
       nodes: [

@@ -1,19 +1,25 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
-import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
+import { nodeLabel } from "../config/nodeTypeLabels";
 import { CHANNEL_TYPES } from "../config/trigger-fields";
 import { ContentMetadata_X } from "../../../metadata/x-byok";
 import { ContentMetadata_YouTube } from "../../../metadata/youtube";
 import { t as localizeLabel } from "../../../metadata/locale";
 import { XIcon, TikTokIcon, YouTubeIcon } from "../../../shared/frontend/ui/icons";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 
 const EXTERNAL_API_ACTIONS = ["xAction", "xContentAction", "tiktokContentAction", "videoAction", "youtubeContentAction"];
+// Count only — locale-invariant, so the module-level frozen CHANNEL_TYPES is fine here (no
+// text ever reaches the user through this constant).
 const X_ACTION_COUNT = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!.actions.length;
 const CONTENT_X_ACTION_OPERATIONS = ContentMetadata_X.filter((m) => m.flowType === "action");
 const CONTENT_YOUTUBE_ACTION_OPERATIONS_NODE = ContentMetadata_YouTube.filter((m) => m.flowType === "action");
 
 export default function ActionNode({ data, selected }: NodeProps) {
+  const T = useT();
+  const { locale } = useLocale();
   const actionType = data.actionType as string;
   const isExternalApi = EXTERNAL_API_ACTIONS.includes(actionType);
 
@@ -24,51 +30,51 @@ export default function ActionNode({ data, selected }: NodeProps) {
 
   if (actionType === "addToList") {
     const listName = data.listName as string;
-    label = NODE_TYPE_REGISTRY.addToList.label!;
-    description = listName || "Select a list...";
+    label = T(nodeLabel("addToList"));
+    description = listName || T({ en: "Select a list...", zh: "选择名单…" });
     icon = "📋";
     isConfigured = !!listName;
   } else if (actionType === "xAction") {
     const xEvent = data.xEvent as string;
-    label = NODE_TYPE_REGISTRY.xAction.label!;
-    description = xEvent === "follow-user" ? "Follow User"
-      : xEvent === "unfollow-user" ? "Unfollow User"
-      : xEvent === "create-dm" ? "Direct Message"
-      : xEvent === "mute-user" ? "Mute User"
-      : `${X_ACTION_COUNT} actions`;
+    label = T(nodeLabel("xAction"));
+    description = xEvent === "follow-user" ? T({ en: "Follow User", zh: "关注用户" })
+      : xEvent === "unfollow-user" ? T({ en: "Unfollow User", zh: "取消关注" })
+      : xEvent === "create-dm" ? T({ en: "Direct Message", zh: "私信" })
+      : xEvent === "mute-user" ? T({ en: "Mute User", zh: "静音用户" })
+      : T({ en: `${X_ACTION_COUNT} actions`, zh: `${X_ACTION_COUNT} 个动作` });
     icon = XIcon;
     isConfigured = !!xEvent;
   } else if (actionType === "xContentAction") {
     const operation = (data.operation as string) || "create-post";
     const selectedOperation = CONTENT_X_ACTION_OPERATIONS.find((op) => op.sourceContentType === operation);
-    label = NODE_TYPE_REGISTRY.xContentAction.label!;
-    description = selectedOperation?.label ? localizeLabel(selectedOperation.label, "en") : undefined;
+    label = T(nodeLabel("xContentAction"));
+    description = selectedOperation?.label ? localizeLabel(selectedOperation.label, locale) : undefined;
     icon = XIcon;
     isConfigured = !!selectedOperation;
   } else if (actionType === "tiktokContentAction") {
     const channelId = data.channelId as string;
-    label = NODE_TYPE_REGISTRY.tiktokContentAction.label!;
-    description = channelId ? "Target channel selected" : "Select a target channel...";
+    label = T(nodeLabel("tiktokContentAction"));
+    description = channelId ? T({ en: "Target channel selected", zh: "已选择目标渠道" }) : T({ en: "Select a target channel...", zh: "选择目标渠道…" });
     icon = TikTokIcon;
     isConfigured = !!channelId;
   } else if (actionType === "youtubeContentAction") {
     const operation = (data.operation as string) || "save-to-playlist";
     const selectedOperation = CONTENT_YOUTUBE_ACTION_OPERATIONS_NODE.find((op) => op.sourceContentType === operation);
-    label = NODE_TYPE_REGISTRY.youtubeContentAction.label!;
-    description = selectedOperation?.label ? localizeLabel(selectedOperation.label, "en") : undefined;
+    label = T(nodeLabel("youtubeContentAction"));
+    description = selectedOperation?.label ? localizeLabel(selectedOperation.label, locale) : undefined;
     icon = YouTubeIcon;
     isConfigured = operation === "rate-like" || (operation === "save-to-playlist" && !!data.playlistId);
   } else if (actionType === "videoAction") {
     const operation = (data.operation as string) || "add-subtitle";
-    label = NODE_TYPE_REGISTRY.videoAction.label!;
-    description = operation === "rotate-to-vertical" ? "Rotate to Vertical"
-      : operation === "remove-face" ? "Remove Face"
-      : "Add Subtitle";
+    label = T(nodeLabel("videoAction"));
+    description = operation === "rotate-to-vertical" ? T({ en: "Rotate to Vertical", zh: "旋转为竖屏" })
+      : operation === "remove-face" ? T({ en: "Remove Face", zh: "移除人脸" })
+      : T({ en: "Add Subtitle", zh: "添加字幕" });
     icon = "🎬";
     isConfigured = true;
   } else {
-    label = "Action";
-    description = "Unknown action";
+    label = T({ en: "Action", zh: "动作" });
+    description = T({ en: "Unknown action", zh: "未知动作" });
     icon = "⚡";
     isConfigured = false;
   }
@@ -101,8 +107,8 @@ export default function ActionNode({ data, selected }: NodeProps) {
       <AnalyticsBadges analytics={data._analytics as any} />
       {isExternalApi && (
         <>
-          <span className="absolute right-1 text-[10px] text-green-600" style={{ top: "35%", transform: "translateY(-50%)" }}>Success</span>
-          <span className="absolute right-1 text-[10px] text-red-500" style={{ top: "65%", transform: "translateY(-50%)" }}>Failed</span>
+          <span className="absolute right-1 text-[10px] text-green-600" style={{ top: "35%", transform: "translateY(-50%)" }}>{T({ en: "Success", zh: "成功" })}</span>
+          <span className="absolute right-1 text-[10px] text-red-500" style={{ top: "65%", transform: "translateY(-50%)" }}>{T({ en: "Failed", zh: "失败" })}</span>
         </>
       )}
       {isExternalApi ? (

@@ -6,6 +6,10 @@ import { FLOW_TEMPLATES, type FlowTemplate } from "../config/templates";
 import { Nav } from "../components/Nav";
 import { DateCell } from "../../../shared/frontend/components/CellDate";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { C } from "../../../shared/frontend/i18n-common";
+import { t, type Locale } from "../../../metadata/locale";
+import type { LocalizedString } from "../../../metadata/dataTypes";
 import { StatusCell } from "../../../shared/frontend/components/CellStatus";
 import { OperationCell } from "../../../shared/frontend/components/CellOperation";
 import { EmptyState } from "../../../shared/frontend/components/EmptyState";
@@ -45,15 +49,18 @@ function getNodeIcons(nodes: { type: string; data: Record<string, unknown> }[]) 
   return { icons, extra: extra > 0 ? extra : 0 };
 }
 
-const TRIGGER_ACCOUNT_NOUN: Record<string, string> = {
-  xTrigger: "X account",
-  xContentTrigger: "X account",
-  youtubeContentTrigger: "YouTube account",
+const TRIGGER_ACCOUNT_NOUN: Record<string, LocalizedString> = {
+  xTrigger: { en: "X account", zh: "X 账号" },
+  xContentTrigger: { en: "X account", zh: "X 账号" },
+  youtubeContentTrigger: { en: "YouTube account", zh: "YouTube 账号" },
 };
+const DEFAULT_TRIGGER_ACCOUNT_NOUN: LocalizedString = { en: "channel", zh: "渠道" };
 
-export function brokenTriggerTooltip(nodeType: string) {
-  const noun = TRIGGER_ACCOUNT_NOUN[nodeType] || "channel";
-  return `The ${noun} this flow triggers on is not connected, so this flow never runs. Connect it under Channels, or pick another one in the trigger node.`;
+export function brokenTriggerTooltip(nodeType: string, locale: Locale) {
+  const noun = t(TRIGGER_ACCOUNT_NOUN[nodeType] || DEFAULT_TRIGGER_ACCOUNT_NOUN, locale);
+  return locale === "zh"
+    ? `此流程触发所用的${noun}未连接，因此该流程永远不会运行。请到渠道页连接它，或在触发器节点中另选一个。`
+    : `The ${noun} this flow triggers on is not connected, so this flow never runs. Connect it under Channels, or pick another one in the trigger node.`;
 }
 
 type SortKey = "trigger_count" | "updated_at";
@@ -64,10 +71,11 @@ interface FlowsPageProps {
 }
 
 export default function FlowsPage({ domain }: FlowsPageProps) {
-  const title = domain === "content" ? "Content Flow" : "User Flow";
+  const T = useT();
+  const { timezone, locale } = useLocale();
+  const title = T(domain === "content" ? { en: "Content Flow", zh: "内容流程" } : { en: "User Flow", zh: "用户流程" });
   useEffect(() => { document.title = `${title} — UniSCRM`; }, [title]);
   const { flows, loading, page, total, totalPages, setPage, createFlow, deleteFlow, refresh } = useFlows(domain);
-  const { timezone } = useLocale();
   const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<SortKey>("updated_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -75,7 +83,7 @@ export default function FlowsPage({ domain }: FlowsPageProps) {
   const handleDuplicate = async (flowId: string) => {
     const { flow: detail } = await api.flows.get(flowId);
     const { flow: created } = await api.flows.create(
-      `${detail.name} (Copy)`,
+      `${detail.name}${locale === "zh" ? "（副本）" : " (Copy)"}`,
       detail.graph_json || '{"nodes":[],"edges":[]}',
       domain,
       detail.description || ""
@@ -122,7 +130,7 @@ export default function FlowsPage({ domain }: FlowsPageProps) {
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-xl font-semibold">{title}</h1>
-            <Button onClick={() => handleCreate()}>+ New</Button>
+            <Button onClick={() => handleCreate()}>{T({ en: "+ New", zh: "+ 新建" })}</Button>
           </div>
 
           {/* Template cards */}
@@ -136,8 +144,8 @@ export default function FlowsPage({ domain }: FlowsPageProps) {
                   className="border-2 border-primary/40 hover:border-primary transition-all cursor-pointer flex flex-col"
                 >
                   <CardContent className="p-4 flex flex-col flex-1">
-                    <span className="text-sm font-medium text-foreground block mb-1">{tpl.name}</span>
-                    <p className="text-xs text-muted-foreground line-clamp-2 mb-3 flex-1">{tpl.description}</p>
+                    <span className="text-sm font-medium text-foreground block mb-1">{T(tpl.name)}</span>
+                    <p className="text-xs text-muted-foreground line-clamp-2 mb-3 flex-1">{T(tpl.description)}</p>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
                         {icons.map((Icon, i) => (
@@ -147,7 +155,7 @@ export default function FlowsPage({ domain }: FlowsPageProps) {
                           <span className="w-6 h-6 flex items-center justify-center rounded bg-muted text-[10px] text-muted-foreground">+{extra}</span>
                         )}
                       </div>
-                      <Button size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleCreate(tpl); }}>Use</Button>
+                      <Button size="sm" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleCreate(tpl); }}>{T({ en: "Use", zh: "使用" })}</Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -164,9 +172,9 @@ export default function FlowsPage({ domain }: FlowsPageProps) {
             </div>
           ) : flows.length === 0 ? (
             <EmptyState
-              title="No workflows yet"
-              description="Create one to get started."
-              action={<Button onClick={() => handleCreate()}>+ New</Button>}
+              title={T({ en: "No workflows yet", zh: "暂无流程" })}
+              description={T({ en: "Create one to get started.", zh: "新建一个即可开始。" })}
+              action={<Button onClick={() => handleCreate()}>{T({ en: "+ New", zh: "+ 新建" })}</Button>}
             />
           ) : (
             <>
@@ -174,16 +182,16 @@ export default function FlowsPage({ domain }: FlowsPageProps) {
                 <DataTable total={total} page={page} totalPages={totalPages} onPageChange={setPage}>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>{T(C.name)}</TableHead>
+                      <TableHead>{T(C.status)}</TableHead>
                       <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("trigger_count")}>
-                        No. Triggered<SortIcon active={sortKey === "trigger_count"} dir={sortDir} />
+                        {T({ en: "No. Triggered", zh: "触发次数" })}<SortIcon active={sortKey === "trigger_count"} dir={sortDir} />
                       </TableHead>
                       <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("updated_at")}>
-                        Updated At<SortIcon active={sortKey === "updated_at"} dir={sortDir} />
+                        {T({ en: "Updated At", zh: "更新时间" })}<SortIcon active={sortKey === "updated_at"} dir={sortDir} />
                       </TableHead>
-                      <TableHead>Updated By</TableHead>
-                      <TableHead className="text-right">Operations</TableHead>
+                      <TableHead>{T({ en: "Updated By", zh: "更新人" })}</TableHead>
+                      <TableHead className="text-right">{T({ en: "Operations", zh: "操作" })}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -199,12 +207,12 @@ export default function FlowsPage({ domain }: FlowsPageProps) {
                             {broken ? (
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <span><StatusCell status="error" label="Trigger Disconnected" /></span>
+                                  <span><StatusCell status="error" label={T({ en: "Trigger Disconnected", zh: "触发器已断开" })} /></span>
                                 </TooltipTrigger>
-                                <TooltipContent>{brokenTriggerTooltip(broken)}</TooltipContent>
+                                <TooltipContent>{brokenTriggerTooltip(broken, locale)}</TooltipContent>
                               </Tooltip>
                             ) : (
-                              <StatusCell status={isPublished ? "published" : "draft"} label={isPublished ? "Published" : "Draft"} />
+                              <StatusCell status={isPublished ? "published" : "draft"} label={isPublished ? T({ en: "Published", zh: "已发布" }) : T({ en: "Draft", zh: "草稿" })} />
                             )}
                           </TableCell>
                           <TableCell className="text-muted-foreground">{flow.trigger_count || "-"}</TableCell>
@@ -217,21 +225,21 @@ export default function FlowsPage({ domain }: FlowsPageProps) {
                               status={broken ? "broken" : flow.status}
                               operations={{
                                 broken: {
-                                  primary: { icon: <EditIcon className="w-5 h-5" />, title: "Edit", onClick: () => navigate(`/flows/${flow.id}`) },
+                                  primary: { icon: <EditIcon className="w-5 h-5" />, title: T(C.edit), onClick: () => navigate(`/flows/${flow.id}`) },
                                   menu: [
-                                    { label: "Duplicate", onClick: () => handleDuplicate(flow.id) },
-                                    { label: "Stop", onClick: () => api.flows.unpublish(flow.id).then(() => refresh()), destructive: true },
+                                    { label: T({ en: "Duplicate", zh: "复制" }), onClick: () => handleDuplicate(flow.id) },
+                                    { label: T({ en: "Stop", zh: "停用" }), onClick: () => api.flows.unpublish(flow.id).then(() => refresh()), destructive: true },
                                   ],
                                 },
                                 published: {
-                                  primary: { icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg>, title: "Duplicate", onClick: () => handleDuplicate(flow.id) },
-                                  menu: [{ label: "Stop", onClick: () => api.flows.unpublish(flow.id).then(() => refresh()), destructive: true }],
+                                  primary: { icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg>, title: T({ en: "Duplicate", zh: "复制" }), onClick: () => handleDuplicate(flow.id) },
+                                  menu: [{ label: T({ en: "Stop", zh: "停用" }), onClick: () => api.flows.unpublish(flow.id).then(() => refresh()), destructive: true }],
                                 },
                                 draft: {
-                                  primary: { icon: <EditIcon className="w-5 h-5" />, title: "Edit", onClick: () => navigate(`/flows/${flow.id}`) },
+                                  primary: { icon: <EditIcon className="w-5 h-5" />, title: T(C.edit), onClick: () => navigate(`/flows/${flow.id}`) },
                                   menu: [
-                                    { label: "Duplicate", onClick: () => handleDuplicate(flow.id) },
-                                    { label: "Delete", onClick: () => { if (confirm("Delete this flow?")) deleteFlow(flow.id); }, destructive: true },
+                                    { label: T({ en: "Duplicate", zh: "复制" }), onClick: () => handleDuplicate(flow.id) },
+                                    { label: T(C.delete), onClick: () => { if (confirm(T({ en: "Delete this flow?", zh: "确定删除该流程？" }))) deleteFlow(flow.id); }, destructive: true },
                                   ],
                                 },
                               }}

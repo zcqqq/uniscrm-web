@@ -1,11 +1,15 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
-import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
+import { nodeLabel } from "../config/nodeTypeLabels";
 import { YouTubeIcon } from "../../../shared/frontend/ui/icons";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
 import { conditionSummary } from "../lib/condition-logic";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 
 export default function YouTubeConditionNode({ data, selected }: NodeProps) {
+  const T = useT();
+  const { locale } = useLocale();
   const conditions = (data.conditions as unknown[]) || [];
   const condCount = conditions.filter((c: any) => c?.field).length;
 
@@ -19,15 +23,15 @@ export default function YouTubeConditionNode({ data, selected }: NodeProps) {
           </TooltipTrigger>
           <TooltipContent>YouTube</TooltipContent>
         </Tooltip>
-        <span className="font-semibold text-sm text-purple-700">{NODE_TYPE_REGISTRY.youtubeCondition.label}</span>
+        <span className="font-semibold text-sm text-purple-700">{T(nodeLabel("youtubeCondition"))}</span>
       </div>
       <p className="text-xs text-gray-700">
-        {condCount === 0 ? "No conditions" : conditionSummary(condCount, data.conditionLogic)}
+        {condCount === 0 ? T({ en: "No conditions", zh: "无条件" }) : conditionSummary(condCount, data.conditionLogic, locale)}
       </p>
       <AnalyticsBadges analytics={data._analytics as any} />
-      <span className="absolute right-1 text-[10px] text-green-600" style={{ top: "25%", transform: "translateY(-50%)" }}>True</span>
-      <span className="absolute right-1 text-[10px] text-gray-500" style={{ top: "50%", transform: "translateY(-50%)" }}>False</span>
-      <span className="absolute right-1 text-[10px] text-red-500" style={{ top: "75%", transform: "translateY(-50%)" }}>Failed</span>
+      <span className="absolute right-1 text-[10px] text-green-600" style={{ top: "25%", transform: "translateY(-50%)" }}>{T({ en: "True", zh: "真" })}</span>
+      <span className="absolute right-1 text-[10px] text-gray-500" style={{ top: "50%", transform: "translateY(-50%)" }}>{T({ en: "False", zh: "假" })}</span>
+      <span className="absolute right-1 text-[10px] text-red-500" style={{ top: "75%", transform: "translateY(-50%)" }}>{T({ en: "Failed", zh: "失败" })}</span>
       <Handle type="source" position={Position.Right} id="true" className="!bg-green-500 !w-2.5 !h-2.5" style={{ top: "25%" }} />
       <Handle type="source" position={Position.Right} id="false" className="!bg-gray-400 !w-2.5 !h-2.5" style={{ top: "50%" }} />
       <Handle type="source" position={Position.Right} id="failed" className="!bg-red-400 !w-2.5 !h-2.5" style={{ top: "75%" }} />

@@ -11,6 +11,7 @@ interface PositionedNode {
 
 function collidesWithAny(pos: { x: number; y: number }, nodes: PositionedNode[]): boolean {
   return nodes.some(
+    // i18n-ok: arithmetic comparison, not text — audit's JSX-text regex false-matches the
     (n) => Math.abs(n.position.x - pos.x) < NODE_WIDTH && Math.abs(n.position.y - pos.y) < NODE_HEIGHT
   );
 }

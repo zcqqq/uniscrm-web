@@ -4,6 +4,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await authFetch(path, {
     ...options,
     headers: {
+      // i18n-ok: HTTP header name/value, not user-facing text
       "Content-Type": "application/json",
       ...options?.headers,
     },

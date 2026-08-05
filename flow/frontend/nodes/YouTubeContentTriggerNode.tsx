@@ -1,16 +1,20 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
-import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
+import { nodeLabel } from "../config/nodeTypeLabels";
 import { YouTubeIcon } from "../../../shared/frontend/ui/icons";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
 import { conditionSummary } from "../lib/condition-logic";
 import { subscriptionSummary } from "../lib/subscription-summary";
 import { resolveYouTubeSubscriptions } from "../../nodeTypeRegistry";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 
 export default function YouTubeContentTriggerNode({ data, selected }: NodeProps) {
+  const T = useT();
+  const { locale } = useLocale();
   const conditions = (data.conditions as unknown[]) || [];
   const condCount = conditions.filter((c: any) => c?.field).length;
-  const channelName = subscriptionSummary(resolveYouTubeSubscriptions(data as Record<string, unknown>));
+  const channelName = subscriptionSummary(resolveYouTubeSubscriptions(data as Record<string, unknown>), locale);
 
   return (
     <div
@@ -26,10 +30,10 @@ export default function YouTubeContentTriggerNode({ data, selected }: NodeProps)
           <TooltipContent>YouTube</TooltipContent>
         </Tooltip>
         <div>
-          <span className="font-semibold text-sm text-red-700">{NODE_TYPE_REGISTRY.youtubeContentTrigger.label}</span>
+          <span className="font-semibold text-sm text-red-700">{T(nodeLabel("youtubeContentTrigger"))}</span>
           <p className="text-xs text-gray-500">{channelName}</p>
           {condCount > 0 && (
-            <p className="text-xs text-red-500">{conditionSummary(condCount, data.conditionLogic)}</p>
+            <p className="text-xs text-red-500">{conditionSummary(condCount, data.conditionLogic, locale)}</p>
           )}
         </div>
       </div>

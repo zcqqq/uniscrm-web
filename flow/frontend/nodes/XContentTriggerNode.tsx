@@ -1,17 +1,26 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
-import { NODE_TYPE_REGISTRY, CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../../nodeTypeRegistry";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS } from "../../nodeTypeRegistry";
+import { nodeLabel } from "../config/nodeTypeLabels";
 import { XIcon } from "../../../shared/frontend/ui/icons";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
 import { conditionSummary } from "../lib/condition-logic";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 
 export default function XContentTriggerNode({ data, selected }: NodeProps) {
+  const T = useT();
+  const { locale } = useLocale();
   const conditions = (data.conditions as unknown[]) || [];
   const condCount = conditions.filter((c: any) => c?.field).length;
   const mode = data.mode as string;
+  const listLabel = T({ en: "List", zh: "名单" });
+  const notSelected = T({ en: "(not selected)", zh: "（未选择）" });
   const subtitle = mode === CONTENT_X_TRIGGER_MODE_LIST_POSTS
-    ? `List: ${(data.listName as string) || "(not selected)"}`
-    : "My own posts";
+    ? (locale === "zh"
+        ? `${listLabel}：${(data.listName as string) || notSelected}`
+        : `${listLabel}: ${(data.listName as string) || notSelected}`)
+    : T({ en: "My own posts", zh: "我自己的帖子" });
 
   return (
     <div
@@ -27,10 +36,10 @@ export default function XContentTriggerNode({ data, selected }: NodeProps) {
           <TooltipContent>X</TooltipContent>
         </Tooltip>
         <div>
-          <span className="font-semibold text-sm text-purple-700">{NODE_TYPE_REGISTRY.xContentTrigger.label}</span>
+          <span className="font-semibold text-sm text-purple-700">{T(nodeLabel("xContentTrigger"))}</span>
           <p className="text-xs text-gray-500">{subtitle}</p>
           {condCount > 0 && (
-            <p className="text-xs text-purple-500">{conditionSummary(condCount, data.conditionLogic)}</p>
+            <p className="text-xs text-purple-500">{conditionSummary(condCount, data.conditionLogic, locale)}</p>
           )}
         </div>
       </div>

@@ -47,6 +47,7 @@ export interface FlowEditorState {
   // Auto-fills data.channelId on any action node whose actionType is in ACTION_CHANNEL_TYPE
   // and still has no channelId, provided the tenant has exactly one connected account for
   // that channelType. No-ops (and skips the API call) if nothing needs filling.
+  // i18n-ok: "Promise<void>" is a TS return type, not text — audit's regex false-matches "=> Promise<"
   autoFillChannelIds: () => Promise<void>;
   setErrorNodeIds: (ids: string[]) => void;
   setReactFlowInstance: (instance: ReactFlowInstance | null) => void;
@@ -90,6 +91,11 @@ function isEditingChange(change: { type?: string }): boolean {
 
 export const useFlowEditor = create<FlowEditorState>((set, get) => ({
   flowId: null,
+  // Must stay byte-identical to the backend/DB default — see flow/src/index.ts's
+  // POST /api/flows fallback and every tenant DB migration's
+  // `name TEXT NOT NULL DEFAULT 'Untitled Flow'`. This is a persisted data value, not display
+  // copy — translating only the frontend copy would make flow names differ depending on
+  // i18n-ok: whether the default came from the frontend or the backend/DB.
   flowName: "Untitled Flow",
   flowEnabled: false,
   flowDomain: "user",

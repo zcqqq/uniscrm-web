@@ -82,9 +82,9 @@ const GROUP_LABELS: Record<PropOption["group"], LocalizedString> = {
 // 只对**限定名**（id 带 "."，即 content flow 的作者字段）加分组标注：裸 id 在同一个列表里
 // 不会有第二个同名项，加了只是噪音，也会动到存量 user flow 的既有观感。
 // 与 computeInsertPrefix 同理导出成纯函数，好在无 DOM 的 workerd 测试环境里直接断言。
-// locale 默认 "en"：保留既有调用方（含 flow 的纯函数单测）不传 locale 时的既有英文输出，
-// 组件内的实际渲染处会显式传入 useLocale() 的当前 locale。
-export function computeSelectedDisplay(opt: Pick<PropOption, "id" | "label" | "group">, locale: Locale = "en"): string {
+// locale 无默认值：调用方必须显式传入 useLocale() 的当前 locale，防止悄悄退回英文
+// （component 内的唯一渲染处已经这样做；纯函数单测显式传 "en" 断言英文分支）。
+export function computeSelectedDisplay(opt: Pick<PropOption, "id" | "label" | "group">, locale: Locale): string {
   return opt.id.includes(".") ? `${t(GROUP_LABELS[opt.group], locale)} · ${opt.label}` : opt.label;
 }
 

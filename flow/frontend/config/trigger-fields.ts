@@ -52,7 +52,7 @@ function propToField(propId: string, locale: Locale, group: "event" | "user" | "
   return { id: propId, label: t(prop.label, locale), dataType, operators, group };
 }
 
-export function getChannelTypes(locale: Locale = "en"): ChannelTypeDefinition[] {
+export function getChannelTypes(locale: Locale): ChannelTypeDefinition[] {
   const eventTimeField: TriggerFieldDefinition = {
     id: "event_time",
     label: t({ en: "Event Time", zh: "事件时间" }, locale),
@@ -114,7 +114,7 @@ export function getChannelTypes(locale: Locale = "en"): ChannelTypeDefinition[] 
 // "do not re-translate"). Left as a known gap — see task-9-report.md.
 export const CHANNEL_TYPES: ChannelTypeDefinition[] = getChannelTypes("en");
 
-export function getEventDefinition(eventType: string, locale: Locale = "en"): EventDefinition | undefined {
+export function getEventDefinition(eventType: string, locale: Locale): EventDefinition | undefined {
   for (const ct of getChannelTypes(locale)) {
     const ev = ct.events.find((e) => e.eventType === eventType);
     if (ev) return ev;
@@ -138,7 +138,7 @@ export function getEventDefinition(eventType: string, locale: Locale = "en"): Ev
 export function getContentTriggerFields(
   metadata: ContentMetadata[],
   sourceContentType: string,
-  locale: Locale = "en"
+  locale: Locale
 ): TriggerFieldDefinition[] {
   const meta = metadata.find((m) => m.sourceContentType === sourceContentType);
   if (!meta) return [];

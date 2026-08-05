@@ -358,6 +358,7 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
 
 function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const T = useT();
+  const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
   const conditions: Condition[] = data.conditions || [];
   const channelId = data.channelId as string;
@@ -444,7 +445,7 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
 
         <ConditionsEditor
           conditions={conditions}
-          fields={getContentTriggerFields(ContentMetadata_X, data.mode || CONTENT_X_TRIGGER_MODE_LIST_POSTS)}
+          fields={getContentTriggerFields(ContentMetadata_X, data.mode || CONTENT_X_TRIGGER_MODE_LIST_POSTS, locale)}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
           logic={data.conditionLogic}
           onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
@@ -545,7 +546,7 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
 
         <ConditionsEditor
           conditions={conditions}
-          fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos")}
+          fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos", locale)}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
           logic={data.conditionLogic}
           onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
@@ -1102,6 +1103,7 @@ function VideoConditionInspector({ nodeId, data }: { nodeId: string; data: Recor
 // duration <= 600 是 link 入队前的摄取门槛，与"发布一天后复查"无关。
 function YouTubeConditionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const T = useT();
+  const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
   const conditions = (data.conditions as Condition[]) || [];
 
@@ -1111,7 +1113,7 @@ function YouTubeConditionInspector({ nodeId, data }: { nodeId: string; data: Rec
       <div className="space-y-3">
         <ConditionsEditor
           conditions={conditions}
-          fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos")}
+          fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos", locale)}
           onChange={(c) => updateNodeData(nodeId, { conditions: c })}
           logic={data.conditionLogic}
           onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}

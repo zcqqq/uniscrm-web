@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect, useCallback, useMemo, createContext, useContext } from "react";
 import type { ReactNode } from "react";
 import { api } from "../lib/api";
 
@@ -51,18 +51,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = async (email: string, trial?: string) => {
+  // Memoized: this context value flows into every consumer (Verify.tsx, Login.tsx, ...), some of
+  // which put `refresh` et al. straight into a useEffect dependency array to run a one-shot side
+  // effect (token exchange). An unmemoized function here gets a new identity on every
+  // AuthProvider re-render (e.g. the me() rejection below settling), which would silently re-fire
+  // any such effect — the exact class of bug in web/src/pages/Verify.tsx that this memoization
+  // closes off at the source, for every current and future consumer, not just that one page.
+  const login = useCallback(async (email: string, trial?: string) => {
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     await api.auth.login(email, trial, timezone);
-  };
+  }, []);
 
-  const passwordLogin = async (email: string, password: string) => {
+  const passwordLogin = useCallback(async (email: string, password: string) => {
     const res = await api.auth.passwordLogin(email, password);
     setMember(res.member);
     setTenant(res.tenant);
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await api.auth.logout();
     } catch {
@@ -71,31 +77,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMember(null);
     setTenant(null);
     window.location.href = "/login";
-  };
+  }, []);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     const res = await api.auth.me();
     setMember(res.member);
     setTenant(res.tenant);
-  };
+  }, []);
 
-  const updateLocation = async (location: string) => {
+  const updateLocation = useCallback(async (location: string) => {
     await api.settings.update(location);
     setMember((prev) => prev ? { ...prev, preferred_location: location } : prev);
-  };
+  }, []);
 
-  const updateLanguage = async (language: string) => {
+  const updateLanguage = useCallback(async (language: string) => {
     await api.settings.updateLanguage(language);
     setMember((prev) => prev ? { ...prev, language } : prev);
-  };
+  }, []);
 
-  const updateTimezone = async (timezone: string) => {
+  const updateTimezone = useCallback(async (timezone: string) => {
     await api.settings.updateTimezone(timezone);
     setMember((prev) => prev ? { ...prev, timezone } : prev);
-  };
+  }, []);
+
+  const value = useMemo(
+    () => ({ member, tenant, loading, login, passwordLogin, logout, refresh, updateLocation, updateLanguage, updateTimezone }),
+    [member, tenant, loading, login, passwordLogin, logout, refresh, updateLocation, updateLanguage, updateTimezone],
+  );
 
   return (
-    <AuthContext.Provider value={{ member, tenant, loading, login, passwordLogin, logout, refresh, updateLocation, updateLanguage, updateTimezone }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

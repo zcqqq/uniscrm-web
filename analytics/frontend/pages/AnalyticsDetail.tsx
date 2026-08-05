@@ -5,6 +5,9 @@ import { LineChart, BarChart3, PieChart } from "lucide-react";
 import { createReport, getReport, updateReport, recomputeReport, listDashboards, createDashboard, addDashboardItem, type Dashboard } from "../lib/api";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { C } from "../../../shared/frontend/i18n-common";
+import type { LocalizedString } from "../../../metadata/dataTypes";
 import { ReportConfig, type ReportConfigValues } from "../components/ReportConfig";
 import { IntervalDistributionChart } from "../components/IntervalDistributionChart";
 import { fillTimeSeries, generatePeriodKeys, normalizeDate } from "../lib/fill-time-series";
@@ -33,93 +36,56 @@ const MODE_TITLES: Record<string, { en: string; zh: string }> = {
 };
 
 const UI = {
-  en: {
-    saved: "Saved",
-    saveFailed: "Save failed",
-    recomputeQueued: "Recompute queued",
-    recomputeFailed: "Recompute failed",
-    notComputedYet: "Not computed yet",
-    recomputing: "Recomputing...",
-    recompute: "Re-compute",
-    dataUpdated: "Data updated: ",
-    dashboardNamePrompt: "Dashboard name",
-    addedTo: "Added to",
-    newDashboard: "New Dashboard",
-    saving: "Saving...",
-    save: "Save",
-    computing: "Computing...",
-    distribution: "Distribution",
-    distributionData: "Distribution Data",
-    period: "Period",
-    count: "Count",
-    min: "Min",
-    median: "Median",
-    max: "Max",
-    line: "Line",
-    bar: "Bar",
-    pieChart: "Pie",
-    data: "Data",
-    dimension: "Dimension",
-    value: "Value",
-    step1Users: "Step 1 Users",
-    completionRate: "Completion Rate",
-    funnel: "Funnel",
-    event: "Event",
-    users: "Users",
-    conv: "Conv.",
-    overall: "Overall",
-    totalUsers: "Total Users",
-    totalContent: "Total Content",
-  },
-  zh: {
-    saved: "已保存",
-    saveFailed: "保存失败",
-    recomputeQueued: "已重新计算",
-    recomputeFailed: "重新计算失败",
-    notComputedYet: "尚未计算",
-    recomputing: "计算中...",
-    recompute: "重新计算",
-    dataUpdated: "数据更新时间：",
-    dashboardNamePrompt: "输入仪表盘名称",
-    addedTo: "已添加到",
-    newDashboard: "新建仪表盘",
-    saving: "保存中...",
-    save: "Save",
-    computing: "查询中...",
-    distribution: "分布",
-    distributionData: "分布数据",
-    period: "时间",
-    count: "配对数",
-    min: "最小值",
-    median: "中位数",
-    max: "最大值",
-    line: "折线",
-    bar: "柱状",
-    pieChart: "饼图",
-    data: "明细数据",
-    dimension: "维度",
-    value: "值",
-    step1Users: "第1步用户数",
-    completionRate: "最终转化率",
-    funnel: "漏斗",
-    event: "事件",
-    users: "用户数",
-    conv: "转化率",
-    overall: "总转化",
-    totalUsers: "用户总数",
-    totalContent: "内容总数",
-  },
-} as const;
+  saved: { en: "Saved", zh: "已保存" },
+  saveFailed: { en: "Save failed", zh: "保存失败" },
+  recomputeQueued: { en: "Recompute queued", zh: "已重新计算" },
+  recomputeFailed: { en: "Recompute failed", zh: "重新计算失败" },
+  notComputedYet: { en: "Not computed yet", zh: "尚未计算" },
+  recomputing: { en: "Recomputing...", zh: "计算中…" },
+  recompute: { en: "Re-compute", zh: "重新计算" },
+  dataUpdated: { en: "Data updated: ", zh: "数据更新时间：" },
+  dashboardNamePrompt: { en: "Dashboard name", zh: "输入仪表盘名称" },
+  addedTo: { en: "Added to", zh: "已添加到" },
+  newDashboard: { en: "New Dashboard", zh: "新建仪表盘" },
+  saving: { en: "Saving...", zh: "保存中…" },
+  save: { en: "Save", zh: "保存" },
+  computing: { en: "Computing...", zh: "查询中…" },
+  distribution: { en: "Distribution", zh: "分布" },
+  distributionData: { en: "Distribution Data", zh: "分布数据" },
+  period: { en: "Period", zh: "时间" },
+  count: { en: "Count", zh: "配对数" },
+  min: { en: "Min", zh: "最小值" },
+  median: { en: "Median", zh: "中位数" },
+  max: { en: "Max", zh: "最大值" },
+  line: { en: "Line", zh: "折线" },
+  bar: { en: "Bar", zh: "柱状" },
+  pieChart: { en: "Pie", zh: "饼图" },
+  data: { en: "Data", zh: "明细数据" },
+  dimension: { en: "Dimension", zh: "维度" },
+  value: { en: "Value", zh: "值" },
+  step1Users: { en: "Step 1 Users", zh: "第1步用户数" },
+  completionRate: { en: "Completion Rate", zh: "最终转化率" },
+  funnel: { en: "Funnel", zh: "漏斗" },
+  event: { en: "Event", zh: "事件" },
+  users: { en: "Users", zh: "用户数" },
+  conv: { en: "Conv.", zh: "转化率" },
+  overall: { en: "Overall", zh: "总转化" },
+  totalUsers: { en: "Total Users", zh: "用户总数" },
+  totalContent: { en: "Total Content", zh: "内容总数" },
+  error: { en: "Error", zh: "错误" },
+  failed: { en: "Failed", zh: "失败" },
+  queryFailed: { en: "Query failed", zh: "查询失败" },
+} satisfies Record<string, LocalizedString>;
 
 export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval" | "user" | "content" | "funnel" }) {
   const { id: paramId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { locale, timezone } = useLocale();
   const { toast } = useToast();
-  const t = UI[locale as "en" | "zh"];
+  const T = useT();
 
   const [mode, setMode] = useState<"event" | "interval" | "user" | "content" | "funnel">(modeProp || "event");
-  const [name, setName] = useState(() => (paramId ? "" : `Untitled ${MODE_TITLES[mode]?.en || "Analytics"}`));
+  const [name, setName] = useState(() => (paramId ? "" : `${T({ en: "Untitled", zh: "未命名" })} ${MODE_TITLES[mode] ? T(MODE_TITLES[mode]) : T({ en: "Analytics", zh: "分析" })}`));
   // Unified chart-type preference, persisted to report params as `chart_type`
   // for every mode (event: line/bar, user: pie/bar, interval: boxplot only —
   // no user-facing toggle yet, funnel: unused). Editing this never triggers
@@ -205,7 +171,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
       if (r.results) setResults(r.results);
       setComputedAt(r.computed_at || null);
       setLoading(r.status === "pending" || r.status === "computing");
-      if (r.status === "error") setError(r.error_message || "Error");
+      if (r.status === "error") setError(r.error_message || T(UI.error));
       setInitialized(true);
     }).catch((e) => { setError(e.message); setLoading(false); setInitialized(true); });
   }, [paramId]);
@@ -308,7 +274,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
         setReportId(res.report.id);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed");
+      setError(err instanceof Error ? err.message : T(UI.failed));
       setLoading(false);
     }
   }, [buildReportParams, config, mode]);
@@ -329,7 +295,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           setLoading(false);
           clearInterval(poll);
         } else if (res.report.status === "error") {
-          setError(res.report.error_message || "Query failed");
+          setError(res.report.error_message || T(UI.queryFailed));
           setLoading(false);
           clearInterval(poll);
         } else if (res.report.status === "pending" || res.report.status === "computing") {
@@ -359,10 +325,10 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     try {
       const params = buildReportParams();
       await updateReport(reportId, { name: normalizedName || null, type: mode, params });
-      toast({ description: t.saved });
+      toast({ description: T(UI.saved) });
       navigate("/analytics");
     } catch (err) {
-      const message = err instanceof Error ? err.message : t.saveFailed;
+      const message = err instanceof Error ? err.message : T(UI.saveFailed);
       toast({ variant: "destructive", description: message });
     } finally {
       setSaving(false);
@@ -376,9 +342,9 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
       await recomputeReport(reportId);
       setLoading(true);
       setPollNonce((n) => n + 1);
-      toast({ description: t.recomputeQueued });
+      toast({ description: T(UI.recomputeQueued) });
     } catch (err) {
-      const message = err instanceof Error ? err.message : t.recomputeFailed;
+      const message = err instanceof Error ? err.message : T(UI.recomputeFailed);
       toast({ variant: "destructive", description: message });
     } finally {
       setRecomputing(false);
@@ -468,7 +434,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div className="flex items-center h-12 px-4 border-b border-border bg-card gap-3 shrink-0">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/analytics")}>← Back</Button>
+        <Button variant="ghost" size="sm" onClick={() => navigate("/analytics")}>{T({ en: "← Back", zh: "← 返回" })}</Button>
         <Input
           type="text"
           value={name}
@@ -480,35 +446,35 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           <UiTooltip>
             <UiTooltipTrigger asChild>
               <Button variant="outline" size="sm" disabled={!reportId || recomputing} onClick={handleRecompute}>
-                {recomputing ? t.recomputing : t.recompute}
+                {recomputing ? T(UI.recomputing) : T(UI.recompute)}
               </Button>
             </UiTooltipTrigger>
             <UiTooltipContent>
-              <div>{t.dataUpdated}</div>
-              {computedAt ? <DateCell iso={computedAt} timezone={timezone} /> : t.notComputedYet}
+              <div>{T(UI.dataUpdated)}</div>
+              {computedAt ? <DateCell iso={computedAt} timezone={timezone} /> : T(UI.notComputedYet)}
             </UiTooltipContent>
           </UiTooltip>
         </UiTooltipProvider>
         <DropdownMenu open={dashDropOpen} onOpenChange={setDashDropOpen}>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" disabled={!reportId}>Add to Dashboard</Button>
+            <Button variant="outline" size="sm" disabled={!reportId}>{T({ en: "Add to Dashboard", zh: "添加到仪表盘" })}</Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuItem onClick={async () => {
-              const name = prompt(t.dashboardNamePrompt);
+              const name = prompt(T(UI.dashboardNamePrompt));
               if (!name || !reportId) return;
               const res = await createDashboard(name);
               await addDashboardItem(res.dashboard.id, reportId);
               setDashboards((prev) => [{ id: res.dashboard.id, name, created_at: "", updated_at: "" }, ...prev]);
-              toast({ description: `${t.addedTo} ${name}` });
+              toast({ description: `${T(UI.addedTo)} ${name}` });
             }}>
-              <span className="text-primary font-medium">+ {t.newDashboard}</span>
+              <span className="text-primary font-medium">+ {T(UI.newDashboard)}</span>
             </DropdownMenuItem>
             {dashboards.map((d) => (
               <DropdownMenuItem key={d.id} onClick={async () => {
                 if (!reportId) return;
                 await addDashboardItem(d.id, reportId);
-                toast({ description: `${t.addedTo} ${d.name}` });
+                toast({ description: `${T(UI.addedTo)} ${d.name}` });
               }}>
                 {d.name}
               </DropdownMenuItem>
@@ -516,7 +482,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           </DropdownMenuContent>
         </DropdownMenu>
         <Button size="sm" onClick={handleSave} disabled={saving || !reportId}>
-          {saving ? t.saving : t.save}
+          {saving ? T(UI.saving) : T(UI.save)}
         </Button>
       </div>
 
@@ -527,7 +493,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           <div className="flex items-center justify-center py-16">
             <div className="flex items-center gap-3 text-muted-foreground">
               <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              <span className="text-sm">{t.computing}</span>
+              <span className="text-sm">{T(UI.computing)}</span>
             </div>
           </div>
         )}
@@ -542,21 +508,21 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           <>
             <Card className="mb-4">
               <CardContent className="p-6 pt-4">
-                <p className="text-sm font-medium text-foreground mb-4">{t.distribution}</p>
+                <p className="text-sm font-medium text-foreground mb-4">{T(UI.distribution)}</p>
                 <IntervalDistributionChart slots={intervalSlots} locale={locale} tickFormatter={formatPeriod} />
               </CardContent>
             </Card>
 
             <ResultsTable
-              title={t.distributionData}
+              title={T(UI.distributionData)}
               columns={[
-                { key: "period", label: t.period, render: (s: any) => <span className="text-muted-foreground">{formatPeriod(s.period)}</span> },
-                { key: "count", label: t.count, align: "right", render: (s: any) => s.stats ? s.stats.count.toLocaleString() : "—" },
-                { key: "min", label: t.min, align: "right", render: (s: any) => s.stats ? fmtDuration(s.stats.min) : "—" },
+                { key: "period", label: T(UI.period), render: (s: any) => <span className="text-muted-foreground">{formatPeriod(s.period)}</span> },
+                { key: "count", label: T(UI.count), align: "right", render: (s: any) => s.stats ? s.stats.count.toLocaleString() : "—" },
+                { key: "min", label: T(UI.min), align: "right", render: (s: any) => s.stats ? fmtDuration(s.stats.min) : "—" },
                 { key: "p25", label: "P25", align: "right", render: (s: any) => s.stats ? fmtDuration(s.stats.p25) : "—" },
-                { key: "median", label: t.median, align: "right", render: (s: any) => <span className="font-medium">{s.stats ? fmtDuration(s.stats.median) : "—"}</span> },
+                { key: "median", label: T(UI.median), align: "right", render: (s: any) => <span className="font-medium">{s.stats ? fmtDuration(s.stats.median) : "—"}</span> },
                 { key: "p75", label: "P75", align: "right", render: (s: any) => s.stats ? fmtDuration(s.stats.p75) : "—" },
-                { key: "max", label: t.max, align: "right", render: (s: any) => s.stats ? fmtDuration(s.stats.max) : "—" },
+                { key: "max", label: T(UI.max), align: "right", render: (s: any) => s.stats ? fmtDuration(s.stats.max) : "—" },
               ]}
               rows={intervalSlots as unknown as Record<string, unknown>[]}
             />
@@ -573,8 +539,8 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                     value={chartType}
                     onChange={setChartType}
                     options={[
-                      { value: "line", icon: LineChart, tooltip: t.line },
-                      { value: "bar", icon: BarChart3, tooltip: t.bar },
+                      { value: "line", icon: LineChart, tooltip: T(UI.line) },
+                      { value: "bar", icon: BarChart3, tooltip: T(UI.bar) },
                     ]}
                   />
                 </div>
@@ -649,9 +615,9 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                 ? eventData.flatMap((row: any) => dimensions.map((dim) => ({ period: row.period, dimension: dim, value: Number(row[dim]) || 0 })))
                 : eventData.map((d: any) => ({ period: d.period, value: Number(d.value) || 0 }));
               const columns = [
-                { key: "period", label: t.period, sortable: true, sortType: "date" as const, render: (d: any) => <span className="text-muted-foreground">{formatPeriod(d.period)}</span> },
-                ...(hasDimension ? [{ key: "dimension", label: t.dimension, sortable: true, sortType: dimensionSortType, render: (d: any) => d.dimension == null ? "—" : formatDimensionValue(String(d.dimension)) }] : []),
-                { key: "value", label: t.value, align: "right" as const, sortable: true, sortType: "number" as const, render: (d: any) => <span className="font-medium">{d.value.toLocaleString()}</span> },
+                { key: "period", label: T(UI.period), sortable: true, sortType: "date" as const, render: (d: any) => <span className="text-muted-foreground">{formatPeriod(d.period)}</span> },
+                ...(hasDimension ? [{ key: "dimension", label: T(UI.dimension), sortable: true, sortType: dimensionSortType, render: (d: any) => d.dimension == null ? "—" : formatDimensionValue(String(d.dimension)) }] : []),
+                { key: "value", label: T(UI.value), align: "right" as const, sortable: true, sortType: "number" as const, render: (d: any) => <span className="font-medium">{d.value.toLocaleString()}</span> },
               ];
               // Clicking "Dimension" fully re-sorts the flattened row array
               // (one row per period x dimension) by the chosen column,
@@ -666,7 +632,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                 : tableRows;
               return (
                 <ResultsTable
-                  title={t.data}
+                  title={T(UI.data)}
                   columns={columns}
                   rows={sortedTableRows}
                   sortKey={sortColumn}
@@ -686,18 +652,18 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
             <>
               <div className="grid gap-4 grid-cols-2 mb-4">
                 <Card><CardContent className="p-4">
-                  <p className="text-xs text-muted-foreground">{t.step1Users}</p>
+                  <p className="text-xs text-muted-foreground">{T(UI.step1Users)}</p>
                   <p className="text-2xl font-bold tracking-tight mt-1">{steps[0].count.toLocaleString()}</p>
                 </CardContent></Card>
                 <Card><CardContent className="p-4">
-                  <p className="text-xs text-muted-foreground">{t.completionRate}</p>
+                  <p className="text-xs text-muted-foreground">{T(UI.completionRate)}</p>
                   <p className="text-2xl font-bold tracking-tight mt-1">{steps[steps.length - 1].totalRate}%</p>
                 </CardContent></Card>
               </div>
 
               <Card className="mb-4">
                 <CardContent className="p-6">
-                  <p className="text-sm font-medium text-foreground mb-4">{t.funnel}</p>
+                  <p className="text-sm font-medium text-foreground mb-4">{T(UI.funnel)}</p>
                   <div className="space-y-3">
                     {steps.map((s, i) => (
                       <div key={i} className="flex items-center gap-3">
@@ -719,13 +685,13 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               </Card>
 
               <ResultsTable
-                title={t.data}
+                title={T(UI.data)}
                 columns={[
                   { key: "idx", label: "#", render: (s: any) => s.idx },
-                  { key: "eventType", label: t.event, render: (s: any) => s.eventType },
-                  { key: "count", label: t.users, align: "right", render: (s: any) => <span className="font-medium">{s.count.toLocaleString()}</span> },
-                  { key: "conversionRate", label: t.conv, align: "right", render: (s: any) => <span className="text-muted-foreground">{s.idx === 1 ? "—" : `${s.conversionRate}%`}</span> },
-                  { key: "totalRate", label: t.overall, align: "right", render: (s: any) => <span className="text-muted-foreground">{s.totalRate}%</span> },
+                  { key: "eventType", label: T(UI.event), render: (s: any) => s.eventType },
+                  { key: "count", label: T(UI.users), align: "right", render: (s: any) => <span className="font-medium">{s.count.toLocaleString()}</span> },
+                  { key: "conversionRate", label: T(UI.conv), align: "right", render: (s: any) => <span className="text-muted-foreground">{s.idx === 1 ? "—" : `${s.conversionRate}%`}</span> },
+                  { key: "totalRate", label: T(UI.overall), align: "right", render: (s: any) => <span className="text-muted-foreground">{s.totalRate}%</span> },
                 ]}
                 rows={steps.map((s, i) => ({ ...s, idx: i + 1 }))}
               />
@@ -733,14 +699,14 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
           );
         })()}
 
-        {/* User/Content results — Pie/Bar chart + table (no dimension selected collapses to a single "Total" slice, same code path) */}
+        {/* User/Content results — Pie/Bar chart + table (no dimension selected collapses to a single Total slice, same code path) */}
         {hasData && (mode === "user" || mode === "content") && (() => {
           const dimensioned = results.data.filter((d: any) => d.dimension != null);
-          const totalLabel = mode === "content" ? t.totalContent : t.totalUsers;
+          const totalLabel = mode === "content" ? T(UI.totalContent) : T(UI.totalUsers);
           const data = dimensioned.length > 0
             ? dimensioned
             : results.data.length === 1
-              ? [{ dimension: config.measure === "count" ? totalLabel : (config.measureField || t.value), value: results.data[0].value }]
+              ? [{ dimension: config.measure === "count" ? totalLabel : (config.measureField || T(UI.value)), value: results.data[0].value }]
               : [];
           const total = data.reduce((s: number, d: any) => s + (d.value || 0), 0);
           if (data.length === 0) return null;
@@ -758,13 +724,13 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               <Card className="mb-4">
                 <CardContent className="p-6 pt-4">
                   <div className="flex items-center justify-between mb-4">
-                    <p className="text-sm font-medium text-foreground">{t.distribution}</p>
+                    <p className="text-sm font-medium text-foreground">{T(UI.distribution)}</p>
                     <ChartTypeToggle
                       value={chartType}
                       onChange={setChartType}
                       options={[
-                        { value: "pie", icon: PieChart, tooltip: t.pieChart },
-                        { value: "bar", icon: BarChart3, tooltip: t.bar },
+                        { value: "pie", icon: PieChart, tooltip: T(UI.pieChart) },
+                        { value: "bar", icon: BarChart3, tooltip: T(UI.bar) },
                       ]}
                     />
                   </div>
@@ -785,7 +751,7 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
                         {sortedData.map((d: any, i: number) => (
                           <div key={i} className="flex items-center gap-2 text-sm">
                             <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: DIMENSION_COLORS[i % DIMENSION_COLORS.length] }} />
-                            <span className="flex-1 truncate text-foreground">{d.dimension == null ? "null" : formatDimensionValue(String(d.dimension))}</span>
+                            <span className="flex-1 truncate text-foreground">{d.dimension == null ? T(C.none) : formatDimensionValue(String(d.dimension))}</span>
                             <span className="text-muted-foreground">{total ? `${Math.round(d.value / total * 100)}%` : "0%"}</span>
                             <span className="font-medium w-16 text-right">{Number(d.value).toLocaleString()}</span>
                           </div>
@@ -812,20 +778,20 @@ export function AnalyticsDetail({ mode: modeProp }: { mode?: "event" | "interval
               </Card>
 
               <ResultsTable
-                title={t.data}
+                title={T(UI.data)}
                 columns={[
                   {
-                    key: "dimension", label: t.dimension, sortable: true, sortType: dimensionSortType, render: (d: any) => {
+                    key: "dimension", label: T(UI.dimension), sortable: true, sortType: dimensionSortType, render: (d: any) => {
                       const i = sortedData.indexOf(d);
                       return (
                         <span className="flex items-center gap-2">
                           <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: DIMENSION_COLORS[i % DIMENSION_COLORS.length] }} />
-                          {d.dimension == null ? "null" : formatDimensionValue(String(d.dimension))}
+                          {d.dimension == null ? T(C.none) : formatDimensionValue(String(d.dimension))}
                         </span>
                       );
                     },
                   },
-                  { key: "value", label: t.value, align: "right", sortable: true, sortType: "number", render: (d: any) => Number(d.value).toLocaleString() },
+                  { key: "value", label: T(UI.value), align: "right", sortable: true, sortType: "number", render: (d: any) => Number(d.value).toLocaleString() },
                   { key: "pct", label: "%", align: "right", sortable: true, sortType: "number", render: (d: any) => <span className="text-muted-foreground">{total ? `${Math.round(d.value / total * 100)}%` : "0%"}</span> },
                 ]}
                 rows={sortedData}

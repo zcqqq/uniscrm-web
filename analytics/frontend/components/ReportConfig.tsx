@@ -1,12 +1,13 @@
 import { EventMetadata_X } from "../../../metadata/x";
 import { PROPS } from "../../../metadata/props";
-import type { PropDefinition } from "../../../metadata/dataTypes";
+import type { PropDefinition, LocalizedString } from "../../../metadata/dataTypes";
 import { t } from "../../../metadata/locale";
 import { SelectProps } from "../../../shared/frontend/components/SelectProps";
 import { IntDimensionPopover, type BucketMode } from "../../../shared/frontend/components/IntDimensionPopover";
 import { DatetimeDimensionPopover, type DatetimeGranularity } from "../../../shared/frontend/components/DatetimeDimensionPopover";
 import { getDimensionRange } from "../lib/api";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
+import { useT } from "../../../shared/frontend/hooks/useT";
 import { Select } from "../../../shared/frontend/ui/select";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
@@ -24,29 +25,39 @@ const eventPropsFor = (eventType: string): PropDefinition[] => {
 };
 
 const UI = {
-  en: {
-    measure: "Measure", dimension: "Dimension", selectEvent: "Select event...",
-    totalCount: "Total count", uniqueUsers: "Unique users", perUserAvg: "Per-user avg",
-    noGroup: "No grouping", viewBy: "View by",
-    today: "Today", yesterday: "Yesterday", thisWeek: "This week", lastWeek: "Last week",
-    thisMonth: "This month", lastMonth: "Last month",
-    last7d: "Last 7 days", last14d: "Last 14 days", last30d: "Last 30 days", last90d: "Last 90 days", last180d: "Last 180 days", last360d: "Last 360 days",
-    total: "Total", day: "Day", week: "Week", month: "Month", hour: "Hour", weekday: "Weekday",
-    compare: "Compare period", filter: "Filter", addFilter: "Add filter",
-    between: "between", hasValue: "has value", noValue: "no value",
-  },
-  zh: {
-    measure: "选择指标", dimension: "选择维度", selectEvent: "选择事件...",
-    totalCount: "总次数", uniqueUsers: "总人数", perUserAvg: "人均次数",
-    noGroup: "不分组", viewBy: "按",
-    today: "今天", yesterday: "昨天", thisWeek: "本周", lastWeek: "上周",
-    thisMonth: "本月", lastMonth: "上月",
-    last7d: "过去7天", last14d: "过去14天", last30d: "过去30天", last90d: "过去90天", last180d: "过去180天", last360d: "过去360天",
-    total: "按总体", day: "按日", week: "按周", month: "按月", hour: "按小时", weekday: "按周几",
-    compare: "对比时间", filter: "筛选条件", addFilter: "添加条件",
-    between: "介于", hasValue: "有值", noValue: "无值",
-  },
-};
+  measure: { en: "Measure", zh: "选择指标" },
+  dimension: { en: "Dimension", zh: "选择维度" },
+  selectEvent: { en: "Select event...", zh: "选择事件…" },
+  totalCount: { en: "Total count", zh: "总次数" },
+  uniqueUsers: { en: "Unique users", zh: "总人数" },
+  perUserAvg: { en: "Per-user avg", zh: "人均次数" },
+  noGroup: { en: "No grouping", zh: "不分组" },
+  viewBy: { en: "View by", zh: "按" },
+  today: { en: "Today", zh: "今天" },
+  yesterday: { en: "Yesterday", zh: "昨天" },
+  thisWeek: { en: "This week", zh: "本周" },
+  lastWeek: { en: "Last week", zh: "上周" },
+  thisMonth: { en: "This month", zh: "本月" },
+  lastMonth: { en: "Last month", zh: "上月" },
+  last7d: { en: "Last 7 days", zh: "过去7天" },
+  last14d: { en: "Last 14 days", zh: "过去14天" },
+  last30d: { en: "Last 30 days", zh: "过去30天" },
+  last90d: { en: "Last 90 days", zh: "过去90天" },
+  last180d: { en: "Last 180 days", zh: "过去180天" },
+  last360d: { en: "Last 360 days", zh: "过去360天" },
+  total: { en: "Total", zh: "按总体" },
+  day: { en: "Day", zh: "按日" },
+  week: { en: "Week", zh: "按周" },
+  month: { en: "Month", zh: "按月" },
+  hour: { en: "Hour", zh: "按小时" },
+  weekday: { en: "Weekday", zh: "按周几" },
+  compare: { en: "Compare period", zh: "对比时间" },
+  filter: { en: "Filter", zh: "筛选条件" },
+  addFilter: { en: "Add filter", zh: "添加条件" },
+  between: { en: "between", zh: "介于" },
+  hasValue: { en: "has value", zh: "有值" },
+  noValue: { en: "no value", zh: "无值" },
+} satisfies Record<string, LocalizedString>;
 
 const TIME_RANGES = [
   { value: "today", key: "today" as const },
@@ -103,7 +114,7 @@ interface ReportConfigProps {
 
 export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigProps) {
   const { locale } = useLocale();
-  const s = UI[locale];
+  const T = useT();
   const mode = modeProp || values.mode || "event";
   const entityProps = propsByEntity(mode === "content" ? "content" : "user");
   const numericEntityProps = entityProps.filter((p) => p.dataType === "INT");
@@ -140,7 +151,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
         {/* Funnel mode — steps + window */}
         {mode === "funnel" && (
           <div className="space-y-3 mb-4">
-            <Label className="block">{locale === "zh" ? "漏斗步骤" : "Funnel Steps"}</Label>
+            <Label className="block">{T({ en: "Funnel Steps", zh: "漏斗步骤" })}</Label>
             {(values.funnelSteps || ["", ""]).map((step, i) => (
               <div key={i} className="flex items-center gap-2">
                 <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center shrink-0">{i + 1}</span>
@@ -149,7 +160,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                   steps[i] = e.target.value;
                   update({ funnelSteps: steps });
                 }} className="flex-1">
-                  <option value="">{s.selectEvent}</option>
+                  <option value="">{T(UI.selectEvent)}</option>
                   {TRIGGER_EVENTS.map((ev) => <option key={ev.eventType} value={ev.eventType}>{t(ev.label, locale)}</option>)}
                 </Select>
                 {(values.funnelSteps || []).length > 2 && (
@@ -162,15 +173,15 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
             ))}
             {(values.funnelSteps || []).length < 10 && (
               <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => update({ funnelSteps: [...(values.funnelSteps || ["", ""]), ""] })}>
-                + {locale === "zh" ? "添加步骤" : "Add step"}
+                + {T({ en: "Add step", zh: "添加步骤" })}
               </Button>
             )}
             <div className="flex items-center gap-2 mt-3">
-              <Label className="text-sm text-muted-foreground shrink-0">{locale === "zh" ? "窗口期" : "Window"}:</Label>
+              <Label className="text-sm text-muted-foreground shrink-0">{T({ en: "Window", zh: "窗口期" })}:</Label>
               <Input type="number" value={values.windowValue ?? 7} onChange={(e) => update({ windowValue: parseInt(e.target.value) || 7 })} className="h-7 w-16 text-xs" min={1} />
               <Select value={values.windowUnit || "day"} onChange={(e) => update({ windowUnit: e.target.value as any })} className="h-7 text-xs">
-                <option value="day">{locale === "zh" ? "天" : "days"}</option>
-                <option value="hour">{locale === "zh" ? "小时" : "hours"}</option>
+                <option value="day">{T({ en: "days", zh: "天" })}</option>
+                <option value="hour">{T({ en: "hours", zh: "小时" })}</option>
               </Select>
             </div>
           </div>
@@ -181,19 +192,19 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
           <div className="flex-1 min-w-[280px]">
             {mode === "interval" ? (
               <>
-                <Label className="mb-2 block">{locale === "zh" ? "定义行为事件" : "Define Events"}</Label>
+                <Label className="mb-2 block">{T({ en: "Define Events", zh: "定义行为事件" })}</Label>
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground w-16">{locale === "zh" ? "初始行为" : "Initial"}</span>
+                    <span className="text-xs text-muted-foreground w-16">{T({ en: "Initial", zh: "初始行为" })}</span>
                     <Select value={values.eventTypeA || ""} onChange={(e) => update({ eventTypeA: e.target.value })}>
-                      <option value="">{s.selectEvent}</option>
+                      <option value="">{T(UI.selectEvent)}</option>
                       {TRIGGER_EVENTS.map((e) => <option key={e.eventType} value={e.eventType}>{t(e.label, locale)}</option>)}
                     </Select>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground w-16">{locale === "zh" ? "结束行为" : "Follow-up"}</span>
+                    <span className="text-xs text-muted-foreground w-16">{T({ en: "Follow-up", zh: "结束行为" })}</span>
                     <Select value={values.eventTypeB || ""} onChange={(e) => update({ eventTypeB: e.target.value })}>
-                      <option value="">{s.selectEvent}</option>
+                      <option value="">{T(UI.selectEvent)}</option>
                       {TRIGGER_EVENTS.map((e) => <option key={e.eventType} value={e.eventType}>{t(e.label, locale)}</option>)}
                     </Select>
                   </div>
@@ -201,12 +212,12 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
               </>
             ) : mode === "user" || mode === "content" ? (
               <>
-                <Label className="mb-2 block">{s.measure}</Label>
+                <Label className="mb-2 block">{T(UI.measure)}</Label>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Select value={values.measure} onChange={(e) => update({ measure: e.target.value as any, measureField: e.target.value !== "count" ? (values.measureField || numericEntityProps[0]?.propId || "") : undefined })}>
-                    <option value="count">{mode === "content" ? (locale === "zh" ? "内容数" : "Content count") : (locale === "zh" ? "用户数" : "User count")}</option>
-                    <option value="avg">{locale === "zh" ? "平均值" : "Average"}</option>
-                    <option value="sum">{locale === "zh" ? "总和" : "Sum"}</option>
+                    <option value="count">{mode === "content" ? (T({ en: "Content count", zh: "内容数" })) : (T({ en: "User count", zh: "用户数" }))}</option>
+                    <option value="avg">{T({ en: "Average", zh: "平均值" })}</option>
+                    <option value="sum">{T({ en: "Sum", zh: "总和" })}</option>
                   </Select>
                   {(values.measure === "avg" || values.measure === "sum") && (
                     <>
@@ -220,33 +231,33 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
               </>
             ) : (
               <>
-                <Label className="mb-2 block">{s.measure}</Label>
+                <Label className="mb-2 block">{T(UI.measure)}</Label>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Select value={values.eventType} onChange={(e) => update({ eventType: e.target.value })}>
-                    <option value="">{s.selectEvent}</option>
+                    <option value="">{T(UI.selectEvent)}</option>
                     {TRIGGER_EVENTS.map((e) => <option key={e.eventType} value={e.eventType}>{t(e.label, locale)}</option>)}
                   </Select>
                   <span className="text-muted-foreground text-sm">→</span>
                   <Select value={values.measure} onChange={(e) => update({ measure: e.target.value as any })}>
-                    <option value="count">{s.totalCount}</option>
-                    <option value="users">{s.uniqueUsers}</option>
-                    <option value="avg">{s.perUserAvg}</option>
+                    <option value="count">{T(UI.totalCount)}</option>
+                    <option value="users">{T(UI.uniqueUsers)}</option>
+                    <option value="avg">{T(UI.perUserAvg)}</option>
                   </Select>
                 </div>
               </>
             )}
           </div>
           <div className="flex-1 min-w-[200px]">
-            <Label className="mb-2 block">{s.dimension}</Label>
+            <Label className="mb-2 block">{T(UI.dimension)}</Label>
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground text-sm">{s.viewBy}</span>
+              <span className="text-muted-foreground text-sm">{T(UI.viewBy)}</span>
               {mode === "user" || mode === "content" ? (
                 <SelectProps
                   options={entityProps}
                   value={values.dimension}
                   onChange={(v) => update({ dimension: v, buckets: "", dimensionBucketMode: undefined, dimensionDateGranularity: undefined })}
                   locale={locale}
-                  placeholder={s.noGroup}
+                  placeholder={T(UI.noGroup)}
                 />
               ) : (
                 <SelectProps
@@ -254,7 +265,7 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                   value={values.dimension}
                   onChange={(v) => update({ dimension: v, buckets: "", dimensionBucketMode: undefined, dimensionDateGranularity: undefined })}
                   locale={locale}
-                  placeholder={s.noGroup}
+                  placeholder={T(UI.noGroup)}
                 />
               )}
               {values.dimension && selectedDimensionIsInt && mode !== "interval" && (
@@ -289,16 +300,16 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                   value={f.field}
                   onChange={(v) => updateFilter(i, { field: v })}
                   locale={locale}
-                  placeholder={locale === "zh" ? "选择属性" : "Select field"}
+                  placeholder={T({ en: "Select field", zh: "选择属性" })}
                 />
                 <Select value={f.operator} onChange={(e) => updateFilter(i, { operator: e.target.value })} className="h-7 text-xs">
-                  {OPERATORS.map((op) => <option key={op} value={op}>{op === "between" ? s.between : op === "has value" ? s.hasValue : op === "no value" ? s.noValue : op}</option>)}
+                  {OPERATORS.map((op) => <option key={op} value={op}>{op === "between" ? T(UI.between) : op === "has value" ? T(UI.hasValue) : op === "no value" ? T(UI.noValue) : op}</option>)}
                 </Select>
                 {f.operator !== "has value" && f.operator !== "no value" && (
-                  <Input type="text" value={f.value} onChange={(e) => updateFilter(i, { value: e.target.value })} className="h-7 w-20 text-xs" placeholder="value" />
+                  <Input type="text" value={f.value} onChange={(e) => updateFilter(i, { value: e.target.value })} className="h-7 w-20 text-xs" placeholder={T({ en: "value", zh: "值" })} />
                 )}
                 {f.operator === "between" && (
-                  <Input type="text" value={f.value2 || ""} onChange={(e) => updateFilter(i, { value2: e.target.value })} className="h-7 w-20 text-xs" placeholder="max" />
+                  <Input type="text" value={f.value2 || ""} onChange={(e) => updateFilter(i, { value2: e.target.value })} className="h-7 w-20 text-xs" placeholder={T({ en: "max", zh: "最大值" })} />
                 )}
                 <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => removeFilter(i)}>✕</Button>
               </div>
@@ -307,22 +318,22 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
         )}
         <div className="mt-3">
           <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={addFilter}>
-            + {s.addFilter}
+            + {T(UI.addFilter)}
           </Button>
         </div>
 
         {/* Time range + Granularity + Compare (not for user/content snapshot modes) */}
         {mode !== "user" && mode !== "content" && <div className="flex items-center gap-3 mt-4 flex-wrap">
           <Select value={values.timeRange} onChange={(e) => update({ timeRange: e.target.value })}>
-            {TIME_RANGES.map((r) => <option key={r.value} value={r.value}>{s[r.key]}</option>)}
+            {TIME_RANGES.map((r) => <option key={r.value} value={r.value}>{T(UI[r.key])}</option>)}
           </Select>
           {mode !== "funnel" && <Select value={values.granularity} onChange={(e) => update({ granularity: e.target.value as any })}>
-            <option value="total">{s.total}</option>
-            <option value="day">{s.day}</option>
-            <option value="week">{s.week}</option>
-            <option value="month">{s.month}</option>
-            <option value="hour">{s.hour}</option>
-            <option value="weekday">{s.weekday}</option>
+            <option value="total">{T(UI.total)}</option>
+            <option value="day">{T(UI.day)}</option>
+            <option value="week">{T(UI.week)}</option>
+            <option value="month">{T(UI.month)}</option>
+            <option value="hour">{T(UI.hour)}</option>
+            <option value="weekday">{T(UI.weekday)}</option>
           </Select>}
           {mode !== "funnel" && <>
             <label className="flex items-center gap-1.5 text-sm text-muted-foreground cursor-pointer ml-2">
@@ -330,11 +341,11 @@ export function ReportConfig({ values, onChange, mode: modeProp }: ReportConfigP
                 checked={values.compareEnabled || false}
                 onCheckedChange={(checked) => update({ compareEnabled: !!checked })}
               />
-              {s.compare}
+              {T(UI.compare)}
             </label>
             {values.compareEnabled && (
               <Select value={values.compareTimeRange || "7"} onChange={(e) => update({ compareTimeRange: e.target.value })}>
-                {TIME_RANGES.map((r) => <option key={r.value} value={r.value}>{s[r.key]}</option>)}
+                {TIME_RANGES.map((r) => <option key={r.value} value={r.value}>{T(UI[r.key])}</option>)}
               </Select>
             )}
           </>}

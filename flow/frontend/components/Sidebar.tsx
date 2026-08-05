@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useFlowEditor } from "../store/flow-editor";
-import { CHANNEL_TYPES } from "../config/trigger-fields";
+import { getChannelTypes } from "../config/trigger-fields";
 import { NODE_TYPE_REGISTRY, USER_FLOW_SIDEBAR_ORDER, CONTENT_FLOW_SIDEBAR_ORDER, type FlowDomain } from "../../nodeTypeRegistry";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
 import { XIcon, TikTokIcon, YouTubeIcon } from "../../../shared/frontend/ui/icons";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { useT } from "../../../shared/frontend/hooks/useT";
+import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { computeAddPosition } from "../lib/compute-add-position";
 import { nodeLabel, nodeDescription } from "../config/nodeTypeLabels";
 
@@ -93,6 +94,7 @@ function sortByOrder(items: SectionItem[], order: string[]): React.ReactNode[] {
 
 export default function Sidebar() {
   const T = useT();
+  const { locale } = useLocale();
   const domain: FlowDomain = useFlowEditor((s) => s.flowDomain);
   const visible = (nodeTypeKey: string) => {
     const cfg = NODE_TYPE_REGISTRY[nodeTypeKey];
@@ -102,7 +104,7 @@ export default function Sidebar() {
 
   const triggerItems: SectionItem[] = [];
   if (visible("xTrigger")) {
-    for (const ct of CHANNEL_TYPES) {
+    for (const ct of getChannelTypes(locale)) {
       triggerItems.push({
         key: "xTrigger",
         el: (

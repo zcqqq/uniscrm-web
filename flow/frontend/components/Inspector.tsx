@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useFlowEditor, ACTION_CHANNEL_TYPE } from "../store/flow-editor";
-import { CHANNEL_TYPES, getContentTriggerFields, type TriggerFieldDefinition } from "../config/trigger-fields";
+import { getChannelTypes, getContentTriggerFields, type TriggerFieldDefinition } from "../config/trigger-fields";
 import { SelectPropsValue } from "../../../shared/frontend/components/SelectPropsValue";
 import { api } from "../lib/api";
 import { Button } from "../../../shared/frontend/ui/button";
@@ -270,6 +270,7 @@ function ConditionsEditor({
 
 function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const T = useT();
+  const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
   const [channels, setChannels] = useState<ChannelOption[]>([]);
   const [loadingChannels, setLoadingChannels] = useState(false);
@@ -279,7 +280,7 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
   const channelId = data.channelId as string;
   const conditions: Condition[] = data.conditions || [];
 
-  const ctDef = CHANNEL_TYPES.find((ct) => ct.channelType === channelType);
+  const ctDef = getChannelTypes(locale).find((ct) => ct.channelType === channelType);
   const evDef = ctDef?.events.find((e) => e.eventType === eventType);
 
   useEffect(() => {
@@ -593,8 +594,9 @@ function WaitInspector({ nodeId, data }: { nodeId: string; data: Record<string, 
 
 function WaitForEventInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const T = useT();
+  const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
-  const allEvents = CHANNEL_TYPES.flatMap((ct) => ct.events);
+  const allEvents = getChannelTypes(locale).flatMap((ct) => ct.events);
   const selectedEvent = allEvents.find((ev) => ev.eventType === data.eventType);
   const conditions: Condition[] = data.conditions || [];
 

@@ -5,7 +5,9 @@ import { NODE_TYPE_REGISTRY, USER_FLOW_SIDEBAR_ORDER, CONTENT_FLOW_SIDEBAR_ORDER
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
 import { XIcon, TikTokIcon, YouTubeIcon } from "../../../shared/frontend/ui/icons";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
+import { useT } from "../../../shared/frontend/hooks/useT";
 import { computeAddPosition } from "../lib/compute-add-position";
+import { nodeLabel, nodeDescription } from "../config/nodeTypeLabels";
 
 interface DraggableItemProps {
   type: string;
@@ -90,6 +92,7 @@ function sortByOrder(items: SectionItem[], order: string[]): React.ReactNode[] {
 }
 
 export default function Sidebar() {
+  const T = useT();
   const domain: FlowDomain = useFlowEditor((s) => s.flowDomain);
   const visible = (nodeTypeKey: string) => {
     const cfg = NODE_TYPE_REGISTRY[nodeTypeKey];
@@ -106,8 +109,8 @@ export default function Sidebar() {
           <DraggableItem
             key={ct.channelType}
             type="xTrigger"
-            label={`${ct.label} Trigger`}
-            description={`${ct.events.length} triggers`}
+            label={T({ en: `${ct.label} Trigger`, zh: `${ct.label} 触发器` })}
+            description={T({ en: `${ct.events.length} triggers`, zh: `${ct.events.length} 个触发器` })}
             color="border-primary/30 bg-primary/5"
             icon={<ct.icon className="w-4 h-4" />}
           />
@@ -118,19 +121,19 @@ export default function Sidebar() {
   if (visible("cronTrigger")) {
     triggerItems.push({
       key: "cronTrigger",
-      el: <DraggableItem key="cronTrigger" type="cronTrigger" label={NODE_TYPE_REGISTRY.cronTrigger.label!} description={NODE_TYPE_REGISTRY.cronTrigger.description!} color="border-primary/30 bg-primary/5" icon="⏰" />,
+      el: <DraggableItem key="cronTrigger" type="cronTrigger" label={T(nodeLabel("cronTrigger"))} description={T(nodeDescription("cronTrigger", NODE_TYPE_REGISTRY.cronTrigger.description) ?? { en: "", zh: "" })} color="border-primary/30 bg-primary/5" icon="⏰" />,
     });
   }
   if (visible("xContentTrigger")) {
     triggerItems.push({
       key: "xContentTrigger",
-      el: <DraggableItem key="xContentTrigger" type="xContentTrigger" label={NODE_TYPE_REGISTRY.xContentTrigger.label!} description={NODE_TYPE_REGISTRY.xContentTrigger.description!} color="border-primary/30 bg-primary/5" icon={<XIcon className="w-4 h-4" />} />,
+      el: <DraggableItem key="xContentTrigger" type="xContentTrigger" label={T(nodeLabel("xContentTrigger"))} description={T(nodeDescription("xContentTrigger", NODE_TYPE_REGISTRY.xContentTrigger.description) ?? { en: "", zh: "" })} color="border-primary/30 bg-primary/5" icon={<XIcon className="w-4 h-4" />} />,
     });
   }
   if (visible("youtubeContentTrigger")) {
     triggerItems.push({
       key: "youtubeContentTrigger",
-      el: <DraggableItem key="youtubeContentTrigger" type="youtubeContentTrigger" label={NODE_TYPE_REGISTRY.youtubeContentTrigger.label!} description={NODE_TYPE_REGISTRY.youtubeContentTrigger.description!} color="border-primary/30 bg-primary/5" icon={<YouTubeIcon className="w-4 h-4" />} />,
+      el: <DraggableItem key="youtubeContentTrigger" type="youtubeContentTrigger" label={T(nodeLabel("youtubeContentTrigger"))} description={T(nodeDescription("youtubeContentTrigger", NODE_TYPE_REGISTRY.youtubeContentTrigger.description) ?? { en: "", zh: "" })} color="border-primary/30 bg-primary/5" icon={<YouTubeIcon className="w-4 h-4" />} />,
     });
   }
 
@@ -138,99 +141,99 @@ export default function Sidebar() {
   if (visible("addToList")) {
     actionItems.push({
       key: "addToList",
-      el: <DraggableItem key="addToList" type="addToList" label={NODE_TYPE_REGISTRY.addToList.label!} description={NODE_TYPE_REGISTRY.addToList.description!} color="border-accent bg-accent/50" icon="📋" />,
+      el: <DraggableItem key="addToList" type="addToList" label={T(nodeLabel("addToList"))} description={T(nodeDescription("addToList", NODE_TYPE_REGISTRY.addToList.description) ?? { en: "", zh: "" })} color="border-accent bg-accent/50" icon="📋" />,
     });
   }
   if (visible("xAction")) {
     actionItems.push({
       key: "xAction",
-      el: <DraggableItem key="xAction" type="xAction" label={NODE_TYPE_REGISTRY.xAction.label!} description={NODE_TYPE_REGISTRY.xAction.description!} color="border-accent bg-accent/50" icon={<XIcon className="w-4 h-4" />} />,
+      el: <DraggableItem key="xAction" type="xAction" label={T(nodeLabel("xAction"))} description={T(nodeDescription("xAction", NODE_TYPE_REGISTRY.xAction.description) ?? { en: "", zh: "" })} color="border-accent bg-accent/50" icon={<XIcon className="w-4 h-4" />} />,
     });
   }
   if (visible("webhook")) {
     actionItems.push({
       key: "webhook",
-      el: <DraggableItem key="webhook" type="webhook" label={NODE_TYPE_REGISTRY.webhook.label!} description={NODE_TYPE_REGISTRY.webhook.description!} color="border-accent bg-accent/50" icon="🔗" />,
+      el: <DraggableItem key="webhook" type="webhook" label={T(nodeLabel("webhook"))} description={T(nodeDescription("webhook", NODE_TYPE_REGISTRY.webhook.description) ?? { en: "", zh: "" })} color="border-accent bg-accent/50" icon="🔗" />,
     });
   }
   if (visible("xContentAction")) {
     actionItems.push({
       key: "xContentAction",
-      el: <DraggableItem key="xContentAction" type="xContentAction" label={NODE_TYPE_REGISTRY.xContentAction.label!} description={NODE_TYPE_REGISTRY.xContentAction.description!} color="border-accent bg-accent/50" icon={<XIcon className="w-4 h-4" />} />,
+      el: <DraggableItem key="xContentAction" type="xContentAction" label={T(nodeLabel("xContentAction"))} description={T(nodeDescription("xContentAction", NODE_TYPE_REGISTRY.xContentAction.description) ?? { en: "", zh: "" })} color="border-accent bg-accent/50" icon={<XIcon className="w-4 h-4" />} />,
     });
   }
   if (visible("tiktokContentAction")) {
     actionItems.push({
       key: "tiktokContentAction",
-      el: <DraggableItem key="tiktokContentAction" type="tiktokContentAction" label={NODE_TYPE_REGISTRY.tiktokContentAction.label!} description={NODE_TYPE_REGISTRY.tiktokContentAction.description!} color="border-accent bg-accent/50" icon={<TikTokIcon className="w-4 h-4" />} />,
+      el: <DraggableItem key="tiktokContentAction" type="tiktokContentAction" label={T(nodeLabel("tiktokContentAction"))} description={T(nodeDescription("tiktokContentAction", NODE_TYPE_REGISTRY.tiktokContentAction.description) ?? { en: "", zh: "" })} color="border-accent bg-accent/50" icon={<TikTokIcon className="w-4 h-4" />} />,
     });
   }
   if (visible("youtubeContentAction")) {
     actionItems.push({
       key: "youtubeContentAction",
-      el: <DraggableItem key="youtubeContentAction" type="youtubeContentAction" label={NODE_TYPE_REGISTRY.youtubeContentAction.label!} description={NODE_TYPE_REGISTRY.youtubeContentAction.description!} color="border-accent bg-accent/50" icon={<YouTubeIcon className="w-4 h-4" />} />,
+      el: <DraggableItem key="youtubeContentAction" type="youtubeContentAction" label={T(nodeLabel("youtubeContentAction"))} description={T(nodeDescription("youtubeContentAction", NODE_TYPE_REGISTRY.youtubeContentAction.description) ?? { en: "", zh: "" })} color="border-accent bg-accent/50" icon={<YouTubeIcon className="w-4 h-4" />} />,
     });
   }
   if (visible("videoAction")) {
     actionItems.push({
       key: "videoAction",
-      el: <DraggableItem key="videoAction" type="videoAction" label={NODE_TYPE_REGISTRY.videoAction.label!} description={NODE_TYPE_REGISTRY.videoAction.description!} color="border-accent bg-accent/50" icon="🎬" />,
+      el: <DraggableItem key="videoAction" type="videoAction" label={T(nodeLabel("videoAction"))} description={T(nodeDescription("videoAction", NODE_TYPE_REGISTRY.videoAction.description) ?? { en: "", zh: "" })} color="border-accent bg-accent/50" icon="🎬" />,
     });
   }
   const flowControlItems: SectionItem[] = [];
   if (visible("waitForEvent")) {
     flowControlItems.push({
       key: "waitForEvent",
-      el: <DraggableItem key="waitForEvent" type="waitForEvent" label={NODE_TYPE_REGISTRY.waitForEvent.label!} description={NODE_TYPE_REGISTRY.waitForEvent.description!} color="border-secondary bg-secondary/30" icon="🔍" />,
+      el: <DraggableItem key="waitForEvent" type="waitForEvent" label={T(nodeLabel("waitForEvent"))} description={T(nodeDescription("waitForEvent", NODE_TYPE_REGISTRY.waitForEvent.description) ?? { en: "", zh: "" })} color="border-secondary bg-secondary/30" icon="🔍" />,
     });
   }
   if (visible("wait")) {
     flowControlItems.push({
       key: "wait",
-      el: <DraggableItem key="wait" type="wait" label={NODE_TYPE_REGISTRY.wait.label!} description={NODE_TYPE_REGISTRY.wait.description!} color="border-secondary bg-secondary/30" icon="⏳" />,
+      el: <DraggableItem key="wait" type="wait" label={T(nodeLabel("wait"))} description={T(nodeDescription("wait", NODE_TYPE_REGISTRY.wait.description) ?? { en: "", zh: "" })} color="border-secondary bg-secondary/30" icon="⏳" />,
     });
   }
   if (visible("timeCondition")) {
     flowControlItems.push({
       key: "timeCondition",
-      el: <DraggableItem key="timeCondition" type="timeCondition" label={NODE_TYPE_REGISTRY.timeCondition.label!} description={NODE_TYPE_REGISTRY.timeCondition.description!} color="border-secondary bg-secondary/30" icon="🕐" />,
+      el: <DraggableItem key="timeCondition" type="timeCondition" label={T(nodeLabel("timeCondition"))} description={T(nodeDescription("timeCondition", NODE_TYPE_REGISTRY.timeCondition.description) ?? { en: "", zh: "" })} color="border-secondary bg-secondary/30" icon="🕐" />,
     });
   }
   if (visible("userPropsCondition")) {
     flowControlItems.push({
       key: "userPropsCondition",
-      el: <DraggableItem key="userPropsCondition" type="userPropsCondition" label={NODE_TYPE_REGISTRY.userPropsCondition.label!} description={NODE_TYPE_REGISTRY.userPropsCondition.description!} color="border-secondary bg-secondary/30" icon="👤" />,
+      el: <DraggableItem key="userPropsCondition" type="userPropsCondition" label={T(nodeLabel("userPropsCondition"))} description={T(nodeDescription("userPropsCondition", NODE_TYPE_REGISTRY.userPropsCondition.description) ?? { en: "", zh: "" })} color="border-secondary bg-secondary/30" icon="👤" />,
     });
   }
   if (visible("abSplit")) {
     flowControlItems.push({
       key: "abSplit",
-      el: <DraggableItem key="abSplit" type="abSplit" label={NODE_TYPE_REGISTRY.abSplit.label!} description={NODE_TYPE_REGISTRY.abSplit.description!} color="border-secondary bg-secondary/30" icon="⚡" />,
+      el: <DraggableItem key="abSplit" type="abSplit" label={T(nodeLabel("abSplit"))} description={T(nodeDescription("abSplit", NODE_TYPE_REGISTRY.abSplit.description) ?? { en: "", zh: "" })} color="border-secondary bg-secondary/30" icon="⚡" />,
     });
   }
   if (visible("videoCondition")) {
     flowControlItems.push({
       key: "videoCondition",
-      el: <DraggableItem key="videoCondition" type="videoCondition" label={NODE_TYPE_REGISTRY.videoCondition.label!} description={NODE_TYPE_REGISTRY.videoCondition.description!} color="border-secondary bg-secondary/30" icon="👁️" />,
+      el: <DraggableItem key="videoCondition" type="videoCondition" label={T(nodeLabel("videoCondition"))} description={T(nodeDescription("videoCondition", NODE_TYPE_REGISTRY.videoCondition.description) ?? { en: "", zh: "" })} color="border-secondary bg-secondary/30" icon="👁️" />,
     });
   }
   if (visible("youtubeCondition")) {
     flowControlItems.push({
       key: "youtubeCondition",
-      el: <DraggableItem key="youtubeCondition" type="youtubeCondition" label={NODE_TYPE_REGISTRY.youtubeCondition.label!} description={NODE_TYPE_REGISTRY.youtubeCondition.description!} color="border-secondary bg-secondary/30" icon="📊" />,
+      el: <DraggableItem key="youtubeCondition" type="youtubeCondition" label={T(nodeLabel("youtubeCondition"))} description={T(nodeDescription("youtubeCondition", NODE_TYPE_REGISTRY.youtubeCondition.description) ?? { en: "", zh: "" })} color="border-secondary bg-secondary/30" icon="📊" />,
     });
   }
 
   return (
     <TooltipProvider>
       <aside className="w-24 md:w-60 border-r border-border bg-background p-4 overflow-y-auto">
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Triggers</h3>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">{T({ en: "Triggers", zh: "触发器" })}</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-6">{sortByOrder(triggerItems, sidebarOrder)}</div>
 
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Actions</h3>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">{T({ en: "Actions", zh: "动作" })}</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-6">{sortByOrder(actionItems, sidebarOrder)}</div>
 
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Flow Control</h3>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">{T({ en: "Flow Control", zh: "流程控制" })}</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">{sortByOrder(flowControlItems, sidebarOrder)}</div>
       </aside>
     </TooltipProvider>

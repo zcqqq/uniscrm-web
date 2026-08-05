@@ -6,6 +6,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from ".
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 import { PageHeader } from "../../../shared/frontend/components/PageHeader";
 import { EmptyState } from "../../../shared/frontend/components/EmptyState";
+import { useT } from "../../../shared/frontend/hooks/useT";
 
 function ScoreBadge({ score }: { score: number }) {
   return (
@@ -18,6 +19,7 @@ function ScoreBadge({ score }: { score: number }) {
 export function Home() {
   const { member, updateLocation } = useAuth();
   const { recommendations, loading } = useRecommendations();
+  const T = useT();
 
   if (loading) {
     return (
@@ -31,10 +33,10 @@ export function Home() {
   if (recommendations.length === 0) {
     return (
       <div className="max-w-5xl mx-auto p-8">
-        <PageHeader title="Recommendations" />
+        <PageHeader title={T({ en: "Recommendations", zh: "推荐" })} />
         <EmptyState
-          title="No recommendations yet"
-          description="Import content and products, then wait for trend matching."
+          title={T({ en: "No recommendations yet", zh: "暂无推荐" })}
+          description={T({ en: "Import content and products, then wait for trend matching.", zh: "导入内容和商品后，等待趋势匹配。" })}
         />
       </div>
     );
@@ -43,24 +45,24 @@ export function Home() {
   return (
     <div className="max-w-5xl mx-auto p-8">
       <PageHeader
-        title="Top Recommendations"
+        title={T({ en: "Top Recommendations", zh: "热门推荐" })}
         actions={
           <Select
             value={member?.preferred_location}
             onChange={(e) => updateLocation(e.target.value)}
             className="text-sm"
           >
-            <option value="global">Global</option>
-            <option value="china">China</option>
+            <option value="global">{T({ en: "Global", zh: "全球" })}</option>
+            <option value="china">{T({ en: "China", zh: "中国" })}</option>
           </Select>
         }
       />
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-1/3">Trend</TableHead>
-            <TableHead className="w-1/3">Content</TableHead>
-            <TableHead className="w-1/3">Product</TableHead>
+            <TableHead className="w-1/3">{T({ en: "Trend", zh: "趋势" })}</TableHead>
+            <TableHead className="w-1/3">{T({ en: "Content", zh: "内容" })}</TableHead>
+            <TableHead className="w-1/3">{T({ en: "Product", zh: "商品" })}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

@@ -1,13 +1,19 @@
+import { localeFromCookie } from "../../../shared/frontend/hooks/useLocale";
+import { t } from "../../../metadata/locale";
+
 const BASE = "/api";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" }, // i18n-ok: HTTP header name, not user-facing text
     ...options,
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: "Request failed" }));
+    // Fallback for a non-JSON error body (e.g. an upstream proxy's HTML error page); the normal
+    // path is the server's own already-bilingual `{ error }` payload, untouched here.
+    const locale = (typeof document !== "undefined" && localeFromCookie(document.cookie)) || "en";
+    const err = await res.json().catch(() => ({ error: t({ en: "Request failed", zh: "请求失败" }, locale) }));
     throw new Error((err as { error: string }).error);
   }
   return res.json() as Promise<T>;

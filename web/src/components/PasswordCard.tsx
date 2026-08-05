@@ -55,7 +55,7 @@ export function PasswordCard() {
       setSaved(true);
       reset();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save");
+      setError(err instanceof Error ? err.message : T({ en: "Failed to save", zh: "保存失败" }));
     } finally {
       setSaving(false);
     }

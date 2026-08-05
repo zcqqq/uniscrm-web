@@ -3,17 +3,19 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { Card, CardHeader, CardTitle, CardContent } from "../../../shared/frontend/ui/card";
+import { useT } from "../../../shared/frontend/hooks/useT";
 
 export function Verify() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { refresh } = useAuth();
   const [error, setError] = useState("");
+  const T = useT();
 
   useEffect(() => {
     const token = searchParams.get("token");
     if (!token) {
-      setError("Missing token");
+      setError(T({ en: "Missing token", zh: "缺少 Token" }));
       return;
     }
     api.auth
@@ -21,9 +23,9 @@ export function Verify() {
       .then(() => refresh())
       .then(() => navigate("/", { replace: true }))
       .catch((err) =>
-        setError(err instanceof Error ? err.message : "Verification failed"),
+        setError(err instanceof Error ? err.message : T({ en: "Verification failed", zh: "验证失败" })),
       );
-  }, [searchParams, navigate, refresh]);
+  }, [searchParams, navigate, refresh, T]);
 
   if (error) {
     return (
@@ -31,7 +33,7 @@ export function Verify() {
         <Card className="max-w-md w-full">
           <CardHeader>
             <CardTitle className="text-xl text-destructive">
-              Verification Failed
+              {T({ en: "Verification Failed", zh: "验证失败" })}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -44,7 +46,7 @@ export function Verify() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
-      <p className="text-muted-foreground">Verifying...</p>
+      <p className="text-muted-foreground">{T({ en: "Verifying...", zh: "验证中…" })}</p>
     </div>
   );
 }

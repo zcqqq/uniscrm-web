@@ -15,17 +15,19 @@ interface TenantData {
   email: string;
 }
 
+// i18n-ok: TypeScript interface method signatures below — the audit's JSX-text scan false-positives on
+// "=> Promise<" (reads it as a `>text<` pair), but this is a type, not rendered copy.
 interface AuthState {
   member: MemberData | null;
   tenant: TenantData | null;
   loading: boolean;
-  login: (email: string, trial?: string) => Promise<void>;
-  passwordLogin: (email: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
-  refresh: () => Promise<void>;
-  updateLocation: (location: string) => Promise<void>;
-  updateLanguage: (language: string) => Promise<void>;
-  updateTimezone: (timezone: string) => Promise<void>;
+  login: (email: string, trial?: string) => Promise<void>; // i18n-ok: type signature, not JSX
+  passwordLogin: (email: string, password: string) => Promise<void>; // i18n-ok: type signature, not JSX
+  logout: () => Promise<void>; // i18n-ok: type signature, not JSX
+  refresh: () => Promise<void>; // i18n-ok: type signature, not JSX
+  updateLocation: (location: string) => Promise<void>; // i18n-ok: type signature, not JSX
+  updateLanguage: (language: string) => Promise<void>; // i18n-ok: type signature, not JSX
+  updateTimezone: (timezone: string) => Promise<void>; // i18n-ok: type signature, not JSX
 }
 
 const AuthContext = createContext<AuthState | null>(null);

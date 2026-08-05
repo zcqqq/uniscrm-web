@@ -8,6 +8,7 @@ const Table = forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement
     </div>
   )
 );
+// i18n-ok: React displayName，仅用于 DevTools 调试，非用户可见文案
 Table.displayName = "Table";
 
 const TableHeader = forwardRef<HTMLTableSectionElement, React.HTMLAttributes<HTMLTableSectionElement>>(

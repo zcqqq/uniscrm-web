@@ -4,6 +4,9 @@ import {
 } from "../ui/alert-dialog";
 import { buttonVariants } from "../ui/button";
 import { cn } from "../lib/utils";
+import { useT } from "../hooks/useT";
+import { C } from "../i18n-common";
+import type { LocalizedString } from "../../../metadata/dataTypes";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -11,15 +14,16 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   title: string;
   description?: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
+  confirmLabel?: LocalizedString;
+  cancelLabel?: LocalizedString;
   variant?: "default" | "destructive";
 }
 
 export function ConfirmDialog({
   open, onOpenChange, onConfirm, title, description,
-  confirmLabel = "Confirm", cancelLabel = "Cancel", variant = "default",
+  confirmLabel = C.confirm, cancelLabel = C.cancel, variant = "default",
 }: ConfirmDialogProps) {
+  const T = useT();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -28,12 +32,12 @@ export function ConfirmDialog({
           {description && <AlertDialogDescription>{description}</AlertDialogDescription>}
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{cancelLabel}</AlertDialogCancel>
+          <AlertDialogCancel>{T(cancelLabel)}</AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
             className={cn(variant === "destructive" && buttonVariants({ variant: "destructive" }))}
           >
-            {confirmLabel}
+            {T(confirmLabel)}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

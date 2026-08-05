@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { findInvalidNodeType } from "../lib/validate-generated-graph";
+import { useT } from "../hooks/useT";
 
 interface AiGenerateBarProps {
   endpoint: string;
@@ -10,7 +11,9 @@ interface AiGenerateBarProps {
   allowedNodeTypes?: string[];
 }
 
-export default function AiGenerateBar({ endpoint, context, placeholder = "Describe...", onResult, extraBody, allowedNodeTypes }: AiGenerateBarProps) {
+export default function AiGenerateBar({ endpoint, context, placeholder, onResult, extraBody, allowedNodeTypes }: AiGenerateBarProps) {
+  const T = useT();
+  const effectivePlaceholder = placeholder ?? T({ en: "Describe...", zh: "描述…" });
   const [prompt, setPrompt] = useState("");
   const [log, setLog] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -29,13 +32,13 @@ export default function AiGenerateBar({ endpoint, context, placeholder = "Descri
       const res = await fetch(endpoint, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" }, // i18n-ok: HTTP 请求头名称，技术值
         body: JSON.stringify({ prompt: input, currentContext: context, ...extraBody }),
       });
 
       if (!res.ok || !res.body) {
-        const err = await res.json().catch(() => ({ error: "Failed" }));
-        setLog((err as any).error || "Generation failed");
+        const err = await res.json().catch(() => ({ error: T({ en: "Failed", zh: "失败" }) }));
+        setLog((err as any).error || T({ en: "Generation failed", zh: "生成失败" }));
         return;
       }
 
@@ -74,17 +77,20 @@ export default function AiGenerateBar({ endpoint, context, placeholder = "Descri
             const parsed = JSON.parse(jsonStr);
             const invalidType = allowedNodeTypes ? findInvalidNodeType(parsed.nodes, allowedNodeTypes) : null;
             if (invalidType !== null) {
-              setLog(full + `\n\n[Generated an invalid node type "${invalidType}" for this flow — please try again]`);
+              setLog(full + "\n\n" + T({
+                en: `[Generated an invalid node type "${invalidType}" for this flow — please try again]`,
+                zh: `[生成了此流程不支持的节点类型 "${invalidType}"，请重试]`,
+              }));
               return;
             }
             onResult(parsed);
           } catch {
-            setLog(full + "\n\n[Failed to parse JSON from response]");
+            setLog(full + "\n\n" + T({ en: "[Failed to parse JSON from response]", zh: "[解析返回的 JSON 失败]" }));
           }
         }
       }
     } catch (e: any) {
-      setLog(e.message || "Generation failed");
+      setLog(e.message || T({ en: "Generation failed", zh: "生成失败" }));
     } finally {
       setGenerating(false);
     }
@@ -97,11 +103,12 @@ export default function AiGenerateBar({ endpoint, context, placeholder = "Descri
           ref={textareaRef}
           value={generating || log ? log : prompt}
           onChange={(e) => { if (!generating) { setLog(""); setPrompt(e.target.value); } }}
+          // i18n-ok: KeyboardEvent.key 的技术取值，不是文案
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !generating) { e.preventDefault(); handleGenerate(); } }}
           onFocus={() => setExpanded(true)}
           onBlur={() => { if (!generating) setExpanded(false); }}
           readOnly={generating}
-          placeholder={placeholder}
+          placeholder={effectivePlaceholder}
           className={`absolute top-0 left-0 w-full text-sm border border-border rounded px-2 py-1 bg-background outline-none focus:border-primary resize-none z-10 ${
             expanded || generating ? "h-32 overflow-y-auto" : "h-7 overflow-hidden whitespace-nowrap"
           }`}
@@ -113,7 +120,7 @@ export default function AiGenerateBar({ endpoint, context, placeholder = "Descri
         disabled={generating || (!prompt.trim() && !log)}
         className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded font-medium hover:bg-primary/90 disabled:opacity-50 whitespace-nowrap shrink-0"
       >
-        {generating ? "..." : "Generate"}
+        {generating ? "..." : T({ en: "Generate", zh: "生成" })}
       </button>
     </>
   );

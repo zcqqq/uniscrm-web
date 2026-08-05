@@ -22,6 +22,7 @@ const Alert = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement> & 
     <div ref={ref} role="alert" className={cn(alertVariants({ variant }), className)} {...props} />
   )
 );
+// i18n-ok: React displayName，仅用于 DevTools 调试，非用户可见文案
 Alert.displayName = "Alert";
 
 const AlertTitle = forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(

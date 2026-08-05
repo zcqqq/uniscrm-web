@@ -19,6 +19,7 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
     );
   }
 );
+// i18n-ok: React displayName，仅用于 DevTools 调试，非用户可见文案
 Select.displayName = "Select";
 
 export { Select };

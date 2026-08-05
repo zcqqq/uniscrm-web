@@ -5,6 +5,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "./tooltip";
 import { ChevronDown } from "lucide-react";
 import { cn } from "../lib/utils";
 import { multiSelectSummary } from "../lib/multi-select-summary";
+import { useT } from "../hooks/useT";
 
 export interface MultiSelectOption {
   value: string;
@@ -29,6 +30,7 @@ export function MultiSelect({
   tooltip: string;
   className?: string;
 }) {
+  const T = useT();
   const labelByValue = new Map(options.map((o) => [o.value, o.label]));
   const selectedLabels = selectedValues.map((v) => labelByValue.get(v) ?? v);
   return (
@@ -46,7 +48,7 @@ export function MultiSelect({
       </Tooltip>
       <PopoverContent align="start" className="w-64 max-h-64 overflow-y-auto p-2">
         {options.length === 0 ? (
-          <p className="px-2 py-1 text-xs italic text-muted-foreground">No options</p>
+          <p className="px-2 py-1 text-xs italic text-muted-foreground">{T({ en: "No options", zh: "无选项" })}</p>
         ) : (
           options.map((o) => (
             <label

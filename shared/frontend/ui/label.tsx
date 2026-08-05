@@ -10,6 +10,7 @@ const Label = forwardRef<HTMLLabelElement, React.LabelHTMLAttributes<HTMLLabelEl
     />
   )
 );
+// i18n-ok: React displayName，仅用于 DevTools 调试，非用户可见文案
 Label.displayName = "Label";
 
 export { Label };

@@ -13,6 +13,7 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(({ className, ..
     {...props}
   />
 ));
+// i18n-ok: React displayName，仅用于 DevTools 调试，非用户可见文案
 Textarea.displayName = "Textarea";
 
 export { Textarea };

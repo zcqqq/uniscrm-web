@@ -19,6 +19,7 @@ const Separator = forwardRef<HTMLDivElement, SeparatorProps>(
     />
   )
 );
+// i18n-ok: React displayName，仅用于 DevTools 调试，非用户可见文案
 Separator.displayName = "Separator";
 
 export { Separator };

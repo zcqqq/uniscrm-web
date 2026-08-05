@@ -13,7 +13,7 @@ interface SelectPropsProps {
 export function SelectProps({ options, value, onChange, locale = "en", placeholder }: SelectPropsProps) {
   return (
     <Select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{placeholder || (locale === "zh" ? "不分组" : "No grouping")}</option>
+      <option value="">{placeholder || t({ en: "No grouping", zh: "不分组" }, locale)}</option>
       {options.map((p) => (
         <option key={p.propId} value={p.propId}>{t(p.label, locale)}</option>
       ))}

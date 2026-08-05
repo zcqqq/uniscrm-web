@@ -18,6 +18,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
     );
   }
 );
+// i18n-ok: React displayName，仅用于 DevTools 调试，非用户可见文案
 Input.displayName = "Input";
 
 export { Input };

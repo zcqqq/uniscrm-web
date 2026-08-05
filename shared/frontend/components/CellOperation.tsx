@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useT } from "../hooks/useT";
 
 export interface Operation {
   label: string;
@@ -19,6 +20,7 @@ interface OperationCellProps {
 }
 
 function MoreIcon() {
+  // i18n-ok: SVG 图标路径数据，非文案
   return <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" /></svg>;
 }
 
@@ -40,6 +42,7 @@ function IconButton({ title, onClick, children }: { title: string; onClick: () =
 }
 
 export function OperationCell({ status, operations }: OperationCellProps) {
+  const T = useT();
   const config = operations[status] || operations["*"] || { menu: [] };
   const { primary, menu } = config;
 
@@ -65,7 +68,7 @@ export function OperationCell({ status, operations }: OperationCellProps) {
         </IconButton>
       )}
       {menu.length > 0 && (
-        <IconButton title="More" onClick={() => setOpen(!open)}>
+        <IconButton title={T({ en: "More", zh: "更多" })} onClick={() => setOpen(!open)}>
           <MoreIcon />
         </IconButton>
       )}

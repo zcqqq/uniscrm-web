@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Popover, PopoverTrigger, PopoverContent } from "../ui/popover";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { t } from "../../../metadata/locale";
 import type { Locale } from "../../../metadata/locale";
+import type { LocalizedString } from "../../../metadata/dataTypes";
 
 export type BucketMode = "discrete" | "default" | "custom";
 
@@ -13,25 +15,14 @@ interface IntDimensionPopoverProps {
   locale?: Locale;
 }
 
-const UI = {
-  en: {
-    configure: "Configure",
-    title: "Choose how to group",
-    discrete: "Use discrete numbers (no interval)",
-    default: "Default interval",
-    custom: "Use custom interval",
-    addInterval: "+ Add interval",
-    confirm: "Confirm",
-  },
-  zh: {
-    configure: "配置",
-    title: "选择如何分组",
-    discrete: "使用离散数字(没有区间)",
-    default: "默认区间",
-    custom: "使用自定义区间",
-    addInterval: "+ 添加区间",
-    confirm: "确定",
-  },
+const UI: Record<string, LocalizedString> = {
+  configure: { en: "Configure", zh: "配置" },
+  title: { en: "Choose how to group", zh: "选择如何分组" },
+  discrete: { en: "Use discrete numbers (no interval)", zh: "使用离散数字(没有区间)" },
+  default: { en: "Default interval", zh: "默认区间" },
+  custom: { en: "Use custom interval", zh: "使用自定义区间" },
+  addInterval: { en: "+ Add interval", zh: "+ 添加区间" },
+  confirm: { en: "Confirm", zh: "确定" },
 };
 
 function parseBoundaries(buckets: string): number[] {
@@ -39,7 +30,7 @@ function parseBoundaries(buckets: string): number[] {
 }
 
 export function IntDimensionPopover({ mode, buckets, onChange, locale = "en" }: IntDimensionPopoverProps) {
-  const s = UI[locale];
+  const s = (key: keyof typeof UI) => t(UI[key], locale);
   const [open, setOpen] = useState(false);
   const [draftMode, setDraftMode] = useState<BucketMode>(mode);
   const [draftBoundaries, setDraftBoundaries] = useState<number[]>(parseBoundaries(buckets));
@@ -76,25 +67,25 @@ export function IntDimensionPopover({ mode, buckets, onChange, locale = "en" }: 
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <button type="button" className="text-xs text-primary hover:underline ml-2">
-          ⚙️ {s.configure}
+          ⚙️ {s("configure")}
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-80">
         <div className="flex items-center justify-between mb-3">
-          <span className="text-sm font-medium">{s.title}</span>
+          <span className="text-sm font-medium">{s("title")}</span>
         </div>
         <div className="space-y-2 text-sm">
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="radio" checked={draftMode === "discrete"} onChange={() => setDraftMode("discrete")} />
-            {s.discrete}
+            {s("discrete")}
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="radio" checked={draftMode === "default"} onChange={() => setDraftMode("default")} />
-            {s.default}
+            {s("default")}
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="radio" checked={draftMode === "custom"} onChange={() => setDraftMode("custom")} />
-            {s.custom}
+            {s("custom")}
           </label>
         </div>
         {draftMode === "custom" && (
@@ -129,12 +120,12 @@ export function IntDimensionPopover({ mode, buckets, onChange, locale = "en" }: 
               );
             })}
             <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={addInterval}>
-              {s.addInterval}
+              {s("addInterval")}
             </Button>
           </div>
         )}
         <div className="mt-4 flex justify-end">
-          <Button size="sm" onClick={confirm}>{s.confirm}</Button>
+          <Button size="sm" onClick={confirm}>{s("confirm")}</Button>
         </div>
       </PopoverContent>
     </Popover>

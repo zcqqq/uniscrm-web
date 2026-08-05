@@ -3,6 +3,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from ".
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { DateCell } from "./CellDate";
+import { useT } from "../hooks/useT";
 
 export interface PaginationProps {
   total: number;
@@ -12,9 +13,10 @@ export interface PaginationProps {
 }
 
 export function Pagination({ total, page, totalPages, onPageChange }: PaginationProps) {
+  const T = useT();
   return (
     <div className="flex items-center justify-between mt-3">
-      <span className="text-sm text-muted-foreground">{total} results</span>
+      <span className="text-sm text-muted-foreground">{T({ en: `${total} results`, zh: `共 ${total} 条` })}</span>
       <div className="flex items-center gap-2">
         <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>←</Button>
         <span className="text-sm text-muted-foreground">{page} / {totalPages}</span>
@@ -121,6 +123,8 @@ export function DataTable<T extends Record<string, unknown>>({
   onPageChange,
   timezone,
 }: DataTableProps<T>) {
+  // 变量名用 tr 而非通常的 T：这个组件本身有个同名泛型参数 <T>，用 T 存翻译函数会挡住阅读。
+  const tr = useT();
   const [internalPage, setInternalPage] = useState(1);
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -189,7 +193,7 @@ export function DataTable<T extends Record<string, unknown>>({
       {searchKeys && searchKeys.length > 0 && (
         <div className="mb-3">
           <Input
-            placeholder="Search..."
+            placeholder={tr({ en: "Search...", zh: "搜索…" })}
             value={search}
             onChange={(e) => { setSearch(e.target.value); setInternalPage(1); }}
             className="max-w-xs"
@@ -219,7 +223,7 @@ export function DataTable<T extends Record<string, unknown>>({
             {paged.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={columns.length} className="text-center text-muted-foreground py-8">
-                  No data
+                  {tr({ en: "No data", zh: "暂无数据" })}
                 </TableCell>
               </TableRow>
             ) : (

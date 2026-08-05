@@ -37,6 +37,7 @@ function DraggableItem({ type, label, description, color, icon }: DraggableItemP
   const addNode = useFlowEditor((s) => s.addNode);
   const isMobile = useIsMobileViewport();
   const { toast } = useToast();
+  const T = useT();
 
   const onDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData("application/reactflow-type", type);
@@ -56,7 +57,7 @@ function DraggableItem({ type, label, description, color, icon }: DraggableItemP
     const position = computeAddPosition(center, nodes);
     const added = addNode(type, position);
     if (!added) {
-      toast({ title: "一个流程只能有一个触发节点", variant: "destructive" });
+      toast({ title: T({ en: "A flow can only have one trigger node", zh: "一个流程只能有一个触发节点" }), variant: "destructive" });
     }
   };
 

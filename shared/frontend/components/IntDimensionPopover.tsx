@@ -23,6 +23,9 @@ const UI: Record<string, LocalizedString> = {
   custom: { en: "Use custom interval", zh: "使用自定义区间" },
   addInterval: { en: "+ Add interval", zh: "+ 添加区间" },
   confirm: { en: "Confirm", zh: "确定" },
+  // "{n}" 占位符在渲染时替换成桶序号 —— 与 flow/frontend/config/nodeTypeLabels.ts 的
+  // nodeDescription() 是同一套模式。
+  bucket: { en: "Bucket {n}:", zh: "区间{n}:" },
 };
 
 function parseBoundaries(buckets: string): number[] {
@@ -96,7 +99,7 @@ export function IntDimensionPopover({ mode, buckets, onChange, locale = "en" }: 
               const lowerLabel = isFirst ? "-∞" : String(draftBoundaries[rowIdx - 1]);
               return (
                 <div key={rowIdx} className="flex items-center gap-1 text-xs">
-                  <span className="text-muted-foreground w-10 shrink-0">区间{rowIdx + 1}:</span>
+                  <span className="text-muted-foreground w-10 shrink-0">{s("bucket").replace("{n}", String(rowIdx + 1))}</span>
                   <span>[</span>
                   <span className="w-14 text-center">{lowerLabel}</span>
                   <span>,</span>

@@ -55,7 +55,7 @@ export function SegmentCreate() {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. 蓝V高粉丝近7天关注"
+            placeholder={T({ en: "e.g. Blue-verified high-follower, followed in last 7 days", zh: "e.g. 蓝V高粉丝近7天关注" })}
           />
         </FormField>
 
@@ -63,7 +63,7 @@ export function SegmentCreate() {
           <Textarea
             value={nlQuery}
             onChange={(e) => setNlQuery(e.target.value)}
-            placeholder="e.g. 过去7天内关注我、且粉丝数大于100的蓝V"
+            placeholder={T({ en: "e.g. Blue-verified accounts that followed me in the last 7 days with more than 100 followers", zh: "e.g. 过去7天内关注我、且粉丝数大于100的蓝V" })}
             rows={3}
           />
         </FormField>

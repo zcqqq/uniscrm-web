@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { PasswordCard } from "../components/PasswordCard";
@@ -10,11 +9,12 @@ import { Label } from "../../../shared/frontend/ui/label";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Separator } from "../../../shared/frontend/ui/separator";
 import { getTimezoneLabel, timezoneOptions } from "../lib/timezones";
+import { useT } from "../../../shared/frontend/hooks/useT";
 
 export function Settings() {
   useEffect(() => { document.title = "Settings — UniSCRM" }, []);
   const { member, updateLocation, updateLanguage, updateTimezone } = useAuth();
-  const { t } = useTranslation();
+  const T = useT();
   const [accounts, setAccounts] = useState<{ provider: string; created_at: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [theme, setThemeState] = useState<Theme>(getTheme());
@@ -34,7 +34,7 @@ export function Settings() {
 
   return (
     <div className="max-w-2xl mx-auto p-8 space-y-6">
-      <h1 className="text-2xl font-bold text-foreground">{t("settings.title")}</h1>
+      <h1 className="text-2xl font-bold text-foreground">{T({ en: "Settings", zh: "设置" })}</h1>
 
       <Card>
         <CardHeader>
@@ -56,10 +56,15 @@ export function Settings() {
           <Separator />
 
           <div className="space-y-3">
-            <Label>{t("settings.language")}</Label>
+            <Label>{T({ en: "Language", zh: "语言" })}</Label>
             <Select
               value={member?.language || "en"}
-              onChange={(e) => updateLanguage(e.target.value)}
+              onChange={async (e: React.ChangeEvent<HTMLSelectElement>) => {
+                await updateLanguage(e.target.value);
+                // 内联双语串由 useLocale 的 cookie 初值驱动，而 lang cookie 是后端在这次请求里写的。
+                // 重新加载一次让整页拿到新语言——用一次刷新换掉整个 i18n 依赖库，划算。
+                window.location.reload();
+              }}
             >
               <option value="en">English</option>
               <option value="zh">简体中文</option>
@@ -69,7 +74,7 @@ export function Settings() {
           <Separator />
 
           <div className="space-y-3">
-            <Label>{t("settings.timezone")}</Label>
+            <Label>{T({ en: "Timezone", zh: "时区" })}</Label>
             <Select
               value={member?.timezone || "UTC"}
               onChange={(e) => updateTimezone(e.target.value)}
@@ -86,7 +91,7 @@ export function Settings() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">{t("settings.connectedAccounts")}</CardTitle>
+          <CardTitle className="text-lg">{T({ en: "Connected Accounts", zh: "已连接账号" })}</CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -105,11 +110,11 @@ export function Settings() {
                 </div>
                 {isLinked("google") ? (
                   <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleUnlink("google")}>
-                    {t("settings.disconnect")}
+                    {T({ en: "Disconnect", zh: "断开" })}
                   </Button>
                 ) : (
                   <Button variant="ghost" size="sm" onClick={() => { window.location.href = "/api/auth/google?link=true"; }}>
-                    {t("settings.connect")}
+                    {T({ en: "Connect", zh: "连接" })}
                   </Button>
                 )}
               </div>
@@ -123,11 +128,11 @@ export function Settings() {
                 </div>
                 {isLinked("x") ? (
                   <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleUnlink("x")}>
-                    {t("settings.disconnect")}
+                    {T({ en: "Disconnect", zh: "断开" })}
                   </Button>
                 ) : (
                   <Button variant="ghost" size="sm" onClick={() => { window.location.href = "/api/auth/x?link=true"; }}>
-                    {t("settings.connect")}
+                    {T({ en: "Connect", zh: "连接" })}
                   </Button>
                 )}
               </div>

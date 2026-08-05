@@ -1,6 +1,5 @@
 import { useState, useEffect, createContext, useContext } from "react";
 import type { ReactNode } from "react";
-import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 
 interface MemberData {
@@ -35,7 +34,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [member, setMember] = useState<MemberData | null>(null);
   const [tenant, setTenant] = useState<TenantData | null>(null);
   const [loading, setLoading] = useState(true);
-  const { i18n } = useTranslation();
 
   useEffect(() => {
     api.auth
@@ -43,7 +41,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((res) => {
         setMember(res.member);
         setTenant(res.tenant);
-        i18n.changeLanguage(res.member.language || "en");
       })
       .catch(() => {
         setMember(null);
@@ -61,7 +58,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await api.auth.passwordLogin(email, password);
     setMember(res.member);
     setTenant(res.tenant);
-    i18n.changeLanguage(res.member.language || "en");
   };
 
   const logout = async () => {
@@ -89,7 +85,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateLanguage = async (language: string) => {
     await api.settings.updateLanguage(language);
     setMember((prev) => prev ? { ...prev, language } : prev);
-    i18n.changeLanguage(language);
   };
 
   const updateTimezone = async (timezone: string) => {

@@ -1,5 +1,4 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import "./lib/i18n";
 import { initTheme } from "../../shared/frontend/theme";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { Sidebar } from "../../shared/frontend/Sidebar";

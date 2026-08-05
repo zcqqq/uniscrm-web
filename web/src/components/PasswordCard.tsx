@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
-import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { Card, CardHeader, CardTitle, CardContent } from "../../../shared/frontend/ui/card";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Label } from "../../../shared/frontend/ui/label";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { C } from "../../../shared/frontend/i18n-common";
 
 export function PasswordCard() {
-  const { t } = useTranslation();
+  const T = useT();
   const [hasPassword, setHasPassword] = useState<boolean | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [open, setOpen] = useState(false);
@@ -44,7 +45,7 @@ export function PasswordCard() {
     setError("");
     // 两次输入一致这件事在本地判掉就行，没必要为它跑一趟网络
     if (next !== confirm) {
-      setError(t("password.mismatch"));
+      setError(T({ en: "The two passwords do not match", zh: "两次输入的密码不一致" }));
       return;
     }
     setSaving(true);
@@ -63,30 +64,34 @@ export function PasswordCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">{t("password.title")}</CardTitle>
+        <CardTitle className="text-lg">{T({ en: "Password", zh: "密码" })}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {loadError ? (
           <div className="space-y-2">
-            <p className="text-sm text-destructive">{t("password.loadError")}</p>
-            <Button variant="outline" size="sm" onClick={fetchStatus}>{t("password.retry")}</Button>
+            <p className="text-sm text-destructive">{T({ en: "Couldn't load password status. Please try again.", zh: "密码状态加载失败，请重试。" })}</p>
+            <Button variant="outline" size="sm" onClick={fetchStatus}>{T(C.retry)}</Button>
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            {hasPassword === null ? t("password.loading") : hasPassword ? t("password.isSet") : t("password.notSet")}
+            {hasPassword === null
+              ? T(C.loading)
+              : hasPassword
+              ? T({ en: "Password is set", zh: "已设置密码" })
+              : T({ en: "Not set — you sign in with an email link or a connected account", zh: "未设置——你目前通过邮件登录链接或已连接的账号登录" })}
           </p>
         )}
-        {saved && <p className="text-sm text-primary">{t("password.saved")}</p>}
+        {saved && <p className="text-sm text-primary">{T({ en: "Password updated. Other devices have been signed out.", zh: "密码已更新，其它设备上的登录已被退出。" })}</p>}
 
         {!open ? (
           <Button variant="outline" onClick={() => { setSaved(false); setOpen(true); }} disabled={hasPassword === null}>
-            {hasPassword ? t("password.change") : t("password.set")}
+            {hasPassword ? T({ en: "Change password", zh: "修改密码" }) : T({ en: "Set password", zh: "设置密码" })}
           </Button>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-3">
             {hasPassword && (
               <div className="space-y-1.5">
-                <Label>{t("password.current")}</Label>
+                <Label>{T({ en: "Current password", zh: "当前密码" })}</Label>
                 <Input
                   type="password"
                   value={current}
@@ -96,7 +101,7 @@ export function PasswordCard() {
               </div>
             )}
             <div className="space-y-1.5">
-              <Label>{t("password.new")}</Label>
+              <Label>{T({ en: "New password", zh: "新密码" })}</Label>
               <Input
                 type="password"
                 value={next}
@@ -107,7 +112,7 @@ export function PasswordCard() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>{t("password.confirm")}</Label>
+              <Label>{T({ en: "Confirm new password", zh: "确认新密码" })}</Label>
               <Input
                 type="password"
                 value={confirm}
@@ -119,8 +124,8 @@ export function PasswordCard() {
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="flex gap-2">
-              <Button type="submit" disabled={saving}>{t("password.save")}</Button>
-              <Button type="button" variant="ghost" onClick={reset}>{t("password.cancel")}</Button>
+              <Button type="submit" disabled={saving}>{T(C.save)}</Button>
+              <Button type="button" variant="ghost" onClick={reset}>{T(C.cancel)}</Button>
             </div>
           </form>
         )}

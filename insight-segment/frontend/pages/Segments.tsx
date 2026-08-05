@@ -7,6 +7,8 @@ import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 import { PageHeader } from "../../../shared/frontend/components/PageHeader";
 import { EmptyState } from "../../../shared/frontend/components/EmptyState";
 import { Pagination } from "../../../shared/frontend/components/DataTable";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { C } from "../../../shared/frontend/i18n-common";
 
 const statusVariant: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; className?: string }> = {
   draft: { variant: "secondary" },
@@ -15,7 +17,16 @@ const statusVariant: Record<string, { variant: "default" | "secondary" | "destru
   error: { variant: "destructive" },
 };
 
+const statusLabel = (status: string): { en: string; zh: string } =>
+  ({
+    draft: { en: "Draft", zh: "草稿" },
+    computing: { en: "Computing", zh: "计算中" },
+    ready: { en: "Ready", zh: "已就绪" },
+    error: C.error,
+  })[status] || { en: status, zh: status };
+
 export function Segments() {
+  const T = useT();
   const [segments, setSegments] = useState<Segment[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -46,16 +57,19 @@ export function Segments() {
   return (
     <div className="max-w-4xl mx-auto p-8">
       <PageHeader
-        title="Segments"
+        title={T({ en: "Segments", zh: "分群" })}
         actions={
           <Button asChild>
-            <Link to="/create">New Segment</Link>
+            <Link to="/create">{T({ en: "New Segment", zh: "新建分群" })}</Link>
           </Button>
         }
       />
 
       {segments.length === 0 ? (
-        <EmptyState title="No segments yet" description="Create your first segment to get started." />
+        <EmptyState
+          title={T({ en: "No segments yet", zh: "暂无分群" })}
+          description={T({ en: "Create your first segment to get started.", zh: "创建你的第一个分群，开始使用。" })}
+        />
       ) : (
         <div className="bg-card rounded border divide-y">
           {segments.map((s) => (
@@ -66,12 +80,12 @@ export function Segments() {
                   <span className="ml-3 text-sm text-muted-foreground/60">{s.nl_query}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-sm text-muted-foreground">{s.user_count} users</span>
+                  <span className="text-sm text-muted-foreground">{T({ en: `${s.user_count} users`, zh: `${s.user_count} 个用户` })}</span>
                   <Badge
                     variant={statusVariant[s.status]?.variant ?? "secondary"}
                     className={statusVariant[s.status]?.className}
                   >
-                    {s.status}
+                    {T(statusLabel(s.status))}
                   </Badge>
                 </div>
               </div>

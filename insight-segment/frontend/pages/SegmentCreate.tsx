@@ -6,8 +6,10 @@ import { FormField } from "../../../shared/frontend/components/FormField";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Textarea } from "../../../shared/frontend/ui/textarea";
 import { Button } from "../../../shared/frontend/ui/button";
+import { useT } from "../../../shared/frontend/hooks/useT";
 
 export function SegmentCreate() {
+  const T = useT();
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [nlQuery, setNlQuery] = useState("");
@@ -24,7 +26,7 @@ export function SegmentCreate() {
       const result = await api.preview(nlQuery);
       setPreview(result);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Preview failed");
+      setError(e instanceof Error ? e.message : T({ en: "Preview failed", zh: "预览失败" }));
     } finally {
       setLoading(false);
     }
@@ -38,17 +40,17 @@ export function SegmentCreate() {
       const { segment } = await api.createSegment(name, nlQuery);
       navigate(`/segments/${segment.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Create failed");
+      setError(e instanceof Error ? e.message : T({ en: "Create failed", zh: "创建失败" }));
       setLoading(false);
     }
   };
 
   return (
     <div className="max-w-2xl mx-auto p-8">
-      <PageHeader title="Create Segment" />
+      <PageHeader title={T({ en: "Create Segment", zh: "新建分群" })} />
 
       <div className="space-y-4">
-        <FormField label="Name">
+        <FormField label={T({ en: "Name", zh: "名称" })}>
           <Input
             type="text"
             value={name}
@@ -57,7 +59,7 @@ export function SegmentCreate() {
           />
         </FormField>
 
-        <FormField label="Condition (natural language)">
+        <FormField label={T({ en: "Condition (natural language)", zh: "条件（自然语言）" })}>
           <Textarea
             value={nlQuery}
             onChange={(e) => setNlQuery(e.target.value)}
@@ -72,14 +74,14 @@ export function SegmentCreate() {
             onClick={handlePreview}
             disabled={loading || !nlQuery.trim()}
           >
-            Preview
+            {T({ en: "Preview", zh: "预览" })}
           </Button>
           <Button
             variant="default"
             onClick={handleCreate}
             disabled={loading || !name.trim() || !nlQuery.trim()}
           >
-            Create
+            {T({ en: "Create", zh: "新建" })}
           </Button>
         </div>
 
@@ -91,8 +93,8 @@ export function SegmentCreate() {
 
         {preview && (
           <div className="bg-background border rounded p-4 space-y-2">
-            <div className="text-sm"><strong>Estimated users:</strong> {preview.estimated_count}</div>
-            <div className="text-sm"><strong>Conditions:</strong></div>
+            <div className="text-sm"><strong>{T({ en: "Estimated users:", zh: "预计用户数：" })}</strong> {preview.estimated_count}</div>
+            <div className="text-sm"><strong>{T({ en: "Conditions:", zh: "条件：" })}</strong></div>
             <pre className="text-xs bg-card border rounded p-2 overflow-x-auto">
               {JSON.stringify(preview.conditions, null, 2)}
             </pre>

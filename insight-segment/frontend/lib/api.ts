@@ -39,7 +39,7 @@ export const api = {
   createSegment: (name: string, nl_query: string) =>
     request<{ segment: Segment }>(BASE, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" }, // i18n-ok: HTTP header name, not user-facing text
       body: JSON.stringify({ name, nl_query }),
     }),
 
@@ -48,7 +48,7 @@ export const api = {
       `${BASE}/preview`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" }, // i18n-ok: HTTP header name, not user-facing text
         body: JSON.stringify({ nl_query }),
       }
     ),

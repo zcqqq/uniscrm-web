@@ -5,8 +5,11 @@ import { PageHeader } from "../../../shared/frontend/components/PageHeader";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
+import { useT } from "../../../shared/frontend/hooks/useT";
+import { C } from "../../../shared/frontend/i18n-common";
 
 export function SegmentDetail() {
+  const T = useT();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [segment, setSegment] = useState<Segment | null>(null);
@@ -46,13 +49,13 @@ export function SegmentDetail() {
   };
 
   const handleDelete = async () => {
-    if (!id || !confirm("Delete this segment?")) return;
+    if (!id || !confirm(T({ en: "Delete this segment?", zh: "删除这个分群？" }))) return;
     await api.deleteSegment(id);
     navigate("/");
   };
 
   if (loading) return <div className="p-8"><Skeleton className="h-6 w-48" /></div>;
-  if (!segment) return <div className="p-8 text-destructive">Segment not found</div>;
+  if (!segment) return <div className="p-8 text-destructive">{T({ en: "Segment not found", zh: "分群不存在" })}</div>;
 
   return (
     <div className="max-w-4xl mx-auto p-8">
@@ -66,7 +69,7 @@ export function SegmentDetail() {
                 disabled={computing}
                 variant="default"
               >
-                {computing ? "Computing..." : "Compute"}
+                {computing ? T({ en: "Computing...", zh: "计算中…" }) : T({ en: "Compute", zh: "计算" })}
               </Button>
             )}
             {segment.status === "ready" && (
@@ -75,11 +78,11 @@ export function SegmentDetail() {
                 disabled={computing}
                 variant="outline"
               >
-                {computing ? "Recomputing..." : "Recompute"}
+                {computing ? T({ en: "Recomputing...", zh: "重新计算中…" }) : T({ en: "Recompute", zh: "重新计算" })}
               </Button>
             )}
             <Button onClick={handleDelete} variant="destructive">
-              Delete
+              {T(C.delete)}
             </Button>
           </>
         }
@@ -87,10 +90,10 @@ export function SegmentDetail() {
 
       <Card className="mb-6">
         <CardContent className="p-4 space-y-3">
-          <div className="text-sm"><strong>Query:</strong> {segment.nl_query}</div>
-          <div className="text-sm"><strong>Status:</strong> {segment.status} &middot; <strong>Users:</strong> {segment.user_count}</div>
+          <div className="text-sm"><strong>{T({ en: "Query:", zh: "查询：" })}</strong> {segment.nl_query}</div>
+          <div className="text-sm"><strong>{T(C.status)}:</strong> {segment.status} &middot; <strong>{T({ en: "Users:", zh: "用户：" })}</strong> {segment.user_count}</div>
           <details className="text-sm">
-            <summary className="cursor-pointer text-muted-foreground">Conditions & SQL</summary>
+            <summary className="cursor-pointer text-muted-foreground">{T({ en: "Conditions & SQL", zh: "条件与 SQL" })}</summary>
             <pre className="mt-2 text-xs bg-background rounded p-2 overflow-x-auto">
               {JSON.stringify(JSON.parse(segment.conditions_json || "{}"), null, 2)}
             </pre>
@@ -101,7 +104,7 @@ export function SegmentDetail() {
 
       {segment.status === "ready" && users.length > 0 && (
         <div>
-          <h2 className="text-lg font-medium mb-3">Users ({segment.user_count})</h2>
+          <h2 className="text-lg font-medium mb-3">{T({ en: `Users (${segment.user_count})`, zh: `用户（${segment.user_count}）` })}</h2>
           <div className="bg-card border rounded divide-y">
             {users.map((u) => (
               <div key={u.id} className="flex items-center gap-3 p-3">
@@ -117,9 +120,9 @@ export function SegmentDetail() {
           </div>
           {userTotalPages > 1 && (
             <div className="flex justify-center gap-2 mt-4">
-              <Button variant="outline" size="sm" disabled={userPage <= 1} onClick={() => setUserPage(userPage - 1)}>Prev</Button>
+              <Button variant="outline" size="sm" disabled={userPage <= 1} onClick={() => setUserPage(userPage - 1)}>{T({ en: "Prev", zh: "上一页" })}</Button>
               <span className="px-3 py-1 text-sm text-muted-foreground">{userPage} / {userTotalPages}</span>
-              <Button variant="outline" size="sm" disabled={userPage >= userTotalPages} onClick={() => setUserPage(userPage + 1)}>Next</Button>
+              <Button variant="outline" size="sm" disabled={userPage >= userTotalPages} onClick={() => setUserPage(userPage + 1)}>{T(C.next)}</Button>
             </div>
           )}
         </div>

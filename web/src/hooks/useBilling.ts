@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
+import type { LocalizedString } from "../../../metadata/dataTypes";
 
 interface Plan {
   tier: string;
-  name: string;
+  name: LocalizedString;
   price_monthly: number;
   currency: string;
 }

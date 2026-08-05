@@ -31,6 +31,10 @@ const DIRS = [
   "shared/frontend",
 ];
 
+// shared/plans.ts 不在任何前端目录下，但它的套餐文案会渲染在账单页与升级提示上。
+// 这是本计划最初漏扫的地方——补进来，免得下次改套餐文案又只写英文。
+const EXTRA_FILES = ["shared/plans.ts"];
+
 // 「Save changes」「Last 7 days」这类：首字母大写，后面还有至少一个词。
 const SENTENCE = /^[A-Z][A-Za-z0-9]*(?:[ ,.'’\-—:!?()/&%]+[A-Za-z0-9()][A-Za-z0-9()]*)+[.!?…]?$/;
 // 「Dashboard」「Channels」这类单词标题——菜单项和列名大量是这种。
@@ -120,6 +124,10 @@ function walk(dir, out) {
 export function runAudit(root) {
   const files = [];
   for (const d of DIRS) walk(path.join(root, d), files);
+  for (const f of EXTRA_FILES) {
+    const p = path.join(root, f);
+    if (fs.existsSync(p)) files.push(p);
+  }
   const findings = [], exempted = [], unexempted = [];
   for (const file of files) {
     const source = fs.readFileSync(file, "utf8");

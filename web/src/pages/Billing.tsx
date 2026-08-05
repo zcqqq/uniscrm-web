@@ -79,7 +79,7 @@ export function Billing() {
             {plans.map((plan) => (
               <Card key={plan.tier}>
                 <CardHeader>
-                  <CardTitle>{plan.name}</CardTitle>
+                  <CardTitle>{T(plan.name)}</CardTitle>
                   <div className="mt-2">
                     <span className="text-3xl font-bold">${(plan.price_monthly / 100).toFixed(0)}</span>
                     <span className="text-muted-foreground">/mo</span>
@@ -88,10 +88,8 @@ export function Billing() {
                 <CardContent>
                   <ul className="space-y-1.5">
                     {getTierDescriptions(plan.tier as "basic" | "pro").map((f, i) => (
-                      // i18n-ok: matches shared/plans.ts tier description prefix (out of this task's scope, still English); translating the literal would break the match
-                      <li key={f} className={`text-sm flex gap-2 ${f.startsWith("All in") ? "text-foreground font-medium mb-1" : "text-muted-foreground"}`}>
-                        {/* i18n-ok: matches shared/plans.ts tier description prefix (out of this task's scope, still English); translating the literal would break the match */}
-                        {!f.startsWith("All in") && <span className="text-primary">✓</span>}{f}
+                      <li key={i} className={`text-sm flex gap-2 ${f.isHeader ? "text-foreground font-medium mb-1" : "text-muted-foreground"}`}>
+                        {!f.isHeader && <span className="text-primary">✓</span>}{T(f.text)}
                       </li>
                     ))}
                   </ul>
@@ -128,7 +126,10 @@ export function Billing() {
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-foreground">
-                  {plans.find((p) => p.tier === currentTier)?.name ?? currentTier}{status === "trialing" ? T({ en: " Trial", zh: " 试用" }) : ""}
+                  {(() => {
+                    const currentPlanName = plans.find((p) => p.tier === currentTier)?.name;
+                    return currentPlanName ? T(currentPlanName) : currentTier;
+                  })()}{status === "trialing" ? T({ en: " Trial", zh: " 试用" }) : ""}
                 </span>
                 <Badge variant={status === "active" ? "default" : "secondary"} className="text-xs">
                   {status === "trialing" ? T({ en: "Trial", zh: "试用" }) : status === "active" ? T({ en: "Active", zh: "已激活" }) : T({ en: "Past Due", zh: "已逾期" })}
@@ -154,11 +155,12 @@ export function Billing() {
         {plans.map((plan) => {
           const isCurrent = currentTier === plan.tier;
           const features = getTierDescriptions(plan.tier as "basic" | "pro");
+          const planName = T(plan.name);
 
           return (
             <Card key={plan.tier} className={isCurrent ? "border-primary ring-1 ring-primary/20" : ""}>
               <CardHeader>
-                <CardTitle className="text-lg">{plan.name}</CardTitle>
+                <CardTitle className="text-lg">{planName}</CardTitle>
                 <div className="mt-2">
                   <span className="text-3xl font-bold text-foreground">
                     ${(plan.price_monthly / 100).toFixed(0)}
@@ -168,12 +170,10 @@ export function Billing() {
               </CardHeader>
               <CardContent className="flex-1">
                 <ul className="space-y-2">
-                  {features.map((f) => (
-                    // i18n-ok: matches shared/plans.ts tier description prefix (out of this task's scope, still English); translating the literal would break the match
-                    <li key={f} className={`flex items-start gap-2 text-sm ${f.startsWith("All in") ? "text-foreground font-medium mb-1" : "text-muted-foreground"}`}>
-                      {/* i18n-ok: matches shared/plans.ts tier description prefix (out of this task's scope, still English); translating the literal would break the match */}
-                      {!f.startsWith("All in") && <span className="text-primary mt-0.5">✓</span>}
-                      {f}
+                  {features.map((f, i) => (
+                    <li key={i} className={`flex items-start gap-2 text-sm ${f.isHeader ? "text-foreground font-medium mb-1" : "text-muted-foreground"}`}>
+                      {!f.isHeader && <span className="text-primary mt-0.5">✓</span>}
+                      {T(f.text)}
                     </li>
                   ))}
                 </ul>
@@ -182,7 +182,7 @@ export function Billing() {
                 {isCurrent ? (
                   <>
                     <Badge variant="secondary" className="bg-primary/10 text-primary border-0">
-                      {status === "trialing" ? `${plan.name}${T({ en: " Trial", zh: " 试用" })}` : T({ en: "Current Plan", zh: "当前套餐" })}
+                      {status === "trialing" ? `${planName}${T({ en: " Trial", zh: " 试用" })}` : T({ en: "Current Plan", zh: "当前套餐" })}
                     </Badge>
                     {status === "trialing" && subscription?.subscription?.current_period_end && (
                       <p className="text-xs text-muted-foreground">
@@ -191,7 +191,7 @@ export function Billing() {
                     )}
                     {status === "trialing" && (
                       <Button className="w-full" size="sm" onClick={() => subscribe(plan.tier)}>
-                        {T({ en: "Subscribe to keep", zh: "续订以保留" })} {plan.name}
+                        {T({ en: "Subscribe to keep", zh: "续订以保留" })} {planName}
                       </Button>
                     )}
                     {status === "active" && (

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { env } from "cloudflare:test";
 import worker, { queryNodeLogRows } from "../../src/index";
+import { seedSession } from "./helpers/seed-session";
 
 function mockR2Response(rows: Record<string, unknown>[]) {
   return new Response(JSON.stringify({ success: true, result: { rows } }), { status: 200 });
@@ -82,7 +83,7 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — UUID validation guard", () =
   let fetchMock: ReturnType<typeof vi.fn>;
 
   function req(path: string) {
-    return new Request(`https://flow.test${path}`, { headers: { Cookie: "session=test" } });
+    return new Request(`https://flow.test${path}`, { headers: { Cookie: `session=sess-${TENANT_ID}` } });
   }
 
   function r2Calls() {
@@ -90,10 +91,9 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — UUID validation guard", () =
   }
 
   beforeEach(async () => {
+    // authMiddleware resolves sessions from WEB_DB (shared/auth.ts) — no auth fetch anymore.
+    await seedSession(env as never, `sess-${TENANT_ID}`, TENANT_ID);
     fetchMock = vi.fn(async (url: string) => {
-      if (String(url).includes("/api/auth/me")) {
-        return new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: String(TENANT_ID) } }), { status: 200 });
-      }
       return mockR2Response([]);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -167,14 +167,13 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — content domain reads R2 only
   let fetchMock: ReturnType<typeof vi.fn>;
 
   function req(path: string) {
-    return new Request(`https://flow.test${path}`, { headers: { Cookie: "session=test" } });
+    return new Request(`https://flow.test${path}`, { headers: { Cookie: `session=sess-${TENANT_ID}` } });
   }
 
   beforeEach(async () => {
+    // authMiddleware resolves sessions from WEB_DB (shared/auth.ts) — no auth fetch anymore.
+    await seedSession(env as never, `sess-${TENANT_ID}`, TENANT_ID);
     fetchMock = vi.fn(async (url: string, init?: any) => {
-      if (String(url).includes("/api/auth/me")) {
-        return new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: String(TENANT_ID) } }), { status: 200 });
-      }
       // Two rows for the same content_id: an earlier "enter" and a later "outcome" — the route
       // must dedupe to the latest (the outcome row), not return both.
       return mockR2Response([
@@ -231,14 +230,13 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — user domain name lookup keys
   let fetchMock: ReturnType<typeof vi.fn>;
 
   function req(path: string) {
-    return new Request(`https://flow.test${path}`, { headers: { Cookie: "session=test" } });
+    return new Request(`https://flow.test${path}`, { headers: { Cookie: `session=sess-${TENANT_ID}` } });
   }
 
   beforeEach(async () => {
+    // authMiddleware resolves sessions from WEB_DB (shared/auth.ts) — no auth fetch anymore.
+    await seedSession(env as never, `sess-${TENANT_ID}`, TENANT_ID);
     fetchMock = vi.fn(async (url: string, init?: any) => {
-      if (String(url).includes("/api/auth/me")) {
-        return new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: String(TENANT_ID) } }), { status: 200 });
-      }
       const parsedBody = init?.body ? JSON.parse(init.body as string) : {};
       if (typeof parsedBody.query === "string" && parsedBody.query.includes("FROM uniscrm.flow_log")) {
         return mockR2Response([
@@ -307,14 +305,13 @@ describe("GET /api/flows/:id/nodes/:nodeId/logs — YouTube-only content flow is
   let fetchMock: ReturnType<typeof vi.fn>;
 
   function req(path: string) {
-    return new Request(`https://flow.test${path}`, { headers: { Cookie: "session=test" } });
+    return new Request(`https://flow.test${path}`, { headers: { Cookie: `session=sess-${TENANT_ID}` } });
   }
 
   beforeEach(async () => {
+    // authMiddleware resolves sessions from WEB_DB (shared/auth.ts) — no auth fetch anymore.
+    await seedSession(env as never, `sess-${TENANT_ID}`, TENANT_ID);
     fetchMock = vi.fn(async (url: string) => {
-      if (String(url).includes("/api/auth/me")) {
-        return new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: String(TENANT_ID) } }), { status: 200 });
-      }
       return mockR2Response([
         { content_id: "c-yt", created_at: "2026-01-03T00:00:00.000Z", direction: "enter", outcome: null, title: "a video", content_text: null, content_url: "https://youtube.com/watch?v=abc" },
       ]);

@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
-import { getCookie } from "hono/cookie";
+import { resolveSession as resolveSharedSession } from "../../shared/auth";
 import { Twitter, Google, generateState, generateCodeVerifier, decodeIdToken } from "arctic";
-import type { Env, Session } from "./types";
+import type { Env } from "./types";
 import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, X_BYOK_SCOPES, type ByokConfig } from "./services/app-credentials";
@@ -13,19 +13,12 @@ import { canUseFeature, LOWEST_TIER } from "../../shared/plans";
 import { X_CHANNEL_SCOPES } from "../../shared/x-scopes";
 export { X_CHANNEL_SCOPES };
 
+// Thin adapter over shared/auth.ts's single session implementation (the previous inline
+// copy here also carried a dead KV-first branch — sessions are D1-only). Keeps the
+// snake_case shape this file's call sites have always used.
 async function resolveSession(c: Context<{ Bindings: Env }>): Promise<{ tenant_id: number; member_id: string } | null> {
-  const sessionId = getCookie(c, "session");
-  if (!sessionId) return null;
-  const kvData = await c.env.KV.get(`session:${sessionId}`);
-  if (kvData) {
-    const session = JSON.parse(kvData) as Session;
-    return { tenant_id: session.tenant_id, member_id: session.member_id };
-  }
-  const dbRow = await c.env.WEB_DB
-    .prepare("SELECT tenant_id, member_id FROM sessions WHERE id = ? AND expires_at > datetime('now')")
-    .bind(sessionId)
-    .first<{ tenant_id: number; member_id: string }>();
-  return dbRow || null;
+  const session = await resolveSharedSession(c.env.WEB_DB, c.req.raw.headers.get("Cookie"));
+  return session ? { tenant_id: session.tenantId, member_id: session.memberId } : null;
 }
 
 export function buildYouTubeAuthUrl(clientId: string, clientSecret: string, redirectUri: string): {

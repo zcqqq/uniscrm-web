@@ -10,6 +10,7 @@ import { cfTimezone, resolveSignupTimezone } from "../services/timezone";
 import { dummyVerify, hashPassword, needsUpgrade, verifyPassword } from "../services/password";
 import { LoginThrottle } from "../services/login-throttle";
 import { normalizeEmail } from "../services/email-identity";
+import { resolveAuthMe } from "../../../shared/auth";
 
 export function createAuthRouter() {
   const router = new Hono<{ Bindings: Env }>();
@@ -235,25 +236,12 @@ export function createAuthRouter() {
     return c.json({ ok: true });
   });
 
+  // Payload assembly lives in shared/auth.ts — the same resolveAuthMe now answers
+  // /api/auth/me locally on every worker instead of them proxying to this route.
   router.get("/me", async (c) => {
-    const sessionId = getCookie(c, "session");
-    if (!sessionId) return c.json({ error: "Unauthorized" }, 401);
-
-    const sessions = new SessionService(c.env.WEB_DB);
-    const session = await sessions.get(sessionId);
-    if (!session) return c.json({ error: "Unauthorized" }, 401);
-
-    const member = await c.env.WEB_DB.prepare(
-      "SELECT id, tenant_id, email, preferred_location, language, timezone FROM members WHERE id = ?"
-    )
-      .bind(session.member_id)
-      .first<{ id: string; tenant_id: number; email: string; preferred_location: string; language: string; timezone: string }>();
-    if (!member) return c.json({ error: "Unauthorized" }, 401);
-
-    return c.json({
-      member: { id: member.id, email: member.email, preferred_location: member.preferred_location, language: member.language || "en", timezone: member.timezone || "UTC" },
-      tenant: { id: member.tenant_id, email: member.email },
-    });
+    const me = await resolveAuthMe(c.env.WEB_DB, c.req.raw.headers.get("Cookie"));
+    if (!me) return c.json({ error: "Unauthorized" }, 401);
+    return c.json(me);
   });
 
   return router;

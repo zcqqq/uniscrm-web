@@ -12,6 +12,8 @@ interface ContainerNamespace {
 
 export interface Env {
   CONTENT_DB: D1Database;
+  // web's sessions/members database, read-only here for session resolution (shared/auth.ts).
+  WEB_DB: D1Database;
   AI: Ai;
   ASSETS: Fetcher;
   WEB_URL: string;

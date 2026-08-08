@@ -35,18 +35,26 @@ describe("R2-SQL-calling routes fail loudly (500, naming R2_CATALOG_TOKEN) inste
       R2_BUCKET: "uniscrm-dev",
       R2_WAREHOUSE: "acct-1_uniscrm-dev",
       // R2_CATALOG_TOKEN deliberately omitted
-      WEB_DB: { prepare: () => ({ bind: () => ({ first: async () => null, all: async () => ({ results: [] }), run: async () => ({}) }) }) },
+      // segmentAuth resolves sessions from WEB_DB (shared/auth.ts) — serve the session row here.
+      WEB_DB: {
+        prepare: (sql: string) => ({
+          bind: () => ({
+            first: async () => (sql.includes("FROM sessions") ? { member_id: "m1", tenant_id: 7, email: "m1@example.com", language: "en" } : null),
+            all: async () => ({ results: [] }),
+            run: async () => ({}),
+          }),
+        }),
+      },
       AI: {},
       ASSETS: undefined,
       ...overrides,
     } as any;
   }
 
+  // Auth no longer fetches (sessions come from WEB_DB) — every fetch this mock sees must be
+  // an expected external call, anything else still throws.
   function authedFetchMock(extra?: (url: string, init?: any) => Response | undefined) {
     return vi.fn(async (url: string, init?: any) => {
-      if (String(url).includes("/api/auth/me")) {
-        return new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: "7" } }), { status: 200 });
-      }
       const custom = extra?.(url, init);
       if (custom) return custom;
       throw new Error(`unexpected fetch call in test: ${url}`);
@@ -67,8 +75,9 @@ describe("R2-SQL-calling routes fail loudly (500, naming R2_CATALOG_TOKEN) inste
     expect(res.status).toBe(500);
     const body = await res.json() as { error: string };
     expect(body.error).toContain("R2_CATALOG_TOKEN");
-    // Only the /api/auth/me call happened — no r2-sql call, no AI-backed parse call.
-    expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual(["https://web.test/api/auth/me"]);
+    // No fetch at all — auth is a WEB_DB read now, and neither r2-sql nor the AI-backed
+    // parse call was reached.
+    expect(fetchMock.mock.calls).toEqual([]);
   });
 
   it("POST /api/segments/:id/compute: 500 naming R2_CATALOG_TOKEN, and never reaches r2Query", async () => {
@@ -79,7 +88,12 @@ describe("R2-SQL-calling routes fail loudly (500, naming R2_CATALOG_TOKEN) inste
       WEB_DB: {
         prepare: (sql: string) => ({
           bind: (..._args: unknown[]) => ({
-            first: async () => (sql.startsWith("SELECT id, sql_query") ? { id: "seg-1", sql_query: "SELECT 1", conditions_json: "{}" } : null),
+            first: async () =>
+              sql.includes("FROM sessions")
+                ? { member_id: "m1", tenant_id: 7, email: "m1@example.com", language: "en" }
+                : sql.startsWith("SELECT id, sql_query")
+                  ? { id: "seg-1", sql_query: "SELECT 1", conditions_json: "{}" }
+                  : null,
             all: async () => ({ results: [] }),
             run: async () => ({}),
           }),
@@ -96,7 +110,7 @@ describe("R2-SQL-calling routes fail loudly (500, naming R2_CATALOG_TOKEN) inste
     expect(res.status).toBe(500);
     const body = await res.json() as { error: string };
     expect(body.error).toContain("R2_CATALOG_TOKEN");
-    expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual(["https://web.test/api/auth/me"]);
+    expect(fetchMock.mock.calls).toEqual([]);
   });
 
   it("does not block when R2_CATALOG_TOKEN is set (guard is transparent on the happy path)", async () => {
@@ -115,7 +129,12 @@ describe("R2-SQL-calling routes fail loudly (500, naming R2_CATALOG_TOKEN) inste
       WEB_DB: {
         prepare: (sql: string) => ({
           bind: (..._args: unknown[]) => ({
-            first: async () => (sql.startsWith("SELECT id, sql_query") ? { id: "seg-1", sql_query: "SELECT id FROM uniscrm.user", conditions_json: "{\"logic\":\"AND\",\"conditions\":[]}" } : null),
+            first: async () =>
+              sql.includes("FROM sessions")
+                ? { member_id: "m1", tenant_id: 7, email: "m1@example.com", language: "en" }
+                : sql.startsWith("SELECT id, sql_query")
+                  ? { id: "seg-1", sql_query: "SELECT id FROM uniscrm.user", conditions_json: "{\"logic\":\"AND\",\"conditions\":[]}" }
+                  : null,
             all: async () => ({ results: [] }),
             run: async () => ({}),
             batch: async () => ({}),

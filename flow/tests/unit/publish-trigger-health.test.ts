@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
+import { seedSession } from "./helpers/seed-session";
 
 const TENANT_ID = 997;
 
@@ -20,7 +21,7 @@ const cronOnly = JSON.stringify({
 function publishReq(id: string) {
   return new Request(`https://flow.test/api/flows/${id}/publish`, {
     method: "POST",
-    headers: { Cookie: "session=test" },
+    headers: { Cookie: `session=sess-${TENANT_ID}` },
   });
 }
 
@@ -31,7 +32,8 @@ function stubFetch(channels: { status: number; body?: unknown } | "throw") {
       if (channels === "throw") throw new Error("link down");
       return new Response(JSON.stringify(channels.body ?? {}), { status: channels.status });
     }
-    return new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: String(TENANT_ID) } }), { status: 200 });
+    // authMiddleware resolves sessions from WEB_DB (shared/auth.ts) — no auth fetch anymore.
+    throw new Error(`unexpected fetch call in test: ${url}`);
   }));
 }
 
@@ -42,6 +44,7 @@ async function statusOf(id: string) {
 
 describe("POST /api/flows/:id/publish trigger gate", () => {
   beforeEach(async () => {
+    await seedSession(env as never, `sess-${TENANT_ID}`, TENANT_ID);
     await env.FLOW_DB.prepare(
       `CREATE TABLE IF NOT EXISTS flows (
          id TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, member_id TEXT NOT NULL DEFAULT '',

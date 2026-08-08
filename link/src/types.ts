@@ -66,12 +66,6 @@ export interface Env {
   DOUYIN_COOKIE: string;
 }
 
-export interface Session {
-  member_id: string;
-  tenant_id: number;
-  email: string;
-}
-
 // Content types
 export type ChannelType = "LOCAL" | "NOTION" | "TIKTOK" | "X" | "YOUTUBE" | "YOUTUBE_ACCOUNT";
 

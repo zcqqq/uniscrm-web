@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
+import { seedSession } from "./helpers/seed-session";
 
 const TENANT_ID = 999;
 
@@ -11,25 +12,17 @@ const contentFlowGraph = JSON.stringify({ nodes: [{ id: "t1", type: "xContentTri
 const triggerlessGraph = JSON.stringify({ nodes: [{ id: "a1", type: "action", data: { actionType: "xContentAction" }, position: { x: 0, y: 0 } }], edges: [] });
 
 function req(path: string) {
-  return new Request(`https://flow.test${path}`, { headers: { Cookie: "session=test" } });
+  return new Request(`https://flow.test${path}`, { headers: { Cookie: `session=sess-${TENANT_ID}` } });
 }
 
-// GET /api/flows is behind authMiddleware, which calls WEB_URL's /api/auth/me over fetch
-// and c.set()s tenantId/memberId from the response. We stub global fetch so that call
-// resolves to a fixed tenant/member, matching the tenant_id used by the fixture rows below,
-// then call the real worker.fetch(...) so this test actually exercises flow/src/index.ts's
-// GET /api/flows domain-filter SQL rather than re-implementing/hardcoding it here.
+// GET /api/flows is behind authMiddleware, which resolves the session cookie against
+// WEB_DB's sessions table (shared/auth.ts). We seed a session row matching the tenant_id
+// used by the fixture rows below, then call the real worker.fetch(...) so this test
+// actually exercises flow/src/index.ts's GET /api/flows domain-filter SQL rather than
+// re-implementing/hardcoding it here.
 describe("GET /api/flows domain filter", () => {
   beforeEach(async () => {
-    // authMiddleware runs for both the "/api/flows" and "/api/flows/*" registrations, which
-    // both match this path and so invoke the mocked fetch (and read its body) more than once
-    // per request -- return a fresh Response each call rather than a single shared instance.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: String(TENANT_ID) } }), { status: 200 })
-      )
-    );
+    await seedSession(env as never, `sess-${TENANT_ID}`, TENANT_ID);
 
     // vitest-pool-workers does not auto-apply this module's migrations/ directory (see
     // queue-content.test.ts beforeEach for the same note) -- create the post-migration
@@ -63,7 +56,6 @@ describe("GET /api/flows domain filter", () => {
 
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE tenant_id = ?`).bind(TENANT_ID).run();
-    vi.unstubAllGlobals();
   });
 
   it("domain=content returns only the content-domain flow", async () => {
@@ -108,7 +100,7 @@ describe("GET /api/flows domain filter", () => {
     const createRes = await worker.fetch(
       new Request("https://flow.test/api/flows", {
         method: "POST",
-        headers: { Cookie: "session=test", "Content-Type": "application/json" },
+        headers: { Cookie: `session=sess-${TENANT_ID}`, "Content-Type": "application/json" },
         body: JSON.stringify({ name: "fresh", domain: "content" }),
       }),
       env
@@ -126,7 +118,7 @@ describe("GET /api/flows domain filter", () => {
     const createRes = await worker.fetch(
       new Request("https://flow.test/api/flows", {
         method: "POST",
-        headers: { Cookie: "session=test", "Content-Type": "application/json" },
+        headers: { Cookie: `session=sess-${TENANT_ID}`, "Content-Type": "application/json" },
         body: JSON.stringify({ name: "fresh" }),
       }),
       env

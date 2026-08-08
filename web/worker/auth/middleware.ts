@@ -1,24 +1,20 @@
-import { getCookie } from "hono/cookie";
 import type { Context, Next } from "hono";
-import { SessionService } from "./session";
+import { resolveSession } from "../../../shared/auth";
 import { TenantDB } from "../../../shared/tenant-db";
 import type { Env } from "../types";
 
+// Session resolution lives in shared/auth.ts (one implementation for every worker);
+// this middleware is web's adapter: 401 JSON on failure, context vars + tenant-scoped
+// db on success.
 export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
-  const sessionId = getCookie(c, "session");
-  if (!sessionId) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
-
-  const sessions = new SessionService(c.env.WEB_DB);
-  const session = await sessions.get(sessionId);
+  const session = await resolveSession(c.env.WEB_DB, c.req.raw.headers.get("Cookie"));
   if (!session) {
     return c.json({ error: "Unauthorized" }, 401);
   }
 
-  c.set("memberId" as never, session.member_id);
-  c.set("tenantId" as never, session.tenant_id);
+  c.set("memberId" as never, session.memberId);
+  c.set("tenantId" as never, session.tenantId);
   c.set("email" as never, session.email);
-  c.set("db" as never, new TenantDB(c.env.WEB_DB, session.tenant_id));
+  c.set("db" as never, new TenantDB(c.env.WEB_DB, session.tenantId));
   await next();
 }

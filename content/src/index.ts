@@ -13,6 +13,7 @@ import {
 } from "./services/model-catalog";
 import { SKILL_CATALOG } from "./skills/catalog";
 import { processVideoActionJob, type VideoActionQueueMessage } from "./queue-video-action";
+import { createInternalAuthMiddleware, resolveAuthMe, resolveSession, spaLoginGuard } from "../../shared/auth";
 
 export class SubtitleContainer extends Container<Env> {
   defaultPort = 8080;
@@ -37,29 +38,15 @@ type HonoEnv = { Bindings: Env; Variables: { tenantId: string } };
 const app = new Hono<HonoEnv>();
 app.use("*", cors());
 
-function getCookieValue(request: Request, name: string): string | null {
-  const header = request.headers.get("Cookie") || "";
-  const match = header.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
-}
+// Shared fail-closed implementation; content's historical 403 {"error":"Forbidden"}
+// shape is preserved via opts (flow/admin answer 401 — see shared/auth.ts).
+const internalAuthMiddleware = createInternalAuthMiddleware({ status: 403, error: "Forbidden" });
 
-async function internalAuthMiddleware(c: any, next: any) {
-  const secret = c.req.header("X-Internal-Secret");
-  // Fail closed: with INTERNAL_SECRET unset, `undefined !== undefined` would let
-  // header-less requests through.
-  if (!c.env.INTERNAL_SECRET || secret !== c.env.INTERNAL_SECRET) {
-    return c.json({ error: "Forbidden" }, 403);
-  }
-  await next();
-}
-
+// Session resolution via shared/auth.ts against the WEB_DB binding — no HTTP hop to web.
 async function sessionAuth(c: any, next: any) {
-  const cookie = c.req.raw.headers.get("Cookie") || "";
-  const res = await fetch(`${c.env.WEB_URL}/api/auth/me`, { headers: { Cookie: cookie } });
-  if (!res.ok) return c.json({ error: "Unauthorized" }, 401);
-  const data = (await res.json()) as { member?: { id?: string }; tenant?: { id?: string } };
-  if (!data.member?.id || !data.tenant?.id) return c.json({ error: "Unauthorized" }, 401);
-  c.set("tenantId", data.tenant.id);
+  const session = await resolveSession(c.env.WEB_DB, c.req.raw.headers.get("Cookie"));
+  if (!session) return c.json({ error: "Unauthorized" }, 401);
+  c.set("tenantId", session.tenantId);
   await next();
 }
 
@@ -67,6 +54,14 @@ app.use("/internal/*", internalAuthMiddleware);
 app.route("/internal", internalRoutes());
 
 app.get("/health", (c) => c.json({ status: "ok" }));
+
+// Answered locally from WEB_DB (shared/auth.ts). content previously had no /me route at
+// all, so the shared Nav/Sidebar/useLocale fetches to /api/auth/me on content pages 404'd.
+app.get("/api/auth/me", async (c) => {
+  const me = await resolveAuthMe(c.env.WEB_DB, c.req.raw.headers.get("Cookie"));
+  if (!me) return c.json({ error: "Unauthorized" }, 401);
+  return c.json(me);
+});
 
 // The media bucket's lifecycle rule expires every object after 48h (dev and prod alike), so a
 // miss here is the EXPECTED state for any link older than that -- a Video Action node's analytics
@@ -166,18 +161,8 @@ export default {
 
     // Auth redirect for HTML pages
     const accept = request.headers.get("Accept") || "";
-    if (accept.includes("text/html") && !url.pathname.startsWith("/api") && !url.pathname.startsWith("/internal") && !url.pathname.startsWith("/public")) {
-      const sessionCookie = getCookieValue(request, "session");
-      if (!sessionCookie) {
-        return Response.redirect(`${env.WEB_URL}/login`, 302);
-      }
-      const authRes = await fetch(`${env.WEB_URL}/api/auth/me`, {
-        headers: { Cookie: `session=${sessionCookie}` },
-      });
-      if (!authRes.ok) {
-        return Response.redirect(`${env.WEB_URL}/login`, 302);
-      }
-    }
+    const loginRedirect = await spaLoginGuard(request, env.WEB_DB, env.WEB_URL, ["/api", "/internal", "/public"]);
+    if (loginRedirect) return loginRedirect;
 
     // Serve static assets first for non-API paths
     if (!url.pathname.startsWith("/api") && !url.pathname.startsWith("/internal") && !url.pathname.startsWith("/health") && !url.pathname.startsWith("/public") && env.ASSETS) {

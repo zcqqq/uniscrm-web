@@ -1,18 +1,20 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../src/index";
+import { seedSession } from "./helpers/seed-session";
+
+// sessionAuth resolves sessions from the WEB_DB binding (shared/auth.ts), not via an HTTP
+// hop to web — seed a real session row instead of stubbing an /api/auth/me fetch.
+beforeAll(async () => {
+  await seedSession(env as never, "ok", 90);
+});
 
 describe("POST /api/llm-models", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   function authedFetchMock(modelsResponse: Response) {
-    return vi.fn().mockImplementation((url: string) => {
-      if (String(url).includes("/api/auth/me")) {
-        return Promise.resolve(new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: "90" } }), { status: 200 }));
-      }
-      return Promise.resolve(modelsResponse);
-    });
+    return vi.fn().mockImplementation(() => Promise.resolve(modelsResponse));
   }
 
   it("returns 401 when the session check fails", async () => {

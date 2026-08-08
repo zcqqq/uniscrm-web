@@ -71,20 +71,26 @@ function createMockLinkDb() {
   return { prepare, calls };
 }
 
-function createMockKv(sessionTenantId: number | null) {
+// KV now holds only oauth_state blobs — sessions come from WEB_DB via shared/auth.ts.
+function createMockKv() {
   return {
-    get: vi.fn().mockImplementation((key: string) => {
-      if (key.startsWith("session:")) {
-        return Promise.resolve(
-          sessionTenantId === null
-            ? null
-            : JSON.stringify({ tenant_id: sessionTenantId, member_id: "m1", email: "a@b.c" })
-        );
-      }
-      return Promise.resolve(null);
-    }),
+    get: vi.fn().mockResolvedValue(null),
     put: vi.fn().mockResolvedValue(undefined),
     delete: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function createMockWebDb(sessionTenantId: number | null) {
+  return {
+    prepare: vi.fn(() => ({
+      bind: vi.fn(() => ({
+        first: vi.fn(async () =>
+          sessionTenantId === null
+            ? null
+            : { tenant_id: sessionTenantId, member_id: "m1", email: "a@b.c", language: "en" }
+        ),
+      })),
+    })),
   };
 }
 
@@ -103,13 +109,13 @@ describe("GET /x/connect — BYOK channel ownership", () => {
   });
 
   it("refuses a channelId belonging to another tenant, without decrypting its app credentials", async () => {
-    const kv = createMockKv(ATTACKER_TENANT);
+    const kv = createMockKv();
     const linkDb = createMockLinkDb();
 
     const res = await buildApp().request(
       `/x/connect?channelId=${VICTIM_CHANNEL}`,
       sessionCookie,
-      { KV: kv, LINK_DB: linkDb, WEB_DB: { prepare: () => ({ bind: () => ({ first: async () => null }) }) } } as never
+      { KV: kv, LINK_DB: linkDb, WEB_DB: createMockWebDb(ATTACKER_TENANT) } as never
     );
 
     expect(res.status).toBe(404);
@@ -120,13 +126,13 @@ describe("GET /x/connect — BYOK channel ownership", () => {
   });
 
   it("refuses a BYOK connect with no session at all", async () => {
-    const kv = createMockKv(null);
+    const kv = createMockKv();
     const linkDb = createMockLinkDb();
 
     const res = await buildApp().request(
       `/x/connect?channelId=${VICTIM_CHANNEL}`,
       {},
-      { KV: kv, LINK_DB: linkDb, WEB_DB: { prepare: () => ({ bind: () => ({ first: async () => null }) }) } } as never
+      { KV: kv, LINK_DB: linkDb, WEB_DB: createMockWebDb(null) } as never
     );
 
     expect(res.status).toBe(401);
@@ -134,13 +140,13 @@ describe("GET /x/connect — BYOK channel ownership", () => {
   });
 
   it("still connects the tenant's own BYOK channel", async () => {
-    const kv = createMockKv(VICTIM_TENANT);
+    const kv = createMockKv();
     const linkDb = createMockLinkDb();
 
     const res = await buildApp().request(
       `/x/connect?channelId=${VICTIM_CHANNEL}`,
       sessionCookie,
-      { KV: kv, LINK_DB: linkDb, WEB_DB: { prepare: () => ({ bind: () => ({ first: async () => null }) }) } } as never
+      { KV: kv, LINK_DB: linkDb, WEB_DB: createMockWebDb(VICTIM_TENANT) } as never
     );
 
     expect(res.status).toBe(302);

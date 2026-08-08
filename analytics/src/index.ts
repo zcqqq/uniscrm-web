@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { Container } from "@cloudflare/containers";
 import type { Env, IntervalResults, AnalyticsReport } from "./types";
 import { computeStats } from "./services/stats";
+import { resolveAuthMe, resolveSession, spaLoginGuard } from "../../shared/auth";
 
 export class AnalyticsContainer extends Container {
   defaultPort = 8080;
@@ -21,21 +22,12 @@ type HonoEnv = { Bindings: Env; Variables: { tenantId: string; memberId: string 
 const app = new Hono<HonoEnv>();
 app.use("*", cors());
 
-function getCookieValue(request: Request, name: string): string | null {
-  const header = request.headers.get("Cookie") || "";
-  const match = header.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
+// Session resolution via shared/auth.ts against the WEB_DB binding — no HTTP hop to web.
 async function authMiddleware(c: any, next: any) {
-  const cookie = c.req.raw.headers.get("Cookie") || "";
-  const webUrl = c.env.WEB_URL;
-  const res = await fetch(`${webUrl}/api/auth/me`, { headers: { Cookie: cookie } });
-  if (!res.ok) return c.json({ error: "Unauthorized" }, 401);
-  const data = (await res.json()) as { member?: { id?: string }; tenant?: { id?: string } };
-  if (!data.member?.id || !data.tenant?.id) return c.json({ error: "Unauthorized" }, 401);
-  c.set("tenantId", data.tenant.id);
-  c.set("memberId", data.member.id);
+  const session = await resolveSession(c.env.WEB_DB, c.req.raw.headers.get("Cookie"));
+  if (!session) return c.json({ error: "Unauthorized" }, 401);
+  c.set("tenantId", session.tenantId);
+  c.set("memberId", session.memberId);
   await next();
 }
 
@@ -48,15 +40,11 @@ app.use("/api/dashboard-items/*", authMiddleware);
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
+// Answered locally from WEB_DB (shared/auth.ts) instead of proxying to web.
 app.get("/api/auth/me", async (c) => {
-  const webUrl = c.env.WEB_URL;
-  const res = await fetch(`${webUrl}/api/auth/me`, {
-    headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
-  });
-  return new Response(await res.text(), {
-    status: res.status,
-    headers: { "Content-Type": "application/json" },
-  });
+  const me = await resolveAuthMe(c.env.WEB_DB, c.req.raw.headers.get("Cookie"));
+  if (!me) return c.json({ error: "Unauthorized" }, 401);
+  return c.json(me);
 });
 
 // ============ Reports API (async via Container + R2 SQL) ============
@@ -854,18 +842,8 @@ export default {
     const url = new URL(request.url);
 
     const accept = request.headers.get("Accept") || "";
-    if (accept.includes("text/html") && !url.pathname.startsWith("/api")) {
-      const sessionCookie = getCookieValue(request, "session");
-      if (!sessionCookie) {
-        return Response.redirect(`${env.WEB_URL}/login`, 302);
-      }
-      const authRes = await fetch(`${env.WEB_URL}/api/auth/me`, {
-        headers: { Cookie: `session=${sessionCookie}` },
-      });
-      if (!authRes.ok) {
-        return Response.redirect(`${env.WEB_URL}/login`, 302);
-      }
-    }
+    const loginRedirect = await spaLoginGuard(request, env.WEB_DB, env.WEB_URL);
+    if (loginRedirect) return loginRedirect;
 
     if (!url.pathname.startsWith("/api") && env.ASSETS) {
       const assetRes = await env.ASSETS.fetch(request);

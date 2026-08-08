@@ -13,6 +13,7 @@ import { webhookRoutes } from "./webhook";
 import { youtubeWebhookRoutes } from "./webhook-youtube";
 import { handleCron } from "./cron";
 import { createModuleGuard } from "../../shared/plan-guard";
+import { resolveAuthMe } from "../../shared/auth";
 import { getActiveSubscriptionTier } from "../../shared/credit-service";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -35,7 +36,14 @@ app.route("/internal", internalRoutes());
 
 // Authenticated: API routes
 app.use("/api/*", authMiddleware);
-app.get("/api/auth/me", (c) => c.json({ member: { email: c.get("email" as never) } }));
+// Answers with web's full /me shape (member incl. language/timezone + tenant) via the shared
+// implementation — the previous `{ member: { email } }`-only shape left useLocale() on link
+// pages without language/timezone, and the dead KV branch meant email was always "" anyway.
+app.get("/api/auth/me", async (c) => {
+  const me = await resolveAuthMe(c.env.WEB_DB, c.req.raw.headers.get("Cookie"));
+  if (!me) return c.json({ error: "Unauthorized" }, 401);
+  return c.json(me);
+});
 app.post("/api/auth/logout", (c) => c.json({ ok: true }));
 app.route("/api/channels", channelsRoutes());
 app.route("/api/users", usersRoutes());

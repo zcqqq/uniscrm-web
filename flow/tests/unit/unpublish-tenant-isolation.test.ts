@@ -1,21 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
+import { seedSession } from "./helpers/seed-session";
 
-// The session's tenant is whatever the mocked /auth/me returns. Each test sets
-// ATTACKER_TENANT as the caller and checks it cannot reach VICTIM_TENANT's rows.
+// The session's tenant is whatever the seeded WEB_DB sessions row says (shared/auth.ts).
+// Each test sets ATTACKER_TENANT as the caller and checks it cannot reach VICTIM_TENANT's rows.
 const ATTACKER_TENANT = 501;
 const VICTIM_TENANT = 502;
 
 function req(path: string) {
-  return new Request(`https://flow.test${path}`, { method: "POST", headers: { Cookie: "session=test" } });
+  return new Request(`https://flow.test${path}`, { method: "POST", headers: { Cookie: `session=sess-${ATTACKER_TENANT}` } });
 }
 
 describe("POST /api/flows/:id/unpublish — tenant isolation", () => {
   beforeEach(async () => {
-    vi.stubGlobal("fetch", vi.fn(async () =>
-      new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: String(ATTACKER_TENANT) } }), { status: 200 })
-    ));
+    await seedSession(env as never, `sess-${ATTACKER_TENANT}`, ATTACKER_TENANT);
 
     await env.FLOW_DB.prepare(
       `CREATE TABLE IF NOT EXISTS flows (

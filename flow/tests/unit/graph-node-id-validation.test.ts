@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
+import { seedSession } from "./helpers/seed-session";
 
 // The node-logs route (GET /api/flows/:id/nodes/:nodeId/logs) interpolates a node id directly
 // into an R2 SQL string, guarded by a [A-Za-z0-9_-]{1,64} allowlist. That guard is only a
@@ -13,7 +14,7 @@ const TENANT_ID = 777;
 function req(path: string, init?: RequestInit) {
   return new Request(`https://flow.test${path}`, {
     ...init,
-    headers: { Cookie: "session=test", "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: { Cookie: `session=sess-${TENANT_ID}`, "Content-Type": "application/json", ...(init?.headers || {}) },
   });
 }
 
@@ -23,12 +24,8 @@ function graphWith(nodeId: string) {
 
 describe("graph_json node id validation on save", () => {
   beforeEach(async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: String(TENANT_ID) } }), { status: 200 })
-      )
-    );
+    // authMiddleware resolves sessions from WEB_DB (shared/auth.ts) — no auth fetch anymore.
+    await seedSession(env as never, `sess-${TENANT_ID}`, TENANT_ID);
 
     await env.FLOW_DB.prepare(
       `CREATE TABLE IF NOT EXISTS flows (
@@ -43,7 +40,6 @@ describe("graph_json node id validation on save", () => {
 
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE tenant_id = ?`).bind(TENANT_ID).run();
-    vi.unstubAllGlobals();
   });
 
   it("rejects a POST whose graph_json has a SQL-injection-shaped node id", async () => {

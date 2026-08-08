@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
+import { seedSession } from "./helpers/seed-session";
 
 const TENANT_ID = 777;
 
@@ -13,17 +14,20 @@ const youtubeContentFlowGraph = JSON.stringify({ nodes: [{ id: "t1", type: "yout
 const triggerlessGraph = JSON.stringify({ nodes: [{ id: "a1", type: "action", data: { actionType: "xContentAction" }, position: { x: 0, y: 0 } }], edges: [] });
 
 function req(path: string) {
-  return new Request(`https://flow.test${path}`, { headers: { Cookie: "session=test" } });
+  return new Request(`https://flow.test${path}`, { headers: { Cookie: `session=sess-${TENANT_ID}` } });
 }
 
 describe("GET /api/flows/:id/analytics", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
+    // authMiddleware resolves sessions from WEB_DB (shared/auth.ts) — no auth fetch anymore.
+    // The stub stays to catch any unexpected outbound fetch.
     fetchMock = vi.fn(async (url: string) => {
-      return new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: String(TENANT_ID) } }), { status: 200 });
+      throw new Error(`unexpected fetch call in test: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
+    await seedSession(env as never, `sess-${TENANT_ID}`, TENANT_ID);
 
     await env.FLOW_DB.prepare(
       `CREATE TABLE IF NOT EXISTS flows (

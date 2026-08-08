@@ -1,10 +1,5 @@
-import type { Context, Next } from "hono";
-import type { Env } from "../types";
+import { createInternalAuthMiddleware } from "../../../shared/auth";
 
-export async function internalAuth(c: Context<{ Bindings: Env }>, next: Next) {
-  const secret = c.req.header("X-Internal-Secret");
-  if (!secret || secret !== c.env.INTERNAL_SECRET) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
-  await next();
-}
+// Delegates to the shared fail-closed implementation (shared/auth.ts); admin's historical
+// 401 {"error":"Unauthorized"} shape is the shared default.
+export const internalAuth = createInternalAuthMiddleware();

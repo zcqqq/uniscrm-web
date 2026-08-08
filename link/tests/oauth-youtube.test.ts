@@ -73,16 +73,24 @@ function buildApp() {
   return app;
 }
 
-// resolveSession reads the `session` cookie and looks it up in KV first. Without both, the
-// route now refuses before it ever builds Google's authorization URL.
+// resolveSession (shared/auth.ts) reads the `session` cookie and looks it up in WEB_DB's
+// sessions table. Without both, the route refuses before it ever builds Google's
+// authorization URL. KV now holds only oauth_state blobs.
 const SESSION_COOKIE = { Cookie: "session=sess-1" };
 function createSessionKv() {
   return {
-    get: vi.fn().mockImplementation((key: string) =>
-      Promise.resolve(key === "session:sess-1" ? JSON.stringify({ tenant_id: 1, member_id: "member-1", email: "" }) : null)
-    ),
+    get: vi.fn().mockResolvedValue(null),
     put: vi.fn().mockResolvedValue(undefined),
     delete: vi.fn().mockResolvedValue(undefined),
+  };
+}
+function createSessionWebDb() {
+  return {
+    prepare: vi.fn(() => ({
+      bind: vi.fn(() => ({
+        first: vi.fn(async () => ({ tenant_id: 1, member_id: "member-1", email: "", language: "en" })),
+      })),
+    })),
   };
 }
 
@@ -91,7 +99,7 @@ describe("GET /youtube/connect", () => {
     const kv = createSessionKv();
     const app = buildApp();
 
-    const res = await app.request("/youtube/connect", { headers: SESSION_COOKIE }, { KV: kv, WEB_DB: { prepare: vi.fn() }, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any);
+    const res = await app.request("/youtube/connect", { headers: SESSION_COOKIE }, { KV: kv, WEB_DB: createSessionWebDb(), GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any);
 
     expect(res.status).toBe(302);
     expect(kv.put).toHaveBeenCalledWith(expect.stringMatching(/^oauth_state:/), expect.any(String), { expirationTtl: 300 });
@@ -101,7 +109,7 @@ describe("GET /youtube/connect", () => {
     const kv = createSessionKv();
     const app = buildApp();
 
-    const res = await app.request("/youtube/connect", { redirect: "manual", headers: SESSION_COOKIE }, { KV: kv, WEB_DB: { prepare: vi.fn() }, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any);
+    const res = await app.request("/youtube/connect", { redirect: "manual", headers: SESSION_COOKIE }, { KV: kv, WEB_DB: createSessionWebDb(), GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" } as any);
 
     const location = res.headers.get("Location")!;
     expect(new URL(location).searchParams.get("prompt")).toBe("consent select_account");

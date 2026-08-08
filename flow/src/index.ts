@@ -9,6 +9,7 @@ import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-promp
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY, CONDITION_LOGIC_OR, resolveYouTubeSubscriptions } from "../nodeTypeRegistry";
 import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage } from "./trigger-health";
 import { conditionsNeedAuthor, youtubeConditionRequest, resolveYouTubeCondition, type VideoStatsResponse } from "./youtube-condition";
+import { createInternalAuthMiddleware, resolveAuthMe, resolveSession, spaLoginGuard } from "../../shared/auth";
 
 // node ids are NOT always UUIDs: flow/frontend/config/templates.ts hardcodes short ids like
 // "t1"/"w1"/"a1" for template-instantiated flows, and those ids persist forever unless the node
@@ -947,24 +948,13 @@ type HonoEnv = { Bindings: Env; Variables: { tenantId: string; memberId: string 
 const app = new Hono<HonoEnv>();
 app.use("*", cors());
 
-function getCookieValue(request: Request, name: string): string | null {
-  const header = request.headers.get("Cookie") || "";
-  const match = header.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-// Auth middleware
+// Auth middleware — session resolution via shared/auth.ts against the WEB_DB binding,
+// no HTTP hop to web.
 const authMiddleware = async (c: any, next: any) => {
-  const cookie = c.req.raw.headers.get("Cookie") || "";
-  const webUrl = c.env.WEB_URL;
-  const res = await fetch(`${webUrl}/api/auth/me`, {
-    headers: { Cookie: cookie },
-  });
-  if (!res.ok) return c.json({ error: "Unauthorized" }, 401);
-  const data = (await res.json()) as { member?: { id?: string }; tenant?: { id?: string } };
-  if (!data.member?.id || !data.tenant?.id) return c.json({ error: "Unauthorized" }, 401);
-  c.set("tenantId", data.tenant.id);
-  c.set("memberId", data.member.id);
+  const session = await resolveSession(c.env.WEB_DB, c.req.raw.headers.get("Cookie"));
+  if (!session) return c.json({ error: "Unauthorized" }, 401);
+  c.set("tenantId", session.tenantId);
+  c.set("memberId", session.memberId);
   await next();
 };
 
@@ -975,11 +965,12 @@ app.use("/api/channels/*", authMiddleware);
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
+// Shared fail-closed X-Internal-Secret check (shared/auth.ts) for every /internal route,
+// replacing the per-route inline copies that used to open each handler below.
+app.use("/internal/*", createInternalAuthMiddleware());
+
 // Internal: mock trigger event for testing
 app.post("/internal/trigger", async (c) => {
-  const secret = c.req.header("X-Internal-Secret");
-  // Fail closed: with INTERNAL_SECRET unset, `undefined !== undefined` would let header-less requests through.
-  if (!c.env.INTERNAL_SECRET || secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
   const { tenantId, eventType, userId, channelId, payload } = await c.req.json<any>();
   const flows = await c.env.FLOW_DB.prepare("SELECT id, graph_json FROM flows WHERE tenant_id = ? AND status = 'published'")
     .bind(tenantId).all<{ id: string; graph_json: string }>();
@@ -1004,10 +995,6 @@ app.post("/internal/trigger", async (c) => {
 // "video_action_complete"). The periodic sweep below is the backstop if this callback never
 // arrives (queue consumer crash, dropped fetch, etc.) within the row's execute_at timeout.
 app.post("/internal/video-action/resume", async (c) => {
-  const secret = c.req.header("X-Internal-Secret");
-  // Fail closed: with INTERNAL_SECRET unset, `undefined !== undefined` would let header-less requests through.
-  if (!c.env.INTERNAL_SECRET || secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
-
   const { pendingId, branch, props, reason } = await c.req.json<{
     pendingId: string; branch: "success" | "failed"; props?: Record<string, unknown>; reason?: string;
   }>();
@@ -1089,10 +1076,6 @@ app.post("/internal/video-action/resume", async (c) => {
 // node currently wants polled. link's cron pulls this before each polling cycle — flow's
 // graph_json is the sole source of truth, nothing is persisted on link's side for this.
 app.get("/internal/list-watches", async (c) => {
-  const secret = c.req.header("X-Internal-Secret");
-  // Fail closed: with INTERNAL_SECRET unset, `undefined !== undefined` would let header-less requests through.
-  if (!c.env.INTERNAL_SECRET || secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
-
   const rows = await c.env.FLOW_DB.prepare(
     `SELECT graph_json FROM flows WHERE status = 'published' AND graph_json LIKE '%xContentTrigger%'`
   ).all<{ graph_json: string }>();
@@ -1130,10 +1113,6 @@ app.get("/internal/list-watches", async (c) => {
 // subscriptions to renew vs. let lapse — same "graph_json is the sole source of truth"
 // pattern as /internal/list-watches above.
 app.get("/internal/youtube-watches", async (c) => {
-  const secret = c.req.header("X-Internal-Secret");
-  // Fail closed: with INTERNAL_SECRET unset, `undefined !== undefined` would let header-less requests through.
-  if (!c.env.INTERNAL_SECRET || secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
-
   const rows = await c.env.FLOW_DB.prepare(
     `SELECT graph_json FROM flows WHERE status = 'published' AND graph_json LIKE '%youtubeContentTrigger%'`
   ).all<{ graph_json: string }>();
@@ -1166,17 +1145,11 @@ app.get("/internal/youtube-watches", async (c) => {
   return c.json({ watches });
 });
 
-// Auth proxy
+// Answered locally from WEB_DB (shared/auth.ts) instead of proxying to web.
 app.get("/api/auth/me", async (c) => {
-  const webUrl = c.env.WEB_URL;
-  const res = await fetch(`${webUrl}/api/auth/me`, {
-    headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
-  });
-  const body = await res.text();
-  return new Response(body, {
-    status: res.status,
-    headers: { "Content-Type": "application/json" },
-  });
+  const me = await resolveAuthMe(c.env.WEB_DB, c.req.raw.headers.get("Cookie"));
+  if (!me) return c.json({ error: "Unauthorized" }, 401);
+  return c.json(me);
 });
 
 // Proxy lists from profile worker
@@ -1616,18 +1589,8 @@ export default {
     const url = new URL(request.url);
 
     const accept = request.headers.get("Accept") || "";
-    if (accept.includes("text/html") && !url.pathname.startsWith("/api")) {
-      const sessionCookie = getCookieValue(request, "session");
-      if (!sessionCookie) {
-        return Response.redirect(`${env.WEB_URL}/login`, 302);
-      }
-      const authRes = await fetch(`${env.WEB_URL}/api/auth/me`, {
-        headers: { Cookie: `session=${sessionCookie}` },
-      });
-      if (!authRes.ok) {
-        return Response.redirect(`${env.WEB_URL}/login`, 302);
-      }
-    }
+    const loginRedirect = await spaLoginGuard(request, env.WEB_DB, env.WEB_URL);
+    if (loginRedirect) return loginRedirect;
 
     if (!url.pathname.startsWith("/api") && env.ASSETS) {
       // Clone before probing ASSETS: Fetcher.fetch() locks/consumes the Request body it's

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../../src/index";
+import { seedSession } from "./helpers/seed-session";
 
 const TENANT_ID = 998;
 
@@ -14,12 +15,12 @@ const boundToGone = JSON.stringify({
 });
 
 function req(path: string) {
-  return new Request(`https://flow.test${path}`, { headers: { Cookie: "session=test" } });
+  return new Request(`https://flow.test${path}`, { headers: { Cookie: `session=sess-${TENANT_ID}` } });
 }
 
-// authMiddleware fetches WEB_URL's /api/auth/me, and the route under test fetches LINK_URL's
-// /internal/channels/active. One global stub serves both, routed by URL — a single catch-all
-// response would feed the auth body to the channel lookup and vice versa.
+// authMiddleware resolves sessions from WEB_DB (shared/auth.ts) — no auth fetch anymore.
+// The route under test still fetches LINK_URL's /internal/channels/active; the stub serves
+// exactly that and rejects anything else.
 function stubFetch(channels: { status: number; body?: unknown } | "throw") {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -27,12 +28,13 @@ function stubFetch(channels: { status: number; body?: unknown } | "throw") {
       if (channels === "throw") throw new Error("link down");
       return new Response(JSON.stringify(channels.body ?? {}), { status: channels.status });
     }
-    return new Response(JSON.stringify({ member: { id: "m1" }, tenant: { id: String(TENANT_ID) } }), { status: 200 });
+    throw new Error(`unexpected fetch call in test: ${url}`);
   }));
 }
 
 describe("GET /api/flows broken_trigger_type", () => {
   beforeEach(async () => {
+    await seedSession(env as never, `sess-${TENANT_ID}`, TENANT_ID);
     // vitest-pool-workers does not auto-apply this module's migrations/ directory — create the
     // post-migration `flows` table by hand (0001_init as amended by 0011/0014/0015).
     await env.FLOW_DB.prepare(

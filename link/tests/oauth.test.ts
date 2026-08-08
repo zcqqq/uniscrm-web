@@ -116,10 +116,18 @@ describe("GET /x/connect — scope selection", () => {
     ]);
     // A BYOK connect is tenant-scoped, so it needs a real session — see
     // oauth-x-byok-tenant-isolation.test.ts for what an unscoped one allowed.
+    // Sessions come from WEB_DB (shared/auth.ts); KV only stores the oauth_state blob.
     const env = {
       KV: {
-        get: vi.fn().mockResolvedValue(JSON.stringify({ tenant_id: 5, member_id: "m1", email: "a@b.c" })),
+        get: vi.fn().mockResolvedValue(null),
         put: vi.fn().mockResolvedValue(undefined),
+      },
+      WEB_DB: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({
+            first: vi.fn(async () => ({ tenant_id: 5, member_id: "m1", email: "a@b.c", language: "en" })),
+          })),
+        })),
       },
       LINK_DB: { prepare },
     };

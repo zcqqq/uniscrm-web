@@ -233,10 +233,10 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     expect(freeCall!.args).toEqual(["byok_merged source_channel_id=xuser-999", oldChannelId]);
 
     const pollSeedCalls = linkDb.calls.filter((c) => c.sql.includes("INSERT INTO channel_poll_state"));
-    expect(pollSeedCalls).toHaveLength(2);
-    for (const call of pollSeedCalls) {
-      expect(call.args[0]).toBe(byokChannelId);
-    }
+    // followers poller 已删除（2026-08-08）：只播种 posts 一个 poller
+    expect(pollSeedCalls).toHaveLength(1);
+    expect(pollSeedCalls[0].args[0]).toBe(byokChannelId);
+    expect(pollSeedCalls[0].args[1]).toBe("posts");
 
     expect(pollChannelOnceMock).toHaveBeenCalledWith(expect.anything(), "X", byokChannelId);
 

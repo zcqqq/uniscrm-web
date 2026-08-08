@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { XUnauthorizedError } from "../../../src/services/x-errors";
+import { XUnauthorizedError, XAccountFrozenError } from "../../../src/services/x-errors";
 import { TikTokUnauthorizedError } from "../../../src/services/tiktok-errors";
 
-const runFollowersPollerMock = vi.fn().mockResolvedValue(undefined);
 const runPostsPollerMock = vi.fn().mockResolvedValue(undefined);
 const runTikTokContentPollerMock = vi.fn().mockResolvedValue(undefined);
 const runListPostsPollerMock = vi.fn().mockResolvedValue(undefined);
@@ -11,14 +10,10 @@ const getValidTokenMock = vi.fn().mockResolvedValue("tok");
 const refreshAccessTokenMock = vi.fn().mockResolvedValue("refreshed-tok");
 const tiktokGetValidTokenMock = vi.fn().mockResolvedValue("tt-tok");
 const tiktokRefreshAccessTokenMock = vi.fn().mockResolvedValue("tt-refreshed-tok");
+const markChannelFrozenMock = vi.fn().mockResolvedValue(undefined);
 
-// 粉丝轮询的总开关（x-followers.ts 的 FOLLOWERS_POLLING_ENABLED，生产上是 false）。
-// 这里用 getter 暴露成可变值：默认 true，让下面那些「调度/换 token」的用例继续测真实接线，
-// 另有一个用例把它翻成 false，验证关掉之后一次 X 调用都不会发生。
-let followersPollingEnabled = true;
-vi.mock("../../../src/services/pollers/x-followers", () => ({
-  runFollowersPoller: (...args: unknown[]) => runFollowersPollerMock(...args),
-  get FOLLOWERS_POLLING_ENABLED() { return followersPollingEnabled; },
+vi.mock("../../../src/services/x-freeze", () => ({
+  markChannelFrozen: (...args: unknown[]) => markChannelFrozenMock(...args),
 }));
 vi.mock("../../../src/services/pollers/x-posts", () => ({
   runPostsPoller: (...args: unknown[]) => runPostsPollerMock(...args),
@@ -78,9 +73,8 @@ function mockWebDb(d1DatabaseId: string | null = "tenant-db-1") {
 
 describe("pollChannelOnce", () => {
   beforeEach(() => {
-    followersPollingEnabled = true;
-    runFollowersPollerMock.mockClear().mockResolvedValue(undefined);
     runPostsPollerMock.mockClear().mockResolvedValue(undefined);
+    markChannelFrozenMock.mockClear().mockResolvedValue(undefined);
     runTikTokContentPollerMock.mockClear().mockResolvedValue(undefined);
     runListPostsPollerMock.mockClear().mockResolvedValue(undefined);
     getAppCredentialsMock.mockClear();
@@ -103,11 +97,10 @@ describe("pollChannelOnce", () => {
       }),
     };
     await pollChannelOnce(baseEnv(linkDb, mockWebDb()), "X", "chan-1");
-    expect(runFollowersPollerMock).not.toHaveBeenCalled();
     expect(runPostsPollerMock).not.toHaveBeenCalled();
   });
 
-  it("X: BYOK channel with seeded poll state runs both followers and posts", async () => {
+  it("X: BYOK channel with seeded poll state runs the posts poller", async () => {
     const linkDb = {
       prepare: vi.fn().mockImplementation((sql: string) => {
         if (sql.includes("FROM channels")) {
@@ -119,38 +112,11 @@ describe("pollChannelOnce", () => {
       }),
     };
     await pollChannelOnce(baseEnv(linkDb, mockWebDb()), "X", "chan-1");
-    expect(runFollowersPollerMock).toHaveBeenCalledTimes(1);
     expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
   });
 
-  it("X: FOLLOWERS_POLLING_ENABLED=false 时不跑粉丝轮询，posts 不受影响", async () => {
-    followersPollingEnabled = false;
-    const polledNames: string[] = [];
-    const linkDb = {
-      prepare: vi.fn().mockImplementation((sql: string) => {
-        if (sql.includes("FROM channels")) {
-          return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({
-            id: "chan-1", tenant_id: 1, config: JSON.stringify({ is_byok: true, x_user_id: "u1" }),
-          }) }) };
-        }
-        // channel_poll_state 的 poller_name 是绑定参数，不在 SQL 文本里 —— 记 bind 实参
-        return {
-          bind: vi.fn().mockImplementation((_channelId: string, pollerName: string) => {
-            polledNames.push(pollerName);
-            return { first: vi.fn().mockResolvedValue({ backfill_complete: 0, last_polled_at: null }) };
-          }),
-        };
-      }),
-    };
-    await pollChannelOnce(baseEnv(linkDb, mockWebDb()), "X", "chan-1");
-    expect(runFollowersPollerMock).not.toHaveBeenCalled();
-    expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
-    // 短路要发生在 shouldPoll 之前：关掉之后连 followers 那行的 D1 读都不该发生
-    expect(polledNames).toEqual(["posts"]);
-  });
-
-  it("X: force-refreshes and retries once on XUnauthorizedError (followers)", async () => {
-    runFollowersPollerMock
+  it("X: force-refreshes and retries once on XUnauthorizedError (posts)", async () => {
+    runPostsPollerMock
       .mockRejectedValueOnce(new XUnauthorizedError("expired"))
       .mockResolvedValueOnce(undefined);
     const linkDb = {
@@ -165,11 +131,28 @@ describe("pollChannelOnce", () => {
     };
     await pollChannelOnce(baseEnv(linkDb, mockWebDb()), "X", "chan-1");
     expect(refreshAccessTokenMock).toHaveBeenCalledWith("chan-1");
-    expect(runFollowersPollerMock).toHaveBeenCalledTimes(2);
-    expect(runFollowersPollerMock.mock.calls[0][0]).toMatchObject({ accessToken: "tok" });
-    expect(runFollowersPollerMock.mock.calls[1][0]).toMatchObject({ accessToken: "refreshed-tok" });
-    // posts still runs independently on the original (unrefreshed at call time) token
-    expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
+    expect(runPostsPollerMock).toHaveBeenCalledTimes(2);
+    expect(runPostsPollerMock.mock.calls[0][0]).toMatchObject({ accessToken: "tok" });
+    expect(runPostsPollerMock.mock.calls[1][0]).toMatchObject({ accessToken: "refreshed-tok" });
+  });
+
+  it("X: marks the channel frozen and stops when the posts poller reports XAccountFrozenError", async () => {
+    runPostsPollerMock.mockRejectedValueOnce(new XAccountFrozenError({ code: 326, message: "account locked" }));
+    const linkDb = {
+      prepare: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes("FROM channels")) {
+          return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({
+            id: "chan-1", tenant_id: 1, config: JSON.stringify({ is_byok: true, x_user_id: "u1" }),
+          }) }) };
+        }
+        return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({ backfill_complete: 0, last_polled_at: null }) }) };
+      }),
+    };
+    await expect(pollChannelOnce(baseEnv(linkDb, mockWebDb()), "X", "chan-1")).resolves.not.toThrow();
+    expect(markChannelFrozenMock).toHaveBeenCalledTimes(1);
+    expect(markChannelFrozenMock.mock.calls[0][1]).toBe("chan-1");
+    // A frozen account must not trigger the 401 refresh-retry path
+    expect(refreshAccessTokenMock).not.toHaveBeenCalled();
   });
 
   it("TIKTOK: no BYOK gate — runs content poller for any active channel with seeded poll state", async () => {
@@ -207,48 +190,6 @@ describe("pollChannelOnce", () => {
     expect(runTikTokContentPollerMock).toHaveBeenCalledTimes(2);
   });
 
-  it("X: still runs the posts poller when the followers poller throws a non-401 error (failure isolation)", async () => {
-    runFollowersPollerMock.mockRejectedValueOnce(new Error("X get-followers failed: 503 Service Unavailable"));
-    const linkDb = {
-      prepare: vi.fn().mockImplementation((sql: string) => {
-        if (sql.includes("FROM channels")) {
-          return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({
-            id: "chan-1", tenant_id: 1, config: JSON.stringify({ is_byok: true, x_user_id: "u1" }),
-          }) }) };
-        }
-        return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({ backfill_complete: 0, last_polled_at: null }) }) };
-      }),
-    };
-    await expect(pollChannelOnce(baseEnv(linkDb, mockWebDb()), "X", "chan-1")).resolves.not.toThrow();
-    expect(runFollowersPollerMock).toHaveBeenCalledTimes(1);
-    expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("X: gives the posts poller its own fresh budget even if followers consumed most of it (starvation fix)", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-    runFollowersPollerMock.mockImplementationOnce(async () => {
-      vi.advanceTimersByTime(15_000);
-    });
-    const linkDb = {
-      prepare: vi.fn().mockImplementation((sql: string) => {
-        if (sql.includes("FROM channels")) {
-          return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({
-            id: "chan-1", tenant_id: 1, config: JSON.stringify({ is_byok: true, x_user_id: "u1" }),
-          }) }) };
-        }
-        return { bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({ backfill_complete: 0, last_polled_at: null }) }) };
-      }),
-    };
-    await pollChannelOnce(baseEnv(linkDb, mockWebDb()), "X", "chan-1");
-    expect(runPostsPollerMock).toHaveBeenCalledTimes(1);
-    const postsDeadline = runPostsPollerMock.mock.calls[0][0].deadline as number;
-    // Each poller computes its own deadline fresh (Date.now() + 20s) rather than
-    // being capped by a shared run-level deadline, so posts still gets ~20s here.
-    expect(postsDeadline - Date.now()).toBeGreaterThan(15_000);
-    vi.useRealTimers();
-  });
-
   it("X: skips entirely (no token fetched, no poller run) when the tenant has no provisioned D1 database", async () => {
     const linkDb = {
       prepare: vi.fn().mockReturnValue({
@@ -264,7 +205,6 @@ describe("pollChannelOnce", () => {
     // persist anything would be exactly last round's I1 lesson.
     expect(getAppCredentialsMock).not.toHaveBeenCalled();
     expect(getValidTokenMock).not.toHaveBeenCalled();
-    expect(runFollowersPollerMock).not.toHaveBeenCalled();
     expect(runPostsPollerMock).not.toHaveBeenCalled();
   });
 

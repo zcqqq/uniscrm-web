@@ -207,8 +207,8 @@ export function oauthRoutes() {
         .bind(updatedConfig, xUser.id, tokens.accessToken(), byokChannelId)
         .run();
 
-      // Seed (or reset, on re-authorization) poll state for both pollers — full backfill runs again
-      for (const pollerName of ["followers", "posts"]) {
+      // Seed (or reset, on re-authorization) poll state — full backfill runs again
+      for (const pollerName of ["posts"]) {
         await c.env.LINK_DB
           .prepare(
             `INSERT INTO channel_poll_state (channel_id, poller_name, cursor, backfill_complete, last_polled_at, updated_at)

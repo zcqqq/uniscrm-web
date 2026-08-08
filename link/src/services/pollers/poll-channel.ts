@@ -5,7 +5,6 @@ import { TikTokTokenService } from "../tiktok-token";
 import { XUnauthorizedError, XAccountFrozenError } from "../x-errors";
 import { markChannelFrozen } from "../x-freeze";
 import { TikTokUnauthorizedError } from "../tiktok-errors";
-import { runFollowersPoller, FOLLOWERS_POLLING_ENABLED } from "./x-followers";
 import { runPostsPoller } from "./x-posts";
 import { runTikTokContentPoller } from "./tiktok-content";
 import { runListPostsPoller } from "./x-list-posts";
@@ -58,10 +57,8 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
   if (!config.is_byok) return;
   if (!config.x_user_id || !row.tenant_id) return;
 
-  // 开关关掉时连 shouldPoll 的那次 D1 读都省掉 —— 见 x-followers.ts 的 FOLLOWERS_POLLING_ENABLED。
-  const pollFollowers = FOLLOWERS_POLLING_ENABLED && (await shouldPoll(env, row.id, "followers"));
   const pollPosts = await shouldPoll(env, row.id, "posts");
-  if (!pollFollowers && !pollPosts) return;
+  if (!pollPosts) return;
 
   // Guard before any external (X) API call, including the token refresh below — a tenant
   // with no provisioned D1 can't persist anything this poll would fetch, so there is no
@@ -81,37 +78,6 @@ async function pollXChannel(env: Env, row: { id: string; config: string; tenant_
   } catch (e) {
     console.error(JSON.stringify({ event: "poll_setup_error", channel_id: row.id, error: String(e) }));
     return;
-  }
-
-  const entityState = new EntityStateStore(env.LINK_DB, row.tenant_id!);
-
-  if (pollFollowers) {
-    try {
-      try {
-        await runFollowersPoller({
-          channelId: row.id, xUserId: config.x_user_id, accessToken,
-          linkDb: env.LINK_DB, tenantDb, entityState, tenantId: row.tenant_id!,
-          pipelineUser: env.PIPELINE_USER, deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
-        });
-      } catch (e) {
-        if (!(e instanceof XUnauthorizedError)) throw e;
-        accessToken = await tokenService.refreshAccessToken(row.id);
-        await runFollowersPoller({
-          channelId: row.id, xUserId: config.x_user_id, accessToken,
-          linkDb: env.LINK_DB, tenantDb, entityState, tenantId: row.tenant_id!,
-          pipelineUser: env.PIPELINE_USER, deadline: Date.now() + PER_CHANNEL_BUDGET_MS,
-        });
-      }
-    } catch (e) {
-      // X reports the account itself is locked/suspended: record it and stop polling this
-      // channel. getValidToken refuses every later call until the hourly probe in cron.ts sees
-      // the account answer again — retrying now would only lengthen the lock.
-      if (e instanceof XAccountFrozenError) {
-        await markChannelFrozen(env.LINK_DB, row.id, e.signal);
-        return;
-      }
-      console.error(JSON.stringify({ event: "followers_poll_error", channel_id: row.id, error: String(e) }));
-    }
   }
 
   if (pollPosts) {
@@ -195,7 +161,7 @@ async function pollTikTokChannel(env: Env, row: { id: string; config: string; te
 //    「没有行」意味着未授权；YouTube 的授权凭证就在 channels 行的 config 里。
 // 2) 节流 23 小时而不是 55 分钟（共享配额，见 YOUTUBE_REPOLL_INTERVAL_MS）。
 // 3) cursor 非空 = 上一轮没跑完、欠着一段续跑 → **无视 23 小时**，下一个小时的 tick 就继续。
-//    这与 x-followers 的 backfill / incremental 分工同构：backfill 每小时推进，跑完了才
+//    这与 x-posts 的 backfill / incremental 分工同构：backfill 每小时推进，跑完了才
 //    进入长间隔的增量节奏。没有这一条，一个 400 订阅的账号每天只推进 ~150 个，要 8 天
 //    才跑完一轮完整同步，而取消订阅的 diff 只在跑完的那一轮才执行。
 // tenantDb 解析与 token 刷新都在 syncYouTubeSubscriptionUsers 里，这里只做调度判断。

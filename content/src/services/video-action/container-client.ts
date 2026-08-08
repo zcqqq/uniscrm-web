@@ -24,13 +24,19 @@ export async function downloadAndExtract(env: Env, jobId: string, videoUrl: stri
   return { videoKey: body.video_key, audioKey: body.audio_key };
 }
 
-export async function burnSubtitles(env: Env, jobId: string, videoKey: string, subtitleSrt: string): Promise<BurnResult> {
+export interface BurnCue {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+}
+
+export async function burnSubtitles(env: Env, jobId: string, videoKey: string, cues: BurnCue[], titleText: string): Promise<BurnResult> {
   const container = env.SUBTITLE_CONTAINER.getByName("subtitle-singleton");
   await container.startAndWaitForPorts();
   const res = await container.fetch("http://container/burn-subtitles", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ job_id: jobId, video_key: videoKey, subtitle_srt: subtitleSrt }),
+    body: JSON.stringify({ job_id: jobId, video_key: videoKey, cues, title_text: titleText }),
   });
   const body = await res.json() as { final_key?: string; error?: string };
   if (body.error) return { error: body.error };

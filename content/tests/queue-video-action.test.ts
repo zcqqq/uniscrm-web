@@ -30,7 +30,7 @@ describe("processVideoActionJob", () => {
   it("resolves success end-to-end and posts branch='success' to flow", async () => {
     vi.spyOn(containerClient, "downloadAndExtract").mockResolvedValue({ videoKey: "v1", audioKey: "a1" });
     vi.spyOn(transcribeModule, "transcribeAudio").mockResolvedValue([{ start: "00:00:00.000", end: "00:00:01.000", text: "hi" }]);
-    vi.spyOn(translateModule, "translateCues").mockResolvedValue({ translatedCues: [{ start: "00:00:00.000", end: "00:00:01.000", text: "你好" }], plainText: "你好" });
+    vi.spyOn(translateModule, "translateCues").mockResolvedValue({ translatedCues: [{ start: "00:00:00.000", end: "00:00:01.000", text: "你好" }], plainText: "你好", translatedTitle: "" });
     vi.spyOn(containerClient, "burnSubtitles").mockResolvedValue({ finalKey: "final-xyz.mp4" });
 
     await processVideoActionJob(makeEnv(), message);
@@ -41,6 +41,26 @@ describe("processVideoActionJob", () => {
     const body = JSON.parse(resumeCall[1].body);
     expect(body.branch).toBe("success");
     expect(body.props.processed_video_url).toContain("final-xyz.mp4");
+  });
+
+  it("passes the payload title through translation and sends millisecond cues plus the translated title to the burn", async () => {
+    vi.spyOn(containerClient, "downloadAndExtract").mockResolvedValue({ videoKey: "v1", audioKey: "a1" });
+    vi.spyOn(transcribeModule, "transcribeAudio").mockResolvedValue([{ start: "00:04.240", end: "00:06.000", text: "hi there" }]);
+    const translateSpy = vi.spyOn(translateModule, "translateCues").mockResolvedValue({
+      translatedCues: [{ start: "00:04.240", end: "00:06.000", text: "你好" }],
+      plainText: "你好",
+      translatedTitle: "一个标题",
+    });
+    const burnSpy = vi.spyOn(containerClient, "burnSubtitles").mockResolvedValue({ finalKey: "final-xyz.mp4" });
+
+    await processVideoActionJob(makeEnv(), { ...message, payload: { title: "A title" } });
+
+    expect(translateSpy).toHaveBeenCalledWith(expect.anything(), 1, expect.anything(), "zh", "A title");
+    expect(burnSpy).toHaveBeenCalledWith(
+      expect.anything(), "job1", "v1",
+      [{ start_ms: 4240, end_ms: 6000, text: "你好" }],
+      "一个标题"
+    );
   });
 
   it("resolves failed when download fails, without calling transcribe", async () => {

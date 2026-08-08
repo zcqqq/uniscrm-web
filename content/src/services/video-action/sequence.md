@@ -18,9 +18,10 @@ sequenceDiagram
         Content->>R2: get audio.mp3
         Content->>AI: whisper-large-v3-turbo (STT)
         AI-->>Content: WebVTT cues
-        Content->>AI: default model (translate all cues)
-        AI-->>Content: translated cues
-        Content->>Container: POST /burn-subtitles {videoKey, srt}
+        Content->>AI: default model (translate all cues + payload title, one numbered list)
+        AI-->>Content: translated cues + translated title
+        Content->>Container: POST /burn-subtitles {videoKey, cues[ms], title_text}
+        Container->>Container: probe frame + letterbox box, author ASS (karaoke \kf sweep per cue, title centered in top bar)
         Container->>R2: download source.mp4, upload {key}.mp4
         Container-->>Content: {finalKey}
     else operation = rotate-to-vertical

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { translateCues, cuesToSrt } from "../../../src/services/video-action/translate";
+import { translateCues, cuesToSrt, vttTimestampToMs } from "../../../src/services/video-action/translate";
 import * as generateModule from "../../../src/services/generate";
 import type { Cue } from "../../../src/services/video-action/transcribe";
 
@@ -91,5 +91,37 @@ describe("translateCues", () => {
     vi.spyOn(generateModule, "generateContent").mockRejectedValue(new Error("model error"));
     const result = await translateCues({} as any, 1, cues, "zh");
     expect(result).toBeNull();
+  });
+
+  it("translates the title as one extra numbered line in the same call", async () => {
+    const spy = vi.spyOn(generateModule, "generateContent")
+      .mockResolvedValue("1. 你好。\n2. 这是一个测试。\n3. 一个标题");
+    const result = await translateCues({} as any, 1, cues, "zh", "A title");
+    expect(spy.mock.lastCall?.[1].prompt).toContain("3. A title");
+    expect(result?.translatedTitle).toBe("一个标题");
+    expect(result?.translatedCues).toHaveLength(2);
+    // The title line must not leak into the subtitle text.
+    expect(result?.plainText).toBe("你好。 这是一个测试。");
+  });
+
+  it("falls back to the original title when its line is missing from the response", async () => {
+    vi.spyOn(generateModule, "generateContent").mockResolvedValue("1. 你好。\n2. 这是一个测试。");
+    const result = await translateCues({} as any, 1, cues, "zh", "A title");
+    expect(result?.translatedTitle).toBe("A title");
+  });
+
+  it("returns an empty translatedTitle when no title is given", async () => {
+    vi.spyOn(generateModule, "generateContent").mockResolvedValue("1. 你好。\n2. 这是一个测试。");
+    const result = await translateCues({} as any, 1, cues, "zh");
+    expect(result?.translatedTitle).toBe("");
+  });
+});
+
+describe("vttTimestampToMs", () => {
+  it("converts full and short-form WebVTT timestamps to milliseconds", () => {
+    expect(vttTimestampToMs("00:00:02.000")).toBe(2000);
+    expect(vttTimestampToMs("00:04.240")).toBe(4240);
+    expect(vttTimestampToMs("01:02:03.456")).toBe(3723456);
+    expect(vttTimestampToMs("00:04")).toBe(4000);
   });
 });

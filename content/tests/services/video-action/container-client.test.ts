@@ -24,10 +24,16 @@ describe("container-client", () => {
     expect(result.error).toBe("download failed");
   });
 
-  it("burnSubtitles returns finalKey on success", async () => {
+  it("burnSubtitles sends structured cues plus title and returns finalKey on success", async () => {
     const env = makeEnv({ final_key: "final-abc.mp4" });
-    const result = await burnSubtitles(env, "job1", "video-action-jobs/job1/source.mp4", "1\n00:00:00,000 --> 00:00:01,000\nhello\n");
+    const cues = [{ start_ms: 0, end_ms: 1000, text: "你好" }];
+    const result = await burnSubtitles(env, "job1", "video-action-jobs/job1/source.mp4", cues, "标题");
     expect(result).toEqual({ finalKey: "final-abc.mp4" });
+    const container = env.SUBTITLE_CONTAINER.getByName("subtitle-singleton");
+    const sent = JSON.parse(container.fetch.mock.calls[0][1].body);
+    expect(sent.cues).toEqual(cues);
+    expect(sent.title_text).toBe("标题");
+    expect(sent.subtitle_srt).toBeUndefined();
   });
 
   it("downloadVideo returns videoKey on success", async () => {

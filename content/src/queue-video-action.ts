@@ -2,7 +2,7 @@ import type { Env } from "./types";
 import { createJob, updateJobStatus } from "./services/video-action/job-store";
 import { downloadAndExtract, downloadVideo, burnSubtitles, rotateToVertical, removeFace, faceRatio, probeDimensions } from "./services/video-action/container-client";
 import { transcribeAudio } from "./services/video-action/transcribe";
-import { translateCues, cuesToSrt } from "./services/video-action/translate";
+import { translateCues, vttTimestampToMs } from "./services/video-action/translate";
 
 export interface VideoActionQueueMessage {
   pendingId: string;
@@ -64,7 +64,10 @@ async function processAddSubtitle(env: Env, jobId: string, message: VideoActionQ
   }
 
   await updateJobStatus(env, jobId, "translating");
-  const translated = await translateCues(env, message.tenantId, cues, message.targetLanguage);
+  // The content's title (when the trigger payload carries one) is overlaid at the top of the
+  // video, translated into the same target language as the subtitles.
+  const title = String(message.payload?.title ?? "");
+  const translated = await translateCues(env, message.tenantId, cues, message.targetLanguage, title);
   if (!translated) {
     await updateJobStatus(env, jobId, "failed", "translating", "translation failed or cue count mismatch");
     await cleanupScratch(env, jobId);
@@ -73,8 +76,12 @@ async function processAddSubtitle(env: Env, jobId: string, message: VideoActionQ
   }
 
   await updateJobStatus(env, jobId, "burning_in");
-  const srt = cuesToSrt(translated.translatedCues);
-  const burned = await burnSubtitles(env, jobId, downloaded.videoKey, srt);
+  const burnCues = translated.translatedCues.map((cue) => ({
+    start_ms: vttTimestampToMs(cue.start),
+    end_ms: vttTimestampToMs(cue.end),
+    text: cue.text,
+  }));
+  const burned = await burnSubtitles(env, jobId, downloaded.videoKey, burnCues, translated.translatedTitle);
   if (burned.error || !burned.finalKey) {
     await updateJobStatus(env, jobId, "failed", "burning_in", burned.error || "unknown burn-in error");
     await cleanupScratch(env, jobId);

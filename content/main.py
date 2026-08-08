@@ -8,7 +8,7 @@ import boto3
 from botocore.config import Config
 import cv2
 from flask import Flask, request, jsonify
-from video_action_lib import compute_keep_segments, needs_rotation, is_too_short, sample_timestamps, face_ratio, aspect_ratio
+from video_action_lib import compute_keep_segments, needs_rotation, is_too_short, sample_timestamps, face_ratio, aspect_ratio, ass_timestamp, build_ass
 
 app = Flask(__name__)
 
@@ -163,8 +163,9 @@ ASS_PLAY_RES_Y = 288
 SUBTITLE_CLEARANCE_UNITS = 34
 
 
-def _detect_content_bottom(video_path, frame_height):
-    """Bottom edge (px) of the real picture inside any letterbox bars, or None if undetectable."""
+def _detect_content_box(video_path, frame_height):
+    """(top, bottom) edges (px) of the real picture inside any letterbox bars — top hosts the
+    title overlay, bottom parks the subtitles. (None, None) if undetectable."""
     probe = subprocess.run(
         ["ffmpeg", "-hide_banner", "-i", video_path, "-vf", "cropdetect=limit=24:round=2:reset=0",
          "-frames:v", "60", "-f", "null", "-"],
@@ -172,10 +173,12 @@ def _detect_content_bottom(video_path, frame_height):
     )
     matches = re.findall(r"crop=(\d+):(\d+):(\d+):(\d+)", probe.stderr)
     if not matches:
-        return None
+        return None, None
     _, height, _, y = (int(v) for v in matches[-1])
     bottom = y + height
-    return bottom if 0 < bottom <= frame_height else None
+    if not (0 < bottom <= frame_height):
+        return None, None
+    return y, bottom
 
 
 def _subtitle_margin_v(frame_height, content_bottom):
@@ -187,36 +190,65 @@ def _subtitle_margin_v(frame_height, content_bottom):
     return margin if margin > 0 else None
 
 
+def _cues_to_srt(cues):
+    """Plain SRT from structured cues — the degraded path when the frame can't be probed, so a
+    burn still succeeds (without karaoke/title placement) instead of failing outright."""
+    blocks = []
+    for i, cue in enumerate(cues):
+        start = ass_timestamp(cue["start_ms"]).replace(".", ",")
+        end = ass_timestamp(cue["end_ms"]).replace(".", ",")
+        blocks.append(f"{i + 1}\n0{start}0 --> 0{end}0\n{cue['text']}")
+    return "\n\n".join(blocks)
+
+
 @app.route("/burn-subtitles", methods=["POST"])
 def burn_subtitles():
     body = request.get_json()
     job_id = body["job_id"]
     video_key = body["video_key"]
-    subtitle_srt = body["subtitle_srt"]
+    cues = body.get("cues")
+    title_text = body.get("title_text", "")
+    subtitle_srt = body.get("subtitle_srt")
 
     work_dir = f"/tmp/{job_id}"
     os.makedirs(work_dir, exist_ok=True)
     video_path = f"{work_dir}/source.mp4"
-    srt_path = f"{work_dir}/subs.srt"
     output_path = f"{work_dir}/output.mp4"
 
     bucket = os.environ["R2_BUCKET_NAME"]
     client = r2_client()
     client.download_file(bucket, video_key, video_path)
 
-    with open(srt_path, "w", encoding="utf-8") as f:
-        f.write(subtitle_srt)
+    subtitle_filter = None
+    if cues:
+        frame_width, frame_height, dim_error = _probe_dimensions(video_path)
+        if not dim_error and frame_width and frame_height:
+            content_top, content_bottom = _detect_content_box(video_path, frame_height)
+            duration, dur_error = _probe_duration(video_path)
+            duration_ms = int(duration * 1000) if not dur_error and duration else 0
+            ass_text = build_ass(cues, title_text, frame_width, frame_height, content_top, content_bottom, duration_ms)
+            with open(f"{work_dir}/subs.ass", "w", encoding="utf-8") as f:
+                f.write(ass_text)
+            subtitle_filter = "subtitles=subs.ass"
+        else:
+            subtitle_srt = _cues_to_srt(cues)
 
-    subtitle_filter = "subtitles=subs.srt"
-    _, frame_height, dim_error = _probe_dimensions(video_path)
-    if not dim_error and frame_height:
-        content_bottom = _detect_content_bottom(video_path, frame_height)
-        if content_bottom is not None:
-            margin_v = _subtitle_margin_v(frame_height, content_bottom)
-            if margin_v is not None:
-                subtitle_filter += f":force_style='MarginV={margin_v}'"
-    # A failed probe/detect is not fatal here — it only costs the improved placement, so fall
-    # through to ffmpeg's default bottom margin rather than failing an otherwise-fine burn-in.
+    if subtitle_filter is None:
+        # Legacy SRT path: either the worker still sends subtitle_srt, or the ASS path above
+        # degraded to it because the frame couldn't be probed.
+        with open(f"{work_dir}/subs.srt", "w", encoding="utf-8") as f:
+            f.write(subtitle_srt)
+
+        subtitle_filter = "subtitles=subs.srt"
+        _, frame_height, dim_error = _probe_dimensions(video_path)
+        if not dim_error and frame_height:
+            _, content_bottom = _detect_content_box(video_path, frame_height)
+            if content_bottom is not None:
+                margin_v = _subtitle_margin_v(frame_height, content_bottom)
+                if margin_v is not None:
+                    subtitle_filter += f":force_style='MarginV={margin_v}'"
+        # A failed probe/detect is not fatal here — it only costs the improved placement, so fall
+        # through to ffmpeg's default bottom margin rather than failing an otherwise-fine burn-in.
 
     # cwd + a bare relative filename: the subtitles filter's argument goes through ffmpeg's
     # filtergraph parser, where ":" and "\" in an absolute path are separator/escape

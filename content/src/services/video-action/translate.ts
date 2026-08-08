@@ -16,6 +16,17 @@ function vttTimestampToSrt(timestamp: string): string {
   return `${hours}:${minutes}:${seconds},${millis}`;
 }
 
+// The container builds the ASS subtitle file itself (it knows the frame geometry), so cues
+// cross the boundary as plain millisecond offsets rather than any timestamp string format.
+export function vttTimestampToMs(timestamp: string): number {
+  const [clock, fraction = ""] = timestamp.trim().split(".");
+  const parts = clock.split(":");
+  while (parts.length < 3) parts.unshift("0");
+  const [hours, minutes, seconds] = parts.map((p) => parseInt(p, 10) || 0);
+  const millis = parseInt(fraction.padEnd(3, "0").slice(0, 3), 10) || 0;
+  return (hours * 3600 + minutes * 60 + seconds) * 1000 + millis;
+}
+
 export function cuesToSrt(cues: Cue[]): string {
   return cues
     .map((cue, i) => `${i + 1}\n${vttTimestampToSrt(cue.start)} --> ${vttTimestampToSrt(cue.end)}\n${cue.text}`)
@@ -26,9 +37,15 @@ export async function translateCues(
   env: Env,
   tenantId: number,
   cues: Cue[],
-  targetLanguage: string
-): Promise<{ translatedCues: Cue[]; plainText: string } | null> {
-  const numbered = cues.map((cue, i) => `${i + 1}. ${cue.text}`).join("\n");
+  targetLanguage: string,
+  title = ""
+): Promise<{ translatedCues: Cue[]; plainText: string; translatedTitle: string } | null> {
+  // The title (overlaid at the top of the video) travels as one extra numbered line so it
+  // shares the cues' LLM call instead of costing a second one. It falls back to its original
+  // text the same way a dropped cue line does.
+  const titleNumber = title ? cues.length + 1 : 0;
+  const numbered = cues.map((cue, i) => `${i + 1}. ${cue.text}`).join("\n")
+    + (title ? `\n${titleNumber}. ${title}` : "");
   const prompt = `Translate each numbered line into ${targetLanguage}. Output ONLY the translated lines, same numbering, one per line, no commentary:\n\n${numbered}`;
 
   let response: string;
@@ -75,5 +92,6 @@ export async function translateCues(
   }
 
   const plainText = translatedCues.map((c) => c.text).join(" ");
-  return { translatedCues, plainText };
+  const translatedTitle = title ? (byNumber.get(titleNumber) ?? title) : "";
+  return { translatedCues, plainText, translatedTitle };
 }

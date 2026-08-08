@@ -29,6 +29,14 @@ describe("GET /internal/list-watches", () => {
     expect(res.status).toBe(401);
   });
 
+  it("fails closed: header-less request is rejected even when INTERNAL_SECRET is unset", async () => {
+    const res = await worker.fetch(
+      new Request("https://flow.test/internal/list-watches"),
+      { ...(env as any), INTERNAL_SECRET: undefined }
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("returns distinct channelId/listId pairs from published xContentTrigger List Posts nodes", async () => {
     const graph1 = JSON.stringify({
       nodes: [{ id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "get-list-posts", listId: "listA" }, position: { x: 0, y: 0 } }],

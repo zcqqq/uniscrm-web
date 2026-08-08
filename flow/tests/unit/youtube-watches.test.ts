@@ -22,6 +22,12 @@ describe("GET /internal/youtube-watches", () => {
     expect(res.status).toBe(401);
   });
 
+  it("fails closed: header-less request is rejected even when INTERNAL_SECRET is unset", async () => {
+    const envNoSecret = { ...makeEnv([]), INTERNAL_SECRET: undefined };
+    const res = await worker.fetch(req("/internal/youtube-watches"), envNoSecret);
+    expect(res.status).toBe(401);
+  });
+
   it("returns distinct (channelId, subscriptionChannelId) pairs from published youtubeContentTrigger nodes", async () => {
     const graph = {
       nodes: [

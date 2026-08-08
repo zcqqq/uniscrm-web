@@ -1183,7 +1183,8 @@ app.post("/internal/video-action/resume", async (c) => {
 // graph_json is the sole source of truth, nothing is persisted on link's side for this.
 app.get("/internal/list-watches", async (c) => {
   const secret = c.req.header("X-Internal-Secret");
-  if (secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
+  // Fail closed: with INTERNAL_SECRET unset, `undefined !== undefined` would let header-less requests through.
+  if (!c.env.INTERNAL_SECRET || secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
 
   const rows = await c.env.FLOW_DB.prepare(
     `SELECT graph_json FROM flows WHERE status = 'published' AND graph_json LIKE '%xContentTrigger%'`
@@ -1223,7 +1224,8 @@ app.get("/internal/list-watches", async (c) => {
 // pattern as /internal/list-watches above.
 app.get("/internal/youtube-watches", async (c) => {
   const secret = c.req.header("X-Internal-Secret");
-  if (secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
+  // Fail closed: with INTERNAL_SECRET unset, `undefined !== undefined` would let header-less requests through.
+  if (!c.env.INTERNAL_SECRET || secret !== c.env.INTERNAL_SECRET) return c.json({ error: "Unauthorized" }, 401);
 
   const rows = await c.env.FLOW_DB.prepare(
     `SELECT graph_json FROM flows WHERE status = 'published' AND graph_json LIKE '%youtubeContentTrigger%'`

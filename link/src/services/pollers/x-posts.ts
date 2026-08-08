@@ -4,6 +4,7 @@ import { ContentService, CONTENT_MAPPED_PROP_IDS } from "../content";
 import { fetchPostsPage } from "../x-posts-api";
 import { resolveProps, consumedPaths } from "./resolve-props";
 import { ContentMetadata_X } from "../../../../metadata/x-byok";
+import { runPagedPoll, type PolledPage } from "./paged-poll";
 
 const POSTS_METADATA = ContentMetadata_X.find((m) => m.sourceContentType === "own:get-posts")!;
 
@@ -15,8 +16,8 @@ export interface PostsPollerContext {
   // Per-tenant D1 — the source of truth (2026-07-26 plan). poll-channel.ts resolves this once
   // per channel and skips the whole poll before it ever gets here when the tenant has no
   // provisioned database, so it is always real by the time runPostsPoller runs. No entityState
-  // field here (unlike x-followers.ts / x-list-posts.ts): upsertContentFromMetadata's D1
-  // column-compare replaced the entity_state fingerprint on this path entirely.
+  // field here (unlike x-list-posts.ts): upsertContentFromMetadata's D1 column-compare
+  // replaced the entity_state fingerprint on this path entirely.
   tenantDb: TenantDataDB;
   tenantId: number;
   ai: Ai;
@@ -26,33 +27,30 @@ export interface PostsPollerContext {
   deadline: number;
 }
 
-interface PollStateRow {
-  cursor: string | null;
-  backfill_complete: number;
-  last_polled_at: string | null;
-  since_id: string | null;
-}
-
+// Adapter over paged-poll.ts, which owns every paging/state invariant — including this
+// poller's since_id watermark rule (useSinceIdWatermark: advance only when all new pages were
+// consumed). Errors from fetchPostsPage (XUnauthorizedError / XAccountFrozenError) escape
+// through runPagedPoll unchanged to poll-channel.ts's token-refresh retry and freeze breaker.
 export async function runPostsPoller(ctx: PostsPollerContext): Promise<void> {
-  const state = await ctx.linkDb
-    .prepare("SELECT cursor, backfill_complete, last_polled_at, since_id FROM channel_poll_state WHERE channel_id = ? AND poller_name = 'posts'")
-    .bind(ctx.channelId)
-    .first<PollStateRow>();
-
-  if (!state || Object.keys(state).length === 0) {
-    console.log(JSON.stringify({ event: "posts_poll_skipped_not_seeded", channel_id: ctx.channelId }));
-    return;
-  }
-
   const contentService = new ContentService(ctx.tenantDb, ctx.vectorize, ctx.ai, ctx.tenantId, ctx.pipelineContent, ctx.flowQueue);
-  const phase = state.backfill_complete ? "incremental" : "backfill";
-  console.log(JSON.stringify({ event: "posts_poll_started", channel_id: ctx.channelId, phase, cursor: state.cursor }));
 
-  if (!state.backfill_complete) {
-    await runBackfill(ctx, contentService, state.cursor);
-  } else {
-    await runIncrementalPoll(ctx, contentService, state.since_id);
-  }
+  await runPagedPoll({
+    linkDb: ctx.linkDb,
+    channelId: ctx.channelId,
+    pollerName: "posts",
+    deadline: ctx.deadline,
+    mode: "paged",
+    // X 的 owned read 按返回条数计费（UTC 日内同一条去重）——增量轮询必须带 since_id 水位，
+    // 否则每天第一次轮询都会把整份自有帖重新买一遍（见 x-posts-api.ts 的 since_id 注释）。
+    useSinceIdWatermark: true,
+    logPrefix: "posts_poll",
+    fetchPage: async ({ cursor, sinceId }) => {
+      const { page, rateLimited } = await fetchPostsPage(ctx.accessToken, ctx.xUserId, cursor || undefined, sinceId ?? undefined);
+      return { items: page.data, nextCursor: page.nextToken || null, newestId: page.newestId, rateLimited };
+    },
+    upsertPage: (page: PolledPage, emitFlowEvent: boolean) =>
+      upsertPage(contentService, page.items as Record<string, unknown>[], ctx.channelId, emitFlowEvent),
+  });
 }
 
 async function upsertPage(
@@ -84,95 +82,4 @@ async function upsertPage(
     if (isNew) newCount++;
   }
   return newCount;
-}
-
-async function runBackfill(
-  ctx: PostsPollerContext,
-  contentService: ContentService,
-  startCursor: string | null
-): Promise<void> {
-  let cursor = startCursor || undefined;
-  let pagesFetched = 0;
-
-  while (Date.now() < ctx.deadline) {
-    const { page, rateLimited } = await fetchPostsPage(ctx.accessToken, ctx.xUserId, cursor);
-    if (rateLimited) {
-      console.log(JSON.stringify({ event: "posts_poll_rate_limited", channel_id: ctx.channelId, phase: "backfill", pagesFetched }));
-      return;
-    }
-
-    pagesFetched++;
-    await upsertPage(contentService, page.data, ctx.channelId, false);
-
-    if (!page.nextToken) {
-      await ctx.linkDb
-        .prepare(
-          "UPDATE channel_poll_state SET cursor = NULL, backfill_complete = 1, last_polled_at = datetime('now'), updated_at = datetime('now') WHERE channel_id = ? AND poller_name = 'posts'"
-        )
-        .bind(ctx.channelId)
-        .run();
-      console.log(JSON.stringify({ event: "posts_poll_backfill_complete", channel_id: ctx.channelId, pagesFetched }));
-      return;
-    }
-
-    cursor = page.nextToken;
-    await ctx.linkDb
-      .prepare("UPDATE channel_poll_state SET cursor = ?, updated_at = datetime('now') WHERE channel_id = ? AND poller_name = 'posts'")
-      .bind(cursor, ctx.channelId)
-      .run();
-  }
-
-  console.log(JSON.stringify({ event: "posts_poll_deadline_reached", channel_id: ctx.channelId, phase: "backfill", pagesFetched }));
-}
-
-async function runIncrementalPoll(
-  ctx: PostsPollerContext,
-  contentService: ContentService,
-  sinceId: string | null
-): Promise<void> {
-  let cursor: string | undefined;
-  let pagesFetched = 0;
-  let totalNew = 0;
-  let newestId: string | undefined;
-  let stopReason: "rate_limited" | "no_new_content" | "no_next_page" | "deadline" = "deadline";
-
-  while (Date.now() < ctx.deadline) {
-    const { page, rateLimited } = await fetchPostsPage(ctx.accessToken, ctx.xUserId, cursor, sinceId ?? undefined);
-    if (rateLimited) { stopReason = "rate_limited"; break; }
-
-    // 结果倒序，第一页的 newest_id 就是本轮最新的一条 —— 只记第一次拿到的那个。
-    if (newestId === undefined && page.newestId) newestId = page.newestId;
-
-    pagesFetched++;
-    const newCount = await upsertPage(contentService, page.data, ctx.channelId, true);
-    totalNew += newCount;
-
-    if (newCount === 0) { stopReason = "no_new_content"; break; }
-    if (!page.nextToken) { stopReason = "no_next_page"; break; }
-    cursor = page.nextToken;
-  }
-
-  // 水位只在「新帖已经全部翻完」时才推进。撞 deadline 或被限流时后面还欠着更旧的新帖，
-  // 此时推进 since_id 会把它们永久跳过 —— 宁可下一轮重拉一遍（同一 UTC 日内 X 对同一条
-  // 资源只计一次费，重拉基本不额外花钱），也不能丢数据。
-  const advanceWaterMark = newestId !== undefined && (stopReason === "no_new_content" || stopReason === "no_next_page");
-
-  console.log(JSON.stringify({
-    event: "posts_poll_incremental_complete",
-    channel_id: ctx.channelId, pagesFetched, totalNew, stopReason,
-    since_id: sinceId, new_since_id: advanceWaterMark ? newestId : null,
-  }));
-
-  if (advanceWaterMark) {
-    await ctx.linkDb
-      .prepare("UPDATE channel_poll_state SET since_id = ?, last_polled_at = datetime('now'), updated_at = datetime('now') WHERE channel_id = ? AND poller_name = 'posts'")
-      .bind(newestId, ctx.channelId)
-      .run();
-    return;
-  }
-
-  await ctx.linkDb
-    .prepare("UPDATE channel_poll_state SET last_polled_at = datetime('now'), updated_at = datetime('now') WHERE channel_id = ? AND poller_name = 'posts'")
-    .bind(ctx.channelId)
-    .run();
 }

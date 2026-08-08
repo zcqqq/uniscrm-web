@@ -187,3 +187,28 @@ def test_build_ass_keeps_base_font_for_a_short_title():
     style = next(l for l in ass.splitlines() if l.startswith("Style: Title,"))
     font = int(style.split(",")[2])
     assert font == round(round(1920 / 18) * 1.2)
+
+
+def test_karaoke_line_wraps_unspaced_cjk_to_the_usable_width():
+    # 20 CJK chars at font 107 in a 1020px-wide box: libass never breaks unspaced runs, so
+    # the line must carry explicit \N breaks and no segment may exceed 9 chars (1020//107).
+    line = karaoke_line("十" * 20, 4000, font_size=107, usable_width=1020)
+    segments = re.sub(r"\{[^}]*\}", "", line).split("\\N")
+    assert len(segments) >= 3
+    assert all(len(s) <= 9 for s in segments)
+    assert "".join(segments) == "十" * 20
+    tags = [int(m) for m in re.findall(r"\\kf(\d+)", line)]
+    assert sum(tags) == 400
+
+
+def test_karaoke_line_leaves_spaced_text_to_libass_wrapping():
+    line = karaoke_line("hello brave world", 2000, font_size=107, usable_width=1020)
+    assert "\\N" not in line
+
+
+def test_build_ass_wraps_long_cjk_cue_and_unspaced_cjk_title():
+    cues = [{"start_ms": 0, "end_ms": 4000, "text": "这是一段很长很长的中文字幕内容需要被折行处理"}]
+    ass = build_ass(cues, "这是一个特别长的中文标题需要折行", 1080, 1920, 656, 1476, 4000)
+    dialogue_lines = [l for l in ass.splitlines() if l.startswith("Dialogue:")]
+    assert any("\\N" in l and ",Sub," in l for l in dialogue_lines)
+    assert any("\\N" in l and ",Title," in l for l in dialogue_lines)

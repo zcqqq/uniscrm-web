@@ -33,33 +33,34 @@ export function cuesToSrt(cues: Cue[]): string {
     .join("\n\n");
 }
 
-export async function translateCues(
+// One numbered-list call per CHUNK of lines, not one call for the whole video. Reproduced
+// live: past ~40 lines the model degenerates — merges lines, renumbers, repeats whole blocks —
+// so either the tail parses as missing (cues silently fall back to English) or, worse, numbers
+// stay complete but carry the WRONG line's translation. Short chunks keep it on rails, and a
+// chunk that still goes wrong only costs those few cues, not half the video.
+const TRANSLATE_CHUNK_SIZE = 10;
+
+// Translates one chunk of plain strings; per item, the translation or null (dropped line /
+// failed call). Numbering restarts at 1 for every chunk — small numbers, small outputs.
+async function translateChunk(
   env: Env,
   tenantId: number,
-  cues: Cue[],
-  targetLanguage: string,
-  title = ""
-): Promise<{ translatedCues: Cue[]; plainText: string; translatedTitle: string } | null> {
-  // The title (overlaid at the top of the video) travels as one extra numbered line so it
-  // shares the cues' LLM call instead of costing a second one. It falls back to its original
-  // text the same way a dropped cue line does.
-  const titleNumber = title ? cues.length + 1 : 0;
-  const numbered = cues.map((cue, i) => `${i + 1}. ${cue.text}`).join("\n")
-    + (title ? `\n${titleNumber}. ${title}` : "");
+  texts: string[],
+  targetLanguage: string
+): Promise<(string | null)[]> {
+  const numbered = texts.map((t, i) => `${i + 1}. ${t}`).join("\n");
   const prompt = `Translate each numbered line into ${targetLanguage}. Output ONLY the translated lines, same numbering, one per line, no commentary:\n\n${numbered}`;
 
   let response: string;
   try {
     response = await generateContent(env, { tenantId, prompt, provider: "default" });
   } catch (err) {
-    console.error(JSON.stringify({ event: "translate_failed", error: String(err) }));
-    return null;
+    console.error(JSON.stringify({ event: "translate_chunk_failed", chunkSize: texts.length, error: String(err) }));
+    return texts.map(() => null);
   }
 
-  // Match by the model's own leading number ("14. ...") rather than raw line position — on a
-  // long numbered batch the model occasionally merges or drops one line, which used to fail
-  // the entire batch even though every other cue translated correctly. Any cue whose number
-  // never shows up in the response falls back to its own original (untranslated) text instead.
+  // Match by the model's own leading number ("4. ...") rather than raw line position — the
+  // model occasionally merges or drops a line, which must not shift every line after it.
   const byNumber = new Map<number, string>();
   for (const rawLine of response.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -71,20 +72,39 @@ export async function translateCues(
     byNumber.set(parseInt(match[1], 10), text);
   }
 
-  if (byNumber.size === 0) {
+  return texts.map((_, i) => byNumber.get(i + 1) ?? null);
+}
+
+export async function translateCues(
+  env: Env,
+  tenantId: number,
+  cues: Cue[],
+  targetLanguage: string,
+  title = ""
+): Promise<{ translatedCues: Cue[]; plainText: string; translatedTitle: string } | null> {
+  // The title (overlaid at the top of the video) is just one more item in the list, riding
+  // whichever chunk it lands in. It falls back to its original text like any dropped line.
+  const items = cues.map((c) => c.text);
+  if (title) items.push(title);
+
+  const translated: (string | null)[] = [];
+  for (let i = 0; i < items.length; i += TRANSLATE_CHUNK_SIZE) {
+    translated.push(...await translateChunk(env, tenantId, items.slice(i, i + TRANSLATE_CHUNK_SIZE), targetLanguage));
+  }
+
+  if (translated.every((t) => t === null)) {
     console.error(JSON.stringify({ event: "translate_no_numbered_lines_parsed", cueCount: cues.length }));
     return null;
   }
 
   const missing: number[] = [];
   const translatedCues = cues.map((cue, i) => {
-    const cueNumber = i + 1;
-    const translated = byNumber.get(cueNumber);
-    if (translated === undefined) {
-      missing.push(cueNumber);
+    const text = translated[i];
+    if (text === null) {
+      missing.push(i + 1);
       return { ...cue };
     }
-    return { ...cue, text: translated };
+    return { ...cue, text };
   });
 
   if (missing.length > 0) {
@@ -92,6 +112,6 @@ export async function translateCues(
   }
 
   const plainText = translatedCues.map((c) => c.text).join(" ");
-  const translatedTitle = title ? (byNumber.get(titleNumber) ?? title) : "";
+  const translatedTitle = title ? (translated[items.length - 1] ?? title) : "";
   return { translatedCues, plainText, translatedTitle };
 }

@@ -115,6 +115,52 @@ describe("translateCues", () => {
     const result = await translateCues({} as any, 1, cues, "zh");
     expect(result?.translatedTitle).toBe("");
   });
+
+  // One giant numbered list makes the model degenerate past ~40 lines (merged/renumbered/
+  // repeated output, observed live) — so the list is translated in chunks of 10, each
+  // renumbered from 1, and a failed chunk only loses its own cues.
+  it("splits long cue lists into chunks of 10 with per-chunk numbering", async () => {
+    const manyCues: Cue[] = Array.from({ length: 12 }, (_, i) => ({
+      start: `00:0${i}.000`, end: `00:0${i}.900`, text: `line ${i + 1}`,
+    }));
+    const spy = vi.spyOn(generateModule, "generateContent").mockImplementation(async (_env, params) => {
+      const count = (params.prompt.match(/^\d+\./gm) || []).length;
+      return Array.from({ length: count }, (_, i) => `${i + 1}. 中文${i + 1}`).join("\n");
+    });
+    spy.mockClear();
+
+    const result = await translateCues({} as any, 1, manyCues, "zh", "A title");
+
+    // 12 cues + title = 13 items -> chunk of 10 + chunk of 3
+    const chunkSpy = spy.mock.calls.filter((c) => c[1].prompt.includes("Translate each numbered line"));
+    expect(chunkSpy).toHaveLength(2);
+    expect((chunkSpy[0][1].prompt.match(/^\d+\./gm) || [])).toHaveLength(10);
+    expect((chunkSpy[1][1].prompt.match(/^\d+\./gm) || [])).toHaveLength(3);
+    // second chunk restarts numbering at 1
+    expect(chunkSpy[1][1].prompt).toContain("1. line 11");
+    expect(chunkSpy[1][1].prompt).toContain("3. A title");
+    // items map back positionally: cue 11 takes the second chunk's first line
+    expect(result?.translatedCues[10].text).toBe("中文1");
+    expect(result?.translatedTitle).toBe("中文3");
+  });
+
+  it("a failed chunk only drops its own cues to原文, other chunks still translate", async () => {
+    const manyCues: Cue[] = Array.from({ length: 12 }, (_, i) => ({
+      start: `00:0${i}.000`, end: `00:0${i}.900`, text: `line ${i + 1}`,
+    }));
+    let call = 0;
+    vi.spyOn(generateModule, "generateContent").mockImplementation(async (_env, params) => {
+      call += 1;
+      if (call === 1) throw new Error("model error");
+      const count = (params.prompt.match(/^\d+\./gm) || []).length;
+      return Array.from({ length: count }, (_, i) => `${i + 1}. 中文${i + 1}`).join("\n");
+    });
+
+    const result = await translateCues({} as any, 1, manyCues, "zh");
+    expect(result?.translatedCues[0].text).toBe("line 1");
+    expect(result?.translatedCues[9].text).toBe("line 10");
+    expect(result?.translatedCues[10].text).toBe("中文1");
+  });
 });
 
 describe("vttTimestampToMs", () => {

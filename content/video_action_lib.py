@@ -109,19 +109,39 @@ def _sanitize_ass_text(text):
     return str(text).replace("{", "(").replace("}", ")").replace("\\", "/").replace("\n", " ")
 
 
-def karaoke_line(text, duration_ms):
+def _char_width(ch, font_size):
+    """CJK/full-width glyphs ~1 em, everything else ~0.55 em. Estimation only."""
+    return font_size if ord(ch) > 0x2E7F else font_size * 0.55
+
+
+def wrap_unspaced(text, font_size, usable_width):
+    """Explicit \\N breaks for text with no spaces: libass only wraps at spaces, so an
+    unspaced CJK line would otherwise run straight off both edges of the frame."""
+    out, width = [], 0.0
+    for ch in str(text):
+        cw = _char_width(ch, font_size)
+        if out and width + cw > usable_width:
+            out.append("\\N")
+            width = 0.0
+        out.append(ch)
+        width += cw
+    return "".join(out)
+
+
+def karaoke_line(text, duration_ms, font_size=None, usable_width=None):
     """Prefixes each token with a \\kf fill tag so the highlight sweeps left-to-right across
     the cue's real start..end window. Spaced text highlights per word; unspaced text (CJK) per
     character. Word-level speech alignment across languages isn't possible for translated
     subtitles, so durations are allocated proportionally to token length — an even sweep that
     tracks the sentence, not the individual spoken word."""
     text = _sanitize_ass_text(text)
-    if " " in text.strip():
+    per_character = " " not in text.strip()
+    if per_character:
+        tokens = list(text)
+    else:
         parts = text.split(" ")
         tokens = [p + (" " if i < len(parts) - 1 else "") for i, p in enumerate(parts)]
         tokens = [t for t in tokens if t]
-    else:
-        tokens = list(text)
     if not tokens:
         return text
 
@@ -131,7 +151,19 @@ def karaoke_line(text, duration_ms):
     durations = [total_cs * w // weight_sum for w in weights]
     durations[-1] += total_cs - sum(durations)
 
-    return "".join(f"{{\\kf{d}}}{t}" for d, t in zip(durations, tokens))
+    # Spaced text wraps fine in libass; unspaced (CJK) needs explicit \N breaks between
+    # karaoke tokens or the line runs off the frame.
+    wrap = per_character and font_size and usable_width
+    pieces, width = [], 0.0
+    for d, t in zip(durations, tokens):
+        if wrap:
+            cw = _char_width(t, font_size)
+            if pieces and width + cw > usable_width:
+                pieces.append("\\N")
+                width = 0.0
+            width += cw
+        pieces.append(f"{{\\kf{d}}}{t}")
+    return "".join(pieces)
 
 
 _STYLE_MARGIN_LR = 30
@@ -211,12 +243,18 @@ def build_ass(cues, title_text, frame_width, frame_height, content_top, content_
 
     if title_text:
         end = ass_timestamp(duration_ms if duration_ms else max((c["end_ms"] for c in cues), default=0))
-        lines.append(f"Dialogue: 0,{ass_timestamp(0)},{end},Title,,0,0,0,,{_sanitize_ass_text(title_text)}")
+        title = _sanitize_ass_text(title_text)
+        if " " not in title.strip():
+            title = wrap_unspaced(title, title_font, max(frame_width - 2 * _STYLE_MARGIN_LR, 1))
+        lines.append(f"Dialogue: 0,{ass_timestamp(0)},{end},Title,,0,0,0,,{title}")
 
     for cue in cues:
         start = ass_timestamp(cue["start_ms"])
         end = ass_timestamp(cue["end_ms"])
-        text = karaoke_line(cue["text"], cue["end_ms"] - cue["start_ms"])
+        text = karaoke_line(
+            cue["text"], cue["end_ms"] - cue["start_ms"],
+            font_size=sub_font, usable_width=max(frame_width - 2 * _STYLE_MARGIN_LR, 1),
+        )
         lines.append(f"Dialogue: 0,{start},{end},Sub,,0,0,0,,{text}")
 
     return "\n".join(lines) + "\n"

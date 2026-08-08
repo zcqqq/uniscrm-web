@@ -1,4 +1,4 @@
-import type { InsightField, ParsedConditions } from "../fields";
+import { SEGMENT_USER_COLUMNS, type InsightField, type ParsedConditions } from "../fields";
 import { sqlStr, sqlInt } from "../../../shared/r2-sql";
 
 export interface SqlResult {
@@ -49,9 +49,12 @@ function literalFor(field: InsightField, v: string | number): string {
 // NOTE: combining a JOIN with QUALIFY is the least-exercised path in this codebase (R2 SQL
 // gained JOINs 2026-05, QUALIFY 2026-06) — needs live verification once the R2 token works
 // (see task-9-report.md).
+// Key columns the outer query/join needs + every column a segment condition can reference
+// (SEGMENT_USER_COLUMNS, derived in fields.ts from metadata/columns.ts) + the dedup/filter
+// columns (is_deleted for the outer WHERE, updated_at for the QUALIFY ORDER BY).
 const USER_DEDUP_COLUMNS = [
-  "id", "channel_id", "source_user_id", "name", "username",
-  "followers_count", "following_count", "verified_type", "is_follow", "is_followed",
+  "id", "channel_id", "source_user_id",
+  ...SEGMENT_USER_COLUMNS,
   "is_deleted", "updated_at",
 ];
 

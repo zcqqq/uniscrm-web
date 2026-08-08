@@ -2,76 +2,51 @@ import type { TenantDataDB } from "../../../shared/tenant-data-db";
 import type { ContentRow, ChannelType, Pipeline } from "../types";
 import type { ChannelItem } from "../channels/interface";
 import type { EntityStateStore } from "./entity-state";
+import {
+  contentColumnMap,
+  contentD1ValueColumns,
+  contentR2ValueColumns,
+  mappedContentPropIds,
+} from "../../../metadata/columns";
 
 const EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5";
 
-// propId -> column name. The name is shared by BOTH stores on purpose: per-tenant D1 is the
-// source of truth (2026-07-26 plan: user/content back to per-tenant D1) and the R2 Iceberg
-// `content` table is an analytics-only copy of the same row, so one map drives both writes.
-// The D1 schema (admin/src/services/tenant-init-sql.ts) is a superset of the R2 schema — every
-// column named here exists in both. A resolved prop not in this map only ever lives in
-// raw_data. `list_id` deliberately does not go through this map: it's a dedup-key component the
-// caller passes separately, not a value resolved from metadata props.
-const CONTENT_COLUMN_MAP: Record<string, string> = {
-  content_type: "content_type",
-  content_text: "content_text",
-  title: "title",
-  source_created_at: "source_created_at",
-  bookmark_count: "bookmark_count",
-  view_count: "view_count",
-  like_count: "like_count",
-  quote_count: "quote_count",
-  reply_count: "reply_count",
-  repost_count: "repost_count",
-  share_count: "share_count",
-  cover_image_url: "cover_image_url",
-  duration: "duration",
-  height: "height",
-  width: "width",
-  has_face: "has_face",
-  // `content_url` is the propId every caller (x-posts.ts/webhook.ts's manual permalink,
-  // tiktok.ts's metadata-mapped share_url) already uses; `source_url` is the column it
-  // belongs in — the Content Library page renders the title as a link via item.source_url.
-  // Missing until task-7 fix round 1 (Minor 3): content_url reached neither a column nor
-  // raw_data (it's a value resolveProps computed, not consumed from the payload, so
-  // consumedPaths never targeted it either) — every X/TikTok/YouTube row lost its link.
-  content_url: "source_url",
-};
+// propId -> column name, derived from the PROPS registry (metadata/columns.ts — the entity
+// contract's single source; incl. the content_url -> source_url rename). The name is shared by
+// BOTH stores on purpose: per-tenant D1 is the source of truth (2026-07-26 plan: user/content
+// back to per-tenant D1) and the R2 Iceberg `content` table is an analytics-only copy of the
+// same row, so one map drives both writes. The D1 schema (admin/src/services/tenant-init-sql.ts,
+// now generated from the same module) is a superset of the R2 schema — every column named here
+// exists in both. A resolved prop not in this map only ever lives in raw_data. `list_id`
+// deliberately does not go through this map: it's a dedup-key component the caller passes
+// separately, not a value resolved from metadata props.
+const CONTENT_COLUMN_MAP: Record<string, string> = contentColumnMap();
 
 // propIds from CONTENT_COLUMN_MAP's keys, plus source_content_id — every propId that actually
 // lands in a named column. Exported so a caller computing consumedPaths
 // (pollers/resolve-props.ts) before calling upsertContentFromMetadata can pass this as
 // consumedPaths' `allowedPropIds` filter, so a metadata prop that has a dataId but no
 // CONTENT_COLUMN_MAP entry doesn't get treated as "consumed" and stripped out of raw_data with
-// nowhere else to land — the same bug class the task-5 fix round caught on the user path
-// (profile_image_url/description had a dataId but no `user` column, and were being
-// destroyed). `source_content_id` isn't a CONTENT_COLUMN_MAP entry (it's the entity key, passed
-// separately by the caller — see upsertContentFromMetadata below) but it IS a real column, so
-// it belongs here too — mirrors x-users.ts's MAPPED_USER_PROP_IDS, which explicitly includes
-// `source_user_id` for the identical reason. Omitting it here (task 7's original cut) meant
+// nowhere else to land — the same bug class the task-5 fix round caught on the user path.
+// `source_content_id` is included by the module (the entity key, passed separately by the
+// caller — see upsertContentFromMetadata below); omitting it (task 7's original cut) meant
 // `{linkPrefix}.id` was never stripped and every X/TikTok tweet or video id ended up duplicated
 // into raw_data despite already having a named column (task-7 fix round 1, Minor 2).
-export const CONTENT_MAPPED_PROP_IDS = new Set(["source_content_id", ...Object.keys(CONTENT_COLUMN_MAP)]);
+export const CONTENT_MAPPED_PROP_IDS = mappedContentPropIds();
 
 // Full set of the R2 `content` table's value columns, i.e. everything except the
 // key/audit columns every write builds explicitly (tenant_id, id, channel_id, channel_type,
 // source_content_id, list_id, raw_data, is_deleted, created_at, updated_at). This is a
-// superset of CONTENT_COLUMN_MAP's values: some columns here (summary, source_url,
-// source_updated_at, impression_count) aren't resolvable from metadata props and are only
-// ever populated by other write paths (e.g. syncBatch), but every write must still send them
-// explicitly as null — reads take one whole row via QUALIFY ROW_NUMBER() = 1, so a write that
-// omits a column here silently nulls it out. Keep in sync with
-// analytics/pipelines/content-stream-schema.json.
-const R2_CONTENT_VALUE_COLUMNS = [
-  "content_type", "content_text", "title", "summary",
-  "source_url", "source_updated_at", "source_created_at",
-  "cover_image_url", "duration", "height", "width", "has_face",
-  "bookmark_count", "impression_count", "view_count", "like_count",
-  "quote_count", "reply_count", "repost_count", "share_count",
-];
+// superset of CONTENT_COLUMN_MAP's values: some columns (summary, source_updated_at,
+// impression_count) aren't resolvable from metadata props and are only ever populated by other
+// write paths (e.g. syncBatch), but every write must still send them explicitly as null —
+// reads take one whole row via QUALIFY ROW_NUMBER() = 1, so a write that omits a column here
+// silently nulls it out. Reconciled against analytics/pipelines/content-stream-schema.json by
+// analytics/tests/unit/content-stream-schema.test.ts.
+const R2_CONTENT_VALUE_COLUMNS = contentR2ValueColumns();
 
 // The D1-queryable subset of R2_CONTENT_VALUE_COLUMNS: every R2 value column except
-// impression_count, which (per CONTENT_READ_PROJECTION's comment above) has no D1 column at
+// impression_count, which (per CONTENT_READ_PROJECTION's comment below) has no D1 column at
 // all — no writer anywhere populates it. upsertContentFromMetadata's probe SELECTs this full
 // set — not just the columns THIS call's metadata mapping happens to resolve (dynamicCols,
 // below) — so a caller that only knows a subset of columns (a metrics-only poller tick, a
@@ -80,27 +55,27 @@ const R2_CONTENT_VALUE_COLUMNS = [
 // legitimately changed only (say) view_count would rebuild the R2 copy from columnValues alone
 // and null out every column it didn't resolve — permanently, since the next tick sees D1
 // unchanged and never re-sends.
-const CONTENT_PROBE_COLUMNS = R2_CONTENT_VALUE_COLUMNS.filter((c) => c !== "impression_count");
+const CONTENT_PROBE_COLUMNS = contentD1ValueColumns();
 
 // Read projection that turns a D1 `content` row into the exact ContentRow shape the routes and
-// the frontend already consume. Two of ContentRow's fields are not D1 columns and are projected
-// as constants:
+// the frontend already consume: key columns + the derived D1 value columns + constants. Two of
+// ContentRow's fields are not D1 columns and are projected as constants:
 //   - impression_count: an R2-only analytics column that no writer anywhere populates (verified
 //     column-by-column in task 1's D1-superset review), so D1 has nothing to store for it.
 //   - is_deleted: D1 deletes are physical (`DELETE FROM content`), so a row that comes back from
 //     D1 is by definition not deleted. The flag exists only in the R2 copy, whose append-only
 //     Iceberg sink has no DELETE and needs a tombstone instead.
 const CONTENT_READ_PROJECTION = [
-  "id", "channel_id", "channel_type", "content_type", "source_content_id", "list_id",
-  "title", "content_text", "summary", "source_url", "source_updated_at", "source_created_at",
-  "cover_image_url", "duration", "height", "width", "has_face",
-  "bookmark_count", "NULL AS impression_count", "view_count", "like_count", "quote_count",
-  "reply_count", "repost_count", "share_count",
+  "id", "channel_id", "channel_type", "source_content_id", "list_id",
+  ...CONTENT_PROBE_COLUMNS,
+  "NULL AS impression_count",
   "raw_data", "created_at", "updated_at", "0 AS is_deleted",
 ].join(", ");
 
 // The business fields syncBatch's ChannelItem carries, compared column-by-column against the
-// existing D1 row to decide added/updated/skipped.
+// existing D1 row to decide added/updated/skipped. Deliberately still a literal, NOT derived
+// from metadata/columns.ts: this set is defined by the ChannelItem interface (what LOCAL/NOTION
+// imports carry), a business decision of the sync path — not by which props have columns.
 const SYNC_COMPARE_COLUMNS = ["source_updated_at", "title", "summary", "source_url"] as const;
 
 // Deep-clones `payload` and deletes each dotted `path` (e.g. "public_metrics.impression_count")

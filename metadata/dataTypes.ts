@@ -21,10 +21,16 @@ export interface PropDefinition {
   // Orthogonal to isInsight — does not affect the analytics dimension/measure
   // picker (ReportConfig.tsx), which filters on isInsight + entity only.
   isList?: boolean;
-  // Which R2 snapshot table(s) this prop is a real column on. Drives which
-  // props Content/User Analytics dimension & measure-field pickers offer —
-  // keep in sync with link/src/services/x-users.ts's USER_TABLE_COLUMNS and
-  // link/src/services/content.ts's CONTENT_COLUMN_MAP.
+  // Which R2/D1 snapshot table(s) this prop is a real column on. Drives (a) the
+  // User/Content list columns (buildEntityColumns), (b) the Analytics dimension &
+  // measure pickers (ReportConfig, isInsight + entity), and (c) the per-entity
+  // column derivation in metadata/columns.ts, which link / insight-segment /
+  // admin(tenant DDL) / analytics(stream schemas) all consume. The contract
+  // "entity ⇒ real column" is machine-enforced by
+  // analytics/tests/unit/{user,content}-stream-schema.test.ts — tagging a prop
+  // without adding the column (schema JSON + tenant-DB migration) fails CI.
+  // A prop that only lives in the flow payload (e.g. processed_video_url) must
+  // NOT carry entity.
   entity?: Array<"user" | "content">;
   label: LocalizedString;
   enums?: { value: string | number; label: LocalizedString }[];

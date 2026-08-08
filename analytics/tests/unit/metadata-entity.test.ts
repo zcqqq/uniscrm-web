@@ -23,7 +23,13 @@ describe("PROPS entity tagging", () => {
     expect(likeCount?.entity).toEqual(expect.arrayContaining(["user", "content"]));
   });
 
-  it("excludes event-only fields (not real columns on either snapshot table) from both entities", () => {
+  // message_text is genuinely event-only (no user/content column). verified_type is NOT —
+  // it has been a real `user` column since operation/migrations/0006 — but it deliberately
+  // stays untagged: entity also drives the Users list columns (buildEntityColumns) and the
+  // analytics user pickers (ReportConfig), and the product keeps verified_type out of both.
+  // Storage-wise it is modeled as the explicit USER_EXTRA_VALUE_COLUMNS exception in
+  // metadata/columns.ts (see user-stream-schema.test.ts, which reconciles it into the schema).
+  it("keeps verified_type (UI-excluded column exception) and message_text (event-only) untagged", () => {
     const verifiedType = insightProps.find((p) => p.propId === "verified_type");
     const messageText = insightProps.find((p) => p.propId === "message_text");
     expect(verifiedType?.entity ?? []).toHaveLength(0);

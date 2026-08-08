@@ -4,6 +4,12 @@ import { EntityStateStore, type EntityStateKey } from "./entity-state";
 import { resolveProps, consumedPaths } from "./pollers/resolve-props";
 import { UserMetadata_X } from "../../../metadata/x-byok";
 import type { UserMetadata } from "../../../metadata/dataTypes";
+import {
+  eventValueColumns,
+  mappedUserPropIds,
+  userValueColumns,
+  USER_FOLLOW_COLUMNS as MODULE_USER_FOLLOW_COLUMNS,
+} from "../../../metadata/columns";
 
 // X nests the counts under public_metrics and names some fields differently from our
 // propIds (post_count -> tweet_count), so the propId -> payload path mapping has to come
@@ -15,12 +21,14 @@ const X_USER_MAPPINGS = (X_USER_META?.userProps || []).filter((m) => m.dataId);
 
 // Every value column of the `user` entity, i.e. everything except the key/audit columns each
 // write builds explicitly (tenant_id, id, channel_id, channel_type, source_user_id, is_active,
-// is_follow, is_followed, raw_data, is_deleted, created_at, updated_at). One list drives BOTH
-// stores on purpose (same rule as content.ts's CONTENT_COLUMN_MAP): per-tenant D1 is the source
-// of truth (2026-07-26 plan: user/content back to per-tenant D1) and the R2 Iceberg `user`
-// table is an analytics-only copy of the same row. The D1 schema
-// (admin/src/services/tenant-init-sql.ts) is a superset — every column named here exists in
-// both. Keep in sync with analytics/pipelines/user-stream-schema.json.
+// is_follow, is_followed, raw_data, is_deleted, created_at, updated_at). Derived from the
+// PROPS registry via metadata/columns.ts (entity:"user" props minus the follow columns, plus
+// the documented verified_type exception). One list drives BOTH stores on purpose (same rule
+// as content.ts's CONTENT_COLUMN_MAP): per-tenant D1 is the source of truth (2026-07-26 plan)
+// and the R2 Iceberg `user` table is an analytics-only copy of the same row. The D1 schema
+// (admin/src/services/tenant-init-sql.ts, generated from the same module) is a superset —
+// every column named here exists in both. Reconciled against
+// analytics/pipelines/user-stream-schema.json by analytics/tests/unit/user-stream-schema.test.ts.
 //
 // This is ALSO the probe/compare projection that decides whether anything actually changed. It
 // replaces the entity_state fingerprint the R2-as-truth phase used: D1 holds the previous
@@ -29,30 +37,29 @@ const X_USER_MAPPINGS = (X_USER_META?.userProps || []).filter((m) => m.dataId);
 // knows all of them, and both now diff against the SAME stored row instead of against each
 // other's fingerprint. created_at/updated_at are deliberately excluded, or every call would
 // look "changed".
-const USER_VALUE_COLUMNS = [
-  "name", "username", "verified_type", "profile_image_url", "description",
-  "followers_count", "following_count", "post_count", "listed_count", "like_count", "media_count",
-];
+const USER_VALUE_COLUMNS = userValueColumns();
 
 // The two follow columns. They live on the `user` row in D1 (NOT NULL DEFAULT 0) and as fixed
 // base columns on the R2 record, so they are tracked separately from USER_VALUE_COLUMNS: only a
 // caller that actually KNOWS a follow bit ever writes it, which is 461d039's CASE WHEN guard
 // restated — an upsert that says nothing about following must never reset a stored 1 to 0.
-const USER_FOLLOW_COLUMNS = ["is_follow", "is_followed"] as const;
+const USER_FOLLOW_COLUMNS = MODULE_USER_FOLLOW_COLUMNS;
 
 // propIds that land in a named column — source_user_id (the entity key itself) plus every
 // USER_VALUE_COLUMNS entry. Used to filter consumedPaths() so a mapped-but-columnless prop is
 // never treated as "consumed" and stripped out of raw_data, which would destroy it with nowhere
 // else to land (task-5 fix round, Important 1). profile_image_url and description USED to be in
 // that category; they became real columns once the Users list was seen rendering both as blank.
-const MAPPED_USER_PROP_IDS = new Set<string>(["source_user_id", ...USER_VALUE_COLUMNS]);
+const MAPPED_USER_PROP_IDS = mappedUserPropIds();
 
 // R2 event pipeline's value columns beyond the fixed identity/time columns every write
-// builds explicitly. Keep in sync with analytics/pipelines/event-stream-schema.json.
+// builds explicitly — the union of every channel's EventMetadata[].eventProps, derived by
+// metadata/columns.ts (same reconciliation rule as
+// analytics/tests/unit/event-stream-schema.test.ts enforces on the schema JSON).
 // Exported so a caller computing consumedPaths for an eventProps array (webhook.ts) can pass
 // this as consumedPaths' allowedPropIds filter, mirroring MAPPED_USER_PROP_IDS above — same
 // "mapped-but-columnless" guard, applied to the event pipeline instead of the user one.
-export const EVENT_VALUE_COLUMNS = ["followers_count", "following_count", "verified_type", "message_text"];
+export const EVENT_VALUE_COLUMNS = eventValueColumns();
 
 export interface XUserData {
   id: string;

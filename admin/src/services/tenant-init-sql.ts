@@ -1,20 +1,18 @@
+import { contentD1ValueColumnDdl, userD1ValueColumnDdl } from "../../../metadata/columns";
+
+// 每租户 D1 的初始 schema。表骨架（主键、NOT NULL 记账列、索引）手写在这里；value 列段
+// 由 metadata/columns.ts 从 PROPS registry 生成 —— 新增一个带 entity 的 prop，新租户的
+// 建表语句自动跟上，不再需要手抄这份 DDL（列集合与生成前逐列一致，由
+// tests/unit/tenant-init-sql.test.ts 的冻结快照对账）。存量租户库不受影响：这里只跑
+// CREATE TABLE IF NOT EXISTS，存量库的 schema 演进走 operation/migrations/ 的显式 ALTER
+// （operation/migrate-tenant-dbs.ts）。
 export const TENANT_DB_INIT_SQL = [
   `CREATE TABLE IF NOT EXISTS user (
     id TEXT PRIMARY KEY,
     channel_id TEXT NOT NULL,
     source_user_id TEXT NOT NULL,
     channel_type TEXT,
-    name TEXT,
-    username TEXT,
-    profile_image_url TEXT,
-    description TEXT,
-    followers_count INTEGER,
-    following_count INTEGER,
-    post_count INTEGER,
-    listed_count INTEGER,
-    like_count INTEGER,
-    media_count INTEGER,
-    verified_type TEXT,
+    ${userD1ValueColumnDdl().join(",\n    ")},
     raw_data TEXT NOT NULL DEFAULT '{}',
     is_active INTEGER NOT NULL DEFAULT 1,
     is_follow INTEGER NOT NULL DEFAULT 0,
@@ -27,27 +25,9 @@ export const TENANT_DB_INIT_SQL = [
     id TEXT PRIMARY KEY,
     channel_id TEXT,
     channel_type TEXT NOT NULL,
-    content_type TEXT,
     source_content_id TEXT NOT NULL,
     list_id TEXT,
-    title TEXT,
-    content_text TEXT,
-    summary TEXT,
-    source_url TEXT,
-    source_updated_at TEXT,
-    source_created_at TEXT,
-    bookmark_count INTEGER,
-    view_count INTEGER,
-    like_count INTEGER,
-    quote_count INTEGER,
-    reply_count INTEGER,
-    repost_count INTEGER,
-    share_count INTEGER,
-    cover_image_url TEXT,
-    duration INTEGER,
-    height INTEGER,
-    width INTEGER,
-    has_face INTEGER,
+    ${contentD1ValueColumnDdl().join(",\n    ")},
     raw_data TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL

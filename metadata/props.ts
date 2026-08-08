@@ -188,23 +188,27 @@ export const PROPS = definePropDefinitions([
     entity: ["content"],
     label: { en: "Duration", zh: "时长" },
   },
+  // 下面三个是 flow-payload-only prop：由 content/src/queue-video-action.ts 产出、写进
+  // flow payload，flow 侧用 $content.processed_video_url 之类的字符串引用消费
+  // （flow/nodeTypeRegistry.ts、flow/src/index.ts）。它们**不是**任何快照表上的列，
+  // 所以不带 entity（dataTypes.ts 的 entity 契约：entity = 表上的真实列）。曾经误标
+  // entity:["content"]，导致 Content 列表渲染三个永远为空的死列；
+  // analytics/tests/unit/content-stream-schema.test.ts 现在机器对账，加回 entity 而
+  // 不加列会直接红。
   {
     propId: "processed_video_url",
     dataType: "TEXT",
     fieldType: "VIDEO",
-    entity: ["content"],
     label: { en: "Subtitled Video", zh: "字幕视频" },
   },
   {
     propId: "video_transcript",
     dataType: "TEXT",
-    entity: ["content"],
     label: { en: "Video Transcript", zh: "视频转录文本" },
   },
   {
     propId: "translated_subtitle_text",
     dataType: "TEXT",
-    entity: ["content"],
     label: { en: "Translated Subtitle Text", zh: "翻译字幕文本" },
   },
   {
@@ -220,6 +224,17 @@ export const PROPS = definePropDefinitions([
     dataType: "INT",
     entity: ["content"],
     label: { en: "Width", zh: "宽度" },
+  },
+  // content 表的真实列（tenant-init-sql / content-stream-schema 都有它），此前只出现在
+  // link 手抄的 CONTENT_COLUMN_MAP 里而不在 registry —— 注册进来让 metadata/columns.ts
+  // 能完整推导。isList:false + 无 isInsight：不在 Content 列表和 analytics 选择器里展示，
+  // 与注册前的 UI 行为逐字一致。
+  {
+    propId: "has_face",
+    dataType: "INT",
+    isList: false,
+    entity: ["content"],
+    label: { en: "Has Face", zh: "是否含人脸" },
   },
   {
     propId: "bookmark_count",

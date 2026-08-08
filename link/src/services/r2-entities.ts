@@ -1,11 +1,10 @@
 import { r2Query, latestRowsSql, sqlStr, sqlInt, type R2SqlEnv } from "../../../shared/r2-sql";
+import { userR2SelectColumns } from "../../../metadata/columns";
 
-export const USER_COLUMNS = [
-  "id", "channel_id", "channel_type", "source_user_id", "name", "username",
-  "is_active", "is_follow", "is_followed", "verified_type", "profile_image_url", "description",
-  "followers_count", "following_count", "post_count", "listed_count", "like_count", "media_count",
-  "raw_data", "created_at", "updated_at", "is_deleted",
-];
+// The full uniscrm.user SELECT projection — key/audit columns + the value columns derived
+// from the PROPS registry (metadata/columns.ts). tenant_id is absent on purpose: it only
+// appears in WHERE.
+export const USER_COLUMNS = userR2SelectColumns();
 
 const USER_PARTITION = ["channel_id", "source_user_id"];
 

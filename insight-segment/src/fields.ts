@@ -1,5 +1,6 @@
 import { PROPS, EventMetadata_X, t } from "../../metadata";
 import type { PropDefinition, Locale } from "../../metadata";
+import { userColumnFor } from "../../metadata/columns";
 
 export type Operator = "=" | "!=" | ">" | "<" | ">=" | "<=" | "IN" | "BETWEEN";
 
@@ -24,18 +25,25 @@ export interface InsightField {
   enums?: { value: string | number; label: string }[];
 }
 
+// 分段条件向用户开放哪些 user 字段是**产品选择**（这份 propId 清单），但每个字段的
+// 列名与"它确实是 uniscrm.user 的真实列"由 metadata/columns.ts 的 userColumnFor 保证 ——
+// 写进一个不存在的 propId 会在模块加载期抛错，而不是生成引用幽灵列的 SQL。
+const SEGMENT_USER_PROP_IDS = [
+  "name", "username", "followers_count", "following_count",
+  "verified_type", "is_follow", "is_followed",
+] as const;
+
+// 分段字段对应的物理列（按上面清单的顺序）。Exported for sql-builder.ts's dedup
+// projection — the QUALIFY subquery must SELECT every column a condition can reference.
+export const SEGMENT_USER_COLUMNS: string[] = SEGMENT_USER_PROP_IDS.map((id) => userColumnFor(id));
+
 // R2 的 uniscrm.user 把这些做成了真实列,不再需要从 raw_data 里 json_extract。
 // "u" is the alias buildSegmentQuery gives the deduped-latest-row subquery over uniscrm.user —
 // every entry here must stay in sync with that alias, not with the raw table name.
-const SQL_EXPR_MAP: Record<string, { source: "user" | "event"; sqlExpr: string }> = {
-  name: { source: "user", sqlExpr: "u.name" },
-  username: { source: "user", sqlExpr: "u.username" },
-  followers_count: { source: "user", sqlExpr: "u.followers_count" },
-  following_count: { source: "user", sqlExpr: "u.following_count" },
-  verified_type: { source: "user", sqlExpr: "u.verified_type" },
-  is_follow: { source: "user", sqlExpr: "u.is_follow" },
-  is_followed: { source: "user", sqlExpr: "u.is_followed" },
-};
+const SQL_EXPR_MAP: Record<string, { source: "user" | "event"; sqlExpr: string }> =
+  Object.fromEntries(
+    SEGMENT_USER_PROP_IDS.map((id) => [id, { source: "user" as const, sqlExpr: `u.${userColumnFor(id)}` }])
+  );
 
 export function getAllFields(locale: Locale = "en"): InsightField[] {
   const propFields = PROPS.map((prop) => {

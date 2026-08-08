@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ContentService, CONTENT_MAPPED_PROP_IDS } from "../../src/services/content";
 import { consumedPaths, resolveProps } from "../../src/services/pollers/resolve-props";
 import type { PropMapping } from "../../../metadata/dataTypes";
+import { PROPS } from "../../../metadata/props";
 import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
 import { ContentMetadata_X } from "../../../metadata/x-byok";
 import contentSchema from "../../../analytics/pipelines/content-stream-schema.json";
@@ -451,12 +452,11 @@ describe("ContentService.upsertContentFromMetadata", () => {
     // NOTE: this test originally used "content_url" as its real-world mapped-but-columnless
     // example. Task-7 fix round 1 (Minor 3) gave content_url an actual column (source_url —
     // see the CONTENT_COLUMN_MAP comment), so it's no longer an example of this bug class at
-    // all — it's now a positive case, covered by the dedicated test below. There is currently
-    // no other real ContentMetadata entry with a dataId and no CONTENT_COLUMN_MAP entry (the
-    // registry-only props in metadata/props.ts — processed_video_url, video_transcript,
-    // translated_subtitle_text — are declared but never actually mapped by any source's
-    // contentProps yet), so this test now uses a synthetic propId to keep exercising the
-    // guard mechanism itself rather than asserting on a specific field name.
+    // all — it's now a positive case, covered by the dedicated test below. And since the
+    // entity-contract cleanup there CANNOT be a real mapped-but-columnless entity prop any
+    // more (asserted below: every entity:"content" prop has a column, and the once-divergent
+    // flow-payload-only video props no longer carry entity), so this test uses a synthetic
+    // propId to keep exercising the guard mechanism itself.
     it("a mapped-but-columnless prop survives in raw_data when consumedPaths is filtered by CONTENT_MAPPED_PROP_IDS (Important 1)", async () => {
       const pipeline = { send: vi.fn().mockResolvedValue(undefined) };
       const service = new ContentService(tenantDb as any, vectorize as any, ai as any, 42, pipeline as any);
@@ -480,6 +480,23 @@ describe("ContentService.upsertContentFromMetadata", () => {
       const raw = JSON.parse(record.raw_data as string);
       expect(raw).not.toHaveProperty("text"); // consumed and column-mapped -> stripped
       expect(raw.extra).toBe("https://x/1"); // mapped but columnless -> survives
+    });
+
+    // The entity contract (metadata/dataTypes.ts): entity:["content"] means "real column".
+    // This used to be a documented divergence — processed_video_url / video_transcript /
+    // translated_subtitle_text carried entity while existing in no store, rendering three
+    // always-empty columns in the Content list. They are flow-payload-only now, and this
+    // assertion (plus analytics/tests/unit/content-stream-schema.test.ts) keeps the
+    // divergence from coming back.
+    it("every entity:'content' prop has a real column; the flow-payload-only video props have neither entity nor column", () => {
+      for (const p of PROPS.filter((prop) => prop.entity?.includes("content"))) {
+        expect(CONTENT_MAPPED_PROP_IDS.has(p.propId), `entity prop without a column: ${p.propId}`).toBe(true);
+      }
+      for (const propId of ["processed_video_url", "video_transcript", "translated_subtitle_text"]) {
+        const def = PROPS.find((p) => p.propId === propId)!;
+        expect(def.entity ?? [], `${propId} must stay flow-payload-only`).toHaveLength(0);
+        expect(CONTENT_MAPPED_PROP_IDS.has(propId), propId).toBe(false);
+      }
     });
 
     // Minor 2 (task-7 fix round 1): CONTENT_MAPPED_PROP_IDS omitted source_content_id, so

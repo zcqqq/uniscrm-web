@@ -255,7 +255,8 @@ def burn_subtitles():
     # characters. job_id is a UUID today so an absolute path happens to be safe, but keeping
     # the filtergraph argument free of path syntax removes that coupling entirely.
     burn = subprocess.run(
-        ["ffmpeg", "-y", "-i", video_path, "-vf", subtitle_filter, "-c:a", "copy", output_path],
+        ["ffmpeg", "-y", "-i", video_path, "-vf", subtitle_filter, "-c:a", "copy",
+         "-movflags", "+faststart", output_path],
         capture_output=True, text=True, timeout=600, cwd=work_dir,
     )
     if burn.returncode != 0 or not os.path.exists(output_path):
@@ -287,14 +288,22 @@ def rotate_to_vertical():
         return jsonify({"error": error}), 200
 
     if not needs_rotation(width, height):
+        # Pass-through still gets remuxed (stream copy, no re-encode) so the output is
+        # faststart even when the source wasn't; on remux failure ship the source as-is —
+        # a tail-moov file beats failing the node.
+        remux = subprocess.run(
+            ["ffmpeg", "-y", "-i", video_path, "-c", "copy", "-movflags", "+faststart", output_path],
+            capture_output=True, text=True, timeout=600,
+        )
+        upload_path = output_path if remux.returncode == 0 and os.path.exists(output_path) else video_path
         final_key = f"{uuid.uuid4()}.mp4"
-        client.upload_file(video_path, bucket, final_key, ExtraArgs={"ContentType": "video/mp4"})
+        client.upload_file(upload_path, bucket, final_key, ExtraArgs={"ContentType": "video/mp4"})
         return jsonify({"final_key": final_key})
 
     rotate = subprocess.run(
         ["ffmpeg", "-y", "-i", video_path, "-vf",
          "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black",
-         "-c:a", "copy", output_path],
+         "-c:a", "copy", "-movflags", "+faststart", output_path],
         capture_output=True, text=True, timeout=600,
     )
     if rotate.returncode != 0 or not os.path.exists(output_path):
@@ -414,7 +423,8 @@ def remove_face():
                 f.write(f"file '{p}'\n")
 
         concat = subprocess.run(
-            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list_path, "-c", "copy", output_path],
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list_path, "-c", "copy",
+             "-movflags", "+faststart", output_path],
             capture_output=True, text=True, timeout=300,
         )
         if concat.returncode != 0 or not os.path.exists(output_path):

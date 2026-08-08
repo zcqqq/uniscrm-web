@@ -422,20 +422,20 @@ export function channelsRoutes() {
   });
 
   router.get("/notion/status", async (c) => {
-    const memberId = c.get("memberId" as never) as string;
+    const tenantId = c.get("tenantId" as never) as number;
     const ch = await c.env.LINK_DB
-      .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND member_id = ? AND is_active = 1")
-      .bind(memberId).first<{ config: string }>();
+      .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND tenant_id = ? AND is_active = 1 AND json_extract(config, '$.access_token') IS NOT NULL")
+      .bind(tenantId).first<{ config: string }>();
     if (!ch) return c.json({ connected: false });
     const config = JSON.parse(ch.config) as { channel_name?: string };
     return c.json({ connected: true, channel_name: config.channel_name });
   });
 
   router.get("/notion/folders", async (c) => {
-    const memberId = c.get("memberId" as never) as string;
+    const tenantId = c.get("tenantId" as never) as number;
     const ch = await c.env.LINK_DB
-      .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND member_id = ? AND is_active = 1")
-      .bind(memberId).first<{ config: string }>();
+      .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND tenant_id = ? AND is_active = 1 AND json_extract(config, '$.access_token') IS NOT NULL")
+      .bind(tenantId).first<{ config: string }>();
     if (!ch) return c.json({ error: "Notion not connected" }, 401);
     const config = JSON.parse(ch.config) as { access_token: string };
     const folders = await NotionChannel.listFolders(config.access_token);
@@ -481,7 +481,6 @@ export function channelsRoutes() {
   });
 
   router.post("/notion/sync", async (c) => {
-    const memberId = c.get("memberId" as never) as string;
     const tenantId = c.get("tenantId" as never) as number;
     // Per-tenant D1 — the source of truth. See /tiktok/sync's identical guard comment above.
     // Checked before the Notion fetch below, not just before the D1 write.
@@ -489,8 +488,8 @@ export function channelsRoutes() {
     if (!tenantDb) return c.json({ error: "Tenant DB not provisioned" }, 503);
 
     const ch = await c.env.LINK_DB
-      .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND member_id = ? AND is_active = 1")
-      .bind(memberId).first<{ config: string }>();
+      .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND tenant_id = ? AND is_active = 1 AND json_extract(config, '$.access_token') IS NOT NULL")
+      .bind(tenantId).first<{ config: string }>();
     if (!ch) return c.json({ error: "Notion not connected" }, 401);
     const notionConfig = JSON.parse(ch.config) as { access_token: string };
 
@@ -569,8 +568,8 @@ export function channelsRoutes() {
 
     if (channelType === "NOTION") {
       const ch = await c.env.LINK_DB
-        .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND member_id = ? AND is_active = 1")
-        .bind(memberId).first<{ config: string }>();
+        .prepare("SELECT config FROM channels WHERE channel_type = 'NOTION' AND tenant_id = ? AND is_active = 1 AND json_extract(config, '$.access_token') IS NOT NULL")
+        .bind(tenantId).first<{ config: string }>();
       if (ch && (config as { folder_ids?: string[] }).folder_ids) {
         // Per-tenant D1 — the source of truth. Scoped to this branch (not the whole route,
         // which is a generic per-channel-type config setter most types don't need D1 for),
@@ -599,21 +598,14 @@ export function channelsRoutes() {
     return c.json({ url });
   });
 
-  router.get("/shopify/status", async (c) => {
-    const memberId = c.get("memberId" as never) as string;
-    const ch = await c.env.LINK_DB
-      .prepare("SELECT config FROM channels WHERE channel_type = 'SHOPIFY' AND member_id = ? AND is_active = 1")
-      .bind(memberId).first<{ config: string }>();
-    if (!ch) return c.json({ connected: false });
-    const config = JSON.parse(ch.config) as { channel_name?: string };
-    return c.json({ connected: true, channel_name: config.channel_name });
-  });
+  // NOTE: /shopify/status 被更早注册的通用 /:type/status（租户作用域）处理，此处不再定义
+  // 专属 status 路由 —— 原来的那份注册在通用路由之后，从未被匹配到过（死代码，已删）。
 
   router.get("/shopify/products", async (c) => {
-    const memberId = c.get("memberId" as never) as string;
+    const tenantId = c.get("tenantId" as never) as number;
     const ch = await c.env.LINK_DB
-      .prepare("SELECT config FROM channels WHERE channel_type = 'SHOPIFY' AND member_id = ? AND is_active = 1")
-      .bind(memberId).first<{ config: string }>();
+      .prepare("SELECT config FROM channels WHERE channel_type = 'SHOPIFY' AND tenant_id = ? AND is_active = 1 AND json_extract(config, '$.access_token') IS NOT NULL")
+      .bind(tenantId).first<{ config: string }>();
     if (!ch) return c.json({ error: "Shopify not connected" }, 401);
     const config = JSON.parse(ch.config) as { access_token: string; channel_name: string };
     if (!config.channel_name) return c.json({ error: "Shopify not connected" }, 401);

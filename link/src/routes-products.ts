@@ -24,12 +24,13 @@ export function productsRoutes() {
 
   router.post("/sync", async (c) => {
     const memberId = c.get("memberId" as never) as string;
+    const tenantId = c.get("tenantId" as never) as number;
     const body = await c.req.json<{ product_ids: string[]; confirmed?: boolean }>();
     const { product_ids } = body;
 
     const ch = await c.env.LINK_DB
-      .prepare("SELECT config FROM channels WHERE channel_type = 'SHOPIFY' AND member_id = ? AND is_active = 1")
-      .bind(memberId).first<{ config: string }>();
+      .prepare("SELECT config FROM channels WHERE channel_type = 'SHOPIFY' AND tenant_id = ? AND is_active = 1 AND json_extract(config, '$.access_token') IS NOT NULL")
+      .bind(tenantId).first<{ config: string }>();
     if (!ch) return c.json({ error: "Shopify not connected" }, 401);
     const config = JSON.parse(ch.config) as { access_token: string; channel_name: string };
     if (!config.channel_name) return c.json({ error: "Shopify not connected" }, 401);

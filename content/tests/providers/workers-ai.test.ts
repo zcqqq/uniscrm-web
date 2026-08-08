@@ -15,6 +15,7 @@ describe("WorkersAiProvider", () => {
       {
         messages: [{ role: "user", content: "user prompt" }],
         stream: false,
+        max_tokens: 4096,
       }
     );
   });
@@ -32,6 +33,7 @@ describe("WorkersAiProvider", () => {
         { role: "user", content: "user prompt" },
       ],
       stream: false,
+      max_tokens: 4096,
     });
   });
 });

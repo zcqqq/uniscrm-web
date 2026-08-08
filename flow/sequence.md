@@ -42,15 +42,24 @@ sequenceDiagram
     CS->>EQ: content.created { contentId, channelId, payload }
     EQ->>FW: queue() dispatches on contentId
     FW->>FW: executeFlow (xContentTrigger match)
-    alt has wait/timeCondition/abSplit downstream
-        FW->>CFP: INSERT content_flow_pending
-        Note over FW,CFP: resumed later by scheduled() sweep
+    alt has wait/waitForEvent/timeCondition downstream
+        FW->>CFP: INSERT content_flow_pending（含 conditions + condition_logic 快照）
+        Note over FW,CFP: resumed later by scheduled() sweep：<br/>awaiting_event 行到期时用 conditionsPass 对存储 payload 求值，<br/>通过走 "yes"、不通过走 "no"（快照语义与 user 域一致，见 0016/0017）；<br/>普通 wait 行照旧直接继续
     end
     FW->>STUB: repost / xContentAction (stub, 501)
 ```
 
 `content_flow_executions`（连同 `flow_executions`）已移除 — 触发次数改由
 `recomputeFlowCounts()` 从 R2 日志聚合，缓存到 `flows.trigger_count`。
+
+分支解析的收尾（resumeFromNode → 节点日志 → 递归执行下游 action → 落 pending wait）在
+user / content 两域统一收敛到 `recordBranchOutcome`（src/index.ts）：user 域的
+`executeActions.recordOutcome`、content 域 `executeContentActions` 的全部分支点、
+`scheduled()` 的 content sweep 三个解析点、以及 `POST /internal/video-action/resume`
+都经由它落库，pending 行从此总是带 conditions + condition_logic 快照。content 域没有
+事件驱动的 wait 解析（content.created 每次都是新的 content_id），sweep 到期即是
+waitForEvent 条件快照的唯一求值点；video_action_complete 行的 conditions 恒为空，
+其解析结果由 videoAction/videoCondition 的 outcome 本身决定，不套 conditionsPass 门禁。
 
 ## Content-domain: xContentAction (real generation + publish)
 

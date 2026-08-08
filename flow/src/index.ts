@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Env, FlowQueueMessage } from "./types";
-import { executeFlow, resumeFromNode, evaluateFaceRatioBranch, evaluateOrientationBranch, conditionsPass, type FlowGraph, type ActionResult, type NodeLog } from "./engine";
+import { executeFlow, resumeFromNode, evaluateFaceRatioBranch, evaluateOrientationBranch, conditionsPass, type FlowGraph, type ActionResult, type NodeLog, type PendingWait } from "./engine";
 import { EventMetadata_X } from "../../metadata/x";
 import { passesPropsFilter } from "../../metadata/props-filter";
 import { r2Query, latestRowsSql, sqlStr, sqlInt } from "../../shared/r2-sql";
@@ -367,6 +367,65 @@ export async function resolveUserPropsForFilter(
   return { is_follow: row.is_follow, is_followed: row.is_followed };
 }
 
+// 分支解析的四步收尾（resumeFromNode → 节点日志 → 递归执行下游 action → 落 pending wait），
+// user / content 两域共用的唯一实现——此前 content 域内联了十余份副本并各自漂移（有的漏写
+// conditions，全部漏写 condition_logic）。
+//
+// 不变量：
+// - resumed.nodeLogs[0] 是被解析节点自己的重复 exit，被 resumeFromNode 改标为
+//   direction:"outcome"（wait/waitForEvent/timeCondition 除外，它们此刻才记真正的 exit）。
+//   调用方绝不能再补一条 outcome 行，否则该节点被重复计数。
+// - pending wait 行的 conditions / condition_logic 必须与 wait 节点同源快照一起写入
+//   （见 migrations/0016、0017 的注释）：等待期间用户改 flow，不能出现"旧条件 + 新逻辑"。
+// - emitLogs / runActions 是仅有的两个域注入点：user 域把日志累积进 executeActions 的本地
+//   数组、下游动作递归 executeActions（带 depth+1）；content 域立即 emitContentNodeLogs、
+//   下游递归 executeContentActions。四步的顺序与 pending 落库形状两域完全一致。
+interface OutcomeEpilogueOps {
+  table: "flow_pending" | "content_flow_pending";
+  subjectColumn: "user_id" | "content_id";
+  subjectId: string;
+  // 保持各域既有的绑定类型不变：user 域一直绑字符串 tenantId，content 域绑数值。
+  tenantId: string | number;
+  flowId: string;
+  // 落进 pending 行的 payload 串由调用方给定（content 域要混入 channel_id；sweep 场景直接
+  // 复用行里已有的原串）——它与传给 resumeFromNode 的运行时 payload 可以不同。
+  storedPayload: string;
+  emitLogs(nodeLogs: NodeLog[]): Promise<void>;
+  runActions(actions: ActionResult[]): Promise<void>;
+  onWaitScheduled?(wait: PendingWait, executeAt: string): void;
+}
+
+async function recordBranchOutcome(
+  env: Env,
+  graph: FlowGraph,
+  nodeId: string,
+  payload: Record<string, unknown>,
+  branch: string | undefined,
+  failureReason: string | undefined,
+  ops: OutcomeEpilogueOps
+): Promise<void> {
+  const resumed = resumeFromNode(graph, nodeId, payload, branch, failureReason);
+  if (resumed.nodeLogs.length > 0) await ops.emitLogs(resumed.nodeLogs);
+  if (resumed.actions.length > 0) await ops.runActions(resumed.actions);
+  // Written directly rather than returned for the caller to batch: each call site persists its
+  // own top-level pendingWaits in its own shape, and a wait reached through a branch belongs to
+  // none of them.
+  for (const wait of resumed.pendingWaits) {
+    const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO ${ops.table} (id, flow_id, node_id, ${ops.subjectColumn}, tenant_id, payload, execute_at, created_at, awaiting_event, conditions, condition_logic)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      crypto.randomUUID(), ops.flowId, wait.nodeId, ops.subjectId, ops.tenantId,
+      ops.storedPayload, executeAt, new Date().toISOString(),
+      wait.awaitingEvent || "",
+      wait.conditions ? JSON.stringify(wait.conditions) : "",
+      wait.conditionLogic || ""
+    ).run();
+    ops.onWaitScheduled?.(wait, executeAt);
+  }
+}
+
 // `graph` is what makes an action node's success/failed branch actually continue: without it the
 // node's outcome is only recorded for the analytics drawer and the flow stops there (which is how
 // a user-flow X Action's "failed" edge silently led nowhere — see flow/CLAUDE.md's rule that every
@@ -402,30 +461,22 @@ async function executeActions(
       nodeLogs.push({ nodeId, direction: "outcome", outcome: branch, failureReason: ok ? undefined : failureReason });
       return;
     }
-    const resumed = resumeFromNode(graph, nodeId, payload || {}, branch, failureReason);
-    nodeLogs.push(...resumed.nodeLogs);
-    if (resumed.actions.length > 0) {
-      const nested = await executeActions(resumed.actions, userId, tenantId, env, payload, flowId, graph, depth + 1);
-      stmts.push(...nested.stmts);
-      rateLimited.push(...nested.rateLimited);
-      nodeLogs.push(...nested.nodeLogs);
-    }
-    // Written directly rather than returned for the caller to batch: each call site persists its
-    // own top-level pendingWaits in its own shape, and a wait reached through a branch belongs to
-    // none of them. Mirrors executeContentActions, which likewise INSERTs its resumed waits inline.
-    for (const wait of resumed.pendingWaits) {
-      await env.FLOW_DB.prepare(
-        `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions, condition_logic)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(
-        crypto.randomUUID(), flowId || "", wait.nodeId, userId, tenantId,
-        JSON.stringify(payload || {}), new Date(Date.now() + wait.durationMs).toISOString(),
-        new Date().toISOString(), wait.awaitingEvent || "",
-        wait.conditions ? JSON.stringify(wait.conditions) : "",
-        wait.conditionLogic || ""
-      ).run();
-      console.log(JSON.stringify({ event: "flow_wait_scheduled", flowId, nodeId: wait.nodeId, awaitingEvent: wait.awaitingEvent || "", viaBranch: branch }));
-    }
+    await recordBranchOutcome(env, graph, nodeId, payload || {}, branch, failureReason, {
+      table: "flow_pending",
+      subjectColumn: "user_id",
+      subjectId: userId,
+      tenantId,
+      flowId: flowId || "",
+      storedPayload: JSON.stringify(payload || {}),
+      emitLogs: async (logs) => { nodeLogs.push(...logs); },
+      runActions: async (resumedActions) => {
+        const nested = await executeActions(resumedActions, userId, tenantId, env, payload, flowId, graph, depth + 1);
+        stmts.push(...nested.stmts);
+        rateLimited.push(...nested.rateLimited);
+        nodeLogs.push(...nested.nodeLogs);
+      },
+      onWaitScheduled: (wait) => console.log(JSON.stringify({ event: "flow_wait_scheduled", flowId, nodeId: wait.nodeId, awaitingEvent: wait.awaitingEvent || "", viaBranch: branch })),
+    });
   };
 
   for (const action of actions) {
@@ -566,6 +617,31 @@ async function executeContentActions(
 ): Promise<ContentActionExecResult> {
   const rateLimited: { action: ActionResult; retryAt: string }[] = [];
 
+  // content 域对 recordBranchOutcome 的绑定。epiloguePayload 默认是本次调用的 payload，
+  // 只有 youtubeCondition 用它传 outcome.payload（条件求值可能往 payload 里合并了作者 props）。
+  const recordContentOutcome = async (
+    nodeId: string,
+    branch: string,
+    failureReason?: string,
+    epiloguePayload: Record<string, unknown> = payload
+  ) => {
+    await recordBranchOutcome(env, graph, nodeId, epiloguePayload, branch, failureReason, {
+      table: "content_flow_pending",
+      subjectColumn: "content_id",
+      subjectId: contentId,
+      tenantId: Number(tenantId),
+      flowId: flowId || "",
+      // channel_id 混入存储 payload：content_flow_pending 没有 channel_id 列，resume 时
+      // 要靠它拿回 SOURCE channel（见 queue() 里同样做法的注释）。
+      storedPayload: JSON.stringify({ ...epiloguePayload, channel_id: channelId }),
+      emitLogs: (logs) => emitContentNodeLogs(logs, flowId || "", contentId, tenantId, env, epiloguePayload),
+      runActions: async (resumedActions) => {
+        const nested = await executeContentActions(graph, resumedActions, contentId, channelId, tenantId, env, epiloguePayload, flowId);
+        rateLimited.push(...nested.rateLimited);
+      },
+    });
+  };
+
   for (const action of actions) {
     if (action.type === "xContentAction") {
       const operation = (action.operation as string) || "create-post";
@@ -615,24 +691,7 @@ async function executeContentActions(
           const videoUrl = String(payload?.processed_video_url ?? "");
           if (!videoUrl) {
             console.log(JSON.stringify({ event: "content_action_x_content_action_missing_video", contentId, channelId: xChannelId }));
-            const nodeId = action.nodeId as string;
-            const resumed = resumeFromNode(graph, nodeId, payload, "failed", "missing_video: no upstream Video Action produced a video to attach");
-            if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
-            if (resumed.actions.length > 0) {
-              const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
-              rateLimited.push(...nested.rateLimited);
-            }
-            for (const wait of resumed.pendingWaits) {
-              const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-              await env.FLOW_DB.prepare(
-                `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-              ).bind(
-                crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
-                JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
-                wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
-              ).run();
-            }
+            await recordContentOutcome(action.nodeId as string, "failed", "missing_video: no upstream Video Action produced a video to attach");
             continue;
           }
           res = await fetch(`${env.LINK_URL}/internal/content/create-post`, {
@@ -667,25 +726,7 @@ async function executeContentActions(
             continue;
           }
           console.log(JSON.stringify({ event: "content_action_x_content_action", contentId, status: res.status, ok: !!videoBody.ok, channelId: xChannelId, provider, skillId, attachVideo: true, reason: videoBody.reason }));
-          const branch = videoBody.ok ? "success" : "failed";
-          const nodeId = action.nodeId as string;
-          const resumed = resumeFromNode(graph, nodeId, payload, branch, videoBody.reason);
-          if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
-          if (resumed.actions.length > 0) {
-            const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
-            rateLimited.push(...nested.rateLimited);
-          }
-          for (const wait of resumed.pendingWaits) {
-            const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-            await env.FLOW_DB.prepare(
-              `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            ).bind(
-              crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
-              JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
-              wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
-            ).run();
-          }
+          await recordContentOutcome(action.nodeId as string, videoBody.ok ? "success" : "failed", videoBody.reason);
           continue;
         }
 
@@ -706,28 +747,7 @@ async function executeContentActions(
         continue;
       }
 
-      const branch = body.ok ? "success" : "failed";
-      const nodeId = action.nodeId as string;
-      const resumed = resumeFromNode(graph, nodeId, payload, branch, body.reason);
-      // resumed.nodeLogs[0] is `nodeId`'s own duplicate exit, relabeled direction:"outcome"
-      // (carrying the resolved branch) rather than dropped — everything from index 1 onward is
-      // the genuinely new downstream enter/exit reached by resolving this branch.
-      if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
-      if (resumed.actions.length > 0) {
-        const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
-        rateLimited.push(...nested.rateLimited);
-      }
-      for (const wait of resumed.pendingWaits) {
-        const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-        await env.FLOW_DB.prepare(
-          `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(
-          crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
-          JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
-          wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
-        ).run();
-      }
+      await recordContentOutcome(action.nodeId as string, body.ok ? "success" : "failed", body.reason);
     } else if (action.type === "tiktokContentAction") {
       const interpolate = (s: string) => String(s || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""));
       const operation = (action.operation as string) || "photo-post";
@@ -736,24 +756,7 @@ async function executeContentActions(
         const videoUrl = String(payload?.processed_video_url ?? "");
         if (!videoUrl) {
           console.log(JSON.stringify({ event: "content_action_tiktok_video_post_missing_video", contentId, channelId: action.channelId }));
-          const nodeId = action.nodeId as string;
-          const resumed = resumeFromNode(graph, nodeId, payload, "failed", "missing_video: no upstream Video Action produced a video to post");
-          if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
-          if (resumed.actions.length > 0) {
-            const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
-            rateLimited.push(...nested.rateLimited);
-          }
-          for (const wait of resumed.pendingWaits) {
-            const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-            await env.FLOW_DB.prepare(
-              `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            ).bind(
-              crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
-              JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
-              wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
-            ).run();
-          }
+          await recordContentOutcome(action.nodeId as string, "failed", "missing_video: no upstream Video Action produced a video to post");
           continue;
         }
         const rawPrompts = (action.prompts as Record<string, string>) || {};
@@ -779,25 +782,7 @@ async function executeContentActions(
           continue;
         }
 
-        const branch = respBody.ok ? "success" : "failed";
-        const nodeId = action.nodeId as string;
-        const resumed = resumeFromNode(graph, nodeId, payload, branch, respBody.reason);
-        if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
-        if (resumed.actions.length > 0) {
-          const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
-          rateLimited.push(...nested.rateLimited);
-        }
-        for (const wait of resumed.pendingWaits) {
-          const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-          await env.FLOW_DB.prepare(
-            `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          ).bind(
-            crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
-            JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
-            wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
-          ).run();
-        }
+        await recordContentOutcome(action.nodeId as string, respBody.ok ? "success" : "failed", respBody.reason);
         continue;
       }
 
@@ -830,25 +815,7 @@ async function executeContentActions(
         continue;
       }
 
-      const branch = respBody.ok ? "success" : "failed";
-      const nodeId = action.nodeId as string;
-      const resumed = resumeFromNode(graph, nodeId, payload, branch, respBody.reason);
-      if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
-      if (resumed.actions.length > 0) {
-        const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
-        rateLimited.push(...nested.rateLimited);
-      }
-      for (const wait of resumed.pendingWaits) {
-        const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-        await env.FLOW_DB.prepare(
-          `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(
-          crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
-          JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
-          wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
-        ).run();
-      }
+      await recordContentOutcome(action.nodeId as string, respBody.ok ? "success" : "failed", respBody.reason);
     } else if (action.type === "youtubeContentAction") {
       const { url, body } = youtubeActionRequest({ env, action, channelId, contentId, flowId, payload });
       const res = await fetch(url, {
@@ -864,25 +831,7 @@ async function executeContentActions(
         continue;
       }
 
-      const branch = respBody.ok ? "success" : "failed";
-      const nodeId = action.nodeId as string;
-      const resumed = resumeFromNode(graph, nodeId, payload, branch, respBody.reason);
-      if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
-      if (resumed.actions.length > 0) {
-        const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
-        rateLimited.push(...nested.rateLimited);
-      }
-      for (const wait of resumed.pendingWaits) {
-        const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-        await env.FLOW_DB.prepare(
-          `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(
-          crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
-          JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
-          wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
-        ).run();
-      }
+      await recordContentOutcome(action.nodeId as string, respBody.ok ? "success" : "failed", respBody.reason);
     } else if (action.type === "youtubeCondition") {
       // 同步执行：videos.list 是一次几百毫秒的读调用，不像 videoCondition 的人脸检测需要
       // 拉视频跑容器，所以不进队列、不写 content_flow_pending。
@@ -919,23 +868,7 @@ async function executeContentActions(
       // 别的地方留下"为什么 failed"。
       console.log(JSON.stringify({ event: "content_condition_youtube", contentId, flowId: flowId || null, nodeId, branch: outcome.branch, ok: resp.ok, withAuthor, logic: conditionLogic === CONDITION_LOGIC_OR ? "or" : "and", reason: outcome.failureReason || resp.reason || null }));
 
-      const resumed = resumeFromNode(graph, nodeId, outcome.payload, outcome.branch, outcome.failureReason);
-      if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, outcome.payload);
-      if (resumed.actions.length > 0) {
-        const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, outcome.payload, flowId);
-        rateLimited.push(...nested.rateLimited);
-      }
-      for (const wait of resumed.pendingWaits) {
-        const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-        await env.FLOW_DB.prepare(
-          `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(
-          crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
-          JSON.stringify({ ...outcome.payload, channel_id: channelId }), executeAt, new Date().toISOString(),
-          wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
-        ).run();
-      }
+      await recordContentOutcome(nodeId, outcome.branch, outcome.failureReason, outcome.payload);
     } else if (action.type === "videoAction" || action.type === "videoCondition") {
       // videoCondition shares this whole dispatch path with videoAction: both need the same
       // video (upstream-processed if any, else the original), the same duration cap, the same
@@ -949,23 +882,7 @@ async function executeContentActions(
 
       if (duration > MAX_DURATION_SECONDS) {
         console.log(JSON.stringify({ event: "content_action_video_action_duration_exceeded", contentId, duration, actionType: action.type }));
-        const resumed = resumeFromNode(graph, nodeId, payload, "failed", `duration_exceeded: ${duration}s exceeds the ${MAX_DURATION_SECONDS}s limit`);
-        if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
-        if (resumed.actions.length > 0) {
-          const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
-          rateLimited.push(...nested.rateLimited);
-        }
-        for (const wait of resumed.pendingWaits) {
-          const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-          await env.FLOW_DB.prepare(
-            `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          ).bind(
-            crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
-            JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
-            wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
-          ).run();
-        }
+        await recordContentOutcome(nodeId, "failed", `duration_exceeded: ${duration}s exceeds the ${MAX_DURATION_SECONDS}s limit`);
         continue;
       }
 
@@ -989,23 +906,7 @@ async function executeContentActions(
 
       if (!videoUrl) {
         console.log(JSON.stringify({ event: "content_action_video_action_no_video", contentId, actionType: action.type }));
-        const resumed = resumeFromNode(graph, nodeId, payload, "failed", "missing_video: the content has no downloadable video URL");
-        if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, flowId || "", contentId, tenantId, env, payload);
-        if (resumed.actions.length > 0) {
-          const nested = await executeContentActions(graph, resumed.actions, contentId, channelId, tenantId, env, payload, flowId);
-          rateLimited.push(...nested.rateLimited);
-        }
-        for (const wait of resumed.pendingWaits) {
-          const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-          await env.FLOW_DB.prepare(
-            `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          ).bind(
-            crypto.randomUUID(), flowId || "", wait.nodeId, contentId, Number(tenantId),
-            JSON.stringify({ ...payload, channel_id: channelId }), executeAt, new Date().toISOString(),
-            wait.awaitingEvent || "", wait.conditions ? JSON.stringify(wait.conditions) : ""
-          ).run();
-        }
+        await recordContentOutcome(nodeId, "failed", "missing_video: the content has no downloadable video URL");
         continue;
       }
 
@@ -1162,18 +1063,24 @@ app.post("/internal/video-action/resume", async (c) => {
 
   // A videoCondition that content measured fine but whose threshold sent it down "failed" is a
   // rule outcome, not an error — content supplies no reason there, and none is invented.
-  const resumed = resumeFromNode(graph, row.node_id, payload, effectiveBranch, reason);
-  if (resumed.nodeLogs.length > 0) await emitContentNodeLogs(resumed.nodeLogs, row.flow_id, row.content_id, String(row.tenant_id), c.env, payload);
-  if (resumed.actions.length > 0) {
-    await executeContentActions(graph, resumed.actions, row.content_id, String(payload.channel_id ?? ""), String(row.tenant_id), c.env, payload, row.flow_id);
-  }
-  for (const wait of resumed.pendingWaits) {
-    const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-    await c.env.FLOW_DB.prepare(
-      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(crypto.randomUUID(), row.flow_id, wait.nodeId, row.content_id, row.tenant_id, JSON.stringify(payload), executeAt, new Date().toISOString(), wait.awaitingEvent || "").run();
-  }
+  //
+  // 被解析的这行 awaiting_event="video_action_complete"，其 conditions 列永远为空——它是
+  // videoAction 派发时写的作业行，不是 waitForEvent 的条件快照，而且 videoAction/videoCondition
+  // 的 outcome 本身就是解析结果（分支由测量值 + 节点阈值决定），user 域式的 conditionsPass
+  // 门禁在这里语义上不适用，所以刻意不加条件检查。下游若走到新的 waitForEvent，其快照由
+  // recordBranchOutcome 统一写入。
+  await recordBranchOutcome(c.env, graph, row.node_id, payload, effectiveBranch, reason, {
+    table: "content_flow_pending",
+    subjectColumn: "content_id",
+    subjectId: row.content_id,
+    tenantId: row.tenant_id,
+    flowId: row.flow_id,
+    storedPayload: JSON.stringify(payload),
+    emitLogs: (logs) => emitContentNodeLogs(logs, row.flow_id, row.content_id, String(row.tenant_id), c.env, payload),
+    runActions: async (resumedActions) => {
+      await executeContentActions(graph, resumedActions, row.content_id, String(payload.channel_id ?? ""), String(row.tenant_id), c.env, payload, row.flow_id);
+    },
+  });
 
   return c.json({ ok: true });
 });
@@ -1777,13 +1684,16 @@ export default {
               // Stash channelId inside the stored payload (under channel_id) — content_flow_pending
               // has no channel_id column of its own, and the resume path in scheduled() (Task 6)
               // needs the source channel to execute repost/xContentAction once the wait elapses.
+              // condition_logic 与 conditions 同源快照一起写（migrations/0017）——此前只写
+              // conditions，OR 组在 sweep 解析时会被错当成 AND。
               await env.FLOW_DB.prepare(
-                `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions, condition_logic)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
               ).bind(
                 crypto.randomUUID(), flow.id, wait.nodeId, contentId, tenantId,
                 JSON.stringify(matchPayload), executeAt, new Date().toISOString(), wait.awaitingEvent || "",
-                wait.conditions ? JSON.stringify(wait.conditions) : ""
+                wait.conditions ? JSON.stringify(wait.conditions) : "",
+                wait.conditionLogic || ""
               ).run();
               console.log(JSON.stringify({ event: "content_flow_wait_scheduled", flowId: flow.id, nodeId: wait.nodeId, executeAt }));
             }
@@ -1948,10 +1858,37 @@ export default {
     // block — the two sweeps are independent (different tables), so order between them doesn't
     // matter functionally.
     const contentPending = await env.FLOW_DB.prepare(
-      `SELECT id, flow_id, node_id, content_id, tenant_id, payload, awaiting_event, retry_action, retry_count FROM content_flow_pending WHERE execute_at <= ?`
+      `SELECT id, flow_id, node_id, content_id, tenant_id, payload, awaiting_event, conditions, condition_logic, retry_action, retry_count FROM content_flow_pending WHERE execute_at <= ?`
     )
       .bind(now)
-      .all<{ id: string; flow_id: string; node_id: string; content_id: string; tenant_id: string; payload: string; awaiting_event: string; retry_action: string; retry_count: number }>();
+      .all<{ id: string; flow_id: string; node_id: string; content_id: string; tenant_id: string; payload: string; awaiting_event: string; conditions: string; condition_logic: string; retry_action: string; retry_count: number }>();
+
+    // content sweep 三个分支解析点（xVideoStatusPoll 兑现、重试耗尽、到期 claim）共用的
+    // recordBranchOutcome 绑定：storedPayload 直接复用行里已有的原串（channel_id 早已混在
+    // 里面），嵌套 rateLimited 落成 retry_action 行——与改动前各点内联的行为逐字一致。
+    const contentSweepOps = (
+      row: { flow_id: string; content_id: string; tenant_id: string; payload: string },
+      graph: FlowGraph,
+      payload: Record<string, unknown>,
+      channelId: string
+    ): OutcomeEpilogueOps => ({
+      table: "content_flow_pending",
+      subjectColumn: "content_id",
+      subjectId: row.content_id,
+      tenantId: row.tenant_id,
+      flowId: row.flow_id,
+      storedPayload: row.payload,
+      emitLogs: (logs) => emitContentNodeLogs(logs, row.flow_id, row.content_id, row.tenant_id, env, payload),
+      runActions: async (resumedActions) => {
+        const { rateLimited: nestedRateLimited } = await executeContentActions(graph, resumedActions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
+        for (const rl of nestedRateLimited) {
+          await env.FLOW_DB.prepare(
+            `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+             VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 0)`
+          ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, row.payload, rl.retryAt, now, JSON.stringify(rl.action)).run();
+        }
+      },
+    });
 
     for (const row of contentPending.results) {
       try {
@@ -2007,24 +1944,7 @@ export default {
               : statusBody.pending ? `video_processing_timeout: X still processing after ${row.retry_count + 1} polls`
               : statusBody.rateLimited ? `rate_limit_exhausted: still rate limited after ${row.retry_count + 1} retries`
               : statusBody.reason;
-            const resolved = resumeFromNode(graph, action.nodeId as string, payload, branch, failureReason);
-            if (resolved.nodeLogs.length > 0) await emitContentNodeLogs(resolved.nodeLogs, row.flow_id, row.content_id, row.tenant_id, env, payload);
-            if (resolved.actions.length > 0) {
-              const { rateLimited: nestedRateLimited } = await executeContentActions(graph, resolved.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
-              for (const rl of nestedRateLimited) {
-                await env.FLOW_DB.prepare(
-                  `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
-                   VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 0)`
-                ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, row.payload, rl.retryAt, now, JSON.stringify(rl.action)).run();
-              }
-            }
-            for (const wait of resolved.pendingWaits) {
-              const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-              await env.FLOW_DB.prepare(
-                `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-              ).bind(crypto.randomUUID(), row.flow_id, wait.nodeId, row.content_id, row.tenant_id, row.payload, executeAt, now, wait.awaitingEvent || "").run();
-            }
+            await recordBranchOutcome(env, graph, action.nodeId as string, payload, branch, failureReason, contentSweepOps(row, graph, payload, channelId));
             await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE id = ?`).bind(row.id).run();
             console.log(JSON.stringify({ event: statusBody.pending ? "x_video_poll_exhausted" : "x_video_poll_resolved", id: row.id, branch }));
             continue;
@@ -2043,28 +1963,7 @@ export default {
               // branch downstream of the retried action, mirroring the resolved-branch handling
               // below (lines ~983-1004) — mustn't just drop the row per flow/CLAUDE.md's
               // "Rate limit重试耗尽后才走failed分支" rule.
-              const failedResult = resumeFromNode(graph, action.nodeId as string, payload, "failed", `rate_limit_exhausted: still rate limited after ${row.retry_count + 1} retries`);
-              // failedResult.nodeLogs[0] is the retried action node's own duplicate exit,
-              // relabeled direction:"outcome" (carrying the resolved branch) rather than dropped —
-              // everything from index 1 onward is the genuinely new downstream enter/exit reached
-              // by resolving the "failed" branch.
-              if (failedResult.nodeLogs.length > 0) await emitContentNodeLogs(failedResult.nodeLogs, row.flow_id, row.content_id, row.tenant_id, env, payload);
-              if (failedResult.actions.length > 0) {
-                const { rateLimited: nestedRateLimited } = await executeContentActions(graph, failedResult.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
-                for (const rl of nestedRateLimited) {
-                  await env.FLOW_DB.prepare(
-                    `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
-                     VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 0)`
-                  ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, row.payload, rl.retryAt, now, JSON.stringify(rl.action)).run();
-                }
-              }
-              for (const wait of failedResult.pendingWaits) {
-                const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-                await env.FLOW_DB.prepare(
-                  `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-                ).bind(crypto.randomUUID(), row.flow_id, wait.nodeId, row.content_id, row.tenant_id, row.payload, executeAt, now, wait.awaitingEvent || "").run();
-              }
+              await recordBranchOutcome(env, graph, action.nodeId as string, payload, "failed", `rate_limit_exhausted: still rate limited after ${row.retry_count + 1} retries`, contentSweepOps(row, graph, payload, channelId));
               console.log(JSON.stringify({ event: "content_flow_retry_exhausted", id: row.id, retryCount: row.retry_count }));
             }
             await env.FLOW_DB.prepare(`DELETE FROM content_flow_pending WHERE id = ?`).bind(row.id).run();
@@ -2094,28 +1993,27 @@ export default {
         const isTimedOutVideoJob =
           (timedOutNode?.type === "action" && timedOutNode?.data?.actionType === "videoAction") ||
           timedOutNode?.type === "videoCondition";
-        const branch = isTimedOutVideoJob ? "failed" : (row.awaiting_event ? "no" : undefined);
-        const result = resumeFromNode(graph, row.node_id, payload, branch);
-        if (result.nodeLogs.length > 0) await emitContentNodeLogs(result.nodeLogs, row.flow_id, row.content_id, row.tenant_id, env, payload);
-
-        if (result.actions.length > 0) {
-          const channelId = String(payload.channel_id ?? "");
-          const { rateLimited } = await executeContentActions(graph, result.actions, row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
-          for (const rl of rateLimited) {
-            await env.FLOW_DB.prepare(
-              `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
-               VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 0)`
-            ).bind(crypto.randomUUID(), row.flow_id, row.content_id, row.tenant_id, row.payload, rl.retryAt, now, JSON.stringify(rl.action)).run();
+        let branch: string | undefined;
+        if (isTimedOutVideoJob) {
+          branch = "failed";
+        } else if (row.awaiting_event) {
+          // content 域没有事件驱动的 wait 解析（content.created 每次都带全新的 content_id，
+          // 不存在"同一主体的后续事件"能像 user 域那样按 user_id 命中 pending 行），所以
+          // sweep 到期就是 waitForEvent 条件快照的唯一求值点：对行里存的流 payload props
+          // 求值，通过走 "yes"，不通过走 "no"。快照语义与 user 域的 queue 解析逐字一致
+          // （条件与 AND/OR 逻辑同源快照、不看 live graph；坏 JSON 降级为"没有条件"而不是
+          // 抛出让整个 sweep 回合报错；空集落在 AND/OR 的恒等元上——AND 放行、OR 恒不过）。
+          // 此前这里硬编码 "no"，conditions 列写了却没人读。
+          let snapshotConditions: unknown = [];
+          try {
+            snapshotConditions = row.conditions ? JSON.parse(row.conditions) : [];
+          } catch {
+            snapshotConditions = [];
           }
+          branch = conditionsPass(snapshotConditions, row.condition_logic, payload) ? "yes" : "no";
         }
-
-        for (const wait of result.pendingWaits) {
-          const executeAt = new Date(Date.now() + wait.durationMs).toISOString();
-          await env.FLOW_DB.prepare(
-            `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          ).bind(crypto.randomUUID(), row.flow_id, wait.nodeId, row.content_id, row.tenant_id, row.payload, executeAt, now, wait.awaitingEvent || "").run();
-        }
+        const channelId = String(payload.channel_id ?? "");
+        await recordBranchOutcome(env, graph, row.node_id, payload, branch, undefined, contentSweepOps(row, graph, payload, channelId));
       } catch (e) {
         console.error(JSON.stringify({ event: "content_flow_pending_error", id: row.id, error: String(e) }));
       }

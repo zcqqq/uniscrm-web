@@ -33,7 +33,9 @@ beforeAll(async () => {
        graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}',
        status TEXT NOT NULL DEFAULT 'draft',
        created_at TEXT NOT NULL,
-       updated_at TEXT NOT NULL
+       updated_at TEXT NOT NULL,
+       domain TEXT NOT NULL DEFAULT 'user',
+       trigger_count INTEGER
      )`
   ).run();
   await env.FLOW_DB.prepare(
@@ -49,7 +51,8 @@ beforeAll(async () => {
        conditions TEXT NOT NULL DEFAULT '',
        retry_action TEXT NOT NULL DEFAULT '',
        retry_count INTEGER NOT NULL DEFAULT 0,
-       created_at TEXT NOT NULL
+       created_at TEXT NOT NULL,
+       condition_logic TEXT NOT NULL DEFAULT ''
      )`
   ).run();
 });

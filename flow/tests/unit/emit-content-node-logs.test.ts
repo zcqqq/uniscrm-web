@@ -33,7 +33,7 @@ describe("emitContentNodeLogs: content-domain execution now writes node logs", (
          tenant_id INTEGER NOT NULL, payload TEXT NOT NULL, execute_at TEXT NOT NULL,
          awaiting_event TEXT NOT NULL DEFAULT '', conditions TEXT NOT NULL DEFAULT '',
          retry_action TEXT NOT NULL DEFAULT '', retry_count INTEGER NOT NULL DEFAULT 0,
-         created_at TEXT NOT NULL
+         created_at TEXT NOT NULL, condition_logic TEXT NOT NULL DEFAULT ''
        )`
     ).run();
     await env.FLOW_DB.prepare(

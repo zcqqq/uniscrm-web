@@ -1,12 +1,4 @@
 import type { Env } from "./types";
-import type { TrendSource } from "./trend/sources/interface";
-import { getTwitterConfig, getTikTokConfig, getDouyinConfig } from "./trend/config";
-import { TwitterTrendSource } from "./trend/sources/twitter";
-import { TikTokTrendSource } from "./trend/sources/tiktok";
-import { DouyinTrendSource } from "./trend/sources/douyin";
-import { Aggregator } from "./trend/aggregator";
-import { TrendCache } from "./trend/storage/cache";
-import { TrendVectorStore } from "./trend/storage/vectorize";
 import { XTokenService } from "./services/x-token";
 import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
@@ -18,14 +10,13 @@ import { clearChannelFrozen } from "./services/x-freeze";
 export async function handleCron(env: Env): Promise<void> {
   // The unfreeze probe runs BEFORE the rest: a channel that recovered this hour should be
   // polled and refreshed in the same tick rather than waiting another hour. Its own failure is
-  // swallowed here — everything below (trends, token refresh, polling, WebSub renewal) is
+  // swallowed here — everything below (token refresh, polling, WebSub renewal) is
   // independent of it, and Promise.allSettled would not cover a throw from this awaited call.
   await handleFrozenProbe(env).catch((e) => {
     console.error(JSON.stringify({ event: "x_freeze_probe_sweep_error", error: String(e) }));
   });
 
   await Promise.allSettled([
-    handleTrendAggregation(env),
     handleTokenRefresh(env),
     handlePolling(env),
     handleYouTubeRenewal(env),
@@ -74,58 +65,6 @@ export async function handleFrozenProbe(env: Env): Promise<void> {
       console.error(JSON.stringify({ event: "x_freeze_probe_error", channel_id: row.id, error: String(e) }));
     }
   }
-}
-
-async function handleTrendAggregation(env: Env): Promise<void> {
-  const sources: TrendSource[] = [];
-
-  const twitterConfig = getTwitterConfig();
-  if (twitterConfig && env.X_BEARER_TOKEN) {
-    sources.push(new TwitterTrendSource(env.X_BEARER_TOKEN));
-  }
-
-  const tiktokConfig = getTikTokConfig();
-  if (tiktokConfig && env.FIRECRAWL_API_KEY && env.TIKTOK_COOKIE) {
-    sources.push(new TikTokTrendSource(env.FIRECRAWL_API_KEY, env.TIKTOK_COOKIE, tiktokConfig.locations, tiktokConfig.categories));
-  }
-
-  const douyinConfig = getDouyinConfig();
-  if (douyinConfig && env.FIRECRAWL_API_KEY && env.DOUYIN_COOKIE) {
-    sources.push(new DouyinTrendSource(env.FIRECRAWL_API_KEY, env.DOUYIN_COOKIE, douyinConfig.categories));
-  }
-
-  if (sources.length === 0) return;
-
-  const aggregator = new Aggregator(sources);
-  const cache = new TrendCache(env.KV);
-  const vectorStore = new TrendVectorStore(env.VECTORIZE, env.AI);
-
-  const { items, failedPlatforms } = await aggregator.fetchAll();
-
-  if (failedPlatforms.length > 0) {
-    console.log(JSON.stringify({ event: "link.fetch_partial_failure", failedPlatforms, successCount: items.length }));
-  }
-
-  await cache.setLatest(items);
-
-  const byKey = new Map<string, typeof items>();
-  for (const item of items) {
-    const key = `${item.platform}:${item.location}`;
-    const list = byKey.get(key) ?? [];
-    list.push(item);
-    byKey.set(key, list);
-  }
-  for (const [key, platformItems] of byKey) {
-    const [platform, location] = key.split(":");
-    await cache.setPlatformLatest(platform, location, platformItems);
-  }
-
-  await vectorStore.upsertTrends(items);
-
-  const retentionDays = parseInt(env.TREND_RETENTION_DAYS || "30", 10);
-  await vectorStore.cleanupOld(retentionDays);
-
-  console.log(JSON.stringify({ event: "link.cron_complete", totalItems: items.length, platforms: [...new Set(items.map((i) => i.platform))] }));
 }
 
 async function handleTokenRefresh(env: Env): Promise<void> {

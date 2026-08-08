@@ -91,8 +91,8 @@ describe("R2-SQL-calling routes fail loudly (500, naming R2_CATALOG_TOKEN) inste
             first: async () =>
               sql.includes("FROM sessions")
                 ? { member_id: "m1", tenant_id: 7, email: "m1@example.com", language: "en" }
-                : sql.startsWith("SELECT id, sql_query")
-                  ? { id: "seg-1", sql_query: "SELECT 1", conditions_json: "{}" }
+                : sql.includes("FROM segments")
+                  ? { id: "seg-1", conditions_json: "{}" }
                   : null,
             all: async () => ({ results: [] }),
             run: async () => ({}),
@@ -123,7 +123,7 @@ describe("R2-SQL-calling routes fail loudly (500, naming R2_CATALOG_TOKEN) inste
     vi.stubGlobal("fetch", fetchMock);
 
     // Bypass the AI-backed NL parser (not this guard's concern) by hitting compute with a
-    // pre-stored, already-valid sql_query/conditions_json instead of preview.
+    // pre-stored, already-valid conditions_json instead of preview.
     const env = baseEnv({
       R2_CATALOG_TOKEN: "tok-1",
       WEB_DB: {
@@ -132,8 +132,8 @@ describe("R2-SQL-calling routes fail loudly (500, naming R2_CATALOG_TOKEN) inste
             first: async () =>
               sql.includes("FROM sessions")
                 ? { member_id: "m1", tenant_id: 7, email: "m1@example.com", language: "en" }
-                : sql.startsWith("SELECT id, sql_query")
-                  ? { id: "seg-1", sql_query: "SELECT id FROM uniscrm.user", conditions_json: "{\"logic\":\"AND\",\"conditions\":[]}" }
+                : sql.includes("FROM segments")
+                  ? { id: "seg-1", conditions_json: "{\"logic\":\"AND\",\"conditions\":[]}" }
                   : null,
             all: async () => ({ results: [] }),
             run: async () => ({}),

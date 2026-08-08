@@ -128,6 +128,77 @@ describe("latestRowsSql", () => {
   });
 });
 
+// Batch F widenings: an aliased dedup subquery with a JOIN (insight-segment's shape) and
+// aggregates over the deduped rows (analytics' snapshot shape).
+describe("latestRowsSql — join over the aliased dedup subquery", () => {
+  const joinOpts = {
+    table: "uniscrm.user",
+    columns: ["id", "channel_id", "source_user_id", "is_deleted", "updated_at"],
+    partitionBy: ["channel_id", "source_user_id"],
+    where: ["tenant_id = 7"],
+    alias: "u",
+    join: "LEFT JOIN uniscrm.event e ON e.user_id = u.source_user_id AND e.channel_id = u.channel_id AND e.tenant_id = 7",
+    outerSelect: "DISTINCT u.id",
+    outerWhere: ["u.is_deleted = 0"],
+    limit: 10000,
+  };
+
+  it("emits subquery → alias → join → outer WHERE, with the join AFTER the QUALIFY window", () => {
+    const sql = latestRowsSql(joinOpts);
+    const qualifyIdx = sql.indexOf("QUALIFY ROW_NUMBER()");
+    const aliasIdx = sql.indexOf(") u");
+    const joinIdx = sql.indexOf("LEFT JOIN uniscrm.event e");
+    const whereIdx = sql.indexOf("WHERE u.is_deleted = 0");
+    expect(sql.startsWith("SELECT DISTINCT u.id FROM (")).toBe(true);
+    expect(qualifyIdx).toBeGreaterThan(-1);
+    expect(aliasIdx).toBeGreaterThan(qualifyIdx);
+    expect(joinIdx).toBeGreaterThan(aliasIdx);
+    expect(whereIdx).toBeGreaterThan(joinIdx);
+    expect(sql.indexOf("LIMIT 10000")).toBeGreaterThan(whereIdx);
+  });
+
+  it("requires the join clause to carry its own tenant_id predicate (per-side pruning)", () => {
+    expect(() =>
+      latestRowsSql({ ...joinOpts, join: "LEFT JOIN uniscrm.event e ON e.user_id = u.source_user_id" })
+    ).toThrow(/tenant_id/);
+  });
+
+  it("requires an alias when a join is given", () => {
+    expect(() => latestRowsSql({ ...joinOpts, alias: undefined })).toThrow(/alias/);
+  });
+});
+
+describe("latestRowsSql — aggregates over the deduped rows (outerSelect form)", () => {
+  it("puts the aggregate in the outer SELECT so it runs on the QUALIFY window's output", () => {
+    const sql = latestRowsSql({
+      table: "uniscrm.content",
+      columns: ["id", "channel_id", "list_id", "source_content_id", "updated_at", "like_count"],
+      partitionBy: ["channel_id", "list_id", "source_content_id"],
+      where: ["tenant_id = 7"],
+      outerSelect: "SUM(CAST(like_count AS DOUBLE)) as value",
+    });
+    expect(sql.startsWith("SELECT SUM(CAST(like_count AS DOUBLE)) as value FROM (")).toBe(true);
+    expect(sql.indexOf("SUM(")).toBeLessThan(sql.indexOf("QUALIFY ROW_NUMBER()"));
+  });
+
+  it("supports GROUP BY and extra outer FROM sources (cross-joined CTE) after the subquery", () => {
+    const sql = latestRowsSql({
+      table: "uniscrm.content",
+      columns: ["id", "channel_id", "list_id", "source_content_id", "updated_at", "like_count"],
+      partitionBy: ["channel_id", "list_id", "source_content_id"],
+      where: ["tenant_id = 7"],
+      outerSelect: "COUNT(DISTINCT id) as value, like_count as dimension",
+      outerFrom: ", bounds",
+      groupBy: "dimension",
+      orderBy: "dimension",
+    });
+    expect(sql).toContain("), bounds");
+    const groupIdx = sql.indexOf("GROUP BY dimension");
+    expect(groupIdx).toBeGreaterThan(sql.indexOf("), bounds"));
+    expect(sql.indexOf("ORDER BY dimension")).toBeGreaterThan(groupIdx);
+  });
+});
+
 describe("r2Query", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
@@ -160,5 +231,30 @@ describe("r2Query", () => {
     await expect(
       r2Query(ENV, "SELECT id FROM uniscrm.user WHERE tenant_id = 1")
     ).rejects.toThrow(/40010/);
+  });
+
+  it("throws on the Cloudflare envelope failure shape ({success:false, errors}) inside HTTP 200", async () => {
+    // flow's count/node-log queries observed this shape; treating it as "zero rows" is the
+    // silent failure r2Query exists to prevent.
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ success: false, errors: [{ code: 1 }] }), { status: 200 })
+    );
+    await expect(
+      r2Query(ENV, "SELECT id FROM uniscrm.user WHERE tenant_id = 1")
+    ).rejects.toBeInstanceOf(R2SqlError);
+  });
+
+  it("tolerates a single Response instance shared across two callers (test-mock reality)", async () => {
+    // Under mockResolvedValue the SAME Response object serves every caller; r2Query reads via
+    // .clone() so the second read doesn't hit an already-consumed body.
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ success: true, result: { rows: [{ id: "u1" }] } }), { status: 200 })
+    );
+    const [a, b] = await Promise.all([
+      r2Query<{ id: string }>(ENV, "SELECT id FROM uniscrm.user WHERE tenant_id = 1"),
+      r2Query<{ id: string }>(ENV, "SELECT id FROM uniscrm.user WHERE tenant_id = 1"),
+    ]);
+    expect(a).toEqual([{ id: "u1" }]);
+    expect(b).toEqual([{ id: "u1" }]);
   });
 });

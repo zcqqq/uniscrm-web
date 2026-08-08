@@ -29,7 +29,9 @@ describe("insight-segment column derivation matches the pre-refactor literals", 
   });
 
   it("USER_DEDUP_COLUMNS (via generated SQL) — byte-identical projection, same order", () => {
+    // Single-line `SELECT ... FROM` is latestRowsSql's inner-query shape (buildSegmentQuery
+    // composes through shared/r2-sql.ts since Batch F); the frozen column list is unchanged.
     const { sql } = buildSegmentQuery({ logic: "AND", conditions: [] }, getAllFields("en"), 7);
-    expect(sql).toContain(`SELECT ${FROZEN_USER_DEDUP_COLUMNS.join(", ")}\n  FROM uniscrm.user`);
+    expect(sql).toContain(`SELECT ${FROZEN_USER_DEDUP_COLUMNS.join(", ")} FROM uniscrm.user`);
   });
 });

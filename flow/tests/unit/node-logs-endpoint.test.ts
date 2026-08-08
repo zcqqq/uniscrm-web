@@ -70,6 +70,24 @@ describe("queryNodeLogRows", () => {
     const rows = await queryNodeLogRows(baseEnv(), "uniscrm.flow_log", "user_id", 42, "flow-1", "node-1");
     expect(rows).toEqual([]);
   });
+
+  // The route validates too (see the UUID-guard describe below), but the guard also lives at the
+  // query site itself so queryNodeLogRows is safe regardless of caller: a NODE_ID_RE-violating
+  // node id must throw before any R2 request is built.
+  it("throws on a NODE_ID_RE-violating node id without issuing any fetch", async () => {
+    await expect(
+      queryNodeLogRows(baseEnv(), "uniscrm.flow_log", "user_id", 42, "flow-1", "x' OR '1'='1")
+    ).rejects.toThrow(/NODE_ID_RE/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("escapes flow/node ids into the SQL as quoted literals", async () => {
+    fetchMock.mockResolvedValue(mockR2Response([]));
+    await queryNodeLogRows(baseEnv(), "uniscrm.flow_log", "user_id", 42, "flow-1", "t1");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.query).toContain("flow_id = 'flow-1'");
+    expect(body.query).toContain("node_id = 't1'");
+  });
 });
 
 // Handler-level guard: flowId/nodeId route params must look like UUIDs before queryNodeLogRows

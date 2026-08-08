@@ -2,29 +2,40 @@ import { describe, it, expect } from "vitest";
 import { buildSQL, buildSnapshotSQL, buildDimensionRangeSQL } from "../../src/index";
 
 describe("buildSnapshotSQL", () => {
-  it("builds a plain count query with no dimension", () => {
+  it("builds a plain count query with no dimension, aggregating over the QUALIFY-deduped rows", () => {
     const sql = buildSnapshotSQL("uniscrm.user", { measure: "count" }, "1");
-    expect(sql).toContain("SELECT COUNT(DISTINCT id) as value");
+    expect(sql).toContain("SELECT COUNT(DISTINCT id) as value FROM (");
     expect(sql).toContain("FROM uniscrm.user");
     expect(sql).toContain("WHERE tenant_id = 1");
+    expect(sql).toContain(
+      "QUALIFY ROW_NUMBER() OVER (PARTITION BY channel_id, source_user_id ORDER BY updated_at DESC) = 1"
+    );
     expect(sql).not.toContain("GROUP BY");
   });
 
-  it("builds an avg query against a measure field", () => {
+  it("builds an avg query against a measure field, over deduped rows", () => {
     const sql = buildSnapshotSQL("uniscrm.content", { measure: "avg", measure_field: "like_count" }, "1");
     expect(sql).toContain("AVG(CAST(like_count AS DOUBLE)) as value");
     expect(sql).toContain("FROM uniscrm.content");
+    // content dedups on the same key its compaction uses (list_id included)
+    expect(sql).toContain(
+      "QUALIFY ROW_NUMBER() OVER (PARTITION BY channel_id, list_id, source_content_id ORDER BY updated_at DESC) = 1"
+    );
+    // the aggregate must run on the dedup window's OUTPUT — outside the subquery
+    expect(sql.indexOf("AVG(")).toBeLessThan(sql.indexOf("QUALIFY"));
   });
 
-  it("builds a sum query against a measure field", () => {
+  it("builds a sum query against a measure field, over deduped rows", () => {
     const sql = buildSnapshotSQL("uniscrm.content", { measure: "sum", measure_field: "bookmark_count" }, "1");
     expect(sql).toContain("SUM(CAST(bookmark_count AS DOUBLE)) as value");
+    expect(sql).toContain("QUALIFY ROW_NUMBER()");
   });
 
   it("groups by a plain dimension ordered by value desc", () => {
     const sql = buildSnapshotSQL("uniscrm.content", { measure: "count", dimension: "content_type" }, "1");
     expect(sql).toContain(", content_type as dimension");
-    expect(sql).toContain("GROUP BY content_type ORDER BY value DESC");
+    expect(sql).toContain("GROUP BY content_type");
+    expect(sql).toContain("ORDER BY value DESC");
   });
 
   it("groups by numeric buckets when provided", () => {
@@ -36,7 +47,8 @@ describe("buildSnapshotSQL", () => {
     expect(sql).toContain("WHEN like_count < 100 THEN '0-100'");
     expect(sql).toContain("WHEN like_count < 1000 THEN '100-1000'");
     expect(sql).toContain("ELSE '1000+'");
-    expect(sql).toContain("GROUP BY dimension ORDER BY dimension");
+    expect(sql).toContain("GROUP BY dimension");
+    expect(sql).toContain("ORDER BY dimension");
   });
 
   it("groups by a default 10-bucket equal-width split when mode is default", () => {
@@ -46,10 +58,11 @@ describe("buildSnapshotSQL", () => {
       "1"
     );
     expect(sql).toContain("WITH bounds AS (SELECT MIN(like_count) as mn, MAX(like_count) as mx FROM uniscrm.content WHERE tenant_id = 1 )");
-    expect(sql).toContain("FROM uniscrm.content, bounds");
+    expect(sql).toContain("), bounds");
     expect(sql).toContain("WHEN like_count < (bounds.mn + (bounds.mx - bounds.mn) * 1 / 10) THEN");
     expect(sql).toContain("ELSE CAST(CAST((bounds.mn + (bounds.mx - bounds.mn) * 9 / 10) AS BIGINT) AS VARCHAR) || '+'");
-    expect(sql).toContain("GROUP BY dimension ORDER BY dimension");
+    expect(sql).toContain("GROUP BY dimension");
+    expect(sql).toContain("ORDER BY dimension");
   });
 
   it("default mode's bounds CTE includes the same filter clauses as the outer query", () => {
@@ -74,13 +87,52 @@ describe("buildSnapshotSQL", () => {
     expect(sql).not.toContain("WHEN like_count < 100 THEN");
   });
 
-  it("applies filter clauses", () => {
+  it("applies filter clauses AFTER the dedup window (current-state semantics, no row resurrection)", () => {
     const sql = buildSnapshotSQL(
       "uniscrm.content",
       { measure: "count", filters: [{ field: "content_type", operator: "=", value: "TWEET" }] },
       "1"
     );
-    expect(sql).toContain("AND content_type = 'TWEET'");
+    const filterIdx = sql.indexOf("WHERE content_type = 'TWEET'");
+    expect(filterIdx).toBeGreaterThan(sql.indexOf("QUALIFY"));
+    // the pre-QUALIFY WHERE stays tenant-only
+    expect(sql).toContain("WHERE tenant_id = 1\nQUALIFY");
+  });
+
+  it("escapes a filter value containing a single quote", () => {
+    const sql = buildSnapshotSQL(
+      "uniscrm.content",
+      { measure: "count", filters: [{ field: "content_type", operator: "=", value: "TWE'ET; DROP TABLE x --" }] },
+      "1"
+    );
+    expect(sql).toContain("'TWE''ET; DROP TABLE x --'");
+  });
+
+  it("rejects a filter field that is not a real column of the target table", () => {
+    expect(() =>
+      buildSnapshotSQL(
+        "uniscrm.content",
+        { measure: "count", filters: [{ field: "1=1; --", operator: "=", value: "x" }] },
+        "1"
+      )
+    ).toThrow(/not an allowed column/);
+    // a real USER column is still not a CONTENT column
+    expect(() =>
+      buildSnapshotSQL(
+        "uniscrm.content",
+        { measure: "count", filters: [{ field: "followers_count", operator: ">", value: "1" }] },
+        "1"
+      )
+    ).toThrow(/not an allowed column/);
+  });
+
+  it("rejects a dimension or measure_field outside the column allowlist", () => {
+    expect(() =>
+      buildSnapshotSQL("uniscrm.user", { measure: "count", dimension: "pg_sleep(1)" }, "1")
+    ).toThrow(/not an allowed column/);
+    expect(() =>
+      buildSnapshotSQL("uniscrm.user", { measure: "sum", measure_field: "evil()" }, "1")
+    ).toThrow(/not an allowed column/);
   });
 });
 
@@ -88,7 +140,8 @@ describe("buildSnapshotSQL datetime dimension granularity", () => {
   it("groups by raw datetime value when granularity is unset (regression check)", () => {
     const sql = buildSnapshotSQL("uniscrm.content", { measure: "count", dimension: "source_created_at" }, "1");
     expect(sql).toContain(", source_created_at as dimension");
-    expect(sql).toContain("GROUP BY source_created_at ORDER BY value DESC");
+    expect(sql).toContain("GROUP BY source_created_at");
+    expect(sql).toContain("ORDER BY value DESC");
   });
 
   it("truncates to day when dimension_date_granularity is 'day'", () => {
@@ -98,7 +151,8 @@ describe("buildSnapshotSQL datetime dimension granularity", () => {
       "1"
     );
     expect(sql).toContain(", DATE_TRUNC('day', source_created_at) as dimension");
-    expect(sql).toContain("GROUP BY dimension ORDER BY dimension");
+    expect(sql).toContain("GROUP BY dimension");
+    expect(sql).toContain("ORDER BY dimension");
   });
 
   it("truncates to quarter when dimension_date_granularity is 'quarter'", () => {
@@ -133,12 +187,14 @@ describe("buildSnapshotSQL datetime dimension granularity", () => {
 
 describe("buildSQL event dimension datetime granularity", () => {
   it("truncates the event dimension to week", () => {
+    // event_time, not source_created_at: the event table's columns are its fixed identity/time
+    // fields plus the eventProps union — and the dimension must be one of them now.
     const sql = buildSQL(
       "event",
-      { event_type: "post.create", measure: "count", dimension: "source_created_at", granularity: "day", dimension_date_granularity: "week" },
+      { event_type: "post.create", measure: "count", dimension: "event_time", granularity: "day", dimension_date_granularity: "week" },
       "1"
     );
-    expect(sql).toContain(", DATE_TRUNC('week', source_created_at) as dimension");
+    expect(sql).toContain(", DATE_TRUNC('week', event_time) as dimension");
     expect(sql).toContain("GROUP BY period, dimension ORDER BY period");
   });
 });
@@ -172,11 +228,22 @@ describe("buildSQL interval filters", () => {
   });
 
   it("has value / no value / between operators behave the same as other modes", () => {
-    const hasValue = buildSQL("interval", { event_type_a: "a", event_type_b: "b", filters: [{ field: "x", operator: "has value", value: "" }] }, "1");
-    expect(hasValue).toContain("AND x IS NOT NULL");
+    const hasValue = buildSQL("interval", { event_type_a: "a", event_type_b: "b", filters: [{ field: "message_text", operator: "has value", value: "" }] }, "1");
+    expect(hasValue).toContain("AND message_text IS NOT NULL");
 
-    const between = buildSQL("interval", { event_type_a: "a", event_type_b: "b", filters: [{ field: "x", operator: "between", value: "1", value2: "9" }] }, "1");
-    expect(between).toContain("AND x BETWEEN 1 AND 9");
+    const between = buildSQL("interval", { event_type_a: "a", event_type_b: "b", filters: [{ field: "followers_count", operator: "between", value: "1", value2: "9" }] }, "1");
+    expect(between).toContain("AND followers_count BETWEEN 1 AND 9");
+  });
+
+  it("rejects a filter field that is not an event column", () => {
+    expect(() =>
+      buildSQL("interval", { event_type_a: "a", event_type_b: "b", filters: [{ field: "x) OR (1=1", operator: "=", value: "1" }] }, "1")
+    ).toThrow(/not an allowed column/);
+  });
+
+  it("escapes event-type values instead of interpolating them raw", () => {
+    const sql = buildSQL("interval", { event_type_a: "a'b", event_type_b: "b" }, "1");
+    expect(sql).toContain("'a''b'");
   });
 
   it("omits filter clauses entirely when none are provided (regression check)", () => {
@@ -288,7 +355,12 @@ describe("buildDimensionRangeSQL", () => {
   it("maps mode to the correct table", () => {
     expect(buildDimensionRangeSQL("user", "followers_count", "1")).toContain("FROM uniscrm.user");
     expect(buildDimensionRangeSQL("content", "source_created_at", "1")).toContain("FROM uniscrm.content");
-    expect(buildDimensionRangeSQL("event", "source_created_at", "1")).toContain("FROM uniscrm.event");
+    expect(buildDimensionRangeSQL("event", "event_time", "1")).toContain("FROM uniscrm.event");
+  });
+
+  it("rejects a dimension that is not a real column of the mode's table", () => {
+    expect(() => buildDimensionRangeSQL("event", "source_created_at", "1")).toThrow(/not an allowed column/);
+    expect(() => buildDimensionRangeSQL("user", "mn) FROM x; --", "1")).toThrow(/not an allowed column/);
   });
 
   it("selects MIN/MAX aliased as mn/mx, scoped by tenant", () => {

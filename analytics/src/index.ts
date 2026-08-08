@@ -4,6 +4,14 @@ import { Container } from "@cloudflare/containers";
 import type { Env, IntervalResults, AnalyticsReport } from "./types";
 import { computeStats } from "./services/stats";
 import { resolveAuthMe, resolveSession, spaLoginGuard } from "../../shared/auth";
+import { latestRowsSql, sqlIdent, sqlInt, sqlNum, sqlStr } from "../../shared/r2-sql";
+import {
+  CONTENT_R2_KEY_FIELDS,
+  columnNameFor,
+  contentR2ValueColumns,
+  eventValueColumns,
+  userR2SelectColumns,
+} from "../../metadata/columns";
 
 export class AnalyticsContainer extends Container {
   defaultPort = 8080;
@@ -257,7 +265,14 @@ app.get("/api/dimension-range", async (c) => {
     return c.json({ error: "Invalid mode or dimension" }, 400);
   }
 
-  const sql = buildDimensionRangeSQL(mode, dimension, tenantId);
+  // buildDimensionRangeSQL rejects a dimension that isn't a real column (identifier-position
+  // values can't be escaped, only allowlisted) — surface that as a 400, not a worker error.
+  let sql: string;
+  try {
+    sql = buildDimensionRangeSQL(mode, dimension, tenantId);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+  }
   const container = c.env.ANALYTICS_CONTAINER.getByName("analytics-singleton");
   await container.startAndWaitForPorts();
 
@@ -447,6 +462,67 @@ export async function handleQueueMessage(msg: QueueMessage, env: Env): Promise<v
   ).bind(resultsJson, report_id).run();
 }
 
+// ---- SQL assembly guard rails (shared/r2-sql.ts) ------------------------------------------
+//
+// R2 SQL has no bind parameters, so every value literal goes through sqlStr/sqlNum/sqlInt and
+// every identifier-position value (filter field, dimension, measure_field — all user-picked in
+// ReportConfig) is validated against the real column set of the table it targets. The column
+// sets are derived from metadata/columns.ts (the same derivation the stream-schema reconciliation
+// tests enforce) plus each table's fixed identity columns, so a prop added to the registry is
+// filterable here without another hand-kept list.
+
+// Fixed identity/time columns of uniscrm.event (analytics/pipelines/event-stream-schema.json);
+// the value columns are the union of every channel's eventProps, via eventValueColumns().
+const EVENT_FIXED_COLUMNS = ["tenant_id", "id", "user_id", "channel_id", "event_type", "event_time", "created_at", "raw_data"] as const;
+
+const TABLE_COLUMNS: Record<string, ReadonlySet<string>> = {
+  "uniscrm.event": new Set([...EVENT_FIXED_COLUMNS, ...eventValueColumns()]),
+  // userR2SelectColumns deliberately omits tenant_id (it only ever appears in WHERE) — add it back.
+  "uniscrm.user": new Set(["tenant_id", ...userR2SelectColumns()]),
+  "uniscrm.content": new Set([...CONTENT_R2_KEY_FIELDS, ...contentR2ValueColumns()]),
+};
+
+function columnsFor(table: string): ReadonlySet<string> {
+  const cols = TABLE_COLUMNS[table];
+  if (!cols) throw new Error(`Unknown table: ${table}`);
+  return cols;
+}
+
+interface ReportFilter { field: string; operator: string; value: string; value2?: string }
+
+const FILTER_OPERATORS = new Set(["=", "!=", "≠", ">", "<", ">=", "<=", "has value", "no value", "between"]);
+
+// Filter values arrive as strings from ReportConfig; numeric-looking ones stay numeric literals
+// (so `followers_count > 100` compares as a number), everything else is escaped as a string.
+function sqlFilterValue(v: string): string {
+  const n = Number(v);
+  return v.trim() !== "" && !isNaN(n) ? sqlNum(n) : sqlStr(v);
+}
+
+// The one filter-clause builder (previously copy-pasted four times across the event, interval,
+// funnel and snapshot branches). Returns bare clauses without an AND prefix; use
+// andFilterClauses() where the caller splices into an existing WHERE.
+//
+// Fields arrive as propIds from ReportConfig; columnNameFor maps the propId to its physical
+// column first (propId ≠ column name for renamed columns like content_url → source_url), then
+// sqlIdent proves the result is a real column of the target table.
+function buildFilterClauseList(filters: ReportFilter[] | undefined, table: string): string[] {
+  const cols = columnsFor(table);
+  return (filters || []).filter((f) => f.field && f.operator).map((f) => {
+    const field = sqlIdent(columnNameFor(f.field), cols);
+    if (!FILTER_OPERATORS.has(f.operator)) throw new Error(`Unsupported filter operator: ${f.operator}`);
+    if (f.operator === "has value") return `${field} IS NOT NULL`;
+    if (f.operator === "no value") return `${field} IS NULL`;
+    if (f.operator === "between") return `${field} BETWEEN ${sqlFilterValue(f.value)} AND ${sqlFilterValue(f.value2 || f.value)}`;
+    const op = f.operator === "≠" ? "!=" : f.operator;
+    return `${field} ${op} ${sqlFilterValue(f.value)}`;
+  });
+}
+
+function andFilterClauses(filters: ReportFilter[] | undefined, table: string): string {
+  return buildFilterClauseList(filters, table).map((c) => `AND ${c}`).join(" ");
+}
+
 export function buildSQL(type: string, params: Record<string, unknown>, tenantId: string): string {
   if (type === "event") {
     const { event_type, measure, dimension, granularity, dimension_bucket_mode, buckets, dimension_date_granularity, time_range_start, time_range_end, filters } = params as {
@@ -457,36 +533,31 @@ export function buildSQL(type: string, params: Record<string, unknown>, tenantId
       filters?: { field: string; operator: string; value: string; value2?: string }[];
     };
     const gran = granularity || "day";
+    const tid = sqlInt(Number(tenantId));
 
     const timeFilter = [
-      time_range_start ? `AND event_time >= '${time_range_start}'` : "",
-      time_range_end ? `AND event_time <= '${time_range_end}'` : "",
+      time_range_start ? `AND event_time >= ${sqlStr(time_range_start)}` : "",
+      time_range_end ? `AND event_time <= ${sqlStr(time_range_end)}` : "",
     ].join(" ");
 
-    const filterClauses = (filters || []).filter(f => f.field && f.operator).map(f => {
-      if (f.operator === "has value") return `AND ${f.field} IS NOT NULL`;
-      if (f.operator === "no value") return `AND ${f.field} IS NULL`;
-      if (f.operator === "between") return `AND ${f.field} BETWEEN ${f.value} AND ${f.value2 || f.value}`;
-      const op = f.operator === "≠" ? "!=" : f.operator;
-      const val = isNaN(Number(f.value)) ? `'${f.value}'` : f.value;
-      return `AND ${f.field} ${op} ${val}`;
-    }).join(" ");
+    const filterClauses = andFilterClauses(filters, "uniscrm.event");
 
-    const eventScopeFilter = `AND event_type = '${event_type}' ${timeFilter} ${filterClauses}`;
+    const eventScopeFilter = `AND event_type = ${sqlStr(event_type)} ${timeFilter} ${filterClauses}`;
 
     let dimCol = "";
     let dimGroupCol = "";
     let boundsCte = "";
     let fromExtra = "";
     if (dimension) {
+      const dim = sqlIdent(columnNameFor(dimension), columnsFor("uniscrm.event"));
       const bucketing = dimension_date_granularity
         ? buildDatetimeDimensionBucketing({
-            dimension, dateGranularity: dimension_date_granularity,
-            fromTable: "uniscrm.event", tenantId, scopeFilter: eventScopeFilter,
+            dimension: dim, dateGranularity: dimension_date_granularity,
+            fromTable: "uniscrm.event", tenantId: tid, scopeFilter: eventScopeFilter,
           })
         : buildIntDimensionBucketing({
-            dimension, mode: dimension_bucket_mode, buckets,
-            fromTable: "uniscrm.event", tenantId, scopeFilter: eventScopeFilter,
+            dimension: dim, mode: dimension_bucket_mode, buckets,
+            fromTable: "uniscrm.event", tenantId: tid, scopeFilter: eventScopeFilter,
           });
       dimCol = bucketing.dimExpr;
       boundsCte = bucketing.boundsCte;
@@ -499,7 +570,7 @@ export function buildSQL(type: string, params: Record<string, unknown>, tenantId
       const agg = measure === "users" ? "COUNT(DISTINCT user_id)" : measure === "avg" ? "CAST(COUNT(DISTINCT id) AS DOUBLE) / NULLIF(COUNT(DISTINCT user_id), 0)" : "COUNT(DISTINCT id)";
       return `${boundsCte}SELECT 'total' as period${dimCol}, ${agg} as value
 FROM uniscrm.event${fromExtra}
-WHERE tenant_id = ${tenantId} ${eventScopeFilter}${dimGroupCol ? ` GROUP BY ${dimGroupCol}` : ""}`;
+WHERE tenant_id = ${tid} ${eventScopeFilter}${dimGroupCol ? ` GROUP BY ${dimGroupCol}` : ""}`;
     }
 
     const periodExpr = gran === "month" ? "DATE_TRUNC('month', event_time)"
@@ -512,7 +583,7 @@ WHERE tenant_id = ${tenantId} ${eventScopeFilter}${dimGroupCol ? ` GROUP BY ${di
       return `${boundsCte}SELECT period${dimCol ? ", dimension" : ""}, CAST(total AS DOUBLE) / NULLIF(users, 0) as value FROM (
   SELECT ${periodExpr} as period${dimCol}, COUNT(DISTINCT id) as total, COUNT(DISTINCT user_id) as users
   FROM uniscrm.event${fromExtra}
-  WHERE tenant_id = ${tenantId} ${eventScopeFilter}
+  WHERE tenant_id = ${tid} ${eventScopeFilter}
   GROUP BY period${dimGroupCol ? `, ${dimGroupCol}` : ""}
 ) ORDER BY period`;
     }
@@ -520,7 +591,7 @@ WHERE tenant_id = ${tenantId} ${eventScopeFilter}${dimGroupCol ? ` GROUP BY ${di
     const agg = measure === "users" ? "COUNT(DISTINCT user_id)" : "COUNT(DISTINCT id)";
     return `${boundsCte}SELECT ${periodExpr} as period${dimCol}, ${agg} as value
 FROM uniscrm.event${fromExtra}
-WHERE tenant_id = ${tenantId} ${eventScopeFilter}
+WHERE tenant_id = ${tid} ${eventScopeFilter}
 GROUP BY period${dimGroupCol ? `, ${dimGroupCol}` : ""} ORDER BY period`;
   }
 
@@ -529,33 +600,27 @@ GROUP BY period${dimGroupCol ? `, ${dimGroupCol}` : ""} ORDER BY period`;
       event_type_a: string; event_type_b: string; time_range_start?: string; time_range_end?: string;
       filters?: { field: string; operator: string; value: string; value2?: string }[];
     };
+    const tid = sqlInt(Number(tenantId));
     const timeFilter = [
-      time_range_start ? `AND event_time >= '${time_range_start}'` : "",
-      time_range_end ? `AND event_time <= '${time_range_end}'` : "",
+      time_range_start ? `AND event_time >= ${sqlStr(time_range_start)}` : "",
+      time_range_end ? `AND event_time <= ${sqlStr(time_range_end)}` : "",
     ].join(" ");
 
     // Filters describe eventTypeA's own props (see ReportConfig's dimension/filter field
     // source for interval mode), so they're applied after narrowing to the A-leg rows below —
     // applying them inside the `ordered` CTE would also drop B-leg rows and break LEAD pairing.
-    const filterClauses = (filters || []).filter(f => f.field && f.operator).map(f => {
-      if (f.operator === "has value") return `AND ${f.field} IS NOT NULL`;
-      if (f.operator === "no value") return `AND ${f.field} IS NULL`;
-      if (f.operator === "between") return `AND ${f.field} BETWEEN ${f.value} AND ${f.value2 || f.value}`;
-      const op = f.operator === "≠" ? "!=" : f.operator;
-      const val = isNaN(Number(f.value)) ? `'${f.value}'` : f.value;
-      return `AND ${f.field} ${op} ${val}`;
-    }).join(" ");
+    const filterClauses = andFilterClauses(filters, "uniscrm.event");
 
     return `WITH ordered AS (
   SELECT user_id, event_type, event_time,
     LEAD(event_type) OVER (PARTITION BY user_id ORDER BY event_time) as next_type,
     LEAD(event_time) OVER (PARTITION BY user_id ORDER BY event_time) as next_time
   FROM uniscrm.event
-  WHERE tenant_id = ${tenantId} AND event_type IN ('${event_type_a}', '${event_type_b}') ${timeFilter}
+  WHERE tenant_id = ${tid} AND event_type IN (${sqlStr(event_type_a)}, ${sqlStr(event_type_b)}) ${timeFilter}
 )
 SELECT user_id, event_time, next_time
 FROM ordered
-WHERE event_type = '${event_type_a}' AND next_type = '${event_type_b}' ${filterClauses}`;
+WHERE event_type = ${sqlStr(event_type_a)} AND next_type = ${sqlStr(event_type_b)} ${filterClauses}`;
   }
 
   if (type === "user") {
@@ -575,28 +640,22 @@ WHERE event_type = '${event_type_a}' AND next_type = '${event_type_b}' ${filterC
 
     if (!steps || steps.length < 2) return "SELECT 'error' as step, 0 as count";
 
-    const winVal = window_value || 7;
+    const tid = sqlInt(Number(tenantId));
+    const winVal = sqlNum(Number(window_value || 7));
     const winUnit = window_unit === "hour" ? "HOUR" : "DAY";
 
-    const filterClauses = (filters || []).filter(f => f.field && f.operator).map(f => {
-      if (f.operator === "has value") return `AND ${f.field} IS NOT NULL`;
-      if (f.operator === "no value") return `AND ${f.field} IS NULL`;
-      if (f.operator === "between") return `AND ${f.field} BETWEEN ${f.value} AND ${f.value2 || f.value}`;
-      const op = f.operator === "≠" ? "!=" : f.operator;
-      const val = isNaN(Number(f.value)) ? `'${f.value}'` : f.value;
-      return `AND ${f.field} ${op} ${val}`;
-    }).join(" ");
+    const filterClauses = andFilterClauses(filters, "uniscrm.event");
 
     const timeFilter = [
-      time_range_start ? `AND event_time >= '${time_range_start}'` : "",
-      time_range_end ? `AND event_time <= '${time_range_end}'` : "",
+      time_range_start ? `AND event_time >= ${sqlStr(time_range_start)}` : "",
+      time_range_end ? `AND event_time <= ${sqlStr(time_range_end)}` : "",
     ].join(" ");
 
     const ctes: string[] = [];
     ctes.push(`step1 AS (
   SELECT user_id, MIN(event_time) as t1
   FROM uniscrm.event
-  WHERE tenant_id = ${tenantId} AND event_type = '${steps[0]}' ${timeFilter} ${filterClauses}
+  WHERE tenant_id = ${tid} AND event_type = ${sqlStr(steps[0])} ${timeFilter} ${filterClauses}
   GROUP BY user_id
 )`);
 
@@ -607,8 +666,8 @@ WHERE event_type = '${event_type_a}' AND next_type = '${event_type_b}' ${filterC
   SELECT ${prevStep}.user_id
   FROM ${prevStep}
   JOIN uniscrm.event e ON e.user_id = ${prevStep}.user_id
-    AND e.tenant_id = ${tenantId} AND e.event_type = '${steps[i]}'
-    AND e.event_time > ${i === 1 ? `${prevStep}.t1` : `(SELECT MIN(ev.event_time) FROM uniscrm.event ev WHERE ev.user_id = ${prevStep}.user_id AND ev.tenant_id = ${tenantId} AND ev.event_type = '${steps[i - 1]}')`}
+    AND e.tenant_id = ${tid} AND e.event_type = ${sqlStr(steps[i])}
+    AND e.event_time > ${i === 1 ? `${prevStep}.t1` : `(SELECT MIN(ev.event_time) FROM uniscrm.event ev WHERE ev.user_id = ${prevStep}.user_id AND ev.tenant_id = ${tid} AND ev.event_type = ${sqlStr(steps[i - 1])})`}
     AND e.event_time <= DATE_ADD(step1.t1, INTERVAL ${winVal} ${winUnit})
   ${i > 1 ? `JOIN step1 ON step1.user_id = ${prevStep}.user_id` : ""}
   GROUP BY ${prevStep}.user_id
@@ -718,59 +777,93 @@ const DIMENSION_RANGE_TABLES: Record<string, string> = {
 export function buildDimensionRangeSQL(mode: string, dimension: string, tenantId: string): string {
   const table = DIMENSION_RANGE_TABLES[mode];
   if (!table) throw new Error(`Unknown mode: ${mode}`);
-  return `SELECT MIN(${dimension}) as mn, MAX(${dimension}) as mx FROM ${table} WHERE tenant_id = ${tenantId}`;
+  const dim = sqlIdent(columnNameFor(dimension), columnsFor(table));
+  return `SELECT MIN(${dim}) as mn, MAX(${dim}) as mx FROM ${table} WHERE tenant_id = ${sqlInt(Number(tenantId))}`;
 }
+
+// The read-time QUALIFY dedup key per snapshot table — identical to the compaction key
+// (scheduled() below: user defaults, content passes list_id explicitly) minus tenant_id,
+// which the inner WHERE has already pinned.
+const SNAPSHOT_PARTITION_KEYS: Record<string, string[]> = {
+  "uniscrm.user": ["channel_id", "source_user_id"],
+  "uniscrm.content": ["channel_id", "list_id", "source_content_id"],
+};
 
 export function buildSnapshotSQL(tableName: string, params: Record<string, unknown>, tenantId: string): string {
   const { measure, measure_field, dimension, buckets, dimension_bucket_mode, dimension_date_granularity, filters } = params as {
     measure: string; measure_field?: string; dimension?: string;
     buckets?: number[]; dimension_bucket_mode?: "discrete" | "default" | "custom";
     dimension_date_granularity?: "none" | "hour" | "day" | "week" | "month" | "quarter";
-    filters?: { field: string; operator: string; value: string; value2?: string }[];
+    filters?: ReportFilter[];
   };
 
-  const filterClauses = (filters || []).filter(f => f.field && f.operator).map(f => {
-    if (f.operator === "has value") return `AND ${f.field} IS NOT NULL`;
-    if (f.operator === "no value") return `AND ${f.field} IS NULL`;
-    if (f.operator === "between") return `AND ${f.field} BETWEEN ${f.value} AND ${f.value2 || f.value}`;
-    const op = f.operator === "≠" ? "!=" : f.operator;
-    const val = isNaN(Number(f.value)) ? `'${f.value}'` : f.value;
-    return `AND ${f.field} ${op} ${val}`;
-  }).join(" ");
+  const tid = sqlInt(Number(tenantId));
+  const cols = columnsFor(tableName);
+  const filterList = buildFilterClauseList(filters, tableName);
+  const filterClauses = filterList.map((c) => `AND ${c}`).join(" ");
 
   let dimExpr = "";
-  let dimGroup = "";
   let boundsCte = "";
   let fromExtra = "";
-  if (dimension) {
+  let groupBy: string | undefined;
+  let orderBy: string | undefined;
+  const dim = dimension ? sqlIdent(columnNameFor(dimension), cols) : undefined;
+  if (dim) {
     const bucketing = dimension_date_granularity
       ? buildDatetimeDimensionBucketing({
-          dimension, dateGranularity: dimension_date_granularity,
-          fromTable: tableName, tenantId, scopeFilter: filterClauses,
+          dimension: dim, dateGranularity: dimension_date_granularity,
+          fromTable: tableName, tenantId: tid, scopeFilter: filterClauses,
         })
       : buildIntDimensionBucketing({
-          dimension, mode: dimension_bucket_mode, buckets,
-          fromTable: tableName, tenantId, scopeFilter: filterClauses,
+          dimension: dim, mode: dimension_bucket_mode, buckets,
+          fromTable: tableName, tenantId: tid, scopeFilter: filterClauses,
         });
     dimExpr = bucketing.dimExpr;
     boundsCte = bucketing.boundsCte;
     fromExtra = bucketing.fromExtra;
-    dimGroup = bucketing.dimGroupCol === dimension
-      ? ` GROUP BY ${dimension} ORDER BY value DESC`
-      : " GROUP BY dimension ORDER BY dimension";
+    if (bucketing.dimGroupCol === dim) {
+      groupBy = dim;
+      orderBy = "value DESC";
+    } else {
+      groupBy = "dimension";
+      orderBy = "dimension";
+    }
   }
 
-  // Row counts must be distinct-by-id: pipelines deliver at-least-once, and compaction
-  // (which dedups user/content) only runs daily, so raw COUNT(*) over-counts in between.
-  // SUM/AVG over duplicated rows are skewed the same way but need a dedup subquery to
-  // fix — left as-is deliberately rather than half-solved here.
-  const agg = measure === "avg" && measure_field ? `AVG(CAST(${measure_field} AS DOUBLE))`
-    : measure === "sum" && measure_field ? `SUM(CAST(${measure_field} AS DOUBLE))`
+  // Every aggregate runs over the QUALIFY-deduped latest row per business key (latestRowsSql's
+  // outerSelect form): pipelines deliver at-least-once and the same key accumulates one
+  // append-only row per poll/webhook write between daily compactions, so raw-table SUM/AVG
+  // were skewed by duplicates and COUNT needed DISTINCT id. COUNT keeps DISTINCT id anyway as
+  // a belt-and-braces guard (id is stable per business key, so it's free post-dedup). Filters
+  // run in the outer WHERE — post-dedup, on the entity's current state — never in the inner
+  // WHERE, where they'd resurrect stale rows (see latestRowsSql's doc comment).
+  const measureField = measure_field ? sqlIdent(columnNameFor(measure_field), cols) : undefined;
+  const agg = measure === "avg" && measureField ? `AVG(CAST(${measureField} AS DOUBLE))`
+    : measure === "sum" && measureField ? `SUM(CAST(${measureField} AS DOUBLE))`
     : "COUNT(DISTINCT id)";
 
-  return `${boundsCte}SELECT ${agg} as value${dimExpr}
-FROM ${tableName}${fromExtra}
-WHERE tenant_id = ${tenantId} ${filterClauses}${dimGroup}`;
+  // Project only what the outer query touches; filter fields are already validated identifiers.
+  const filterFields = (filters || []).filter((f) => f.field && f.operator).map((f) => sqlIdent(columnNameFor(f.field), cols));
+  const innerColumns = [...new Set([
+    "id", ...SNAPSHOT_PARTITION_KEYS[tableName], "updated_at",
+    ...(dim ? [dim] : []), ...(measureField ? [measureField] : []), ...filterFields,
+  ])];
+
+  const sql = latestRowsSql({
+    table: tableName,
+    columns: innerColumns,
+    partitionBy: SNAPSHOT_PARTITION_KEYS[tableName],
+    where: [`tenant_id = ${tid}`],
+    outerSelect: `${agg} as value${dimExpr}`,
+    // bounds (bucket edges for display) deliberately stays a raw-table CTE: MIN/MAX are
+    // insensitive to duplicate rows, and running a second QUALIFY window just for edge
+    // estimation risks the budget gate.
+    outerFrom: fromExtra || undefined,
+    outerWhere: filterList.length > 0 ? filterList : undefined,
+    groupBy,
+    orderBy,
+  });
+  return `${boundsCte}${sql}`;
 }
 
 function processFunnelResults(rows: unknown[], steps: string[]): { steps: { step: string; eventType: string; count: number; conversionRate: number; totalRate: number }[] } {

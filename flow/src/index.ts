@@ -101,31 +101,21 @@ interface CountRow {
 
 // null = the query failed (as opposed to []: the table is genuinely empty). The caller treats
 // them very differently — a failure must keep the last good counts, an empty table must wipe.
+// r2Query throws R2SqlError on any failure (non-2xx, {"error"} or {"success": false} bodies),
+// which is exactly the signal that maps to null here.
+//
+// No tenant_id filter on purpose: this is the scheduled() cross-tenant aggregate that rebuilds
+// flow_counts/content_flow_counts, keyed BY tenant_id in the GROUP BY — every resulting row
+// lands in D1 with its tenant_id and every read of those tables filters on it.
 async function queryR2Counts(env: Env, table: string): Promise<CountRow[] | null> {
   try {
-    const res = await fetch(
-      `https://api.sql.cloudflarestorage.com/api/v1/accounts/${env.CF_ACCOUNT_ID}/r2-sql/query/${env.R2_BUCKET}`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${env.R2_CATALOG_TOKEN}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          warehouse: env.R2_WAREHOUSE,
-          // DISTINCT id: Cloudflare Pipelines delivery is at-least-once — the same record (same
-          // worker-generated UUID) has been observed landing in the Iceberg table twice. id is
-          // the idempotency key, so duplicates collapse here instead of inflating counts.
-          query: `SELECT tenant_id, flow_id, node_id, direction, COUNT(DISTINCT id) as cnt FROM ${table} GROUP BY tenant_id, flow_id, node_id, direction`,
-        }),
-      }
+    // DISTINCT id: Cloudflare Pipelines delivery is at-least-once — the same record (same
+    // worker-generated UUID) has been observed landing in the Iceberg table twice. id is
+    // the idempotency key, so duplicates collapse here instead of inflating counts.
+    return await r2Query<CountRow>(
+      env,
+      `SELECT tenant_id, flow_id, node_id, direction, COUNT(DISTINCT id) as cnt FROM ${table} GROUP BY tenant_id, flow_id, node_id, direction`
     );
-    // .clone() before .json(): under test mocks a single Response instance may be shared across
-    // multiple fetch() callers within one scheduled() tick; reading via a clone avoids consuming
-    // that shared body. No behavior change against real fetch() responses (always distinct objects).
-    const data = await res.clone().json() as { result?: { rows: CountRow[] }; success: boolean; errors?: unknown };
-    if (!data.success) {
-      console.error(JSON.stringify({ event: "flow_counts_query_failed", table, status: res.status, errors: data.errors }));
-      return null;
-    }
-    return data.result?.rows || [];
   } catch (e) {
     console.error(JSON.stringify({ event: "flow_counts_query_failed", table, error: String(e) }));
     return null;
@@ -151,31 +141,30 @@ export async function queryNodeLogRows(
   flowId: string,
   nodeId: string
 ): Promise<NodeLogRow[]> {
+  // Guard adjacent to the hazard: nodeId lands inside an R2 SQL string below. sqlStr escaping
+  // already makes that injection-safe, but the shape check stays here too (the route validates
+  // as well — defense in depth) so this function is safe no matter who calls it.
+  if (!NODE_ID_RE.test(nodeId)) {
+    throw new Error(`queryNodeLogRows: node id fails NODE_ID_RE: ${JSON.stringify(nodeId)}`);
+  }
   // title/content_text/content_url exist only on content_flow_log — selecting them against
   // flow_log makes R2 SQL reject the whole query (success:false), which silently emptied every
   // user-domain node-log drawer. Keep the column list table-specific.
   const contentColumns = table === "uniscrm.content_flow_log" ? ", title, content_text, content_url" : "";
-  const res = await fetch(
-    `https://api.sql.cloudflarestorage.com/api/v1/accounts/${env.CF_ACCOUNT_ID}/r2-sql/query/${env.R2_BUCKET}`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${env.R2_CATALOG_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        warehouse: env.R2_WAREHOUSE,
-        query: `SELECT ${subjectColumn}, created_at, direction, outcome, failure_reason${contentColumns} FROM ${table}
-                WHERE tenant_id = ${tenantId} AND flow_id = '${flowId}' AND node_id = '${nodeId}' AND direction IN ('enter', 'outcome')
-                ORDER BY created_at DESC LIMIT 50`,
-      }),
-    }
-  );
-  const data = await res.json() as { result?: { rows: Record<string, unknown>[] }; success: boolean; errors?: unknown };
-  // A rejected R2 SQL query used to return [] indistinguishably from "this node has no rows",
-  // which is how a bad column list stayed invisible. Never fail silently here again.
-  if (!data.success) {
-    console.error(JSON.stringify({ event: "node_logs_query_failed", table, tenantId, flowId, nodeId, status: res.status, errors: data.errors }));
+  const sql = `SELECT ${subjectColumn}, created_at, direction, outcome, failure_reason${contentColumns} FROM ${table}
+                WHERE tenant_id = ${sqlInt(tenantId)} AND flow_id = ${sqlStr(flowId)} AND node_id = ${sqlStr(nodeId)} AND direction IN ('enter', 'outcome')
+                ORDER BY created_at DESC LIMIT 50`;
+  let rows: Record<string, unknown>[];
+  try {
+    rows = await r2Query<Record<string, unknown>>(env, sql);
+  } catch (e) {
+    // A rejected R2 SQL query used to return [] indistinguishably from "this node has no rows",
+    // which is how a bad column list stayed invisible. r2Query throws on any failure; the drawer
+    // degrades to empty but the failure is never silent.
+    console.error(JSON.stringify({ event: "node_logs_query_failed", table, tenantId, flowId, nodeId, error: String(e) }));
     return [];
   }
-  return (data.result?.rows || []).map((r) => ({
+  return rows.map((r) => ({
     subjectId: String(r[subjectColumn]),
     created_at: String(r.created_at),
     direction: String(r.direction),

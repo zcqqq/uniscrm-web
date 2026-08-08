@@ -1,5 +1,5 @@
 import { SEGMENT_USER_COLUMNS, type InsightField, type ParsedConditions } from "../fields";
-import { sqlStr, sqlInt } from "../../../shared/r2-sql";
+import { latestRowsSql, sqlStr, sqlInt } from "../../../shared/r2-sql";
 
 export interface SqlResult {
   sql: string;
@@ -12,26 +12,18 @@ function literalFor(field: InsightField, v: string | number): string {
   return field.dataType === "INT" || field.dataType === "ENUM_INT" ? sqlInt(Number(v)) : sqlStr(String(v));
 }
 
-// uniscrm.user rows are append-only Iceberg — the same (channel_id, source_user_id) accumulates
-// many rows over time as the poller/webhook re-observes it, so "does this user match this
-// condition" only makes sense against their CURRENT (latest) row, never any historical
-// snapshot. That means the dedup (QUALIFY) has to run BEFORE any business-logic condition is
-// applied, on a subquery pruned only by tenant_id — a value that's identical across every
-// version of a row, so it can never cause what the r2-sql.ts doc comment calls the
-// "resurrection" bug: is_deleted and every user-supplied condition below run in the OUTER
-// query, after QUALIFY has already picked the single latest row. Putting them in the inner
-// WHERE instead (the shape this task's own hand-written brief used) drops the true-latest row
-// from the window's input whenever it fails the condition, letting a stale row that happens to
-// satisfy it win the "= 1" slot — that's the exact is_deleted bug Task 4's review caught,
-// generalized to any condition, and it also breaks OR-logic segments in a second way: an
-// is_deleted=0 clause OR'd in with the rest would let a *deleted* user through the moment any
-// other clause was true.
+// QUALIFY-dedup placement (why conditions and is_deleted run in the OUTER query, after the
+// window, never in the inner WHERE): see latestRowsSql's doc comment in shared/r2-sql.ts —
+// this file now composes through it instead of hand-writing the subquery, so the inner WHERE
+// is structurally tenant_id-only and a condition can't drift pre-QUALIFY. On top of that,
+// is_deleted is always AND'd at the top level of the outer WHERE, never folded into the
+// user-supplied OR group — an OR-logic segment must still exclude deleted users.
 //
-// Event rows are different: each is a discrete occurrence, not an entity with mutable "current
-// state", so an event condition is existence, not currency, and is safe to filter directly on
-// the joined row. LEFT JOIN (not INNER): an OR-logic segment must still match a user with no
-// qualifying event via the user-side clauses alone, and for AND-logic a LEFT JOIN's NULL columns
-// fail the AND clause just as an INNER JOIN's absence would.
+// Event rows join WITHOUT dedup: each is a discrete occurrence, not an entity with mutable
+// "current state", so an event condition is existence, not currency. LEFT JOIN (not INNER): an
+// OR-logic segment must still match a user with no qualifying event via the user-side clauses
+// alone, and for AND-logic a LEFT JOIN's NULL columns fail the AND clause just as an INNER
+// JOIN's absence would.
 //
 // The join key is NOT `u.id` — `uniscrm.user.id` and `uniscrm.event.user_id` live in two
 // different id domains (see docs/adr/0005 and the final review's C2): `id` is the uuid
@@ -44,7 +36,7 @@ function literalFor(field: InsightField, v: string | number): string {
 // only unique within one channel. `tenant_id` is repeated on the event side (not just carried in
 // from the user subquery) because R2 SQL's window functions are budget-gated on estimated scan
 // size, and a JOIN's ON clause doesn't inherit the other side's WHERE for pruning purposes —
-// both tables need their own tenant_id predicate.
+// both tables need their own tenant_id predicate (latestRowsSql enforces this on the join).
 //
 // NOTE: combining a JOIN with QUALIFY is the least-exercised path in this codebase (R2 SQL
 // gained JOINs 2026-05, QUALIFY 2026-06) — needs live verification once the R2 token works
@@ -96,21 +88,24 @@ export function buildSegmentQuery(
   const joiner = conditions.logic === "OR" ? " OR " : " AND ";
   // is_deleted is always AND'd at the top level, never folded into the user-supplied OR group —
   // an OR-logic segment must still exclude deleted users, not just "match if not deleted OR
-  // condition true".
-  const conditionGroup = clauses.length > 0 ? ` AND (${clauses.join(joiner)})` : "";
+  // condition true". latestRowsSql joins outerWhere entries with AND, so listing is_deleted
+  // first and the parenthesized group second preserves exactly that shape.
+  const outerWhere = ["u.is_deleted = 0"];
+  if (clauses.length > 0) outerWhere.push(`(${clauses.join(joiner)})`);
 
-  const join = needsEvent
-    ? `\nLEFT JOIN uniscrm.event e ON e.user_id = u.source_user_id AND e.channel_id = u.channel_id AND e.tenant_id = ${sqlInt(tenantId)}`
-    : "";
-
-  const sql = `SELECT DISTINCT u.id FROM (
-  SELECT ${USER_DEDUP_COLUMNS.join(", ")}
-  FROM uniscrm.user
-  WHERE tenant_id = ${sqlInt(tenantId)}
-  QUALIFY ROW_NUMBER() OVER (PARTITION BY channel_id, source_user_id ORDER BY updated_at DESC) = 1
-) u${join}
-WHERE u.is_deleted = 0${conditionGroup}
-LIMIT 10000`;
+  const sql = latestRowsSql({
+    table: "uniscrm.user",
+    columns: USER_DEDUP_COLUMNS,
+    partitionBy: ["channel_id", "source_user_id"],
+    where: [`tenant_id = ${sqlInt(tenantId)}`],
+    alias: "u",
+    join: needsEvent
+      ? `LEFT JOIN uniscrm.event e ON e.user_id = u.source_user_id AND e.channel_id = u.channel_id AND e.tenant_id = ${sqlInt(tenantId)}`
+      : undefined,
+    outerSelect: "DISTINCT u.id",
+    outerWhere,
+    limit: 10000,
+  });
 
   return { sql };
 }

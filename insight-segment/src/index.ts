@@ -41,15 +41,12 @@ app.use("/api/segments/*", segmentAuth);
 // middleware, not a module-scope check, because `env` (and thus the secret) is only available
 // once fetch() is called — Workers have no module-level "startup" with bindings attached.
 //
-// Kept local to insight-segment rather than lifted into shared/r2-sql.ts's r2Query: link's three
-// r2-entities.ts call sites all go through r2Query, but flow/src/index.ts's queryR2Counts and
-// queryNodeLogRows build the R2 SQL request with a raw fetch() (not r2Query) for both of its
-// non-r2Query call sites, so a guard inside r2Query would still miss them — full three-module
-// coverage would need touching those two call sites anyway, not just r2Query, and r2Query is a
-// hot path (every one of link's and insight-segment's reads runs through it) that this
-// consolidation's "少改动" bias argues against touching without a full-coverage payoff. link and
-// flow are no worse off than before: neither had a guard for the previous token env var name
-// either.
+// Kept local to insight-segment rather than lifted into shared/r2-sql.ts's r2Query. Every R2
+// SQL read in link/flow/insight-segment now goes through r2Query (flow's last two raw fetch()
+// sites were folded in during Batch F), so a guard inside r2Query WOULD cover all three modules
+// today — but r2Query is a hot path and the other modules degrade acceptably already (an unset
+// token surfaces as an R2SqlError 401 they log/handle), so 少改动 keeps this middleware where a
+// misconfigured secret actually confused someone.
 export function checkR2SqlToken(env: Env): { ok: true } | { ok: false; message: string } {
   if (!env.R2_CATALOG_TOKEN) {
     return {
@@ -134,11 +131,15 @@ app.post("/api/segments", async (c) => {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
+  // sql_query is deliberately NOT stored: conditions_json is the single truth and the SQL is
+  // always derived from it at read/compute time (the column still exists — NOT NULL DEFAULT ''
+  // — but is legacy; a stored copy went stale the moment buildSegmentQuery changed). The
+  // response still carries the derived SQL for immediate display.
   await c.env.WEB_DB.prepare(
-    `INSERT INTO segments (id, tenant_id, name, nl_query, conditions_json, sql_query, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)`
+    `INSERT INTO segments (id, tenant_id, name, nl_query, conditions_json, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)`
   )
-    .bind(id, tenantId, body.name, body.nl_query, JSON.stringify(validation.conditions), sql, now, now)
+    .bind(id, tenantId, body.name, body.nl_query, JSON.stringify(validation.conditions), now, now)
     .run();
 
   return c.json(
@@ -216,7 +217,19 @@ app.get("/api/segments/:id", async (c) => {
     .first();
 
   if (!segment) return c.json({ error: "Not found" }, 404);
-  return c.json({ segment });
+
+  // The sql_query the UI shows is DERIVED from conditions_json — never the stored column
+  // (legacy, no longer written): compute uses conditions_json too, so what the user sees is
+  // exactly what will run. A segment whose conditions can't be rebuilt (malformed JSON, a
+  // field that left the registry) shows empty rather than a stale query that wouldn't run.
+  let sqlQuery = "";
+  try {
+    const conditions = JSON.parse(String((segment as Record<string, unknown>).conditions_json));
+    sqlQuery = buildSegmentQuery(conditions, getAllFields(), Number(tenantId)).sql;
+  } catch (e) {
+    console.error(JSON.stringify({ event: "segment_sql_derive_failed", segmentId, error: String(e) }));
+  }
+  return c.json({ segment: { ...(segment as Record<string, unknown>), sql_query: sqlQuery } });
 });
 
 // Compute segment (execute SQL, populate segment_users)
@@ -224,11 +237,13 @@ app.post("/api/segments/:id/compute", async (c) => {
   const tenantId = c.get("tenantId");
   const segmentId = c.req.param("id");
 
+  // conditions_json only — the sql_query column is legacy (see the create route): SQL is
+  // rebuilt from conditions right below, so there is exactly one truth for what runs.
   const segment = await c.env.WEB_DB.prepare(
-    `SELECT id, sql_query, conditions_json FROM segments WHERE id = ? AND tenant_id = ?`
+    `SELECT id, conditions_json FROM segments WHERE id = ? AND tenant_id = ?`
   )
     .bind(segmentId, tenantId)
-    .first<{ id: string; sql_query: string; conditions_json: string }>();
+    .first<{ id: string; conditions_json: string }>();
 
   if (!segment) return c.json({ error: "Not found" }, 404);
 

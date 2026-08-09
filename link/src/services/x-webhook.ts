@@ -73,8 +73,20 @@ export class XActivityService {
       throw new Error(`Create webhook failed ${res.status}: ${err}`);
     }
 
-    const data = (await res.json()) as { data: { webhook_id: string } };
-    return data.data.webhook_id;
+    // X's webhook object keys the id as `id` (same shape the list endpoint returns), NOT
+    // `webhook_id`. Reading `webhook_id` yielded undefined, which `createSubscription`'s
+    // `if (webhookId)` then silently swallowed — X created six subscriptions bound to NO
+    // webhook ("stream only" in the portal), so they were valid, listed, and undeliverable.
+    // Same failure class as the create-response shape bug documented in createSubscription;
+    // `webhook_id` is kept as a fallback in case X ever answers with the older key.
+    const data = (await res.json()) as { data?: { id?: string; webhook_id?: string } };
+    const id = data.data?.id ?? data.data?.webhook_id;
+    if (!id) {
+      // Loud: the webhook now exists on X's side, and returning undefined loses the only
+      // handle on it — and the caller would go on to create stream-only subscriptions.
+      throw new Error(`Create webhook returned no id: ${JSON.stringify(data).slice(0, 300)}`);
+    }
+    return id;
   }
 
   // Requires app-only auth. With an OAuth 2.0 user token X answers 403 "Unsupported
@@ -150,15 +162,22 @@ export class XActivityService {
     return all;
   }
 
-  async createSubscription(eventType: string, userId: string, webhookId?: string, direction?: "inbound" | "outbound"): Promise<string> {
+  // webhookId is REQUIRED. Omitting it does not fail — X creates a subscription bound to no
+  // webhook at all ("stream only"), which lists as perfectly valid and delivers nothing to
+  // any URL, forever. That is exactly what an undefined id from createWebhook produced on
+  // 2026-08-09, and it cost a day of chasing X's side of the wire. Fail closed instead.
+  async createSubscription(eventType: string, userId: string, webhookId: string, direction?: "inbound" | "outbound"): Promise<string> {
+    if (!webhookId) {
+      throw new Error(`Create subscription [${eventType}] refused: no webhook id — a webhook-less subscription is stream-only and never reaches this app`);
+    }
     const body: Record<string, unknown> = {
       event_type: eventType,
       // direction 只在 metadata 声明了才带上：X 的 filter.direction 是可选的方向过滤，
       // 省略时同一个 event_type 会两个方向都推。
       filter: direction ? { user_id: userId, direction } : { user_id: userId },
       tag: `uniscrm-${eventType}`,
+      webhook_id: webhookId,
     };
-    if (webhookId) body.webhook_id = webhookId;
 
     const res = await fetch("https://api.x.com/2/activity/subscriptions", {
       method: "POST",
@@ -196,6 +215,13 @@ export class XActivityService {
   // webhook itself. It used to, when webhookId was omitted, which is exactly how the BYOK
   // path failed on every authorize with 403 until 2026-07-28.
   async setupAllSubscriptions(userId: string, webhookUrl: string, webhookId: string): Promise<string[]> {
+    // Refuse the whole run rather than per-subscription: without a webhook id every
+    // subscription below would be created stream-only, and stream-only subscriptions look
+    // healthy from every angle (listed, valid, correct filter) while delivering nothing.
+    // Better to leave subscription_ids empty so the hourly repair keeps retrying.
+    if (!webhookId) {
+      throw new Error(`setupAllSubscriptions refused for ${userId}: no webhook id for ${webhookUrl}`);
+    }
     const wId = webhookId;
 
     // Get existing subscriptions — scoped to THIS user. listSubscriptions() returns every

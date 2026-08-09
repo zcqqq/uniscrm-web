@@ -88,7 +88,14 @@ describe("handleTokenRefresh — BYOK subscription repair", () => {
     // a second one it has no room for.
     expect(createWebhookMock).not.toHaveBeenCalled();
     expect(setupAllSubscriptionsMock).toHaveBeenCalledWith(X_USER_ID, `https://link-dev.uni-scrm.com/x/webhook/${X_USER_ID}`, "wh-existing");
-    expect(updateConfigMock).toHaveBeenCalledWith(ROW_ID, { subscription_ids: ["sub-1", "sub-2"] });
+    // subscription_error is cleared on success (the repair shares ensureXSubscriptions with
+    // the manual endpoint and the OAuth callback) — otherwise a channel that recovered still
+    // reads as broken, which is exactly how the 2026-08-07 WebhookLimitExceeded error
+    // outlived the condition that caused it.
+    expect(updateConfigMock).toHaveBeenCalledWith(ROW_ID, expect.objectContaining({
+      subscription_ids: ["sub-1", "sub-2"],
+      subscription_error: null,
+    }));
   });
 
   it("never puts the channel row id in the URL — that is what made the URL unregisterable after a reconnect", async () => {

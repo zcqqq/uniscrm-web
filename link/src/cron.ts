@@ -1,6 +1,7 @@
 import type { Env } from "./types";
 import { XTokenService } from "./services/x-token";
-import { XActivityService, byokWebhookUrl } from "./services/x-webhook";
+import { XActivityService } from "./services/x-webhook";
+import { ensureXSubscriptions } from "./services/x-subscription-repair";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { TikTokTokenService } from "./services/tiktok-token";
 import { pollChannelOnce, pollXListPosts, pollYouTubeChannel } from "./services/pollers/poll-channel";
@@ -97,24 +98,9 @@ export async function handleTokenRefresh(env: Env): Promise<void> {
 
       if (!config.subscription_ids?.length && config.x_user_id) {
         try {
-          // Both branches: app-only Bearer registers the webhook, the freshly refreshed USER
-          // token creates the subscriptions. The BYOK branch used to hand the user token to
-          // both, which `/2/webhooks` rejects with 403 (see oauth.ts's BYOK branch).
-          const webhookUrl = config.is_byok
-            ? byokWebhookUrl(env.LINK_URL, config.x_user_id)
-            : `${env.LINK_URL}/x/webhook`;
-          if (!creds.bearerToken) {
-            throw new Error(`channel ${row.id} has no app-only bearer token — cannot register its webhook`);
-          }
-          const bearerService = new XActivityService(creds.bearerToken);
-          let webhook = await bearerService.getWebhook(webhookUrl);
-          if (!webhook) {
-            const whId = await bearerService.createWebhook(webhookUrl);
-            webhook = { webhook_id: whId, url: webhookUrl };
-          }
-          const userService = new XActivityService(newToken);
-          const ids = await userService.setupAllSubscriptions(config.x_user_id, webhookUrl, webhook.webhook_id);
-          await tokenService.updateConfig(row.id, { subscription_ids: ids });
+          // Shared with POST /internal/x/repair-subscriptions — see ensureXSubscriptions.
+          const result = await ensureXSubscriptions(env, row.id, config, creds, newToken);
+          if (!result.ok) console.error(JSON.stringify({ event: "xaa_subscription_repair_skipped", channel_id: row.id, reason: result.error }));
         } catch (e) {
           console.error("XAA subscription setup failed:", e);
         }

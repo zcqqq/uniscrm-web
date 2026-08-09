@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
-import { XTokenService } from "./services/x-token";
+import { XTokenService, type ChannelConfig } from "./services/x-token";
+import { ensureXSubscriptions } from "./services/x-subscription-repair";
 import { readFrozenState, frozenReason, recordXApiResult, markChannelFrozen, type XFreezeSignal } from "./services/x-freeze";
 import { XActivityService } from "./services/x-webhook";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
@@ -351,6 +352,37 @@ export function internalRoutes() {
         subscriptions_for_user: forUser,
       },
     });
+  });
+
+  // 手动跑一次订阅修复 —— 与 cron 里的自愈走同一个 ensureXSubscriptions。
+  // cron 每小时才跑一次，且只在 token 刷新窗口内才会走到修复分支，所以「改完等两小时」
+  // 一直是排查这条链路的主要成本。幂等：setupAllSubscriptions 会跳过已存在的事件类型。
+  router.post("/x/repair-subscriptions", async (c) => {
+    const channelId = c.req.query("channelId");
+    if (!channelId) return c.json({ error: "channelId required" }, 400);
+
+    const row = await c.env.LINK_DB
+      // tenant-scope-ok: internal maintenance endpoint, gated by INTERNAL_SECRET, not a tenant session
+      .prepare("SELECT id, config FROM channels WHERE id = ? AND is_active = 1")
+      .bind(channelId)
+      .first<{ id: string; config: string }>();
+    if (!row) return c.json({ error: "channel_not_found" }, 404);
+
+    const config = JSON.parse(row.config) as ByokConfig & ChannelConfig & { is_byok?: boolean };
+    const creds = await getAppCredentials(c.env, config);
+    const tokenService = new XTokenService(c.env.LINK_DB, creds.clientId, creds.clientSecret);
+
+    try {
+      // getValidToken refuses a deactivated or frozen channel and refreshes when due — the
+      // same guarantees the cron path gets from its own refresh.
+      const token = await tokenService.getValidToken(channelId);
+      const result = await ensureXSubscriptions(c.env, channelId, config, creds, token);
+      return c.json(result, result.ok ? 200 : 400);
+    } catch (e) {
+      const error = String(e).slice(0, 500);
+      console.error(JSON.stringify({ event: "xaa_manual_repair_failed", channelId, error }));
+      return c.json({ ok: false, error }, 502);
+    }
   });
 
   // flow 用来判断一个 published flow 的 trigger 绑的 channel 是否还活着。只回 id 集合，

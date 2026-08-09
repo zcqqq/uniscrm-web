@@ -900,6 +900,20 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
       <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("xContentAction"))}</h4>
       <div className="space-y-3">
         <div>
+          <Label className="text-xs block mb-1">{T({ en: "Operation", zh: "操作" })}</Label>
+          <OperationSelect
+            value={data.operation || "create-post"}
+            onChange={(v) => updateNodeData(nodeId, { operation: v })}
+            options={CONTENT_ACTION_OPERATIONS.map((op) => ({
+              value: op.sourceContentType,
+              label: op.label ? localizeLabel(op.label, locale) : op.sourceContentType,
+              price: op.price,
+            }))}
+            placeholder={T({ en: "Select operation...", zh: "选择操作…" })}
+          />
+        </div>
+
+        <div>
           <Label className="text-xs block mb-1">{T({ en: "Target Account", zh: "目标账号" })}</Label>
           {channels.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">{T({ en: "No X accounts linked", zh: "尚未绑定 X 账号" })}</p>
@@ -913,20 +927,6 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
               {channels.map((ch) => <option key={ch.id} value={ch.id}>@{ch.username}</option>)}
             </Select>
           )}
-        </div>
-
-        <div>
-          <Label className="text-xs block mb-1">{T({ en: "Operation", zh: "操作" })}</Label>
-          <OperationSelect
-            value={data.operation || "create-post"}
-            onChange={(v) => updateNodeData(nodeId, { operation: v })}
-            options={CONTENT_ACTION_OPERATIONS.map((op) => ({
-              value: op.sourceContentType,
-              label: op.label ? localizeLabel(op.label, locale) : op.sourceContentType,
-              price: op.price,
-            }))}
-            placeholder={T({ en: "Select operation...", zh: "选择操作…" })}
-          />
         </div>
         {aiProp && (
           <>
@@ -1199,6 +1199,19 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
       <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("tiktokContentAction"))}</h4>
       <div className="space-y-3">
         <div>
+          <Label className="text-xs block mb-1">{T({ en: "Operation", zh: "操作" })}</Label>
+          <OperationSelect
+            value={operation}
+            onChange={(v) => updateNodeData(nodeId, { operation: v })}
+            options={CONTENT_TIKTOK_ACTION_OPERATIONS.map((op) => ({
+              value: op.sourceContentType,
+              label: op.label ? localizeLabel(op.label, locale) : op.sourceContentType,
+            }))}
+            placeholder={T({ en: "Select operation...", zh: "选择操作…" })}
+          />
+        </div>
+
+        <div>
           <Label className="text-xs block mb-1">{T({ en: "Target Account", zh: "目标账号" })}</Label>
           {channels.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">{T({ en: "No TikTok accounts linked", zh: "尚未绑定 TikTok 账号" })}</p>
@@ -1212,19 +1225,6 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
               {channels.map((ch) => <option key={ch.id} value={ch.id}>@{ch.username}</option>)}
             </Select>
           )}
-        </div>
-
-        <div>
-          <Label className="text-xs block mb-1">{T({ en: "Operation", zh: "操作" })}</Label>
-          <OperationSelect
-            value={operation}
-            onChange={(v) => updateNodeData(nodeId, { operation: v })}
-            options={CONTENT_TIKTOK_ACTION_OPERATIONS.map((op) => ({
-              value: op.sourceContentType,
-              label: op.label ? localizeLabel(op.label, locale) : op.sourceContentType,
-            }))}
-            placeholder={T({ en: "Select operation...", zh: "选择操作…" })}
-          />
         </div>
 
         {textProps.map((prop) => {

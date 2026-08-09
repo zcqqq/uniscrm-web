@@ -8,15 +8,41 @@ export async function getSkillContent(env: Env, skillId: string): Promise<string
   return row?.content ?? null;
 }
 
+// SKILL.md files push their hard requirements (e.g. X's 280-char limit) out to sibling
+// reference docs like "[references/platform-limits.md](references/platform-limits.md)".
+// The LLM only ever sees the cached text, so an un-inlined link is a dead end — the
+// model was generating posts without ever seeing the platform limits.
+const REFERENCE_LINK_RE = /\]\((references\/[\w./-]+\.md)\)/g;
+const MAX_REFERENCE_FILES = 8;
+
+export function extractReferenceLinks(markdown: string): string[] {
+  const seen = new Set<string>();
+  for (const m of markdown.matchAll(REFERENCE_LINK_RE)) {
+    seen.add(m[1]);
+    if (seen.size >= MAX_REFERENCE_FILES) break;
+  }
+  return [...seen];
+}
+
 // Manual refresh only -- never called from the generation path. Only overwrites the
-// cache on a successful fetch so a GitHub outage/404 can't poison a working cache.
+// cache when the main document AND every referenced file fetch successfully, so a
+// GitHub outage/404 can't poison a working cache — not even with a partial version.
 export async function refreshSkillContent(env: Env, skillId: string): Promise<void> {
   const def = getSkillDefinition(skillId);
   if (!def) throw new Error(`Unknown skill id: ${skillId}`);
 
   const res = await fetch(def.sourceUrl);
   if (!res.ok) throw new Error(`Fetch failed for skill ${skillId}: ${res.status}`);
-  const content = await res.text();
+  const mainContent = await res.text();
+
+  const baseUrl = def.sourceUrl.slice(0, def.sourceUrl.lastIndexOf("/") + 1);
+  const sections = [mainContent];
+  for (const ref of extractReferenceLinks(mainContent)) {
+    const refRes = await fetch(baseUrl + ref);
+    if (!refRes.ok) throw new Error(`Fetch failed for skill ${skillId} reference ${ref}: ${refRes.status}`);
+    sections.push(`\n\n---\n\n# Referenced file: ${ref}\n\n${await refRes.text()}`);
+  }
+  const content = sections.join("");
   const now = new Date().toISOString();
 
   await env.CONTENT_DB.prepare(

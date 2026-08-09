@@ -64,6 +64,56 @@ describe("skill-content", () => {
       expect(content).toBe("new content");
     });
 
+    it("inlines referenced files after the main document, resolved against the source URL", async () => {
+      const main = [
+        "# Social Content",
+        "**For detailed platform strategies**: See [references/platforms.md](references/platforms.md)",
+        "**For hashtag limits and character counts**: See [references/platform-limits.md](references/platform-limits.md)",
+        "Mentioned twice: [references/platform-limits.md](references/platform-limits.md)",
+      ].join("\n");
+      const fetchMock = vi.fn(async (url: string) => {
+        if (String(url).endsWith("/SKILL.md")) return new Response(main, { status: 200 });
+        if (String(url).endsWith("/references/platforms.md")) return new Response("## Platforms detail", { status: 200 });
+        if (String(url).endsWith("/references/platform-limits.md")) return new Response("| Max tweet chars | 280 |", { status: 200 });
+        return new Response("Not Found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await refreshSkillContent(env as any, "marketingskills-social");
+
+      const content = await getSkillContent(env as any, "marketingskills-social");
+      expect(content).toContain("# Social Content");
+      expect(content).toContain("# Referenced file: references/platforms.md\n\n## Platforms detail");
+      expect(content).toContain("# Referenced file: references/platform-limits.md\n\n| Max tweet chars | 280 |");
+      // deduped: the twice-linked file is fetched and inlined once
+      expect(fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/references/platform-limits.md")).length).toBe(1);
+      expect(content!.split("# Referenced file: references/platform-limits.md").length).toBe(2);
+      // resolved against the skill's source URL directory
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://raw.githubusercontent.com/coreyhaines31/marketingskills/main/skills/social/references/platform-limits.md"
+      );
+      // main document comes first
+      expect(content!.indexOf("# Social Content")).toBeLessThan(content!.indexOf("# Referenced file:"));
+    });
+
+    it("leaves the cache untouched when a referenced file fails to fetch (no partial cache)", async () => {
+      await env.CONTENT_DB.prepare(
+        "INSERT INTO skill_content_cache (skill_id, content, source_url, fetched_at) VALUES (?, ?, ?, ?)"
+      ).bind("marketingskills-social", "complete old content", "https://example.com/SKILL.md", "2026-01-01T00:00:00.000Z").run();
+      const fetchMock = vi.fn(async (url: string) => {
+        if (String(url).endsWith("/SKILL.md")) {
+          return new Response("main [references/platform-limits.md](references/platform-limits.md)", { status: 200 });
+        }
+        return new Response("Not Found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(refreshSkillContent(env as any, "marketingskills-social")).rejects.toThrow("Fetch failed");
+
+      const content = await getSkillContent(env as any, "marketingskills-social");
+      expect(content).toBe("complete old content");
+    });
+
     it("leaves the existing cache untouched when the fetch fails", async () => {
       await env.CONTENT_DB.prepare(
         "INSERT INTO skill_content_cache (skill_id, content, source_url, fetched_at) VALUES (?, ?, ?, ?)"

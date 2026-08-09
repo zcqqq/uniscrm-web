@@ -18,7 +18,9 @@ export async function generateContent(env: Env, params: GenerateParams): Promise
   const skillContent = params.skillId && params.skillId !== "none"
     ? (await getSkillContent(env, params.skillId)) ?? undefined
     : undefined;
-  const systemPrompt = [params.operationContext, skillContent].filter(Boolean).join("\n\n") || undefined;
+  // Skill first, operationContext LAST: LLMs weight the tail of a long system prompt most
+  // heavily, and skill docs can be 60k+ chars — the execution contract must not drown.
+  const systemPrompt = [skillContent, params.operationContext].filter(Boolean).join("\n\n") || undefined;
 
   if (params.provider === "default") {
     const model = await credentialsModule.getDefaultModel(env, params.tenantId);

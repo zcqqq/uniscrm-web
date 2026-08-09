@@ -130,7 +130,10 @@ describe("generateContent", () => {
     );
   });
 
-  it("puts operationContext BEFORE skill content when both are present", async () => {
+  // Order matters: LLMs weight the end of a long system prompt most heavily, and the skill
+  // document can be 60k+ chars of agent-manual prose — the operation's execution contract
+  // must come LAST or it drowns (empirically verified against llama-4-scout, 2026-08-09).
+  it("puts operationContext AFTER skill content when both are present", async () => {
     vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("Skill guidance here");
     const aiRun = vi.fn().mockResolvedValue({ response: "punchy text" });
     const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
@@ -145,7 +148,7 @@ describe("generateContent", () => {
       expect.anything(),
       expect.objectContaining({
         messages: expect.arrayContaining([
-          { role: "system", content: "op context line\n\nSkill guidance here" },
+          { role: "system", content: "Skill guidance here\n\nop context line" },
         ]),
       })
     );

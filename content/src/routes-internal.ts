@@ -8,11 +8,12 @@ export function internalRoutes() {
   const router = new Hono<{ Bindings: Env }>();
 
   router.post("/generate", async (c) => {
-    const { tenantId, prompt, provider, skillId } = await c.req.json<{
+    const { tenantId, prompt, provider, skillId, operationContext } = await c.req.json<{
       tenantId: number;
       prompt: string;
       provider: "default" | "openai" | "anthropic";
       skillId?: string;
+      operationContext?: string;
     }>();
 
     if (!tenantId || !prompt || !provider) {
@@ -20,7 +21,7 @@ export function internalRoutes() {
     }
 
     try {
-      const text = await generateContent(c.env, { tenantId, prompt, provider, skillId });
+      const text = await generateContent(c.env, { tenantId, prompt, provider, skillId, operationContext });
       return c.json({ text });
     } catch (err) {
       if (String(err).includes("No") && String(err).includes("credentials configured")) {

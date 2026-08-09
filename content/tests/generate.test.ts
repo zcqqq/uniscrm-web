@@ -109,4 +109,45 @@ describe("generateContent", () => {
       expect.objectContaining({ messages: [{ role: "user", content: baseParams.prompt }] })
     );
   });
+
+  it("passes operationContext as the system prompt when no skill is set", async () => {
+    const aiRun = vi.fn().mockResolvedValue({ response: "punchy text" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+
+    await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, {
+      ...baseParams,
+      operationContext: 'You are executing the flow operation: "X Content Action - Create Post" — Publish a new post via the triggering channel',
+    });
+
+    expect(aiRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        messages: [
+          { role: "system", content: 'You are executing the flow operation: "X Content Action - Create Post" — Publish a new post via the triggering channel' },
+          { role: "user", content: baseParams.prompt },
+        ],
+      })
+    );
+  });
+
+  it("puts operationContext BEFORE skill content when both are present", async () => {
+    vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("Skill guidance here");
+    const aiRun = vi.fn().mockResolvedValue({ response: "punchy text" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+
+    await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, {
+      ...baseParams,
+      skillId: "marketingskills-social",
+      operationContext: "op context line",
+    });
+
+    expect(aiRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          { role: "system", content: "op context line\n\nSkill guidance here" },
+        ]),
+      })
+    );
+  });
 });

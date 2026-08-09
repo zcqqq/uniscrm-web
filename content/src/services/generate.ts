@@ -11,12 +11,14 @@ export interface GenerateParams {
   prompt: string;
   provider: "default" | "openai" | "anthropic";
   skillId?: string;
+  operationContext?: string;
 }
 
 export async function generateContent(env: Env, params: GenerateParams): Promise<string> {
-  const systemPrompt = params.skillId && params.skillId !== "none"
+  const skillContent = params.skillId && params.skillId !== "none"
     ? (await getSkillContent(env, params.skillId)) ?? undefined
     : undefined;
+  const systemPrompt = [params.operationContext, skillContent].filter(Boolean).join("\n\n") || undefined;
 
   if (params.provider === "default") {
     const model = await credentialsModule.getDefaultModel(env, params.tenantId);

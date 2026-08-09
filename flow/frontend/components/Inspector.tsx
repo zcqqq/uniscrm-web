@@ -13,7 +13,7 @@ import { ContentMetadata_YouTube } from "../../../metadata/youtube";
 import { PROPS } from "../../../metadata/props";
 import { t as localizeLabel, type Locale } from "../../../metadata/locale";
 import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
-import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, CONDITION_LOGIC_OR, CONDITION_LOGIC_AND, resolveYouTubeSubscriptions } from "../../nodeTypeRegistry";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, CONDITION_LOGIC_OR, CONDITION_LOGIC_AND, resolveYouTubeSubscriptions, type ActionTypeKey, type ReactFlowNodeType } from "../../nodeTypeRegistry";
 import { EventMetadata_X } from "../../../metadata/x";
 import type { PropFilter, LocalizedString } from "../../../metadata/dataTypes";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
@@ -26,7 +26,7 @@ import { toggleSubscription } from "../lib/subscription-summary";
 import { useT } from "../../../shared/frontend/hooks/useT";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { C } from "../../../shared/frontend/i18n-common";
-import { nodeLabel } from "../config/nodeTypeLabels";
+import { nodeLabel } from "../../nodeTypeRegistry";
 
 type SelectChange = React.ChangeEvent<HTMLSelectElement>;
 type InputChange = React.ChangeEvent<HTMLInputElement>;
@@ -656,73 +656,60 @@ function WaitForEventInspector({ nodeId, data }: { nodeId: string; data: Record<
   );
 }
 
-function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+function AddToListInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const T = useT();
   const { updateNodeData } = useFlowEditor();
-  const actionType = data.actionType as string;
   const [lists, setLists] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (actionType !== "addToList") return;
     setLoading(true);
     api.lists.list()
       .then((res) => setLists(res.lists || []))
       .catch(() => setLists([]))
       .finally(() => setLoading(false));
-  }, [actionType]);
+  }, []);
 
-  if (actionType === "addToList") {
-    return (
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("addToList"))}</h4>
       <div>
-        <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("addToList"))}</h4>
-        <div>
-          <Label className="text-xs block mb-1">{T({ en: "List", zh: "名单" })}</Label>
-          {loading ? (
-            <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
-          ) : lists.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">{T({ en: "No lists found. Create one in Profile.", zh: "未找到名单，请先在用户画像中创建。" })}</p>
-          ) : (
-            <Select
-              value={data.listId || ""}
-              onChange={(e: SelectChange) => {
-                const list = lists.find((l) => l.id === e.target.value);
-                updateNodeData(nodeId, { listId: e.target.value, listName: list?.name || "" });
-              }}
-              className="w-full text-sm"
-            >
-              <option value="">{T({ en: "Select list...", zh: "选择名单…" })}</option>
-              {lists.map((l) => (
-                <option key={l.id} value={l.id}>{l.name}</option>
-              ))}
-            </Select>
-          )}
-        </div>
+        <Label className="text-xs block mb-1">{T({ en: "List", zh: "名单" })}</Label>
+        {loading ? (
+          <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
+        ) : lists.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">{T({ en: "No lists found. Create one in Profile.", zh: "未找到名单，请先在用户画像中创建。" })}</p>
+        ) : (
+          <Select
+            value={data.listId || ""}
+            onChange={(e: SelectChange) => {
+              const list = lists.find((l) => l.id === e.target.value);
+              updateNodeData(nodeId, { listId: e.target.value, listName: list?.name || "" });
+            }}
+            className="w-full text-sm"
+          >
+            <option value="">{T({ en: "Select list...", zh: "选择名单…" })}</option>
+            {lists.map((l) => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </Select>
+        )}
       </div>
-    );
-  }
+    </div>
+  );
+}
 
-  if (actionType === "xAction") {
-    return <XActionInspector nodeId={nodeId} data={data} />;
+// One inspector per registry action key (data.actionType), exhaustive over ActionTypeKey — a
+// new action entry in the registry won't compile until it gets an inspector here. Declared
+// after the components below (function declarations hoist; the map is only read at render).
+function ActionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
+  const actionType = data.actionType as string;
+  const Body = (ACTION_INSPECTORS as Record<string, InspectorComponent | undefined>)[actionType];
+  if (!Body) {
+    return <p className="text-sm text-muted-foreground">{T({ en: "Unknown action type", zh: "未知动作类型" })}</p>;
   }
-
-  if (actionType === "xContentAction") {
-    return <XContentActionInspector nodeId={nodeId} data={data} />;
-  }
-
-  if (actionType === "tiktokContentAction") {
-    return <TikTokContentActionInspector nodeId={nodeId} data={data} />;
-  }
-
-  if (actionType === "youtubeContentAction") {
-    return <YouTubeContentActionInspector nodeId={nodeId} data={data} />;
-  }
-
-  if (actionType === "videoAction") {
-    return <VideoActionInspector nodeId={nodeId} data={data} />;
-  }
-
-  return <p className="text-sm text-muted-foreground">{T({ en: "Unknown action type", zh: "未知动作类型" })}</p>;
+  return <Body nodeId={nodeId} data={data} />;
 }
 
 const X_ACTION_OPERATIONS = EventMetadata_X.filter((m) => m.flowType === "action");
@@ -1529,6 +1516,38 @@ function WebhookInspector({ nodeId, data }: { nodeId: string; data: Record<strin
   );
 }
 
+type InspectorComponent = (props: { nodeId: string; data: Record<string, any> }) => React.ReactNode;
+
+// Per-actionType inspectors, exhaustive over the registry's action keys (see ActionInspector).
+const ACTION_INSPECTORS: Record<ActionTypeKey, InspectorComponent> = {
+  addToList: AddToListInspector,
+  xAction: XActionInspector,
+  xContentAction: XContentActionInspector,
+  tiktokContentAction: TikTokContentActionInspector,
+  youtubeContentAction: YouTubeContentActionInspector,
+  videoAction: VideoActionInspector,
+};
+
+// Per-node-type inspectors, exhaustive over the registry's reactFlowTypes — a new registry
+// entry with a new reactFlowType won't compile until it gets an inspector here. Unknown/legacy
+// types (e.g. pre-registry "condition" nodes) render no body, as the old per-type
+// `node.type === ...` chain did.
+const NODE_INSPECTORS: Record<ReactFlowNodeType, InspectorComponent> = {
+  xTrigger: XTriggerInspector,
+  xContentTrigger: XContentTriggerInspector,
+  youtubeContentTrigger: YouTubeContentTriggerInspector,
+  cronTrigger: CronTriggerInspector,
+  waitForEvent: WaitForEventInspector,
+  wait: WaitInspector,
+  timeCondition: TimeConditionInspector,
+  userPropsCondition: UserPropsConditionInspector,
+  abSplit: AbSplitInspector,
+  action: ActionInspector,
+  webhook: WebhookInspector,
+  videoCondition: VideoConditionInspector,
+  youtubeCondition: YouTubeConditionInspector,
+};
+
 export default function Inspector() {
   const T = useT();
   const { selectedNodeId, nodes, deleteSelectedNode } = useFlowEditor();
@@ -1537,6 +1556,8 @@ export default function Inspector() {
 
   const node = nodes.find((n) => n.id === selectedNodeId);
   if (!node) return null;
+
+  const Body = (NODE_INSPECTORS as Record<string, InspectorComponent | undefined>)[node.type ?? ""];
 
   return (
     <aside className="w-24 md:w-72 border-l border-border bg-background p-4 overflow-y-auto">
@@ -1552,45 +1573,7 @@ export default function Inspector() {
         </Button>
       </div>
 
-      {node.type === "xTrigger" && (
-        <XTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
-      {node.type === "xContentTrigger" && (
-        <XContentTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
-      {node.type === "youtubeContentTrigger" && (
-        <YouTubeContentTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
-      {node.type === "cronTrigger" && (
-        <CronTriggerInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
-      {node.type === "waitForEvent" && (
-        <WaitForEventInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
-      {node.type === "wait" && (
-        <WaitInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
-      {node.type === "timeCondition" && (
-        <TimeConditionInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
-      {node.type === "userPropsCondition" && (
-        <UserPropsConditionInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
-      {node.type === "abSplit" && (
-        <AbSplitInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
-      {node.type === "action" && (
-        <ActionInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
-      {node.type === "webhook" && (
-        <WebhookInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
-      {node.type === "videoCondition" && (
-        <VideoConditionInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
-      {node.type === "youtubeCondition" && (
-        <YouTubeConditionInspector nodeId={node.id} data={node.data as Record<string, any>} />
-      )}
+      {Body && <Body nodeId={node.id} data={node.data as Record<string, any>} />}
     </aside>
   );
 }

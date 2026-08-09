@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildFlowGenerateSystemPrompt } from "../../src/generate-prompt";
-import { NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
+import { NODE_TYPE_REGISTRY, generatableKeysForDomain } from "../../nodeTypeRegistry";
 import { CHANNEL_TYPES } from "../../frontend/config/trigger-fields";
 
 describe("buildFlowGenerateSystemPrompt", () => {
@@ -58,5 +58,46 @@ describe("buildFlowGenerateSystemPrompt", () => {
     // cronTrigger's own fragment (a "trigger on a schedule" declaration) must not leak into
     // the content-domain prompt either — only its name in the "Do NOT use" sentence is allowed.
     expect(prompt).not.toContain("cronTrigger - triggers on a schedule");
+  });
+
+  // The Rules block is now derived from the registry (generatable + role/branches facets), so
+  // it can never again drift the way the hand-typed version did: youtubeContentAction was
+  // registry-marked generatable+content yet missing from both the allowed-actionType list and
+  // the sourceHandle rule, so the LLM was told it didn't exist.
+  it("content domain: the Rules block mentions exactly the generatable content action types — including the previously drifted youtubeContentAction", () => {
+    const prompt = buildFlowGenerateSystemPrompt("content");
+    const contentActionKeys = generatableKeysForDomain("content")
+      .filter((key) => NODE_TYPE_REGISTRY[key].role === "action");
+    expect(contentActionKeys).toContain("youtubeContentAction");
+
+    // Allowed-types rule lists every generatable content actionType and no user-domain one.
+    const onlyUseLine = prompt.split("\n").find((l) => l.startsWith("- Only use "))!;
+    expect(onlyUseLine).toBeTruthy();
+    for (const key of contentActionKeys) {
+      expect(onlyUseLine, `Only-use rule is missing actionType "${key}"`).toContain(`"${key}"`);
+    }
+
+    // sourceHandle rule covers the same exact set.
+    const handleLine = prompt.split("\n").find((l) => l.startsWith("- action nodes with actionType "))!;
+    expect(handleLine).toBeTruthy();
+    const mentioned = [...handleLine.matchAll(/"([A-Za-z]+)"/g)].map((m) => m[1])
+      .filter((v) => v !== "success" && v !== "failed");
+    expect(mentioned.sort()).toEqual([...contentActionKeys].sort());
+    expect(handleLine).toContain('sourceHandle "success" or "failed" for branching');
+  });
+
+  it("user domain: sourceHandle rules derive from the registry's branches facet (xAction named directly; branchless addToList absent)", () => {
+    const prompt = buildFlowGenerateSystemPrompt("user");
+    expect(prompt).toContain('- xAction nodes have sourceHandle "success" or "failed" for branching');
+    expect(prompt).not.toContain("addToList nodes have sourceHandle");
+    // wait/timeCondition declare no branches — no sourceHandle rule may appear for them.
+    expect(prompt).not.toContain("wait nodes have sourceHandle");
+    expect(prompt).not.toContain("timeCondition nodes have sourceHandle");
+  });
+
+  it("content domain: youtubeContentAction's data-shape fragment is in the numbered list (generatable end-to-end, as the registry always claimed)", () => {
+    const prompt = buildFlowGenerateSystemPrompt("content");
+    expect(prompt).toContain(NODE_TYPE_REGISTRY.youtubeContentAction.promptFragment!);
+    expect(prompt).toContain('actionType: "youtubeContentAction"');
   });
 });

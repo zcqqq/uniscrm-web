@@ -2,8 +2,12 @@ import { ContentMetadata_X } from "../metadata/x-byok";
 import { ContentMetadata_TikTok } from "../metadata/tiktok";
 import { ContentMetadata_YouTube } from "../metadata/youtube";
 import { CHANNEL_TYPES } from "./frontend/config/trigger-fields";
+import type { LocalizedString } from "../metadata/dataTypes";
 
 export type FlowDomain = "user" | "content";
+
+/** Sidebar palette section a node type is listed under. Colour derives from the section. */
+export type SidebarSection = "triggers" | "actions" | "flowControl";
 
 export interface NodeTypeConfig {
   /** The React Flow `node.type` this entry corresponds to ("action" for every actionType variant). */
@@ -23,17 +27,24 @@ export interface NodeTypeConfig {
    */
   role: "trigger" | "action" | "condition";
   /**
-   * Display name shown in Sidebar, the canvas node, and the Inspector heading — the single
-   * source of truth for this type's name so the three surfaces can't drift apart. Omitted only
-   * for xTrigger, whose label is dynamic per channelType and sourced from CHANNEL_TYPES instead.
+   * Bilingual display name shown in Sidebar, the canvas node, and the Inspector heading — the
+   * single source of truth for this type's name so the three surfaces can't drift apart.
+   * (Formerly split between this registry's English string and frontend/config/nodeTypeLabels.ts's
+   * zh table; merged here. This file sits at flow/ root, outside the i18n audit's frontend scan
+   * dirs, and every label/description line carries `en:` — which the audit treats as
+   * already-bilingual — so the merge keeps the audit green.)
+   * Omitted only for xTrigger, whose label is dynamic per channelType and sourced from
+   * CHANNEL_TYPES instead.
    */
-  label?: string;
+  label?: LocalizedString;
   /**
-   * Sidebar description — the single source of truth for this type's palette tooltip text,
-   * same rationale as `label`. Omitted only for xTrigger, whose description is dynamic per
-   * channelType and computed in Sidebar.tsx from CHANNEL_TYPES instead.
+   * Bilingual Sidebar description — the single source of truth for this type's palette tooltip
+   * text, same rationale as `label`. Count-based descriptions ("4 actions") compute the number
+   * once at module load into both languages — no "{n}" placeholder / regex round-trip anymore.
+   * Omitted only for xTrigger, whose description is dynamic per channelType and computed in
+   * Sidebar.tsx from CHANNEL_TYPES instead.
    */
-  description?: string;
+  description?: LocalizedString;
   domain: FlowDomain | "both";
   /** Whether the AI generate feature may produce this node type/actionType. */
   generatable: boolean;
@@ -46,6 +57,37 @@ export interface NodeTypeConfig {
    * declaration order, so xAction is declared before addToList to match the existing prompt).
    */
   promptFragment?: string;
+  /**
+   * Fresh default `node.data` for a newly added node of this type (consumed by the editor's
+   * addNode — persisted graphs carry their own data). A factory, not a shared object, so two
+   * nodes never alias the same conditions array.
+   */
+  defaultData: () => Record<string, unknown>;
+  /**
+   * The node's outgoing sourceHandle ids when it branches (["success","failed"], ["yes","no"],
+   * ["true","false","failed"], ...). Absent = single unnamed output. The runtime handles stay
+   * where they always were (node components / executors); this declaration exists so the
+   * generate-prompt Rules block derives its sourceHandle lines instead of hand-typing them —
+   * the documentation can no longer drift from the registry.
+   */
+  branches?: readonly string[];
+  /**
+   * True for node types whose data.conditions is a props-conditions array edited via the
+   * Inspector's ConditionsEditor and evaluated by conditionsPass at runtime. Drives
+   * validate-flow-graph.ts's OR-with-zero-conditions publish gate (PROPS_CONDITION_NODE_TYPES).
+   * userPropsCondition/abSplit also carry data.conditions but neither use ConditionsEditor nor
+   * are engine-evaluated — deliberately not tagged (see validate-flow-graph.ts).
+   */
+  propsConditions?: boolean;
+  /**
+   * Action-role entries only: true when the action calls a third-party platform API and thus
+   * has success/failed branches resolved asynchronously (flow/CLAUDE.md: 2xx→success,
+   * 4xx/5xx/timeout→failed). Drives buildActionData's hasBranches — formerly a hand-maintained
+   * string list in engine.ts.
+   */
+  externalApi?: boolean;
+  /** Which Sidebar section this type is listed under (colour derives from the section). */
+  sidebarSection: SidebarSection;
 }
 
 const CONTENT_X_TRIGGER_ENTRIES = ContentMetadata_X.filter((m) => m.flowType === "trigger");
@@ -96,24 +138,34 @@ const CONTENT_YOUTUBE_ACTION_BULLETS = CONTENT_YOUTUBE_ACTION_ENTRIES.map((m) =>
 // fires a content flow — so get-list-posts is currently the only content-flow trigger mode.
 export const CONTENT_X_TRIGGER_MODE_LIST_POSTS = CONTENT_X_TRIGGER_ENTRIES.find((m) => m.sourceContentType === "get-list-posts")!.sourceContentType;
 
-export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
+// `as const satisfies` (not a plain Record annotation) so the key set and each entry's literal
+// reactFlowType/role survive at the type level: NodeTypeKey / ReactFlowNodeType / TriggerTypeKey /
+// ActionTypeKey below derive from them, and the per-side behavior maps (src/node-executors.ts,
+// frontend/nodes/index.ts, Inspector.tsx's inspector maps) are typed Record<those keys, …> —
+// adding a registry entry without an executor/matcher/component/inspector is a compile error.
+const REGISTRY = {
   // --- user-domain triggers/flow-control/actions ---
   xTrigger: {
     reactFlowType: "xTrigger",
     domain: "user",
     role: "trigger",
     generatable: true,
+    sidebarSection: "triggers",
+    propsConditions: true,
+    defaultData: () => ({ channelType: "X", eventType: "", channelId: "" }),
     promptFragment: `xTrigger - triggers on X (Twitter) events
    data: { channelType: "X", eventType: string }
    eventTypes: ${X_TRIGGER_EVENT_LIST}`,
   },
   cronTrigger: {
     reactFlowType: "cronTrigger",
-    label: "Cron Trigger",
-    description: "Trigger on a schedule",
+    label: { en: "Cron Trigger", zh: "Cron 触发器" },
+    description: { en: "Trigger on a schedule", zh: "按计划定时触发" },
     domain: "user",
     role: "trigger",
     generatable: true,
+    sidebarSection: "triggers",
+    defaultData: () => ({ scheduleType: "", dailyTime: "09:00", cronExpr: "", intervalValue: 60, intervalUnit: "minutes" }),
     promptFragment: `cronTrigger - triggers on a schedule (all times UTC)
    data: { scheduleType: "daily"|"interval"|"cron", dailyTime: "09:00", cronExpr: "", intervalValue: 60, intervalUnit: "minutes"|"hours"|"days" }
    - scheduleType "daily": fires once per day at dailyTime ("HH:mm", UTC).
@@ -122,21 +174,28 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
   },
   waitForEvent: {
     reactFlowType: "waitForEvent",
-    label: "Wait for Event",
-    description: "Check if event has occurred",
+    label: { en: "Wait for Event", zh: "等待事件" },
+    description: { en: "Check if event has occurred", zh: "检查事件是否已发生" },
     domain: "user",
     role: "condition",
     generatable: true,
+    sidebarSection: "flowControl",
+    branches: ["yes", "no"],
+    propsConditions: true,
+    defaultData: () => ({ eventType: "", channelId: "", duration: 1, unit: "days", conditions: [] }),
     promptFragment: `waitForEvent - wait for an event within a time window, has "yes"/"no" branches
    data: { eventType: string, duration: number, unit: "minutes"|"hours"|"days", conditions: [] }`,
   },
   userPropsCondition: {
     reactFlowType: "userPropsCondition",
-    label: "User Props",
-    description: "Branch by user properties",
+    label: { en: "User Props", zh: "用户属性" },
+    description: { en: "Branch by user properties", zh: "按用户属性分支" },
     domain: "user",
     role: "condition",
     generatable: true,
+    sidebarSection: "flowControl",
+    branches: ["yes", "no"],
+    defaultData: () => ({ conditions: [] }),
     promptFragment: `userPropsCondition - branches on the triggering user's profile fields, has "yes"/"no" branches
    data: { conditions: [{ field: string, operator: "=="|"!="|">"|"<", value: string }] }
    - All conditions must pass (AND) for the "yes" branch; otherwise "no".`,
@@ -145,32 +204,41 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
   // (see buildUserDomainPrompt in generate-prompt.ts, which composes fragments in this order).
   xAction: {
     reactFlowType: "action",
-    label: "X Action",
-    description: `${X_ACTION_COUNT} actions`,
+    label: { en: "X Action", zh: "X 动作" },
+    description: { en: `${X_ACTION_COUNT} actions`, zh: `${X_ACTION_COUNT} 个动作` },
     domain: "user",
     role: "action",
     generatable: true,
+    sidebarSection: "actions",
+    branches: ["success", "failed"],
+    externalApi: true,
+    defaultData: () => ({ actionType: "xAction", xEvent: "", channelId: "" }),
     promptFragment: `   For X actions: data: { actionType: "xAction", xEvent: string }
    xEvents: ${X_ACTION_EVENT_LIST}`,
   },
   addToList: {
     reactFlowType: "action",
-    label: "Add to List",
-    description: "Add user to a profile list",
+    label: { en: "Add to List", zh: "加入名单" },
+    description: { en: "Add user to a profile list", zh: "把用户加入画像名单" },
     domain: "user",
     role: "action",
     generatable: true,
+    sidebarSection: "actions",
+    defaultData: () => ({ actionType: "addToList", listId: "", listName: "" }),
     promptFragment: `   For list actions: data: { actionType: "addToList", listId: "", listName: "" }`,
   },
 
   // --- content-domain triggers/actions ---
   xContentTrigger: {
     reactFlowType: "xContentTrigger",
-    label: "X Trigger",
-    description: `${CONTENT_X_TRIGGER_COUNT} triggers`,
+    label: { en: "X Trigger", zh: "X 触发器" },
+    description: { en: `${CONTENT_X_TRIGGER_COUNT} triggers`, zh: `${CONTENT_X_TRIGGER_COUNT} 个触发器` },
     domain: "content",
     role: "trigger",
     generatable: true,
+    sidebarSection: "triggers",
+    propsConditions: true,
+    defaultData: () => ({ channelId: "", mode: CONTENT_X_TRIGGER_MODE_LIST_POSTS, listId: "", listName: "", conditions: [] }),
     promptFragment: `xContentTrigger - triggers when new content arrives on an X channel
    data: { channelId: "", mode: ${CONTENT_X_TRIGGER_MODES}, listId: "", listName: "", conditions: [] }
    - channelId, listId, listName are left blank ("") — the user fills them in via the Inspector after generation.
@@ -178,11 +246,14 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
   },
   youtubeContentTrigger: {
     reactFlowType: "youtubeContentTrigger",
-    label: "YouTube Trigger",
-    description: "Watches a subscribed YouTube channel",
+    label: { en: "YouTube Trigger", zh: "YouTube 触发器" },
+    description: { en: "Watches a subscribed YouTube channel", zh: "监听已订阅的 YouTube 频道" },
     domain: "content",
     role: "trigger",
     generatable: true,
+    sidebarSection: "triggers",
+    propsConditions: true,
+    defaultData: () => ({ channelId: "", subscriptions: [], conditions: [] }),
     promptFragment: `youtubeContentTrigger - triggers when any of the selected subscribed YouTube channels publishes a new video
    data: { channelId: "", subscriptions: [], conditions: [] }
    - channelId and subscriptions are left blank — the user picks one or more subscriptions from a multi-select in the Inspector after generation, sourced from their connected YouTube account (OAuth) on the Social page.
@@ -190,11 +261,15 @@ export const NODE_TYPE_REGISTRY: Record<string, NodeTypeConfig> = {
   },
   xContentAction: {
     reactFlowType: "action",
-    label: "X Action",
-    description: `${CONTENT_X_ACTION_COUNT} actions`,
+    label: { en: "X Action", zh: "X 动作" },
+    description: { en: `${CONTENT_X_ACTION_COUNT} actions`, zh: `${CONTENT_X_ACTION_COUNT} 个动作` },
     domain: "content",
     role: "action",
     generatable: true,
+    sidebarSection: "actions",
+    branches: ["success", "failed"],
+    externalApi: true,
+    defaultData: () => ({ actionType: "xContentAction", prompt: "", provider: "default" }),
     // Leading 3-space indent on the first line matches the user-domain action fragments'
     // (xAction/addToList) "   For X actions: ..." sub-variant style — these fragments are
     // concatenated directly under a numbered "action" item by the prompt builder.
@@ -204,22 +279,34 @@ ${CONTENT_X_ACTION_BULLETS}`,
   },
   tiktokContentAction: {
     reactFlowType: "action",
-    label: "TikTok Action",
-    description: `${CONTENT_TIKTOK_ACTION_ENTRIES.length} actions`,
+    label: { en: "TikTok Action", zh: "TikTok 动作" },
+    description: { en: `${CONTENT_TIKTOK_ACTION_ENTRIES.length} actions`, zh: `${CONTENT_TIKTOK_ACTION_ENTRIES.length} 个动作` },
     domain: "content",
     role: "action",
     generatable: true,
+    sidebarSection: "actions",
+    branches: ["success", "failed"],
+    externalApi: true,
+    defaultData: () => ({
+      actionType: "tiktokContentAction", channelId: "", prompts: {},
+      textProvider: "default", textSkillId: "none",
+      imageCount: 1, imageProvider: "default", imageSkillId: "none",
+    }),
     promptFragment: `   For TikTok content actions: data: { actionType: "tiktokContentAction", operation: ${CONTENT_TIKTOK_ACTION_OPERATIONS}, channelId: "", prompts: {}, textProvider: "default", textSkillId: "none", imageCount: 1, imageProvider: "default", imageSkillId: "none" }
    - Leave all fields at these defaults for the user to configure via the Inspector. imageCount/imageProvider/imageSkillId only apply to "photo-post".
 ${CONTENT_TIKTOK_ACTION_BULLETS}`,
   },
   youtubeContentAction: {
     reactFlowType: "action",
-    label: "YouTube Action",
-    description: `${CONTENT_YOUTUBE_ACTION_ENTRIES.length} actions`,
+    label: { en: "YouTube Action", zh: "YouTube 动作" },
+    description: { en: `${CONTENT_YOUTUBE_ACTION_ENTRIES.length} actions`, zh: `${CONTENT_YOUTUBE_ACTION_ENTRIES.length} 个动作` },
     domain: "content",
     role: "action",
     generatable: true,
+    sidebarSection: "actions",
+    branches: ["success", "failed"],
+    externalApi: true,
+    defaultData: () => ({ actionType: "youtubeContentAction", operation: "save-to-playlist", playlistId: "", playlistTitle: "" }),
     promptFragment: `   For YouTube content actions: data: { actionType: "youtubeContentAction", operation: ${CONTENT_YOUTUBE_ACTION_OPERATIONS}, playlistId: "" }
    - Every operation acts via the triggering channel's own YouTube account — there is no target-account picker.
    - "save-to-playlist" needs playlistId (user picks a playlist in the Inspector); "rate-like" needs no additional fields.
@@ -227,11 +314,15 @@ ${CONTENT_YOUTUBE_ACTION_BULLETS}`,
   },
   videoAction: {
     reactFlowType: "action",
-    label: "Video Action",
-    description: "Add translated subtitles to the content's video",
+    label: { en: "Video Action", zh: "视频动作" },
+    description: { en: "Add translated subtitles to the content's video", zh: "为内容的视频添加翻译字幕" },
     domain: "content",
     role: "action",
     generatable: true,
+    sidebarSection: "actions",
+    branches: ["success", "failed"],
+    externalApi: true,
+    defaultData: () => ({ actionType: "videoAction", targetLanguage: "zh" }),
     promptFragment: `   For video actions: data: { actionType: "videoAction", operation: "add-subtitle"|"rotate-to-vertical"|"remove-face", targetLanguage: "zh" }
    - "add-subtitle": downloads the content's video (or the previous Video Action node's output, if chained), transcribes speech, translates it into targetLanguage, burns in subtitles, caches the result in R2. Has "success"/"failed" branches. Produces $content.processed_video_url, $content.video_transcript, $content.translated_subtitle_text.
    - "rotate-to-vertical": pads the video into 9:16 (1080x1920), centered, black bars top/bottom. No-ops (still succeeds) if already portrait/square. Has "success"/"failed" branches. Produces $content.processed_video_url only. targetLanguage is ignored.
@@ -239,11 +330,17 @@ ${CONTENT_YOUTUBE_ACTION_BULLETS}`,
   },
   videoCondition: {
     reactFlowType: "videoCondition",
-    label: "Video Condition",
-    description: "Sample frames across the video and branch on the face ratio",
+    label: { en: "Video Condition", zh: "视频条件" },
+    description: {
+      en: "Sample frames across the video and branch on the face ratio",
+      zh: "在视频中抽帧，按人脸占比分支",
+    },
     domain: "content",
     role: "condition",
     generatable: true,
+    sidebarSection: "flowControl",
+    branches: ["true", "false", "failed"],
+    defaultData: () => ({ operation: "check-face", operator: "<=", threshold: 0.2 }),
     promptFragment: `videoCondition - samples frames across the content's video and compares the share of frames containing a face against a threshold, has "true"/"false"/"failed" branches
    data: { operation: "check-face", operator: "<=", threshold: 0.2 }
    - "check-face": samples 20 frames spread across the video, measures what fraction of them contain a human face (0-1), and takes the "true" branch when that ratio satisfies operator/threshold. operator is one of "<=", "<", ">=", ">"; threshold is a number between 0 and 1. The default "<= 0.2" therefore means "almost no faces in this video".
@@ -252,11 +349,15 @@ ${CONTENT_YOUTUBE_ACTION_BULLETS}`,
   },
   youtubeCondition: {
     reactFlowType: "youtubeCondition",
-    label: "YouTube Condition",
-    description: "Re-check the trigger video's current stats",
+    label: { en: "YouTube Condition", zh: "YouTube 条件" },
+    description: { en: "Re-check the trigger video's current stats", zh: "重新检查触发视频的当前数据" },
     domain: "content",
     role: "condition",
     generatable: true,
+    sidebarSection: "flowControl",
+    branches: ["true", "false", "failed"],
+    propsConditions: true,
+    defaultData: () => ({ conditions: [] }),
     promptFragment: `youtubeCondition - re-fetches the trigger video's current stats from YouTube and branches on them, has "true"/"false"/"failed" branches
    data: { conditions: [{ field: string, operator: string, value: string }] }
    - Requires a youtubeContentTrigger in the same flow. Put a wait node before it to check the video some time after publication (e.g. wait 1 day, then check whether it passed 10000 views).
@@ -266,32 +367,39 @@ ${CONTENT_YOUTUBE_ACTION_BULLETS}`,
   // --- shared across both domains ---
   wait: {
     reactFlowType: "wait",
-    label: "Wait",
-    description: "Delay for a specified duration",
+    label: { en: "Wait", zh: "等待" },
+    description: { en: "Delay for a specified duration", zh: "延迟指定时长" },
     domain: "both",
     role: "condition",
     generatable: true,
+    sidebarSection: "flowControl",
+    defaultData: () => ({ duration: 0, unit: "minutes" }),
     promptFragment: `wait - delay execution
    data: { duration: number, unit: "minutes"|"hours"|"days" }`,
   },
   timeCondition: {
     reactFlowType: "timeCondition",
-    label: "Time Condition",
-    description: "Gate by time-of-day / day-of-week",
+    label: { en: "Time Condition", zh: "时间条件" },
+    description: { en: "Gate by time-of-day / day-of-week", zh: "按时段 / 星期几放行" },
     domain: "both",
     role: "condition",
     generatable: true,
+    sidebarSection: "flowControl",
+    defaultData: () => ({ timeFrom: "", timeTo: "", daysOfWeek: [] }),
     promptFragment: `timeCondition - gates downstream execution to a time-of-day / day-of-week window, single output (no branching)
    data: { timeFrom: "09:00", timeTo: "17:00", daysOfWeek: [1,2,3,4,5] }
    - timeFrom/timeTo are "HH:mm". daysOfWeek is an array of 0(Sun)-6(Sat). Execution continues once inside the window.`,
   },
   abSplit: {
     reactFlowType: "abSplit",
-    label: "A/B Split",
-    description: "Split traffic by % or condition",
+    label: { en: "A/B Split", zh: "A/B 分流" },
+    description: { en: "Split traffic by % or condition", zh: "按百分比或条件分流" },
     domain: "both",
     role: "condition",
     generatable: true,
+    sidebarSection: "flowControl",
+    branches: ["a", "b"],
+    defaultData: () => ({ mode: "random", percentA: 50, conditions: [] }),
     promptFragment: `abSplit - splits traffic into two branches, has "a"/"b" branches
    data: { mode: "random"|"condition", percentA: 50, conditions: [{ field: string, operator: "==", value: string }] }
    - mode "random": percentA% of traffic takes branch "a", the rest takes "b".
@@ -299,22 +407,73 @@ ${CONTENT_YOUTUBE_ACTION_BULLETS}`,
   },
   webhook: {
     reactFlowType: "webhook",
-    label: "Webhook",
-    description: "Send HTTP request",
+    label: { en: "Webhook", zh: "Webhook" },
+    description: { en: "Send HTTP request", zh: "发送 HTTP 请求" },
     domain: "both",
     role: "condition",
     generatable: true,
+    sidebarSection: "actions",
+    branches: ["success", "failed"],
+    defaultData: () => ({ url: "", method: "POST", headers: {}, body: "" }),
     promptFragment: `webhook - sends an HTTP request, has "success"/"failed" branches
    data: { url: string, method: "GET"|"POST"|"PUT", body: "" }
    - body supports $user.x / $event.x interpolation; if left blank, defaults to a JSON object of the triggering payload.`,
   },
-};
+} as const satisfies Record<string, NodeTypeConfig>;
+
+/** Every registry key: node type ids for non-action types, actionType ids for the action family. */
+export type NodeTypeKey = keyof typeof REGISTRY;
+/** Union of every React Flow `node.type` the registry declares (the action family collapses to "action"). */
+export type ReactFlowNodeType = (typeof REGISTRY)[NodeTypeKey]["reactFlowType"];
+/** Registry keys with role "trigger" (their reactFlowType equals the key). */
+export type TriggerTypeKey = { [K in NodeTypeKey]: (typeof REGISTRY)[K]["role"] extends "trigger" ? K : never }[NodeTypeKey];
+/** Registry keys with role "action" — the data.actionType discriminator values. */
+export type ActionTypeKey = { [K in NodeTypeKey]: (typeof REGISTRY)[K]["role"] extends "action" ? K : never }[NodeTypeKey];
+
+// Intersection type: named access keeps each entry's literal facets (and NodeTypeKey stays a
+// closed union), while arbitrary-string indexing (NODE_TYPE_REGISTRY[node.type]) still
+// typechecks for runtime lookups of possibly-unknown types — exactly how consumers always used
+// this export. Runtime lookups must keep treating the result as possibly undefined (`?.`):
+// the Record half of the type can't know which strings are real keys.
+export const NODE_TYPE_REGISTRY: typeof REGISTRY & Record<string, NodeTypeConfig> = REGISTRY;
 
 export function generatableKeysForDomain(domain: FlowDomain): string[] {
   return Object.entries(NODE_TYPE_REGISTRY)
     .filter(([, cfg]) => cfg.generatable && (cfg.domain === domain || cfg.domain === "both"))
     .map(([key]) => key);
 }
+
+/**
+ * Bilingual display name for a node type key, falling back to the raw key for unknown types
+ * (old graphs may carry types no longer registered). Replaces frontend/config/nodeTypeLabels.ts's
+ * nodeLabel — same signature and fallback, now reading the merged registry.
+ */
+export function nodeLabel(nodeType: string): LocalizedString {
+  return NODE_TYPE_REGISTRY[nodeType]?.label ?? { en: nodeType, zh: nodeType };
+}
+
+// ---- Derived structural sets (no consumer hand-maintains these lists anymore) ----
+
+// Widened to NodeTypeConfig[] so optional facets (propsConditions, ...) are accessible without
+// per-entry narrowing against the const-literal union.
+const ALL_ENTRIES: NodeTypeConfig[] = Object.values(REGISTRY);
+
+function uniqueReactFlowTypes(entries: NodeTypeConfig[]): string[] {
+  return [...new Set(entries.map((e) => e.reactFlowType))];
+}
+
+/** React Flow node types that start a flow — drives orphan detection and trigger lookups. */
+export const TRIGGER_REACT_FLOW_TYPES: string[] = uniqueReactFlowTypes(ALL_ENTRIES.filter((e) => e.role === "trigger"));
+
+// Edge legality, derived from role: anything known may be a connection source; anything known
+// except a trigger may be a target (triggers have no target handle). Unknown/legacy types (e.g.
+// pre-registry "condition" nodes in old graphs) are in neither set — connections to/from them
+// stay invalid, byte-for-byte the old hand-written validSources/validTargets behavior.
+export const VALID_CONNECTION_SOURCE_TYPES: string[] = uniqueReactFlowTypes(ALL_ENTRIES);
+export const VALID_CONNECTION_TARGET_TYPES: string[] = uniqueReactFlowTypes(ALL_ENTRIES.filter((e) => e.role !== "trigger"));
+
+/** Node types whose data.conditions is a ConditionsEditor props-conditions array (see propsConditions). */
+export const PROPS_CONDITION_NODE_TYPES: string[] = uniqueReactFlowTypes(ALL_ENTRIES.filter((e) => e.propsConditions === true));
 
 // Sidebar item order within each domain — deliberately separate from NODE_TYPE_REGISTRY's own
 // declaration order (which only needs to agree with itself for the shared "both" entries, e.g.

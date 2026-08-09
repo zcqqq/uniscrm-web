@@ -1,6 +1,6 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
-import { nodeLabel } from "../config/nodeTypeLabels";
+import { nodeLabel, NODE_TYPE_REGISTRY } from "../../nodeTypeRegistry";
 import { CHANNEL_TYPES } from "../config/trigger-fields";
 import { ContentMetadata_X } from "../../../metadata/x-byok";
 import { ContentMetadata_YouTube } from "../../../metadata/youtube";
@@ -10,7 +10,6 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/fronten
 import { useT } from "../../../shared/frontend/hooks/useT";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 
-const EXTERNAL_API_ACTIONS = ["xAction", "xContentAction", "tiktokContentAction", "videoAction", "youtubeContentAction"];
 // Count only — locale-invariant, so the module-level frozen CHANNEL_TYPES is fine here (no
 // text ever reaches the user through this constant).
 const X_ACTION_COUNT = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!.actions.length;
@@ -21,7 +20,9 @@ export default function ActionNode({ data, selected }: NodeProps) {
   const T = useT();
   const { locale } = useLocale();
   const actionType = data.actionType as string;
-  const isExternalApi = EXTERNAL_API_ACTIONS.includes(actionType);
+  // Success/failed handles come from the registry's externalApi facet — the same declaration
+  // buildActionData's hasBranches derives from, so canvas and engine can't disagree.
+  const isExternalApi = NODE_TYPE_REGISTRY[actionType]?.externalApi === true;
 
   let label: string;
   let description: string | undefined;

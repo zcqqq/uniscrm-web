@@ -1,5 +1,10 @@
-import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, CONDITION_LOGIC_OR, resolveYouTubeSubscriptions } from "../nodeTypeRegistry";
+import { CONDITION_LOGIC_OR } from "../nodeTypeRegistry";
 import { USER_PROP_PREFIX } from "../../metadata/dataTypes";
+import { getNodeExecutor, getTriggerMatcher } from "./node-executors";
+
+// Kept exported from engine.ts (its historical home) for index.ts and the tests; the
+// implementation now lives in node-executors.ts next to the per-actionType builder map.
+export { buildActionData } from "./node-executors";
 
 export interface FlowNode {
   id: string;
@@ -245,20 +250,13 @@ export function executeFlow(
   eventType: string,
   payload: Record<string, unknown>
 ): ExecutionResult {
-  const triggerNodes = graph.nodes.filter(
-    (n) => (n.type === "xTrigger" && (n.data.eventType === eventType || n.data.triggerType === eventType)
-            && n.data.channelId === payload.channel_id)
-      || (n.type === "cronTrigger" && eventType === "cron.trigger")
-      || (n.type === "xContentTrigger" && eventType === "content.created"
-          && n.data.channelId === payload.channel_id
-          && (n.data.mode === CONTENT_X_TRIGGER_MODE_LIST_POSTS
-              ? n.data.listId === payload.list_id
-              : payload.list_id === undefined || payload.list_id === null))
-      || (n.type === "youtubeContentTrigger" && eventType === "content.created"
-          && n.data.channelId === payload.channel_id
-          && resolveYouTubeSubscriptions(n.data)
-               .some((s) => s.channelId === payload.subscription_channel_id))
-  );
+  // Trigger-type set and per-type match rule both come from node-executors' TRIGGER_MATCHERS
+  // (keyed by the registry's trigger-role entries) — a non-trigger or unknown type has no
+  // matcher and never matches, byte-for-byte the old inline OR-literal's behavior.
+  const triggerNodes = graph.nodes.filter((n) => {
+    const matches = getTriggerMatcher(n.type);
+    return matches ? matches(n, eventType, payload) : false;
+  });
 
   if (triggerNodes.length === 0) return { matched: false, actions: [], pendingWaits: [], nodeLogs: [] };
 
@@ -323,15 +321,6 @@ export function resumeFromNode(
   return { matched: actions.length > 0 || pendingWaits.length > 0, actions, pendingWaits, nodeLogs };
 }
 
-function durationToMs(duration: number, unit: string): number {
-  switch (unit) {
-    case "minutes": return duration * 60 * 1000;
-    case "hours": return duration * 60 * 60 * 1000;
-    case "days": return duration * 24 * 60 * 60 * 1000;
-    default: return duration * 60 * 1000;
-  }
-}
-
 export const FACE_RATIO_DEFAULT_OPERATOR = "<=";
 export const FACE_RATIO_DEFAULT_THRESHOLD = 0.2;
 export const ORIENTATION_DEFAULT_OPERATOR = ">";
@@ -375,47 +364,6 @@ export function evaluateOrientationBranch(data: Record<string, unknown>, ratio: 
   return evaluateRatioBranch(data, ratio, ORIENTATION_DEFAULT_OPERATOR, ORIENTATION_DEFAULT_THRESHOLD);
 }
 
-export function buildActionData(targetNode: FlowNode): ActionResult {
-  const actionType = targetNode.data.actionType as string;
-  const isExternalApi = actionType === "xAction" || actionType === "xContentAction" || actionType === "tiktokContentAction" || actionType === "videoAction" || actionType === "youtubeContentAction";
-  const actionData: ActionResult = { type: actionType, nodeId: targetNode.id, hasBranches: isExternalApi };
-  if (actionType === "addToList") actionData.listId = targetNode.data.listId as string;
-  if (actionType === "xAction") {
-    actionData.xEvent = targetNode.data.xEvent as string;
-    actionData.channelId = targetNode.data.channelId as string;
-    if (targetNode.data.messageText) actionData.messageText = targetNode.data.messageText as string;
-  }
-  if (actionType === "xContentAction") {
-    actionData.operation = (targetNode.data.operation as string) || "create-post";
-    // The X account that acts. Absent on nodes built before the picker existed — the executor
-    // then falls back to the triggering channel, which is only correct for X-triggered flows.
-    actionData.channelId = targetNode.data.channelId as string;
-    actionData.prompt = targetNode.data.prompt as string;
-    actionData.provider = targetNode.data.provider as string;
-    actionData.skillId = (targetNode.data.skillId as string) || "none";
-    actionData.attachVideo = !!targetNode.data.attachVideo;
-  }
-  if (actionType === "tiktokContentAction") {
-    actionData.operation = (targetNode.data.operation as string) || "photo-post";
-    actionData.channelId = targetNode.data.channelId as string;
-    actionData.prompts = (targetNode.data.prompts as Record<string, string>) || {};
-    actionData.textProvider = targetNode.data.textProvider as string;
-    actionData.textSkillId = (targetNode.data.textSkillId as string) || "none";
-    actionData.imageCount = (targetNode.data.imageCount as number) || 1;
-    actionData.imageProvider = targetNode.data.imageProvider as string;
-    actionData.imageSkillId = (targetNode.data.imageSkillId as string) || "none";
-  }
-  if (actionType === "videoAction") {
-    actionData.operation = (targetNode.data.operation as string) || "add-subtitle";
-    actionData.targetLanguage = (targetNode.data.targetLanguage as string) || "zh";
-  }
-  if (actionType === "youtubeContentAction") {
-    actionData.operation = (targetNode.data.operation as string) || "save-to-playlist";
-    actionData.playlistId = (targetNode.data.playlistId as string) || "";
-  }
-  return actionData;
-}
-
 function collectActions(
   graph: FlowGraph,
   nodeId: string,
@@ -436,6 +384,9 @@ function collectActions(
 // Executes ONE node that an edge just led into. Shared by collectActions (normal traversal) and
 // resumeFromNode (asynchronous branch resolution) so the two can never drift apart — they did
 // once, and branch targets other than action/wait/waitForEvent were silently skipped.
+// Per-type behavior lives in node-executors.ts's NODE_EXECUTORS map (exhaustive over the
+// registry's reactFlowTypes plus the legacy "condition" type); this dispatcher only owns the
+// "enter" log and the unknown-type guard.
 function processTargetNode(
   graph: FlowGraph,
   targetNode: FlowNode,
@@ -446,95 +397,21 @@ function processTargetNode(
 ): void {
   nodeLogs.push({ nodeId: targetNode.id, direction: "enter" });
 
-  if (targetNode.type === "action") {
-    const actionData = buildActionData(targetNode);
-    actions.push(actionData);
-    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-
-    if (!actionData.hasBranches) {
-      collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
-    }
+  const executor = getNodeExecutor(targetNode.type);
+  if (!executor) {
+    // Old graphs may carry node types that no longer exist. Before this guard, an unknown type
+    // fell off the dispatch chain silently and the flow died unlogged — now it's loud (but
+    // still a skip, never a throw: this runs inside the queue handler, and an exception would
+    // retry the whole message and re-run already-executed actions).
+    console.error(`[flow-engine] unknown node type "${targetNode.type}" (node ${targetNode.id}) — node skipped, downstream nodes will not run`);
     return;
   }
 
-  if (targetNode.type === "wait") {
-    const duration = Number(targetNode.data.duration || 0);
-    const unit = String(targetNode.data.unit || "minutes");
-    if (duration > 0) {
-      pendingWaits.push({ nodeId: targetNode.id, durationMs: durationToMs(duration, unit) });
-    }
-    // wait node: enter logged, exit will be logged when cron resumes
-    return;
-  }
-
-  if (targetNode.type === "waitForEvent") {
-    const awaitingEvent = targetNode.data.eventType as string;
-    const duration = Number(targetNode.data.duration || 1);
-    const unit = String(targetNode.data.unit || "days");
-    const conditions = (targetNode.data.conditions as { field: string; operator: string; value: string }[]) || [];
-    if (awaitingEvent) {
-      pendingWaits.push({
-        nodeId: targetNode.id,
-        durationMs: durationToMs(duration, unit),
-        awaitingEvent,
-        conditions: conditions.length > 0 ? conditions : undefined,
-        // 无条件带上：OR + 0 条是有语义的（恒不通过），丢了会让它在 resume 时被当成 AND 放行。
-        // String() 规整畸形值——D1 的 bind 不接受对象。
-        conditionLogic: String(targetNode.data.conditionLogic ?? ""),
-      });
-    }
-    // eventHistory: enter logged, exit will be logged on resolution
-    return;
-  }
-
-  if (targetNode.type === "condition") {
-    const { field, operator, value } = targetNode.data as { field?: string; operator?: string; value?: string };
-    if (!field || !operator || value === undefined || value === "") {
-      nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-      collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
-      return;
-    }
-    if (evaluateCondition(field, operator, String(value), payload)) {
-      nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-      collectActions(graph, targetNode.id, payload, actions, pendingWaits, nodeLogs);
-    }
-    return;
-  }
-
-  if (targetNode.type === "timeCondition") {
-    pendingWaits.push({ nodeId: targetNode.id, durationMs: 0, timeCondition: true } as any);
-    return;
-  }
-
-  if (targetNode.type === "userPropsCondition") {
-    actions.push({ type: "userPropsCondition", nodeId: targetNode.id, conditions: targetNode.data.conditions, hasBranches: true });
-    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-    return;
-  }
-
-  if (targetNode.type === "abSplit") {
-    actions.push({ type: "abSplit", nodeId: targetNode.id, mode: targetNode.data.mode, percentA: targetNode.data.percentA, conditions: targetNode.data.conditions, hasBranches: true });
-    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-    return;
-  }
-
-  if (targetNode.type === "webhook") {
-    actions.push({ type: "webhook", nodeId: targetNode.id, hasBranches: true, url: targetNode.data.url, method: targetNode.data.method, headers: targetNode.data.headers, body: targetNode.data.body });
-    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-    return;
-  }
-
-  if (targetNode.type === "videoCondition") {
-    actions.push({ type: "videoCondition", nodeId: targetNode.id, operation: (targetNode.data.operation as string) || "check-face", hasBranches: true });
-    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-    return;
-  }
-
-  if (targetNode.type === "youtubeCondition") {
-    // conditions 留在 graph 里（executeContentActions 用 nodeId 回查），不塞进 ActionResult——
-    // 与 videoCondition 把 operator/threshold 留在 graph 的做法一致：阈值改了是纯配置变更。
-    actions.push({ type: "youtubeCondition", nodeId: targetNode.id, hasBranches: true });
-    nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
-    return;
-  }
+  executor(targetNode, {
+    payload,
+    actions,
+    pendingWaits,
+    nodeLogs,
+    continueFrom: (nodeId) => collectActions(graph, nodeId, payload, actions, pendingWaits, nodeLogs),
+  });
 }

@@ -1,6 +1,8 @@
-import { CONDITION_LOGIC_OR, resolveYouTubeSubscriptions } from "../../nodeTypeRegistry";
+import { CONDITION_LOGIC_OR, resolveYouTubeSubscriptions, TRIGGER_REACT_FLOW_TYPES, PROPS_CONDITION_NODE_TYPES } from "../../nodeTypeRegistry";
 
-export const TRIGGER_NODE_TYPES = ["xTrigger", "cronTrigger", "xContentTrigger", "youtubeContentTrigger"];
+// Derived from the registry's role: "trigger" entries — re-exported under this module's
+// historical name for its existing consumers.
+export const TRIGGER_NODE_TYPES = TRIGGER_REACT_FLOW_TYPES;
 
 export function findOrphanNodeIds(
   nodes: { id: string; type?: string }[],
@@ -69,17 +71,12 @@ function countUsableConditions(raw: unknown): number {
   ).length;
 }
 
-// 带 props condition 的 5 种节点，与 Inspector 里用 ConditionsEditor 的 5 个调用点一一对应。
+// 带 props condition 的节点集合，源头是注册表的 propsConditions facet（nodeTypeRegistry.ts），
+// 与 Inspector 里用 ConditionsEditor 的调用点一一对应。
 // userPropsCondition / abSplit 也有 data.conditions，但它们既不用 ConditionsEditor、引擎里
-// 也从未被求值（engine.ts 只把它们 push 成 action，没有消费者），加进来只会挡住一个本就无效
-// 的节点。
-const CONDITION_NODE_TYPES = [
-  "xTrigger",
-  "xContentTrigger",
-  "youtubeContentTrigger",
-  "waitForEvent",
-  "youtubeCondition",
-];
+// 也从未被求值（engine.ts 只把它们 push 成 action，没有消费者），所以注册表里刻意不打
+// propsConditions 标记——打上只会挡住一个本就无效的节点。
+const CONDITION_NODE_TYPES = PROPS_CONDITION_NODE_TYPES;
 
 // OR 且一条可用条件都没有 = 恒不通过（[].some() === false），整条 flow 静默死掉，而画布上
 // 完全看不出异常——AND 的 0 条恒通过是合法常态，两者在 UI 上只差一个小开关。所以挡在上线之前。

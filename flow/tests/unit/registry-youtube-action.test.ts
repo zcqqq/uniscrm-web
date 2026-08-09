@@ -9,7 +9,7 @@ describe("youtubeContentAction registry entry", () => {
     expect(e.domain).toBe("content");
     expect(e.role).toBe("action");
     expect(e.generatable).toBe(true);
-    expect(e.label).toBe("YouTube Action");
+    expect(e.label).toEqual({ en: "YouTube Action", zh: "YouTube 动作" });
   });
 
   it("prompt fragment lists both operations", () => {

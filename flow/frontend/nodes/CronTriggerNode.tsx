@@ -1,6 +1,6 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
-import { nodeLabel } from "../config/nodeTypeLabels";
+import { nodeLabel } from "../../nodeTypeRegistry";
 import { unitLabel } from "../lib/unit-label";
 import { useT } from "../../../shared/frontend/hooks/useT";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";

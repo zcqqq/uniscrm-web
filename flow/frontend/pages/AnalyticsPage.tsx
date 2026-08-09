@@ -12,7 +12,7 @@ import { DateCell } from "../../../shared/frontend/components/CellDate";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
 import { useT } from "../../../shared/frontend/hooks/useT";
 import { C } from "../../../shared/frontend/i18n-common";
-import { nodeLabel } from "../config/nodeTypeLabels";
+import { nodeLabel } from "../../nodeTypeRegistry";
 import { unitLabel } from "../lib/unit-label";
 
 interface NodeLogEntry {

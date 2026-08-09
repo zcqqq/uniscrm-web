@@ -58,11 +58,68 @@ describe("NODE_TYPE_REGISTRY", () => {
     }
   });
 
-  it("derives xContentTrigger/xContentAction Sidebar descriptions from ContentMetadata_X's flowType counts", () => {
+  // Replaces the deleted node-type-labels.test.ts: labels/descriptions used to live in a second
+  // registry (frontend/config/nodeTypeLabels.ts) whose only guarantee was key parity with this
+  // one. Now they're merged, the guarantee is that every entry is fully bilingual.
+  it("labels and descriptions are bilingual { en, zh } objects with both languages filled in", () => {
+    for (const [key, cfg] of Object.entries(NODE_TYPE_REGISTRY)) {
+      if (key === "xTrigger") continue; // dynamic per channelType
+      expect(cfg.label!.en, `empty en label for "${key}"`).toBeTruthy();
+      expect(cfg.label!.zh, `empty zh label for "${key}"`).toBeTruthy();
+      expect(cfg.description!.en, `empty en description for "${key}"`).toBeTruthy();
+      expect(cfg.description!.zh, `empty zh description for "${key}"`).toBeTruthy();
+    }
+  });
+
+  it("gives every entry a defaultData factory returning a fresh object (no aliasing between nodes)", () => {
+    for (const [key, cfg] of Object.entries(NODE_TYPE_REGISTRY)) {
+      const a = cfg.defaultData();
+      const b = cfg.defaultData();
+      expect(a, `defaultData for "${key}" is not an object`).toBeTypeOf("object");
+      expect(a, `defaultData for "${key}" returns a shared reference`).not.toBe(b);
+      expect(a).toEqual(b);
+      if (cfg.role === "action") {
+        expect(a.actionType, `action "${key}" defaultData must carry its actionType discriminator`).toBe(key);
+      }
+    }
+  });
+
+  it("tags exactly the third-party-API actions externalApi (drives hasBranches; addToList is internal)", () => {
+    const externalKeys = Object.entries(NODE_TYPE_REGISTRY)
+      .filter(([, cfg]) => cfg.externalApi === true)
+      .map(([key]) => key)
+      .sort();
+    expect(externalKeys).toEqual(["tiktokContentAction", "videoAction", "xAction", "xContentAction", "youtubeContentAction"].sort());
+    for (const key of externalKeys) {
+      expect(NODE_TYPE_REGISTRY[key].role, `externalApi on non-action "${key}"`).toBe("action");
+      expect(NODE_TYPE_REGISTRY[key].branches, `externalApi action "${key}" must declare success/failed branches`).toEqual(["success", "failed"]);
+    }
+  });
+
+  it("declares branches only on branching node types, never on triggers, matching each promptFragment's own wording", () => {
+    for (const [key, cfg] of Object.entries(NODE_TYPE_REGISTRY)) {
+      if (cfg.role === "trigger") {
+        expect(cfg.branches, `trigger "${key}" must not declare branches`).toBeUndefined();
+      }
+      if (cfg.branches) {
+        expect(cfg.branches.length, `"${key}" declares an empty branches list`).toBeGreaterThan(1);
+      }
+    }
+  });
+
+  it("tags exactly the five ConditionsEditor-driven types propsConditions (drives the OR-empty publish gate)", () => {
+    const keys = Object.entries(NODE_TYPE_REGISTRY)
+      .filter(([, cfg]) => cfg.propsConditions === true)
+      .map(([key]) => key)
+      .sort();
+    expect(keys).toEqual(["waitForEvent", "xContentTrigger", "xTrigger", "youtubeCondition", "youtubeContentTrigger"].sort());
+  });
+
+  it("derives xContentTrigger/xContentAction Sidebar descriptions from ContentMetadata_X's flowType counts, computed once into both languages", () => {
     const triggerCount = ContentMetadata_X.filter((m) => m.flowType === "trigger").length;
     const actionCount = ContentMetadata_X.filter((m) => m.flowType === "action").length;
-    expect(NODE_TYPE_REGISTRY.xContentTrigger.description).toBe(`${triggerCount} triggers`);
-    expect(NODE_TYPE_REGISTRY.xContentAction.description).toBe(`${actionCount} actions`);
+    expect(NODE_TYPE_REGISTRY.xContentTrigger.description).toEqual({ en: `${triggerCount} triggers`, zh: `${triggerCount} 个触发器` });
+    expect(NODE_TYPE_REGISTRY.xContentAction.description).toEqual({ en: `${actionCount} actions`, zh: `${actionCount} 个动作` });
   });
 
   it("gives every node type except xTrigger a Sidebar description (single source of truth, no literals left in Sidebar.tsx)", () => {
@@ -72,9 +129,9 @@ describe("NODE_TYPE_REGISTRY", () => {
     }
   });
 
-  it("derives xAction's Sidebar description from CHANNEL_TYPES' X entry action count", () => {
+  it("derives xAction's Sidebar description from CHANNEL_TYPES' X entry action count, computed once into both languages", () => {
     const actionCount = CHANNEL_TYPES.find((ct) => ct.channelType === "X")!.actions.length;
-    expect(NODE_TYPE_REGISTRY.xAction.description).toBe(`${actionCount} actions`);
+    expect(NODE_TYPE_REGISTRY.xAction.description).toEqual({ en: `${actionCount} actions`, zh: `${actionCount} 个动作` });
   });
 
   it("gives every generatable node type a promptFragment (both domains' generate prompts are composed from the registry)", () => {
@@ -231,8 +288,8 @@ describe("generatableKeysForDomain", () => {
     expect(cfg.role).toBe("condition");
     expect(cfg.domain).toBe("content");
     expect(cfg.generatable).toBe(true);
-    expect(cfg.label).toBe("YouTube Condition");
-    expect(cfg.description).toBe("Re-check the trigger video's current stats");
+    expect(cfg.label).toEqual({ en: "YouTube Condition", zh: "YouTube 条件" });
+    expect(cfg.description).toEqual({ en: "Re-check the trigger video's current stats", zh: "重新检查触发视频的当前数据" });
   });
 
   it("puts youtubeCondition in the content sidebar right after videoCondition", () => {

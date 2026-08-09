@@ -1,3 +1,5 @@
+import type { ComponentType } from "react";
+import type { ReactFlowNodeType } from "../../nodeTypeRegistry";
 import XTriggerNode from "./XTriggerNode";
 import XContentTriggerNode from "./XContentTriggerNode";
 import YouTubeContentTriggerNode from "./YouTubeContentTriggerNode";
@@ -12,7 +14,11 @@ import WebhookNode from "./WebhookNode";
 import VideoConditionNode from "./VideoConditionNode";
 import YouTubeConditionNode from "./YouTubeConditionNode";
 
-export const nodeTypes = {
+// Exhaustively keyed by the registry's ReactFlowNodeType union: a new registry entry with a new
+// reactFlowType fails to compile until its canvas component is added here. (The legacy
+// pre-registry "condition" type has no component — old graphs render it as React Flow's default
+// node, unchanged.)
+export const nodeTypes: Record<ReactFlowNodeType, ComponentType<any>> = {
   xTrigger: XTriggerNode,
   xContentTrigger: XContentTriggerNode,
   youtubeContentTrigger: YouTubeContentTriggerNode,

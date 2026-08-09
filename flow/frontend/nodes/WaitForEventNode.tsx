@@ -1,7 +1,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { getChannelTypes } from "../config/trigger-fields";
 import AnalyticsBadges from "./AnalyticsBadges";
-import { nodeLabel } from "../config/nodeTypeLabels";
+import { nodeLabel } from "../../nodeTypeRegistry";
 import { conditionSummary } from "../lib/condition-logic";
 import { unitLabel } from "../lib/unit-label";
 import { useT } from "../../../shared/frontend/hooks/useT";

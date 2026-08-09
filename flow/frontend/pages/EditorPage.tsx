@@ -11,7 +11,7 @@ import { t } from "../../../metadata/locale";
 import { api } from "../lib/api";
 import { FLOW_TEMPLATES } from "../config/templates";
 import { generatableKeysForDomain, NODE_TYPE_REGISTRY, type FlowDomain } from "../../nodeTypeRegistry";
-import { nodeLabel } from "../config/nodeTypeLabels";
+import { nodeLabel } from "../../nodeTypeRegistry";
 import AiGenerateBar from "../../../shared/frontend/components/BarAiGenerate";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";

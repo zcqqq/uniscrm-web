@@ -11,7 +11,12 @@ import {
   addEdge,
 } from "@xyflow/react";
 import { api } from "../lib/api";
-import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY, type FlowDomain } from "../../nodeTypeRegistry";
+import {
+  NODE_TYPE_REGISTRY,
+  VALID_CONNECTION_SOURCE_TYPES,
+  VALID_CONNECTION_TARGET_TYPES,
+  type FlowDomain,
+} from "../../nodeTypeRegistry";
 
 export interface FlowEditorState {
   flowId: string | null;
@@ -53,8 +58,6 @@ export interface FlowEditorState {
   setReactFlowInstance: (instance: ReactFlowInstance | null) => void;
 }
 
-const ACTION_TYPES = ["addToList", "xAction", "xContentAction", "tiktokContentAction", "videoAction", "youtubeContentAction"];
-
 // Action types that operate on a specific channel account (need `data.channelId`), mapped to
 // the channelType used to fetch that account list. Add an entry here whenever a new
 // channel-scoped action is introduced (e.g. a future "tiktokAction" -> "TIKTOK").
@@ -66,15 +69,13 @@ export const ACTION_CHANNEL_TYPE: Record<string, string> = {
 // Shared by the store's onConnect below and by Canvas.tsx's isValidConnection prop
 // (React Flow gates connection drags with that prop before onConnect ever runs) --
 // keep this the single copy so the two never drift apart again.
+// Legal source/target sets derive from the registry's roles (nodeTypeRegistry.ts): every known
+// type may be a source, everything but a trigger may be a target, unknown types are neither —
+// same semantics the hand-written validSources/validTargets arrays had.
 export function isValidConnection(source: Node | undefined, target: Node | undefined): boolean {
   if (!source || !target) return false;
-  const targetType = target.type;
-  const sourceType = source.type;
-  if (targetType === "xTrigger" || targetType === "cronTrigger" || targetType === "xContentTrigger" || targetType === "youtubeContentTrigger") return false;
-  const validTargets = ["action", "wait", "waitForEvent", "timeCondition", "userPropsCondition", "abSplit", "webhook", "videoCondition", "youtubeCondition"];
-  const validSources = ["xTrigger", "cronTrigger", "xContentTrigger", "youtubeContentTrigger", "wait", "waitForEvent", "action", "timeCondition", "userPropsCondition", "abSplit", "webhook", "videoCondition", "youtubeCondition"];
-  if (validSources.includes(sourceType!) && validTargets.includes(targetType!)) return true;
-  return false;
+  return VALID_CONNECTION_SOURCE_TYPES.includes(source.type ?? "")
+    && VALID_CONNECTION_TARGET_TYPES.includes(target.type ?? "");
 }
 
 // React Flow 的 onNodesChange/onEdgesChange 不只在用户编辑时触发：挂载时它会先测量每个节点
@@ -134,79 +135,19 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
   },
 
   addNode: (type, position) => {
-    if (NODE_TYPE_REGISTRY[type]?.role === "trigger" && get().nodes.some((n) => NODE_TYPE_REGISTRY[n.type!]?.role === "trigger")) {
-      return false;
-    }
-
-    let nodeType: string;
-    let data: Record<string, unknown>;
-
-    if (type === "xTrigger") {
-      nodeType = "xTrigger";
-      data = { channelType: "X", eventType: "", channelId: "" };
-    } else if (type === "cronTrigger") {
-      nodeType = "cronTrigger";
-      data = { scheduleType: "", dailyTime: "09:00", cronExpr: "", intervalValue: 60, intervalUnit: "minutes" };
-    } else if (type === "wait") {
-      nodeType = "wait";
-      data = { duration: 0, unit: "minutes" };
-    } else if (type === "waitForEvent") {
-      nodeType = "waitForEvent";
-      data = { eventType: "", channelId: "", duration: 1, unit: "days", conditions: [] };
-    } else if (type === "timeCondition") {
-      nodeType = "timeCondition";
-      data = { timeFrom: "", timeTo: "", daysOfWeek: [] };
-    } else if (type === "userPropsCondition") {
-      nodeType = "userPropsCondition";
-      data = { conditions: [] };
-    } else if (type === "abSplit") {
-      nodeType = "abSplit";
-      data = { mode: "random", percentA: 50, conditions: [] };
-    } else if (type === "webhook") {
-      nodeType = "webhook";
-      data = { url: "", method: "POST", headers: {}, body: "" };
-    } else if (type === "videoCondition") {
-      nodeType = "videoCondition";
-      data = { operation: "check-face", operator: "<=", threshold: 0.2 };
-    } else if (type === "youtubeCondition") {
-      nodeType = "youtubeCondition";
-      data = { conditions: [] };
-    } else if (ACTION_TYPES.includes(type)) {
-      nodeType = "action";
-      if (type === "addToList") {
-        data = { actionType: type, listId: "", listName: "" };
-      } else if (type === "xAction") {
-        data = { actionType: type, xEvent: "", channelId: "" };
-      } else if (type === "xContentAction") {
-        data = { actionType: type, prompt: "", provider: "default" };
-      } else if (type === "tiktokContentAction") {
-        data = {
-          actionType: type, channelId: "", prompts: {},
-          textProvider: "default", textSkillId: "none",
-          imageCount: 1, imageProvider: "default", imageSkillId: "none",
-        };
-      } else if (type === "videoAction") {
-        data = { actionType: type, targetLanguage: "zh" };
-      } else if (type === "youtubeContentAction") {
-        data = { actionType: type, operation: "save-to-playlist", playlistId: "", playlistTitle: "" };
-      } else {
-        throw new Error(`Unexpected action type: ${type}`);
-      }
-    } else if (type === "xContentTrigger") {
-      nodeType = "xContentTrigger";
-      data = { channelId: "", mode: CONTENT_X_TRIGGER_MODE_LIST_POSTS, listId: "", listName: "", conditions: [] };
-    } else if (type === "youtubeContentTrigger") {
-      nodeType = "youtubeContentTrigger";
-      data = { channelId: "", subscriptions: [], conditions: [] };
-    } else {
+    // Default node data and the key → reactFlowType mapping both come from the registry —
+    // formerly a hand-written per-type switch here. Unknown keys keep returning false.
+    const cfg = NODE_TYPE_REGISTRY[type];
+    if (!cfg) return false;
+    if (cfg.role === "trigger" && get().nodes.some((n) => NODE_TYPE_REGISTRY[n.type!]?.role === "trigger")) {
       return false;
     }
 
     const node: Node = {
       id: crypto.randomUUID(),
-      type: nodeType,
+      type: cfg.reactFlowType,
       position,
-      data,
+      data: cfg.defaultData(),
     };
     set((state) => ({ nodes: [...state.nodes, node], isDirty: true }));
 

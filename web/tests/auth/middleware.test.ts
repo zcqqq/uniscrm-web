@@ -35,7 +35,6 @@ function makeApp(sessionRow: Record<string, unknown> | null) {
       memberId: c.get("memberId" as never),
       tenantId: c.get("tenantId" as never),
       email: c.get("email" as never),
-      hasDb: !!c.get("db" as never),
     })
   );
   return app;
@@ -55,18 +54,17 @@ describe("authMiddleware", () => {
     expect(res.status).toBe(401);
   });
 
-  it("attaches member, tenant, email and a tenant-scoped db when the session is valid", async () => {
+  it("attaches member, tenant and email when the session is valid", async () => {
     const res = await makeApp(validRow).request("/test", {
       headers: { Cookie: "session=valid-id" },
     });
 
     expect(res.status).toBe(200);
+    // 租户隔离靠路由显式绑定 tenant_id（tenant-scope-audit 把关），不再经 SQL 重写的 db。
     expect(await res.json()).toEqual({
       memberId: "member-1",
       tenantId: 42,
       email: "test@example.com",
-      // 每个请求都必须拿到按本会话 tenant 作用域化的 db —— 少了它下游查询就没有租户隔离。
-      hasDb: true,
     });
   });
 });

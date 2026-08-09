@@ -5,8 +5,12 @@ Multi-tenant Social CRM SaaS. Channels (X, TikTok, Notion, Shopify, ...) feed a 
 ## Language
 
 **Prop / PropDefinition**:
-A single field in the metadata registry (`metadata/x.ts` etc.), identified by a unique `propId` — the primary key of the registry. Downstream code (D1 columns, UI dropdowns, R2 sync) looks props up by `propId`, so it must never collide within a channel's registry and must be spelled identically everywhere it's referenced (metadata mapping, column-map, UI).
+A single field in the metadata registry (`metadata/x.ts` etc.), identified by a unique `propId` — the primary key of the registry. Downstream code (D1 columns, UI dropdowns, R2 sync) looks props up by `propId`, so it must never collide within a channel's registry and must be spelled identically everywhere it's referenced (metadata mapping, column-map, UI). Since 2026-08-08, prop→storage-column resolution is a single module (`metadata/columns.ts`): consumers (link column maps, insight-segment SQL fields, admin tenant-DB DDL, stream-schema reconciliation tests) derive from it rather than restating lists, and a prop whose `entity` names a table it has no column on is a test failure, not a comment.
 _Avoid_: field, attribute (too generic — use Prop only for entries in the metadata registry).
+
+**Channel ownership (tenant-shared)**:
+A channel connection (X, TikTok, YouTube, Notion, Shopify, ...) belongs to the **tenant**, not the member who connected it — any member of the tenant sees and uses the same connection, and connection lookups are scoped by `tenant_id` (product decision 2026-08-08; Notion/Shopify's earlier member-scoped lookups were a bug). `channels.member_id` records *who* connected it (provenance only) and must never be used as a lookup scope. Tenant scoping itself is enforced by explicit `tenant_id` binds gated by `scripts/tenant-scope-audit.mjs` — the SQL-rewriting `TenantDB` was deleted; new stores should bind tenant in the constructor the way `EntityStateStore` does.
+_Avoid_: per-member channel, personal connection — no such concept exists in this product.
 
 **PropMapping**:
 An entry inside `UserMetadata`/`ContentMetadata`/`EventMetadata` that resolves one `propId` from a raw channel payload — either a fixed `value` or a `dataId` path to extract. Purely declarative: it cannot express conditional logic (e.g. "set X only if field Y is present"). Conditional derivations are handled in poller code instead, not by extending this model.

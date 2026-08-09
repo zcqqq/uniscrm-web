@@ -48,7 +48,11 @@ vi.mock("../src/services/x-token", () => ({
 // the user token, and passing the user token to both is what silently broke BYOK setup.
 const webhookCallTokens: string[] = [];
 const subscriptionCallTokens: string[] = [];
-vi.mock("../src/services/x-webhook", () => ({
+// Only XActivityService is faked — byokWebhookUrl stays real so the URL these tests assert on
+// is the one production builds (a wholesale mock silently dropped it, and the resulting
+// undefined-is-not-a-function landed in the setup catch as "no webhook calls at all").
+vi.mock("../src/services/x-webhook", async (importActual) => ({
+  ...(await importActual<typeof import("../src/services/x-webhook")>()),
   XActivityService: class {
     constructor(private token: string) {}
     setupAllSubscriptions(...args: unknown[]) {
@@ -248,7 +252,7 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
 
     expect(pollChannelOnceMock).toHaveBeenCalledWith(expect.anything(), "X", byokChannelId);
 
-    expect(setupAllSubscriptionsMock).toHaveBeenCalledWith("xuser-999", `http://localhost/x/webhook/${byokChannelId}`, "wh-id");
+    expect(setupAllSubscriptionsMock).toHaveBeenCalledWith("xuser-999", "http://localhost/x/webhook/xuser-999", "wh-id");
     expect(updateConfigMock).toHaveBeenCalledWith(byokChannelId, expect.objectContaining({ subscription_ids: ["sub-1"], subscription_error: null }));
   });
 
@@ -356,7 +360,7 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
       // Deliberately NOT flush() — that would await the hung poll. The subscriptions must
       // already be persisted by the time the poll is even reached.
       await vi.waitFor(() => {
-        expect(setupAllSubscriptionsMock).toHaveBeenCalledWith("xuser-999", `http://localhost/x/webhook/${byokChannelId}`, "wh-id");
+        expect(setupAllSubscriptionsMock).toHaveBeenCalledWith("xuser-999", "http://localhost/x/webhook/xuser-999", "wh-id");
         expect(updateConfigMock).toHaveBeenCalledWith(byokChannelId, expect.objectContaining({ subscription_ids: ["sub-1"], subscription_error: null }));
       });
     } finally {
@@ -412,6 +416,51 @@ describe("X BYOK OAuth callback — channel conflict handling", () => {
     expect(res.status).toBe(409);
     expect(linkDb.calls.some((c) => c.sql.includes("is_byok = 1"))).toBe(false);
     expect(linkDb.calls.some((c) => c.sql.includes("source_channel_id = NULL"))).toBe(false);
+  });
+
+  // "already connected under a different tenant" told the user nothing they could act on —
+  // usually the holder is their own other workspace and they just need to know which.
+  it("names the holding tenant (id + masked owner email) in the 409", async () => {
+    const kv = createMockKv("placeholder-chan");
+    const linkDb = createMockLinkDb([
+      ["WHERE id = ? AND tenant_id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
+      ["SELECT config, tenant_id FROM channels WHERE id = ?", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }), tenant_id: 5 }],
+      ["channel_type = 'X' AND source_channel_id", { id: "other-tenant-chan", tenant_id: 999 }],
+    ]);
+    const webDb = {
+      prepare: () => ({ bind: () => ({ first: async () => ({ email: "owner@example.com" }) }) }),
+    };
+
+    const res = await buildApp().request(
+      "/x/callback?code=abc&state=state123",
+      {},
+      { KV: kv, LINK_DB: linkDb, WEB_DB: webDb } as any
+    );
+
+    expect(res.status).toBe(409);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toContain("#999");
+    expect(body.error).toContain("o****@example.com");
+    // The full address is another tenant's PII and must never appear.
+    expect(body.error).not.toContain("owner@example.com");
+  });
+
+  it("still answers 409 (not 500) when the tenant lookup is unavailable", async () => {
+    const kv = createMockKv("placeholder-chan");
+    const linkDb = createMockLinkDb([
+      ["WHERE id = ? AND tenant_id = ? AND is_active = 1", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }) }],
+      ["SELECT config, tenant_id FROM channels WHERE id = ?", { config: JSON.stringify({ is_byok: true, app_client_id: "enc-id" }), tenant_id: 5 }],
+      ["channel_type = 'X' AND source_channel_id", { id: "other-tenant-chan", tenant_id: 999 }],
+    ]);
+
+    const res = await buildApp().request(
+      "/x/callback?code=abc&state=state123",
+      {},
+      { KV: kv, LINK_DB: linkDb } as any
+    );
+
+    expect(res.status).toBe(409);
+    expect((await res.json<{ error: string }>()).error).toContain("#999");
   });
 });
 

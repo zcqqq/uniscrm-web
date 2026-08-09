@@ -13,6 +13,7 @@ import { encrypt } from "./services/crypto";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { XTokenService } from "./services/x-token";
 import { readFrozenState } from "./services/x-freeze";
+import { byokWebhookUrl } from "./services/x-webhook";
 import { fetchOwnedLists } from "./services/x-posts-api";
 import { YouTubeTokenService } from "./services/youtube-token";
 import { fetchAllSubscriptions } from "./services/youtube-api";
@@ -204,9 +205,13 @@ export function channelsRoutes() {
         .bind(updatedConfig, channel_id)
         .run();
 
+      // The webhook URL is keyed by the X user id (byokWebhookUrl), which only exists once
+      // the account has been authorized — null until then, and the dialog says so rather
+      // than showing a URL that would never be the one we register.
+      const existingXUserId = (JSON.parse(existing.config) as { x_user_id?: string }).x_user_id;
       return c.json({
         channel_id,
-        webhook_url: `${url.origin}/x/webhook/${channel_id}`,
+        webhook_url: existingXUserId ? byokWebhookUrl(url.origin, existingXUserId) : null,
         redirect_url: `${url.origin}/api/auth/x/callback`,
       });
     }
@@ -228,9 +233,11 @@ export function channelsRoutes() {
       .bind(channelId, config, tenantId, memberId)
       .run();
 
+    // Brand-new app: nobody has authorized yet, so there is no X user id to key the webhook
+    // URL on. It gets registered automatically by the OAuth callback.
     return c.json({
       channel_id: channelId,
-      webhook_url: `${url.origin}/x/webhook/${channelId}`,
+      webhook_url: null,
       redirect_url: `${url.origin}/api/auth/x/callback`,
     });
   });
@@ -262,8 +269,15 @@ export function channelsRoutes() {
   router.delete("/x/byok/:channelId", async (c) => {
     const channelId = c.req.param("channelId");
     const tenantId = c.get("tenantId" as never) as number;
+    // source_channel_id is cleared, not just is_active — channels has
+    // UNIQUE(channel_type, source_channel_id) and the cross-tenant conflict check in
+    // oauth.ts does NOT filter on is_active, so a row left holding the id kept the X account
+    // permanently un-connectable anywhere else: deleting it here and re-authorizing under
+    // another tenant answered 409 forever. NULL never collides in a SQLite unique index.
+    // deactivated_reason mirrors the BYOK merge path so a tier upgrade never resurrects it
+    // and the freed id stays on the record.
     await c.env.LINK_DB
-      .prepare("UPDATE channels SET is_active = 0, updated_at = datetime('now') WHERE id = ? AND tenant_id = ?")
+      .prepare("UPDATE channels SET is_active = 0, source_channel_id = NULL, deactivated_reason = COALESCE(deactivated_reason, 'byok_deleted source_channel_id=' || COALESCE(source_channel_id, '')), updated_at = datetime('now') WHERE id = ? AND tenant_id = ?")
       .bind(channelId, tenantId)
       .run();
     return c.json({ ok: true });

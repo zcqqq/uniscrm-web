@@ -1,9 +1,31 @@
 import { XAA_SUBSCRIPTION_SPECS } from "../../../metadata/x";
 
+// A BYOK channel's webhook URL is keyed by its X user id, never by the channel row id.
+// X allows only a handful of webhooks per app (this dev app: one), and deleting a channel
+// and reconnecting the same account mints a NEW row id — so a channel-id URL could never be
+// registered again: the stale URL held the app's only slot, createWebhook answered
+// WebhookLimitExceeded, and that throw skipped setupAllSubscriptions entirely, leaving the
+// channel with zero subscriptions and X delivering nothing (dev, 2026-08-07 → 08-09).
+// The X user id survives reconnects, so the same URL is reused and getWebhook finds it.
+export function byokWebhookUrl(origin: string, xUserId: string): string {
+  return `${origin}/x/webhook/${xUserId}`;
+}
+
+// Constant-time string compare — a plain === on a signature leaks, byte by byte, how much of
+// a forged value was right.
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 export class XWebhookService {
   constructor(private clientSecret: string) {}
 
-  async computeCrcResponse(crcToken: string): Promise<string> {
+  // `sha256=<base64 HMAC-SHA256>` — the one shape X uses for both directions: our CRC answer
+  // (message = crc_token) and its own event signatures (message = the raw POST body).
+  async computeSignature(message: string): Promise<string> {
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
       "raw",
@@ -12,9 +34,24 @@ export class XWebhookService {
       false,
       ["sign"]
     );
-    const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(crcToken));
+    const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
     const base64 = btoa(String.fromCharCode(...new Uint8Array(signature)));
     return `sha256=${base64}`;
+  }
+
+  async computeCrcResponse(crcToken: string): Promise<string> {
+    return this.computeSignature(crcToken);
+  }
+
+  // Verifies X's `x-twitter-webhooks-signature` header against the RAW request body — parsing
+  // and re-serializing the JSON first would change the bytes and fail every time.
+  // https://docs.x.com/x-api/webhooks/quickstart
+  //
+  // Fails closed on a missing header: the BYOK path segment is the X user id, which is public,
+  // so the URL alone no longer gates who may POST events for an account.
+  async verifySignature(rawBody: string, header: string | undefined | null): Promise<boolean> {
+    if (!header) return false;
+    return timingSafeEqual(await this.computeSignature(rawBody), header);
   }
 }
 
@@ -46,18 +83,47 @@ export class XActivityService {
   // and only THERE learns the credential was wrong. Callers must pass an app-only Bearer.
   //
   // `matchUrl` picks the webhook registered for that exact URL instead of assuming the app
-  // owns exactly one: every BYOK channel gets its own /x/webhook/<channelId>, so a tenant
+  // owns exactly one: every BYOK channel gets its own /x/webhook/<xUserId>, so a tenant
   // with two channels on one X app has two webhooks, and taking data[0] would see a mismatch
   // and try to create a duplicate.
+  // The raw `/2/webhooks` list, every field X returns (getWebhook narrows it to id+url and
+  // drops the rest — including whatever X reports about validity, which is exactly what you
+  // need when subscriptions exist but nothing is being delivered).
+  async listWebhooksRaw(): Promise<{ status: number; body: unknown }> {
+    const res = await fetch("https://api.x.com/2/webhooks", {
+      headers: { Authorization: `Bearer ${this.bearerToken}` },
+    });
+    const text = await res.text();
+    try {
+      return { status: res.status, body: JSON.parse(text) as unknown };
+    } catch {
+      return { status: res.status, body: text.slice(0, 500) };
+    }
+  }
+
   async getWebhook(matchUrl?: string): Promise<{ webhook_id: string; url: string } | null> {
     const res = await fetch("https://api.x.com/2/webhooks", {
       headers: { Authorization: `Bearer ${this.bearerToken}` },
     });
 
-    if (!res.ok) return null;
+    // 诊断日志（2026-08-09）：这个方法把「查询失败」和「不存在」都抹成 null，调用方一律
+    // 当成「没有 webhook」去 createWebhook，于是撞上 WebhookLimitExceeded 并让整个订阅
+    // 建立流程中止 —— dev 频道 70ee0fcb 因此两天零订阅。先把真实状态码与 X 侧现有的
+    // webhook 列表打出来，再决定怎么修。只记 id/url，不记任何凭证。
+    if (!res.ok) {
+      const body = await res.text();
+      console.log(JSON.stringify({ event: "xaa_get_webhook_failed", status: res.status, matchUrl, body: body.slice(0, 300) }));
+      return null;
+    }
     const data = (await res.json()) as { data?: Array<{ id: string; url: string }> };
     const hooks = data.data || [];
     const hit = matchUrl ? hooks.find((w) => w.url === matchUrl) : hooks[0];
+    console.log(JSON.stringify({
+      event: "xaa_get_webhook_listed",
+      matchUrl,
+      matched: hit?.id ?? null,
+      registered: hooks.map((w) => ({ id: w.id, url: w.url })),
+    }));
     return hit ? { webhook_id: hit.id, url: hit.url } : null;
   }
 
@@ -141,6 +207,12 @@ export class XActivityService {
     const existing = await this.listSubscriptions();
     const existingForUser = existing.filter((s) => s.filter?.user_id === userId);
     const existingTypes = new Set(existingForUser.map((s) => s.event_type));
+    // 诊断日志（2026-08-09）：listSubscriptions 在 !res.ok 时静默返回已收集的部分结果，
+    // 分不清「这个用户没订阅」和「列表根本没读到」。先把两个计数打出来。
+    console.log(JSON.stringify({
+      event: "xaa_setup_subscriptions_start",
+      userId, webhookId, total: existing.length, forUser: existingForUser.length,
+    }));
 
     const subscriptionIds: string[] = existingForUser.map((s) => s.subscription_id);
 

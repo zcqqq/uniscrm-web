@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
+import { XWebhookService } from "../src/services/x-webhook";
+
+const TEST_CONSUMER_SECRET = "test-consumer-secret";
 
 // webhook.ts's own job (2026-07-26 plan: user/content back to per-tenant D1) is routing,
 // tenant-DB-provisioned guarding, and argument threading (flowType from the metadata registry,
@@ -71,6 +74,7 @@ function baseEnv(overrides: Record<string, unknown> = {}) {
     AI: { run: vi.fn().mockResolvedValue({ data: [[0.1, 0.2]] }) },
     CF_ACCOUNT_ID: "acct",
     CF_D1_API_TOKEN: "tok",
+    X_CONSUMER_SECRET: TEST_CONSUMER_SECRET,
     ...overrides,
   } as any;
 }
@@ -85,11 +89,16 @@ function activityBody(eventType: string, payload: Record<string, unknown>) {
   return { data: { event_type: eventType, filter: { user_id: "x-user-1" }, payload } };
 }
 
-async function post(app: Hono, body: unknown, env: unknown) {
+// Every real delivery carries X's signature over the raw body; sign here so these routing
+// tests exercise the same path production does instead of a since-removed unauthenticated one.
+async function post(app: Hono, body: unknown, env: unknown, opts: { secret?: string; signature?: string } = {}) {
+  const raw = JSON.stringify(body);
+  const signature = opts.signature
+    ?? await new XWebhookService(opts.secret ?? TEST_CONSUMER_SECRET).computeSignature(raw);
   return app.request("/x/webhook", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json", "x-twitter-webhooks-signature": signature },
+    body: raw,
   }, env as any);
 }
 

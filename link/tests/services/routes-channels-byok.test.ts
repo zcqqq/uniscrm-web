@@ -97,8 +97,11 @@ describe("POST /x/byok", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = await res.json<{ channel_id: string }>();
+    const body = await res.json<{ channel_id: string; webhook_url: string | null }>();
     expect(body.channel_id).toBe(preChannelId);
+    // No X user id yet (nobody has authorized), and the webhook URL is keyed on it — returning
+    // a channel-id URL here is what produced a URL we could never register (byokWebhookUrl).
+    expect(body.webhook_url).toBeNull();
     expect(linkDb._rows.size).toBe(1);
     const stored = JSON.parse(linkDb._rows.get(preChannelId)!.config);
     expect(await decrypt(stored.app_client_id, masterKey)).toBe("cid");
@@ -134,8 +137,10 @@ describe("POST /x/byok", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = await res.json<{ channel_id: string }>();
+    const body = await res.json<{ channel_id: string; webhook_url: string | null }>();
     expect(body.channel_id).toBe("existing-channel");
+    // Already authorized, so the URL is known — and it carries the X user id, not the row id.
+    expect(body.webhook_url).toBe("https://link-dev.uni-scrm.com/x/webhook/12345");
 
     const stored = JSON.parse(linkDb._rows.get("existing-channel")!.config);
     // New credentials took effect...

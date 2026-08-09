@@ -1,6 +1,6 @@
 import type { Env } from "./types";
 import { XTokenService } from "./services/x-token";
-import { XActivityService } from "./services/x-webhook";
+import { XActivityService, byokWebhookUrl } from "./services/x-webhook";
 import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
 import { TikTokTokenService } from "./services/tiktok-token";
 import { pollChannelOnce, pollXListPosts, pollYouTubeChannel } from "./services/pollers/poll-channel";
@@ -67,7 +67,10 @@ export async function handleFrozenProbe(env: Env): Promise<void> {
   }
 }
 
-async function handleTokenRefresh(env: Env): Promise<void> {
+// Exported for tests: the BYOK subscription-repair branch inside is the only thing that can
+// give a reconnected channel its subscriptions back, and it had no coverage while it silently
+// failed for two days (dev, 2026-08-07 → 08-09).
+export async function handleTokenRefresh(env: Env): Promise<void> {
   // X token refresh (system app + BYOK)
   const rows = await env.LINK_DB
     // Frozen channels are excluded: handleFrozenProbe above is the only thing allowed to call
@@ -98,7 +101,7 @@ async function handleTokenRefresh(env: Env): Promise<void> {
           // token creates the subscriptions. The BYOK branch used to hand the user token to
           // both, which `/2/webhooks` rejects with 403 (see oauth.ts's BYOK branch).
           const webhookUrl = config.is_byok
-            ? `${env.LINK_URL}/x/webhook/${row.id}`
+            ? byokWebhookUrl(env.LINK_URL, config.x_user_id)
             : `${env.LINK_URL}/x/webhook`;
           if (!creds.bearerToken) {
             throw new Error(`channel ${row.id} has no app-only bearer token — cannot register its webhook`);

@@ -496,6 +496,23 @@ async function handleXActivityEvent(body: Record<string, unknown>, env: Env): Pr
   });
 }
 
+// The BYOK webhook's path segment is the channel's X user id (see byokWebhookUrl for why it
+// is no longer the channel row id). Webhooks registered before 2026-08-09 carry a channel row
+// id instead and stay registered on X until that app re-registers, so both are resolved here
+// — otherwise every already-connected BYOK channel would go silent the moment this deploys.
+export async function resolveByokChannel(db: D1Database, key: string): Promise<{ id: string; config: string } | null> {
+  return db
+    // tenant-scope-ok: external X webhook endpoint, authed by X's payload signature (and the
+    // CRC secret) rather than a tenant session; the path segment IS the tenant selector.
+    .prepare(
+      "SELECT id, config FROM channels WHERE channel_type IN ('X', 'TWITTER') AND is_active = 1 AND (source_channel_id = ? OR id = ?)"
+    )
+    .bind(key, key)
+    .first<{ id: string; config: string }>();
+}
+
+const SIGNATURE_HEADER = "x-twitter-webhooks-signature";
+
 export function webhookRoutes() {
   const router = new Hono<{ Bindings: Env }>();
 
@@ -509,8 +526,15 @@ export function webhookRoutes() {
 
   router.post("/webhook", async (c) => {
     try {
-      const body = await c.req.json<Record<string, unknown>>();
-      await handleXActivityEvent(body, c.env);
+      // Raw text, not c.req.json(): the signature covers the exact bytes X sent, and a
+      // parse/re-serialize round trip would not reproduce them.
+      const raw = await c.req.text();
+      const webhookService = new XWebhookService(c.env.X_CONSUMER_SECRET);
+      if (!(await webhookService.verifySignature(raw, c.req.header(SIGNATURE_HEADER)))) {
+        console.log(JSON.stringify({ event: "xaa_webhook_bad_signature", scope: "system", hasHeader: !!c.req.header(SIGNATURE_HEADER) }));
+        return c.json({ error: "invalid signature" }, 403);
+      }
+      await handleXActivityEvent(JSON.parse(raw) as Record<string, unknown>, c.env);
       return c.json({ ok: true });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -519,16 +543,11 @@ export function webhookRoutes() {
   });
 
   // BYOK per-channel webhook: CRC challenge
-  router.get("/webhook/:channelId", async (c) => {
+  router.get("/webhook/:xUserId", async (c) => {
     const crcToken = c.req.query("crc_token");
     if (!crcToken) return c.json({ error: "Missing crc_token" }, 400);
 
-    const channelId = c.req.param("channelId");
-    const row = await c.env.LINK_DB
-      // tenant-scope-ok: external X webhook CRC challenge, authed by provider signature not a tenant session
-      .prepare("SELECT config FROM channels WHERE id = ? AND is_active = 1")
-      .bind(channelId)
-      .first<{ config: string }>();
+    const row = await resolveByokChannel(c.env.LINK_DB, c.req.param("xUserId"));
     if (!row) return c.json({ error: "Channel not found" }, 404);
 
     const config = JSON.parse(row.config) as ByokConfig;
@@ -539,11 +558,19 @@ export function webhookRoutes() {
   });
 
   // BYOK per-channel webhook: event reception
-  router.post("/webhook/:channelId", async (c) => {
+  router.post("/webhook/:xUserId", async (c) => {
     try {
-      const channelId = c.req.param("channelId");
-      const body = await c.req.json<Record<string, unknown>>();
-      await handleXActivityEventByChannel(body, c.env, channelId);
+      const row = await resolveByokChannel(c.env.LINK_DB, c.req.param("xUserId"));
+      if (!row) return c.json({ error: "Channel not found" }, 404);
+
+      const config = JSON.parse(row.config) as ByokConfig;
+      const creds = await getAppCredentials(c.env, config);
+      const raw = await c.req.text();
+      if (!(await new XWebhookService(creds.consumerSecret).verifySignature(raw, c.req.header(SIGNATURE_HEADER)))) {
+        console.log(JSON.stringify({ event: "xaa_webhook_bad_signature", scope: "byok", channelId: row.id, hasHeader: !!c.req.header(SIGNATURE_HEADER) }));
+        return c.json({ error: "invalid signature" }, 403);
+      }
+      await handleXActivityEventByChannel(JSON.parse(raw) as Record<string, unknown>, c.env, row.id);
       return c.json({ ok: true });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

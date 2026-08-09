@@ -3,7 +3,8 @@ import { resolveSession as resolveSharedSession } from "../../shared/auth";
 import { Twitter, Google, generateState, generateCodeVerifier, decodeIdToken } from "arctic";
 import type { Env } from "./types";
 import { XTokenService } from "./services/x-token";
-import { XActivityService } from "./services/x-webhook";
+import { XActivityService, byokWebhookUrl } from "./services/x-webhook";
+import { describeTenant } from "./services/tenant-label";
 import { getAppCredentials, X_BYOK_SCOPES, type ByokConfig } from "./services/app-credentials";
 import { pollChannelOnce } from "./services/pollers/poll-channel";
 import { syncYouTubeSubscriptionUsers } from "./services/youtube-account";
@@ -179,8 +180,12 @@ export function oauthRoutes() {
         .first<{ id: string; tenant_id: number | null }>();
 
       if (conflictingRow && conflictingRow.tenant_id !== (existingRow?.tenant_id ?? null)) {
-        console.error(JSON.stringify({ event: "x_byok_cross_tenant_conflict", byokChannelId, conflictingChannelId: conflictingRow.id }));
-        return c.json({ error: "This X account is already connected under a different tenant" }, 409);
+        console.error(JSON.stringify({ event: "x_byok_cross_tenant_conflict", byokChannelId, conflictingChannelId: conflictingRow.id, conflictingTenantId: conflictingRow.tenant_id }));
+        // Name the holder: "connected under a different tenant" left the user with nowhere to
+        // go — most of the time the other tenant is their OWN second workspace, and they can
+        // only disconnect it there if they know which one it is. The owner email is masked
+        // because the person hitting this is, by definition, not a member of that tenant.
+        return c.json({ error: `This X account is already connected under another tenant (${await describeTenant(c.env.WEB_DB, conflictingRow.tenant_id)}). Disconnect it there first, then authorize again.` }, 409);
       }
 
       if (conflictingRow) {
@@ -230,7 +235,7 @@ export function oauthRoutes() {
           // ever calls setupAllSubscriptions for an already-populated config); the poll can —
           // the hourly cron re-runs it from the same unfinished cursor.
           try {
-            const webhookUrl = `${url.origin}/x/webhook/${byokChannelId}`;
+            const webhookUrl = byokWebhookUrl(url.origin, xUser.id);
             // Two different credentials, exactly as the system-app branch below does it:
             // `/2/webhooks` only accepts app-only auth (a user token gets 403 "Unsupported
             // Authentication"), while `/2/activity/subscriptions` needs user context for

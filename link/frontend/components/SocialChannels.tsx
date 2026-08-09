@@ -180,6 +180,10 @@ const BYOK_STRINGS = {
   step1: { en: "Step 1 — Copy these URLs into the X Developer Console", zh: "Step 1 — 复制以下 URL 到 X Developer Console" } as LocalizedString,
   step2: { en: "Step 2 — Enter your app credentials", zh: "Step 2 — 填写应用凭证" } as LocalizedString,
   webhookUrlLabel: { en: "Webhook URL", zh: "Webhook URL" } as LocalizedString,
+  webhookUrlPending: {
+    en: "Registered automatically after you authorize the account",
+    zh: "授权账号后自动注册",
+  } as LocalizedString,
   redirectUrlLabel: { en: "Redirect URL (OAuth 2.0)", zh: "重定向 URL (OAuth 2.0)" } as LocalizedString,
   failed: { en: "Failed", zh: "失败" } as LocalizedString,
   saveAndAuthorize: { en: "Save & Authorize", zh: "保存并授权" } as LocalizedString,
@@ -200,7 +204,11 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
 
   const preChannelId = useMemo(() => crypto.randomUUID(), []);
   const targetChannelId = editingChannelId ?? preChannelId;
-  const webhookUrl = `${window.location.origin}/x/webhook/${targetChannelId}`;
+  // The webhook URL is keyed by the X user id (link/src/services/x-webhook.ts byokWebhookUrl),
+  // so it only exists after the account has been authorized. Before that there is nothing
+  // truthful to show — the backend registers the webhook itself during the OAuth callback.
+  const editingXUserId = channels.find((ch) => ch.id === editingChannelId)?.x_user_id ?? null;
+  const webhookUrl = editingXUserId ? `${window.location.origin}/x/webhook/${editingXUserId}` : null;
   const redirectUrl = `${window.location.origin}/api/auth/x/callback`;
 
   useEffect(() => { loadChannels(); }, []);
@@ -346,12 +354,18 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
               </p>
               <div className="space-y-1">
                 <label className="text-[10px] text-muted-foreground">{t(BYOK_STRINGS.webhookUrlLabel, locale)}</label>
-                <Input
-                  value={webhookUrl}
-                  readOnly
-                  className="text-xs h-8 font-mono"
-                  onClick={(e: React.MouseEvent<HTMLInputElement>) => (e.target as HTMLInputElement).select()}
-                />
+                {webhookUrl ? (
+                  <Input
+                    value={webhookUrl}
+                    readOnly
+                    className="text-xs h-8 font-mono"
+                    onClick={(e: React.MouseEvent<HTMLInputElement>) => (e.target as HTMLInputElement).select()}
+                  />
+                ) : (
+                  <p className="text-xs text-muted-foreground h-8 flex items-center">
+                    {t(BYOK_STRINGS.webhookUrlPending, locale)}
+                  </p>
+                )}
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] text-muted-foreground">{t(BYOK_STRINGS.redirectUrlLabel, locale)}</label>

@@ -3,6 +3,8 @@ import type { Env } from "./types";
 import { XTokenService } from "./services/x-token";
 import { readFrozenState, frozenReason, recordXApiResult, markChannelFrozen, type XFreezeSignal } from "./services/x-freeze";
 import { XActivityService } from "./services/x-webhook";
+import { getAppCredentials, type ByokConfig } from "./services/app-credentials";
+import { describeTenant } from "./services/tenant-label";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 import { CreditService, getActiveSubscriptionTier } from "../../shared/credit-service";
 import { EventMetadata_X } from "../../metadata/x";
@@ -306,6 +308,51 @@ export function internalRoutes() {
     return c.json({ data: parsed.data });
   });
 
+  // 只读诊断：一个 X 频道在 X 侧的 webhook / 订阅真实状态。
+  // 存在的理由是「订阅建好了、X 却一条都不推」这类问题在本地完全不可见 —— app 的 bearer
+  // 是加密存的，只有 worker 解得开，所以没有这个端点就只能靠改代码加日志再等 cron。
+  // 不返回任何凭证，只返回 X 自己回的 webhook / subscription 元数据。
+  router.get("/x/byok-status", async (c) => {
+    const channelId = c.req.query("channelId");
+    if (!channelId) return c.json({ error: "channelId required" }, 400);
+
+    const row = await c.env.LINK_DB
+      // tenant-scope-ok: internal diagnostics endpoint, gated by INTERNAL_SECRET, not a tenant session
+      .prepare("SELECT id, tenant_id, is_active, source_channel_id, config FROM channels WHERE id = ?")
+      .bind(channelId)
+      .first<{ id: string; tenant_id: number | null; is_active: number; source_channel_id: string | null; config: string }>();
+    if (!row) return c.json({ error: "channel_not_found" }, 404);
+
+    const config = JSON.parse(row.config) as ByokConfig & {
+      x_user_id?: string; subscription_ids?: string[]; subscription_error?: string | null;
+    };
+    const creds = await getAppCredentials(c.env, config);
+    if (!creds.bearerToken) return c.json({ error: "no_app_bearer" }, 400);
+
+    const service = new XActivityService(creds.bearerToken);
+    const webhooks = await service.listWebhooksRaw();
+    const subscriptions = await service.listSubscriptions();
+    const forUser = config.x_user_id
+      ? subscriptions.filter((s) => s.filter?.user_id === config.x_user_id)
+      : [];
+
+    return c.json({
+      channel: {
+        id: row.id, tenant_id: row.tenant_id, is_active: row.is_active,
+        source_channel_id: row.source_channel_id, x_user_id: config.x_user_id ?? null,
+        is_byok: !!config.is_byok,
+        stored_subscription_ids: config.subscription_ids ?? null,
+        subscription_error: config.subscription_error ?? null,
+      },
+      x: {
+        webhooks_status: webhooks.status,
+        webhooks: webhooks.body,
+        subscriptions_total: subscriptions.length,
+        subscriptions_for_user: forUser,
+      },
+    });
+  });
+
   // flow 用来判断一个 published flow 的 trigger 绑的 channel 是否还活着。只回 id 集合，
   // 不回类型或名字 —— flow 只需要判断"在不在"，展示文案由它自己的 trigger 节点类型决定。
   router.get("/channels/active", async (c) => {
@@ -363,6 +410,24 @@ export function internalRoutes() {
       refresh_token,
       expires_at,
     });
+
+    // The upsert below reassigns tenant_id on conflict, so without this guard a second tenant
+    // signing in with an X account another tenant already holds silently MOVED the channel —
+    // and with it every event the shared webhook attributes through it. The BYOK path has
+    // refused this since 2026-07; the system-app path must refuse it identically.
+    // is_active is deliberately not filtered: a channel paused by tier enforcement still owns
+    // its account, and a BYOK delete now releases the id outright (routes-channels.ts).
+    const holder = await c.env.LINK_DB
+      // tenant-scope-ok: internal endpoint whose job is exactly to detect a cross-tenant holder of this X account
+      .prepare("SELECT id, tenant_id FROM channels WHERE channel_type = 'X' AND source_channel_id = ?")
+      .bind(xUser.id)
+      .first<{ id: string; tenant_id: number | null }>();
+    if (holder && holder.tenant_id !== tenant_id) {
+      console.error(JSON.stringify({ event: "x_create_cross_tenant_conflict", xUserId: xUser.id, holderChannelId: holder.id, holderTenantId: holder.tenant_id, requestedTenantId: tenant_id }));
+      return c.json({
+        error: `This X account is already connected under another tenant (${await describeTenant(c.env.WEB_DB, holder.tenant_id)}). Disconnect it there first.`,
+      }, 409);
+    }
 
     const channelId = crypto.randomUUID();
     await c.env.LINK_DB

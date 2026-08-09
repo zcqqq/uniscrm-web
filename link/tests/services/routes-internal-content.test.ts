@@ -331,7 +331,7 @@ describe("stub content-flow action endpoints", () => {
     const generateCallBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(generateCallBody.skillId).toBe("marketingskills-social"); // forwarded through to content's /internal/generate
     expect(generateCallBody.operationContext).toBe(
-      'You are executing the flow operation: "X Content Action - Create Post" — Publish a new post via the triggering channel'
+      'You are executing the flow operation: "X Content Action - Create Post" — Publish a new post via the triggering channel. This operation runs in an unattended automation pipeline: there is no user to ask questions, and your entire response is used verbatim as this operation\'s final content. Output only that final content as plain text — no markdown, no headings, no commentary, no surrounding quotation marks, and no alternative versions (e.g. for other platforms). Follow the Twitter/X requirements and style guidance provided elsewhere in this prompt, and stay within the platform\'s standard length limit for a single item of this content type.'
     );
     // recordPublishedContent wrote the new content row to R2 via the pipeline.
     expect(pipelineContent.send).toHaveBeenCalledTimes(1);

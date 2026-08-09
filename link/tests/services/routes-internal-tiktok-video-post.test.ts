@@ -183,7 +183,7 @@ describe("POST /internal/tiktok/video-post", () => {
     const genCall = fetchMock.mock.calls.find((c: any[]) => String(c[0]).includes("/internal/generate"));
     const body = JSON.parse((genCall![1] as RequestInit).body as string);
     expect(body.operationContext).toBe(
-      'You are executing the flow operation: "TikTok Content Action - Video Posting" — Posts the content flow\'s processed video to TikTok as a draft.'
+      'You are executing the flow operation: "TikTok Content Action - Video Posting" — Posts the content flow\'s processed video to TikTok as a draft. This operation runs in an unattended automation pipeline: there is no user to ask questions, and your entire response is used verbatim as this operation\'s final content. Output only that final content as plain text — no markdown, no headings, no commentary, no surrounding quotation marks, and no alternative versions (e.g. for other platforms). Follow the TikTok requirements and style guidance provided elsewhere in this prompt, and stay within the platform\'s standard length limit for a single item of this content type.'
     );
     vi.unstubAllGlobals();
   });

@@ -22,11 +22,24 @@ import { fetchYouTubeVideoProps, fetchYouTubeAuthorProps, type YouTubeVideoProps
 // User-approved system-prompt line for LLM-backed node operations (spec 2026-08-09):
 // operation-level metadata only — prop-level metadata is the user's own prompt's business.
 type ContentOpMeta = { sourceContentType: string; label?: LocalizedString; description?: LocalizedString };
-function buildOperationContext(nodeLabel: string, sourceContentType: string, catalog: ContentOpMeta[]): string {
+// The execution-context clauses are deliberately generic: they hold with no skill selected,
+// with any skill, and for any content type. Platform requirements (e.g. length limits) are
+// never restated here — they come from the skill content; we only point the model at them.
+// Wording A/B-tested against llama-4-scout (2026-08-09): dropping the platform name or the
+// length-limit pointer regresses output to multi-platform plans / 800+ char posts.
+function buildOperationContext(nodeLabel: string, platform: string, sourceContentType: string, catalog: ContentOpMeta[]): string {
   const meta = catalog.find((m) => m.sourceContentType === sourceContentType);
   const opLabel = meta?.label?.en ?? sourceContentType;
-  const desc = meta?.description?.en;
-  return `You are executing the flow operation: "${nodeLabel} - ${opLabel}"${desc ? ` — ${desc}` : ""}`;
+  const desc = meta?.description?.en?.replace(/\.\s*$/, "");
+  return (
+    `You are executing the flow operation: "${nodeLabel} - ${opLabel}"${desc ? ` — ${desc}` : ""}.` +
+    " This operation runs in an unattended automation pipeline: there is no user to ask questions," +
+    " and your entire response is used verbatim as this operation's final content." +
+    " Output only that final content as plain text — no markdown, no headings, no commentary," +
+    " no surrounding quotation marks, and no alternative versions (e.g. for other platforms)." +
+    ` Follow the ${platform} requirements and style guidance provided elsewhere in this prompt,` +
+    " and stay within the platform's standard length limit for a single item of this content type."
+  );
 }
 
 const ACTION_TO_EVENT_TYPE: Record<string, string> = {
@@ -669,7 +682,7 @@ export function internalRoutes() {
           prompt: interpolatedPrompt,
           provider,
           skillId,
-          operationContext: buildOperationContext("X Content Action", "create-post", ContentMetadata_X),
+          operationContext: buildOperationContext("X Content Action", "Twitter/X", "create-post", ContentMetadata_X),
         }),
       });
       if (!genRes.ok) {
@@ -893,7 +906,7 @@ export function internalRoutes() {
     }
     const tenantDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenant.d1_database_id);
 
-    const operationContext = buildOperationContext("TikTok Content Action", "photo-post", ContentMetadata_TikTok);
+    const operationContext = buildOperationContext("TikTok Content Action", "TikTok", "photo-post", ContentMetadata_TikTok);
     const generateText = async (prompt: string): Promise<string | null> => {
       if (textProvider === "none") return prompt;
       const res = await fetch(`${c.env.CONTENT_URL}/internal/generate`, {
@@ -995,7 +1008,7 @@ export function internalRoutes() {
     }
     const tenantDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenant.d1_database_id);
 
-    const operationContext = buildOperationContext("TikTok Content Action", "video-post", ContentMetadata_TikTok);
+    const operationContext = buildOperationContext("TikTok Content Action", "TikTok", "video-post", ContentMetadata_TikTok);
     const generateText = async (prompt: string): Promise<string | null> => {
       if (textProvider === "none") return prompt;
       const res = await fetch(`${c.env.CONTENT_URL}/internal/generate`, {

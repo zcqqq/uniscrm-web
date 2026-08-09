@@ -330,6 +330,9 @@ describe("stub content-flow action endpoints", () => {
     expect(body).toEqual({ ok: true, id: "tweet-999" });
     const generateCallBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(generateCallBody.skillId).toBe("marketingskills-social"); // forwarded through to content's /internal/generate
+    expect(generateCallBody.operationContext).toBe(
+      'You are executing the flow operation: "X Content Action - Create Post" — Publish a new post via the triggering channel'
+    );
     // recordPublishedContent wrote the new content row to R2 via the pipeline.
     expect(pipelineContent.send).toHaveBeenCalledTimes(1);
     const record = pipelineContent.send.mock.calls[0][0][0] as Record<string, unknown>;

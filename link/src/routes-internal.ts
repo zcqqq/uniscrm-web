@@ -6,6 +6,9 @@ import { XActivityService } from "./services/x-webhook";
 import { TenantDataDB } from "../../shared/tenant-data-db";
 import { CreditService, getActiveSubscriptionTier } from "../../shared/credit-service";
 import { EventMetadata_X } from "../../metadata/x";
+import { ContentMetadata_X } from "../../metadata/x-byok";
+import { ContentMetadata_TikTok } from "../../metadata/tiktok";
+import type { LocalizedString } from "../../metadata/dataTypes";
 import { dollarsToMicros } from "../../shared/credit";
 import { ContentService } from "./services/content";
 import { createPost, repostPost, createBookmark, likePost, initMediaUpload, appendMediaChunk, finalizeMediaUpload, getMediaUploadStatus } from "./services/x-posts-api";
@@ -15,6 +18,16 @@ import { YouTubeTokenService } from "./services/youtube-token";
 import { rateVideo, insertPlaylistItem } from "./services/youtube-actions";
 import { recordYouTubeQuota } from "./services/youtube-quota";
 import { fetchYouTubeVideoProps, fetchYouTubeAuthorProps, type YouTubeVideoProps } from "./services/pollers/youtube-content";
+
+// User-approved system-prompt line for LLM-backed node operations (spec 2026-08-09):
+// operation-level metadata only — prop-level metadata is the user's own prompt's business.
+type ContentOpMeta = { sourceContentType: string; label?: LocalizedString; description?: LocalizedString };
+function buildOperationContext(nodeLabel: string, sourceContentType: string, catalog: ContentOpMeta[]): string {
+  const meta = catalog.find((m) => m.sourceContentType === sourceContentType);
+  const opLabel = meta?.label?.en ?? sourceContentType;
+  const desc = meta?.description?.en;
+  return `You are executing the flow operation: "${nodeLabel} - ${opLabel}"${desc ? ` — ${desc}` : ""}`;
+}
 
 const ACTION_TO_EVENT_TYPE: Record<string, string> = {
   follow: "follow-user",
@@ -651,7 +664,13 @@ export function internalRoutes() {
       const genRes = await fetch(`${c.env.CONTENT_URL}/internal/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": c.env.INTERNAL_SECRET },
-        body: JSON.stringify({ tenantId: channel.tenant_id, prompt: interpolatedPrompt, provider, skillId }),
+        body: JSON.stringify({
+          tenantId: channel.tenant_id,
+          prompt: interpolatedPrompt,
+          provider,
+          skillId,
+          operationContext: buildOperationContext("X Content Action", "create-post", ContentMetadata_X),
+        }),
       });
       if (!genRes.ok) {
         console.error(JSON.stringify({ event: "create_post_generate_failed", contentId, channelId, provider, status: genRes.status }));
@@ -874,12 +893,13 @@ export function internalRoutes() {
     }
     const tenantDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenant.d1_database_id);
 
+    const operationContext = buildOperationContext("TikTok Content Action", "photo-post", ContentMetadata_TikTok);
     const generateText = async (prompt: string): Promise<string | null> => {
       if (textProvider === "none") return prompt;
       const res = await fetch(`${c.env.CONTENT_URL}/internal/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": c.env.INTERNAL_SECRET },
-        body: JSON.stringify({ tenantId, prompt, provider: textProvider, skillId: textSkillId }),
+        body: JSON.stringify({ tenantId, prompt, provider: textProvider, skillId: textSkillId, operationContext }),
       });
       if (!res.ok) return null;
       const body = await res.json<{ text: string }>();
@@ -975,12 +995,13 @@ export function internalRoutes() {
     }
     const tenantDb = new TenantDataDB(c.env.CF_ACCOUNT_ID, c.env.CF_D1_API_TOKEN, tenant.d1_database_id);
 
+    const operationContext = buildOperationContext("TikTok Content Action", "video-post", ContentMetadata_TikTok);
     const generateText = async (prompt: string): Promise<string | null> => {
       if (textProvider === "none") return prompt;
       const res = await fetch(`${c.env.CONTENT_URL}/internal/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": c.env.INTERNAL_SECRET },
-        body: JSON.stringify({ tenantId, prompt, provider: textProvider, skillId: textSkillId }),
+        body: JSON.stringify({ tenantId, prompt, provider: textProvider, skillId: textSkillId, operationContext }),
       });
       if (!res.ok) return null;
       const body = await res.json<{ text: string }>();

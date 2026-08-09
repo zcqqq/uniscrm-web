@@ -157,4 +157,34 @@ describe("POST /internal/tiktok/video-post", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
+
+  it("sends the video-post operation metadata as operationContext to content's /internal/generate", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes("/internal/generate")) {
+        return new Response(JSON.stringify({ text: "generated caption" }), { status: 200 });
+      }
+      if (String(url).includes("/v2/post/publish/inbox/video/init/")) {
+        return new Response(JSON.stringify({ data: { publish_id: "pub-vid-1" }, error: { code: "ok", message: "" } }), { status: 200 });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/tiktok/video-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({ ...baseBody, textProvider: "default" as const }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), PIPELINE_CONTENT: mockPipelineContent() }
+    );
+
+    expect(res.status).toBe(200);
+    const genCall = fetchMock.mock.calls.find((c: any[]) => String(c[0]).includes("/internal/generate"));
+    const body = JSON.parse((genCall![1] as RequestInit).body as string);
+    expect(body.operationContext).toBe(
+      'You are executing the flow operation: "TikTok Content Action - Video Posting" — Posts the content flow\'s processed video to TikTok as a draft.'
+    );
+    vi.unstubAllGlobals();
+  });
 });

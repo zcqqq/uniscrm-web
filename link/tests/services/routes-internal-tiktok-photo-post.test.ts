@@ -183,4 +183,42 @@ describe("POST /internal/tiktok/photo-post", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
+
+  it("sends the photo-post operation metadata as operationContext to content's /internal/generate", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes("/internal/generate-image")) {
+        return new Response(JSON.stringify({ url: "https://content-dev.uni-scrm.com/public/media/fake-key-1" }), { status: 200 });
+      }
+      if (String(url).includes("/internal/generate")) {
+        return new Response(JSON.stringify({ text: "generated text" }), { status: 200 });
+      }
+      if (String(url).includes("/v2/post/publish/content/init/")) {
+        return new Response(JSON.stringify({ data: { publish_id: "pub-1" }, error: { code: "ok", message: "" } }), { status: 200 });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/tiktok/photo-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
+        body: JSON.stringify({ ...baseBody, textProvider: "default" as const, imageCount: 1 }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), PIPELINE_CONTENT: mockPipelineContent() } as any
+    );
+
+    expect(res.status).toBe(200);
+    const textCalls = fetchMock.mock.calls.filter(
+      (c: any[]) => String(c[0]).includes("/internal/generate") && !String(c[0]).includes("generate-image")
+    );
+    expect(textCalls.length).toBe(2); // title + description
+    for (const call of textCalls) {
+      const body = JSON.parse((call[1] as RequestInit).body as string);
+      expect(body.operationContext).toBe(
+        'You are executing the flow operation: "TikTok Content Action - Photo Posting" — Generates images and a caption from the triggering content and posts as a TikTok draft.'
+      );
+    }
+    vi.unstubAllGlobals();
+  });
 });

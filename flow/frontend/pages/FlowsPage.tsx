@@ -19,13 +19,14 @@ import { DataTable } from "../../../shared/frontend/components/DataTable";
 import { Card, CardContent } from "../../../shared/frontend/ui/card";
 import { Skeleton } from "../../../shared/frontend/ui/skeleton";
 import { Pencil as EditIcon, Search as SearchIcon, Clock as ClockIcon, List as ListIcon, Clapperboard as ClapperboardIcon } from "lucide-react";
-import { XIcon, TikTokIcon, YouTubeIcon } from "../../../shared/frontend/ui/icons";
+import { XIcon, TikTokIcon, YouTubeIcon, GitHubIcon } from "../../../shared/frontend/ui/icons";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
 
 export function getNodeIcon(type: string, data: Record<string, unknown>) {
   if (type === "xTrigger") return XIcon;
   if (type === "xContentTrigger") return XIcon;
   if (type === "youtubeContentTrigger") return YouTubeIcon;
+  if (type === "githubContentTrigger") return GitHubIcon;
   if (type === "waitForEvent") return SearchIcon;
   if (type === "wait") return ClockIcon;
   if (type === "action") {
@@ -53,6 +54,9 @@ const TRIGGER_ACCOUNT_NOUN: Record<string, LocalizedString> = {
   xTrigger: { en: "X account", zh: "X 账号" },
   xContentTrigger: { en: "X account", zh: "X 账号" },
   youtubeContentTrigger: { en: "YouTube account", zh: "YouTube 账号" },
+  // 与后端 trigger-health.ts 的 TRIGGER_ACCOUNT_NOUN 一一对应：同一个 flow 的 broken
+  // trigger 提示在列表页（本地化）和 publish 报错（英文）里说的必须是同一个名词。
+  githubContentTrigger: { en: "GitHub account", zh: "GitHub 账号" },
 };
 const DEFAULT_TRIGGER_ACCOUNT_NOUN: LocalizedString = { en: "channel", zh: "渠道" };
 

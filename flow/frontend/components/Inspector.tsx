@@ -561,15 +561,30 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
 
 const GITHUB_TRIGGER_META = ContentMetadata_GitHub.find((m) => m.sourceContentType === "watch:get-releases")!;
 
-// 占位版：只有 includePrerelease 与条件编辑器。仓库多选（api.channels.githubRepos +
-// MultiSelect，写回 { channelId, repos }）属于 Task 8，本任务只把节点注册进引擎，
-// 但注册即让 NODE_INSPECTORS/NODE_ICONS/nodeTypes 三张穷尽表要求这一项，故先占位。
 function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
   const T = useT();
   const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
   const conditions: Condition[] = data.conditions || [];
-  const repos = resolveGitHubRepos(data);
+  const selectedRepos = resolveGitHubRepos(data);
+  // 与 YouTube 面板的 initialSubs 同理：打开面板那一刻已选条目的快照。已取消 Watch 的
+  // 条目要一直留在选项里，否则取消勾选的瞬间它就消失、再也勾不回来。按 nodeId 重算
+  // （组件不按 nodeId 加 key，切节点不会重新挂载）。
+  const initialRepos = useMemo(() => resolveGitHubRepos(data), [nodeId]);
+  const [state, setState] = useState<{
+    connected: boolean;
+    accountChannelId: string | null;
+    repos: { fullName: string; name: string; description: string | null }[];
+    // 取数失败必须与"没有 Watch 任何仓库"分开：两者都是空列表，但一个要用户重试、
+    // 另一个要用户去 GitHub 上 Watch 仓库。降级成空列表会让用户白找一圈。
+    error: boolean;
+  }>({ connected: false, accountChannelId: null, repos: [], error: false });
+
+  useEffect(() => {
+    api.channels.githubRepos()
+      .then((r) => setState({ ...r, error: false }))
+      .catch(() => setState({ connected: false, accountChannelId: null, repos: [], error: true }));
+  }, []);
 
   return (
     <div>
@@ -584,21 +599,60 @@ function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data:
 
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Repositories", zh: "仓库" })}</Label>
-          <p className="text-xs text-muted-foreground italic">
-            {repos.length > 0
-              ? repos.map((r) => r.fullName).join(", ")
-              : T({ en: "Connect your GitHub account on the Social page, then pick the repos you watch.", zh: "请先在社交页面连接 GitHub 账号，再选择你关注的仓库。" })}
-          </p>
+          {state.error ? (
+            <p className="text-xs text-destructive italic">
+              {T({ en: "Could not load your watched repositories from GitHub. Try again later.", zh: "无法从 GitHub 获取你关注的仓库，请稍后重试。" })}
+            </p>
+          ) : !state.connected ? (
+            <p className="text-xs text-muted-foreground italic">
+              {T({ en: "Connect your GitHub account on the Social page, then pick the repos you watch.", zh: "请先在社交页面连接 GitHub 账号，再选择你关注的仓库。" })}
+            </p>
+          ) : state.repos.length === 0 && selectedRepos.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">
+              {T({ en: "No watched repositories found — watch a repo on GitHub first.", zh: "未找到关注的仓库——请先在 GitHub 上 Watch 一个仓库。" })}
+            </p>
+          ) : (
+            <MultiSelect
+              options={(() => {
+                // 已选但已取消 Watch（不在接口返回里）的条目也要出现，否则旧 flow 打开后
+                // 无法取消勾选它。
+                const fetched = state.repos.map((r) => ({ value: r.fullName, label: r.fullName }));
+                const fetchedNames = new Set(state.repos.map((r) => r.fullName));
+                const stale = initialRepos
+                  .filter((r) => !fetchedNames.has(r.fullName))
+                  .map((r) => ({ value: r.fullName, label: r.fullName }));
+                return [...fetched, ...stale];
+              })()}
+              selectedValues={selectedRepos.map((r) => r.fullName)}
+              onToggle={(fullName) => {
+                const exists = selectedRepos.some((r) => r.fullName === fullName);
+                updateNodeData(nodeId, {
+                  channelId: state.accountChannelId || "",
+                  repos: exists
+                    ? selectedRepos.filter((r) => r.fullName !== fullName)
+                    : [...selectedRepos, { fullName }],
+                });
+              }}
+              placeholder={T({ en: "Select repositories...", zh: "选择仓库…" })}
+              tooltip={T({ en: "Select one or more repositories", zh: "选择一个或多个仓库" })}
+            />
+          )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-start gap-2">
           <Checkbox
             id={`include-prerelease-${nodeId}`}
             checked={data.includePrerelease === true}
             onCheckedChange={(v: boolean | "indeterminate") => updateNodeData(nodeId, { includePrerelease: v === true })}
           />
-          <Label htmlFor={`include-prerelease-${nodeId}`} className="text-xs">
+          <Label htmlFor={`include-prerelease-${nodeId}`} className="text-xs leading-snug">
             {T({ en: "Include prereleases", zh: "包含预发布" })}
+            <span className="block text-muted-foreground">
+              {T({
+                en: "Prereleases (rc / nightly) also trigger this flow, and count toward the release-count conditions below.",
+                zh: "预发布（rc / nightly）也会触发本流程，并计入下方的发版数条件。",
+              })}
+            </span>
           </Label>
         </div>
 

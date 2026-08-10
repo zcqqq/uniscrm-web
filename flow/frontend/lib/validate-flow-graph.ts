@@ -1,4 +1,4 @@
-import { CONDITION_LOGIC_OR, resolveYouTubeSubscriptions, TRIGGER_REACT_FLOW_TYPES, PROPS_CONDITION_NODE_TYPES } from "../../nodeTypeRegistry";
+import { CONDITION_LOGIC_OR, resolveYouTubeSubscriptions, resolveGitHubRepos, TRIGGER_REACT_FLOW_TYPES, PROPS_CONDITION_NODE_TYPES } from "../../nodeTypeRegistry";
 
 // Derived from the registry's role: "trigger" entries — re-exported under this module's
 // historical name for its existing consumers.
@@ -102,6 +102,20 @@ export function findYouTubeTriggerNoSubscriptionIds(
     .map((n) => n.id);
 }
 
+// 与 YouTube 那条同构，理由更硬：githubContentTrigger 的匹配是「payload.repo_full_name 在
+// 选中的 repos 里」（node-executors.ts），空数组的 some() 恒为 false，且 /internal/github-watches
+// 也不会为它登记任何 (channel, repo)，link 的 poller 根本不会去拉这个仓库。也就是说
+// 「选了账号但一个 repo 都没选」会发布成功、看起来一切正常、然后永远不触发——与产品坏了
+// 无法区分。必须用与运行时同一个 resolver，畸形值的结论才不会跟 engine 打架。
+export function findGitHubTriggerNoRepoIds(
+  nodes: { id: string; type?: string; data?: Record<string, unknown> }[]
+): string[] {
+  return nodes
+    .filter((n) => n.type === "githubContentTrigger")
+    .filter((n) => resolveGitHubRepos(n.data).length === 0)
+    .map((n) => n.id);
+}
+
 export function validateFlowGraph(
   nodes: { id: string; type?: string; data?: Record<string, unknown> }[],
   edges: { source: string; target: string }[]
@@ -112,23 +126,27 @@ export function validateFlowGraph(
   emptyConditionNodeIds: string[];
   orLogicEmptyNodeIds: string[];
   youtubeNoSubscriptionNodeIds: string[];
+  githubNoRepoNodeIds: string[];
 } {
   const orphanNodeIds = findOrphanNodeIds(nodes, edges);
   const misplacedNodeIds = findMisplacedYouTubeConditionIds(nodes);
   const emptyConditionNodeIds = findEmptyYouTubeConditionIds(nodes);
   const orLogicEmptyNodeIds = findOrLogicEmptyNodeIds(nodes);
   const youtubeNoSubscriptionNodeIds = findYouTubeTriggerNoSubscriptionIds(nodes);
+  const githubNoRepoNodeIds = findGitHubTriggerNoRepoIds(nodes);
   return {
     valid:
       orphanNodeIds.length === 0 &&
       misplacedNodeIds.length === 0 &&
       emptyConditionNodeIds.length === 0 &&
       orLogicEmptyNodeIds.length === 0 &&
-      youtubeNoSubscriptionNodeIds.length === 0,
+      youtubeNoSubscriptionNodeIds.length === 0 &&
+      githubNoRepoNodeIds.length === 0,
     orphanNodeIds,
     misplacedNodeIds,
     emptyConditionNodeIds,
     orLogicEmptyNodeIds,
     youtubeNoSubscriptionNodeIds,
+    githubNoRepoNodeIds,
   };
 }

@@ -91,7 +91,7 @@ describe("validateFlowGraph", () => {
   it("is valid when there are no orphan nodes", () => {
     const nodes = [{ id: "t1", type: "xTrigger" }, { id: "a1", type: "action" }];
     const edges = [{ source: "t1", target: "a1" }];
-    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [], orLogicEmptyNodeIds: [], youtubeNoSubscriptionNodeIds: [] });
+    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [], orLogicEmptyNodeIds: [], youtubeNoSubscriptionNodeIds: [], githubNoRepoNodeIds: [] });
   });
 
   it("is invalid and lists orphan ids when nodes are unreachable", () => {
@@ -275,6 +275,7 @@ describe("validateFlowGraph — empty youtubeCondition conditions", () => {
       emptyConditionNodeIds: [],
       orLogicEmptyNodeIds: [],
       youtubeNoSubscriptionNodeIds: [],
+      githubNoRepoNodeIds: [],
     });
   });
 

@@ -111,6 +111,7 @@ export default function AnalyticsPage() {
               let nodeName = "";
               if (nodeType === "xContentTrigger") nodeName = T(nodeLabel("xContentTrigger"));
               else if (nodeType === "youtubeContentTrigger") nodeName = T(nodeLabel("youtubeContentTrigger"));
+              else if (nodeType === "githubContentTrigger") nodeName = T(nodeLabel("githubContentTrigger"));
               else if (nodeType === "xTrigger") nodeName = (nodeData.eventType as string) || T({ en: "Trigger", zh: "触发器" });
               else if (nodeType === "action") {
                 const actionType = nodeData.actionType as string;

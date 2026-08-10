@@ -18,6 +18,7 @@ import { fetchOwnedLists } from "./services/x-posts-api";
 import { YouTubeTokenService } from "./services/youtube-token";
 import { fetchAllSubscriptions } from "./services/youtube-api";
 import { recordYouTubeQuota } from "./services/youtube-quota";
+import { listWatchedRepos } from "./services/github-api";
 
 export function channelsRoutes() {
   const router = new Hono<{ Bindings: Env }>();
@@ -421,6 +422,37 @@ export function channelsRoutes() {
       connected: true,
       playlists: (data.items || []).map((i) => ({ id: i.id, title: i.snippet?.title || i.id })),
     });
+  });
+
+  // --- GitHub ---
+  // 实时拉取，不吃 config 里的快照 —— 刚 Watch 的 repo 要立刻出现在 flow 的选择器里
+  //（与 YouTube 订阅选择器已定的「取实时 API 数据」同一原则）。
+  router.get("/github/repos", async (c) => {
+    const tenantId = c.get("tenantId" as never) as number;
+    const row = await c.env.LINK_DB
+      .prepare("SELECT id, config FROM channels WHERE channel_type = 'GITHUB' AND tenant_id = ? AND is_active = 1")
+      .bind(tenantId)
+      .first<{ id: string; config: string }>();
+    if (!row) return c.json({ connected: false, accountChannelId: null, repos: [] });
+
+    const config = JSON.parse(row.config) as { access_token?: string };
+    if (!config.access_token) return c.json({ connected: false, accountChannelId: null, repos: [] });
+
+    try {
+      const repos = await listWatchedRepos(config.access_token);
+      return c.json({
+        connected: true,
+        accountChannelId: row.id,
+        repos: repos
+          .map((r) => ({ fullName: r.full_name, name: r.name, description: r.description }))
+          .sort((a, b) => a.fullName.localeCompare(b.fullName)),
+      });
+    } catch (e) {
+      // 报错必须是 502，不能降级成空列表：空列表在 UI 上和「你没 Watch 任何 repo」
+      // 长得一模一样，用户会去 GitHub 上白找一圈。
+      console.error(JSON.stringify({ event: "github_repos_fetch_error", channel_id: row.id, error: String(e) }));
+      return c.json({ error: "Failed to fetch watched repos from GitHub" }, 502);
+    }
   });
 
   // --- Notion ---

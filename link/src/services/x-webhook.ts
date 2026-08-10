@@ -198,8 +198,17 @@ export class XActivityService {
     // Reading `data.subscription_id` yielded undefined, and six successfully created
     // subscriptions were stored as `[null × 6]` — no error anywhere, just unusable ids.
     const data = (await res.json()) as {
-      data?: { subscription?: { subscription_id?: string }; subscription_id?: string };
+      data?: { subscription?: { subscription_id?: string; filter?: unknown }; subscription_id?: string };
     };
+    // 把请求的 filter 和 X 回显的 filter 并排记下来。dev 上 2026-08-09 14:23 建的 like.create
+    // 明明带了 direction:"inbound"，列表接口回来却没有 direction —— 分不清是 X 忽略了这个
+    // 字段、还是只是不回显。这条日志是唯一能分清的地方，而两者的处理方式完全相反。
+    console.log(JSON.stringify({
+      event: "xaa_subscription_create_echo",
+      eventType,
+      requested: body.filter,
+      echoed: data.data?.subscription?.filter ?? null,
+    }));
     const id = data.data?.subscription?.subscription_id ?? data.data?.subscription_id;
     if (!id) {
       // Loud: the subscription exists on X's side at this point, so silently returning
@@ -207,6 +216,34 @@ export class XActivityService {
       throw new Error(`Create subscription [${eventType}] returned no subscription_id: ${JSON.stringify(data).slice(0, 300)}`);
     }
     return id;
+  }
+
+  // filter.direction 是唯一没法原地改的字段：PUT /2/activity/subscriptions/{id} 只接受
+  // tag 和 webhook_id（docs.x.com/x-api/activity/update-x-activity-subscription），所以方向
+  // 漂移只能删了重建，这个方法就是重建的前半步。
+  //
+  // 注意认证方式：DELETE 和 /2/webhooks 一样只收 app-only，用户 token 会被 403
+  // "Unsupported Authentication ... Supported authentication types are [OAuth 2.0
+  // Application-Only]"（2026-08-09 dev 实测）。而 POST 建订阅恰恰相反，必须要用户上下文。
+  // 所以这个实例的 token 必须是 app-only bearer，不能是 setupAllSubscriptions 手上那个。
+  async deleteSubscription(subscriptionId: string): Promise<void> {
+    const res = await fetch(`https://api.x.com/2/activity/subscriptions/${subscriptionId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${this.bearerToken}` },
+    });
+
+    // 404 = 这条订阅已经不在了，正是我们想要的终态。当成失败会让整轮修复卡在一条早就
+    // 被手工删掉的订阅上。
+    if (res.status === 404) return;
+    if (!res.ok) {
+      throw new Error(`Delete subscription [${subscriptionId}] failed ${res.status}: ${await res.text()}`);
+    }
+    // X 会用 HTTP 200 + data.deleted:false 表示没删成。放过它，调用方就会以为可以安全重建，
+    // 于是同一个 event_type 出现两条订阅——旧那条继续推我们不想要的方向。
+    const data = (await res.json().catch(() => ({}))) as { data?: { deleted?: boolean } };
+    if (data.data?.deleted === false) {
+      throw new Error(`Delete subscription [${subscriptionId}] returned deleted:false`);
+    }
   }
 
   // `webhookId` is REQUIRED and must have been obtained by an app-only-authenticated caller.
@@ -232,7 +269,6 @@ export class XActivityService {
     // handed back as if setup had succeeded for them.
     const existing = await this.listSubscriptions();
     const existingForUser = existing.filter((s) => s.filter?.user_id === userId);
-    const existingTypes = new Set(existingForUser.map((s) => s.event_type));
     // 诊断日志（2026-08-09）：listSubscriptions 在 !res.ok 时静默返回已收集的部分结果，
     // 分不清「这个用户没订阅」和「列表根本没读到」。先把两个计数打出来。
     console.log(JSON.stringify({
@@ -240,12 +276,20 @@ export class XActivityService {
       userId, webhookId, total: existing.length, forUser: existingForUser.length,
     }));
 
+    const existingTypes = new Set(existingForUser.map((s) => s.event_type));
     const subscriptionIds: string[] = existingForUser.map((s) => s.subscription_id);
 
-    // Create missing subscriptions. An existing subscription is reused as-is even when the
-    // metadata now declares a direction it was created without — X has no in-place update here
-    // and this code owns no delete path, so a legacy like.create subscription keeps delivering
-    // both directions until the channel is reconnected (webhook.ts attributes those correctly).
+    // 存量订阅一律按 event_type 复用，**不比对 direction** —— 不是不想比，是比不了：
+    // GET /2/activity/subscriptions 返回的 filter 里根本没有 direction 字段，哪怕这条订阅
+    // 创建时明确带了它（2026-08-09 dev 实测：15:26:06 新建的 like.create 请求里
+    // direction:"inbound"，创建响应回显了 direction，列表接口却查不到）。
+    // 拿列表当真相去做「方向漂移检测」，会把一条完全正确的订阅每轮都删了重建，永不收敛。
+    //
+    // 代价是 metadata 改了 direction 之后存量订阅不会自动跟上（X 也没有原地改 filter 的接口，
+    // PUT 只收 tag/webhook_id）。要换方向得显式重建：
+    // POST /internal/x/repair-subscriptions?channelId=..&rebuild=<event_type>。
+    // prod 那条 like.create 建于 2026-07-23，比 metadata 声明 inbound 早 5 天，就是这么一直
+    // 两个方向都推的；兜底在 webhook.ts —— outbound 的赞在入库前就被丢掉。
     for (const { eventType, direction } of XAA_SUBSCRIPTION_SPECS) {
       if (existingTypes.has(eventType)) continue;
       try {

@@ -400,15 +400,30 @@ describe("webhookRoutes POST /webhook — like.create", () => {
     expect(events[0].userId).toBe("liker-1");
   });
 
-  it("leaves an outbound like (legacy directionless subscription) on the Account — includes.users holds the liked Post's author, not a liker", async () => {
+  // metadata 声明 like.create 只要 inbound。但 X 的 filter.direction 只在创建订阅时生效，
+  // 之后既改不了也查不到，所以早于该声明建的订阅会一直两个方向都推（prod 那条建于
+  // 2026-07-23，比声明早五天）。订阅层挡不住的，必须在入库前挡住——落库了就是脏数据。
+  it("drops an outbound like instead of recording it as the Account's own activity", async () => {
     const env = baseEnv();
     const app = buildApp();
 
-    await post(app, likeBody({ direction: "outbound", likedAuthorId: "someone-else" }), env);
+    const res = await post(app, likeBody({ direction: "outbound", likedAuthorId: "someone-else" }), env);
+    expect(res.status).toBe(200);
 
     expect(upsertUserMock).not.toHaveBeenCalled();
-    const [events] = insertEventsMock.mock.calls[0];
-    expect(events[0].userId).toBe("x-user-1");
+    expect(insertEventsMock).not.toHaveBeenCalled();
+  });
+
+  // prod 的实际形态：订阅没有 direction，事件里自然也没有，只能靠「被赞的帖子是不是本账号的」
+  // 来判方向。这是 prod 上那些 outbound 事件真正走的分支。
+  it("drops an outbound like even when the subscription echoes no direction at all", async () => {
+    const env = baseEnv();
+    const app = buildApp();
+
+    await post(app, likeBody({ likedAuthorId: "someone-else" }), env);
+
+    expect(insertEventsMock).not.toHaveBeenCalled();
+    expect(env.FLOW_QUEUE.send).not.toHaveBeenCalled();
   });
 
   it("falls back to the old attribution when an inbound like carries no resolvable liker in includes", async () => {

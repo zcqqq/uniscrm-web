@@ -376,8 +376,31 @@ export function internalRoutes() {
       // getValidToken refuses a deactivated or frozen channel and refreshes when due — the
       // same guarantees the cron path gets from its own refresh.
       const token = await tokenService.getValidToken(channelId);
+
+      // ?rebuild=<event_type> —— 先删掉这个 event_type 的现有订阅，再让下面的 ensure 按
+      // 当前 metadata 重建。存在的唯一理由：filter.direction 只在创建时生效，X 既不让改
+      // （PUT 只收 tag/webhook_id）也不在列表里回显它，所以代码没法自己判断该不该重建，
+      // 只能由操作者显式指定。prod 的 like.create 建于 2026-07-23，早于 metadata 声明
+      // direction:"inbound" 五天，就是靠这个换掉的。
+      const rebuild = c.req.query("rebuild");
+      const deleted: string[] = [];
+      if (rebuild) {
+        if (!creds.bearerToken) return c.json({ ok: false, error: "no_app_bearer" }, 400);
+        if (!config.x_user_id) return c.json({ ok: false, error: "channel has no x_user_id" }, 400);
+        // DELETE 只收 app-only 认证（用户 token 会被 403 Unsupported Authentication），
+        // 和建订阅要求的用户上下文正好相反。
+        const appOnly = new XActivityService(creds.bearerToken);
+        const mine = (await appOnly.listSubscriptions())
+          .filter((s) => s.filter?.user_id === config.x_user_id && s.event_type === rebuild);
+        for (const s of mine) {
+          await appOnly.deleteSubscription(s.subscription_id);
+          deleted.push(s.subscription_id);
+        }
+        console.log(JSON.stringify({ event: "xaa_subscription_rebuild_deleted", channelId, eventType: rebuild, deleted }));
+      }
+
       const result = await ensureXSubscriptions(c.env, channelId, config, creds, token);
-      return c.json(result, result.ok ? 200 : 400);
+      return c.json(rebuild ? { ...result, rebuilt: rebuild, deleted } : result, result.ok ? 200 : 400);
     } catch (e) {
       const error = String(e).slice(0, 500);
       console.error(JSON.stringify({ event: "xaa_manual_repair_failed", channelId, error }));

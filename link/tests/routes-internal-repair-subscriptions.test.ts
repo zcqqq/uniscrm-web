@@ -80,3 +80,58 @@ describe("POST /internal/x/repair-subscriptions", () => {
     expect((await post("?channelId=nope", db(null))).status).toBe(404);
   });
 });
+
+// ?rebuild=<event_type> 是换 filter.direction 的唯一手段：X 只在创建订阅时接受 direction，
+// PUT 改不了，GET 又不回显，所以代码无从判断该不该重建——必须由操作者点名。
+describe("POST /internal/x/repair-subscriptions?rebuild=", () => {
+  function mockXList(subs: Array<{ subscription_id: string; event_type: string; filter: { user_id: string } }>) {
+    const deletes: Array<{ url: string; auth: string }> = [];
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        deletes.push({ url, auth: (init.headers as Record<string, string>).Authorization });
+        return Promise.resolve(new Response(JSON.stringify({ data: { deleted: true } }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ data: subs }), { status: 200 }));
+    }));
+    return deletes;
+  }
+
+  const MINE = { subscription_id: "legacy-like", event_type: "like.create", filter: { user_id: "3245609912" } };
+
+  it("只删点名的那个 event_type，再交给 ensure 按 metadata 重建", async () => {
+    const deletes = mockXList([
+      MINE,
+      { subscription_id: "keep-follow", event_type: "follow.follow", filter: { user_id: "3245609912" } },
+    ]);
+
+    const res = await post(`?channelId=${CHANNEL_ID}&rebuild=like.create`, db(CHANNEL_ROW));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, rebuilt: "like.create", deleted: ["legacy-like"] });
+    expect(deletes.map((d) => d.url)).toEqual(["https://api.x.com/2/activity/subscriptions/legacy-like"]);
+    // 删除只收 app-only bearer，用户 token 会被 403。
+    expect(deletes[0].auth).toBe("Bearer bearer");
+    // 重建仍然走和 cron 同一个 ensureXSubscriptions。
+    expect(ensureMock).toHaveBeenCalled();
+  });
+
+  it("不碰别的 X 用户的同类型订阅——共享 webhook 的列表跨租户", async () => {
+    const deletes = mockXList([
+      MINE,
+      { subscription_id: "other-like", event_type: "like.create", filter: { user_id: "other-user" } },
+    ]);
+
+    await post(`?channelId=${CHANNEL_ID}&rebuild=like.create`, db(CHANNEL_ROW));
+
+    expect(deletes.map((d) => d.url.split("/").pop())).toEqual(["legacy-like"]);
+  });
+
+  it("不带 rebuild 时一条都不删（默认幂等修复，不是破坏性操作）", async () => {
+    const deletes = mockXList([MINE]);
+
+    const res = await post(`?channelId=${CHANNEL_ID}`, db(CHANNEL_ROW));
+
+    expect(deletes).toEqual([]);
+    expect(await res.json()).not.toHaveProperty("rebuilt");
+  });
+});

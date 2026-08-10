@@ -281,13 +281,23 @@ async function processXEvent(
     return;
   }
 
-  // Inbound like — someone liked one of the Account's Posts. The event belongs to THAT person,
-  // not to the Account: recording it under filterUserId (what the generic tail below does) would
-  // read as "the Account liked something", which is the opposite of what happened. Outbound
-  // likes can still arrive from a subscription created before metadata declared
-  // direction:"inbound" — there includes.users[] holds the liked Post's AUTHOR, not a liker, so
-  // nothing about it is safe to attribute and it falls through to the unchanged old behavior.
-  if (eventType === "like.create" && isInboundLike(payload, filterUserId, activity.direction)) {
+  if (eventType === "like.create") {
+    // Outbound like — the Account liked someone else's Post. metadata declares like.create as
+    // inbound-only, but X applies filter.direction only at subscription-creation time and offers
+    // no way to change it afterwards (PUT /2/activity/subscriptions/{id} takes tag and
+    // webhook_id, nothing else). prod's subscription was created 2026-07-23, five days before
+    // metadata declared the direction, so both directions keep arriving and will until it is
+    // explicitly rebuilt. This is the layer that has to hold the line: falling through to the
+    // generic tail records the event under filterUserId, i.e. as the Account's own activity —
+    // exactly the outbound rows that showed up in prod.
+    if (!isInboundLike(payload, filterUserId, activity.direction)) {
+      console.log(JSON.stringify({ event: "xaa_outbound_like_dropped", channelId }));
+      return;
+    }
+
+    // Inbound like — someone liked one of the Account's Posts. The event belongs to THAT person,
+    // not to the Account: recording it under filterUserId would read as "the Account liked
+    // something", the opposite of what happened.
     const liker = findCounterparty(activity.includes, filterUserId);
     if (liker?.id) {
       await usersService.upsertXWebhookUser(liker as XUserData, channelId, "X");

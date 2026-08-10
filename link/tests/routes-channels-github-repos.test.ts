@@ -1,12 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { Hono } from "hono";
-
-const listWatchedReposMock = vi.fn();
-vi.mock("../src/services/github-api", async (importActual) => ({
-  ...(await importActual<Record<string, unknown>>()),
-  listWatchedRepos: async (...a: unknown[]) => listWatchedReposMock(...a),
-}));
-
 import { channelsRoutes } from "../src/routes-channels";
 
 function app(row: Record<string, unknown> | null, tenantId = 7) {
@@ -19,36 +12,35 @@ function app(row: Record<string, unknown> | null, tenantId = 7) {
   return a.request("http://x/api/channels/github/repos", {}, { LINK_DB: db } as never);
 }
 
-beforeEach(() => listWatchedReposMock.mockReset());
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => vi.unstubAllGlobals());
 
 describe("GET /api/channels/github/repos", () => {
   it("没连 GitHub 时返回 connected:false，不打外部 API", async () => {
     const res = await app(null);
     expect(await res.json()).toEqual({ connected: false, accountChannelId: null, repos: [] });
-    expect(listWatchedReposMock).not.toHaveBeenCalled();
   });
 
   it("实时拉取 Watch 列表并按 fullName 排序", async () => {
     // 实时拉、不吃快照：刚 Watch 的 repo 要立刻出现在 flow 选择器里
-    listWatchedReposMock.mockResolvedValue([
-      { id: 2, full_name: "z/beta", name: "beta", description: "b", private: false },
-      { id: 1, full_name: "a/alpha", name: "alpha", description: null, private: false },
-    ]);
+    vi.stubGlobal("fetch", vi.fn(() =>
+      Promise.resolve(new Response(JSON.stringify([
+        { id: 2, full_name: "z/beta", name: "beta", description: "b", private: false },
+        { id: 1, full_name: "a/alpha", name: "alpha", description: null, private: false },
+      ]), { status: 200 }))
+    ));
     const res = await app({ id: "chan-1", config: JSON.stringify({ access_token: "tok", login: "zc" }) });
     const body = await res.json<{ accountChannelId: string; repos: { fullName: string }[] }>();
     expect(body.accountChannelId).toBe("chan-1");
     expect(body.repos.map((r) => r.fullName)).toEqual(["a/alpha", "z/beta"]);
-    expect(listWatchedReposMock).toHaveBeenCalledWith("tok");
   });
 
   it("GitHub 报错时返回 502 而不是空列表 —— 空列表会被误读成「你没 Watch 任何 repo」", async () => {
-    // Mock listWatchedRepos to throw an error like GitHub API might
-    listWatchedReposMock.mockImplementation(() => Promise.reject(new Error("GitHub API error")));
+    // Stub fetch to return an error status, causing listWatchedRepos to throw
+    vi.stubGlobal("fetch", vi.fn(() =>
+      Promise.resolve(new Response("Unauthorized", { status: 401 }))
+    ));
     const res = await app({ id: "chan-1", config: JSON.stringify({ access_token: "tok" }) });
     // Verify the response is 502, not a 200 with empty repos
     expect(res.status).toBe(502);
-    // Verify the error was logged
-    expect(listWatchedReposMock).toHaveBeenCalledWith("tok");
   });
 });

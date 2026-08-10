@@ -47,10 +47,17 @@ function headers(token: string, extra?: Record<string, string>): Record<string, 
   };
 }
 
-/** 403 + 余额为 0，或 429 —— 两种都表示「这轮别再打了」。403 但余额非 0 是无权访问，不是限流。 */
+/** 403 + 余额为 0，或 429，或 403 + Retry-After（二级限流）—— 都表示「这轮别再打了」。
+ * 403 但余额非 0 且无 Retry-After 是无权访问，不是限流。 */
 function isRateLimited(res: Response): boolean {
   if (res.status === 429) return true;
-  return res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0";
+  if (res.status === 403) {
+    // 二级限流（abuse limit）：Retry-After 头存在即可认定，无需检查 x-ratelimit-remaining
+    if (res.headers.has("Retry-After")) return true;
+    // 一级限流（primary quota exhaustion）：x-ratelimit-remaining === "0"
+    if (res.headers.get("x-ratelimit-remaining") === "0") return true;
+  }
+  return false;
 }
 
 /** 当前 token 身份 Watch 的全部 repo。私有 repo 只在 token 带 repo scope 时出现。 */
@@ -94,10 +101,21 @@ export async function listReleases(
   };
 }
 
-/** repo 详情（作者字段的来源）。读不到返 null —— 没有作者字段照样发内容事件。 */
-export async function getRepo(token: string, fullName: string): Promise<Record<string, unknown> | null> {
+/** repo 详情（作者字段的来源）。caller 已在发出 recordTriggerContentSeen 后才调用本函数，
+ * 所以必须区分「限流（暂时性，应重试）」与「删除/无权（永久性，应发出降级内容）」，
+ * 不能将两者都坍缩成 null。caller 据此选择：发出缺字段的内容，还是取消本轮该 repo。 */
+export async function getRepo(
+  token: string,
+  fullName: string
+): Promise<{ repo: Record<string, unknown> | null; rateLimited: boolean; notFound: boolean }> {
   const res = await fetch(`${API}/repos/${fullName}`, { headers: headers(token) });
   if (res.status === 401) throw new GitHubUnauthorizedError(await res.text());
-  if (!res.ok) return null;
-  return (await res.json()) as Record<string, unknown>;
+  if (isRateLimited(res)) return { repo: null, rateLimited: true, notFound: false };
+  if (res.status === 404 || res.status === 403) return { repo: null, rateLimited: false, notFound: true };
+  if (!res.ok) throw new Error(`getRepo(${fullName}) failed ${res.status}: ${await res.text()}`);
+  return {
+    repo: (await res.json()) as Record<string, unknown>,
+    rateLimited: false,
+    notFound: false,
+  };
 }

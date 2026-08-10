@@ -75,6 +75,13 @@ describe("listReleases", () => {
     expect(r.notFound).toBe(true);
   });
 
+  it("403 + Retry-After（二级限流）也标 rateLimited，即使 x-ratelimit-remaining > 0", async () => {
+    stub(() => new Response("{}", { status: 403, headers: { "Retry-After": "60", "x-ratelimit-remaining": "42" } }));
+    const r = await listReleases("tok", "o/r", null);
+    expect(r.rateLimited).toBe(true);
+    expect(r.notFound).toBe(false);
+  });
+
   it("429 也算 rateLimited", async () => {
     stub(() => new Response("{}", { status: 429 }));
     expect((await listReleases("tok", "o/r", null)).rateLimited).toBe(true);
@@ -82,13 +89,27 @@ describe("listReleases", () => {
 });
 
 describe("getRepo", () => {
-  it("404 返 null 而不是抛", async () => {
+  it("404 返 notFound（repo 删除/无权访问）", async () => {
     stub(() => new Response("{}", { status: 404 }));
-    expect(await getRepo("tok", "o/gone")).toBeNull();
+    const r = await getRepo("tok", "o/gone");
+    expect(r.notFound).toBe(true);
+    expect(r.repo).toBeNull();
+    expect(r.rateLimited).toBe(false);
   });
 
-  it("200 原样返回 repo 对象", async () => {
+  it("200 返回 repo 对象", async () => {
     stub(() => new Response(JSON.stringify({ id: 7, full_name: "o/r", stargazers_count: 42 }), { status: 200 }));
-    expect(await getRepo("tok", "o/r")).toMatchObject({ id: 7, stargazers_count: 42 });
+    const r = await getRepo("tok", "o/r");
+    expect(r.repo).toMatchObject({ id: 7, stargazers_count: 42 });
+    expect(r.rateLimited).toBe(false);
+    expect(r.notFound).toBe(false);
+  });
+
+  it("403 + Retry-After（二级限流）标 rateLimited，caller 可据此决定是否降级发出内容", async () => {
+    stub(() => new Response("{}", { status: 403, headers: { "Retry-After": "60" } }));
+    const r = await getRepo("tok", "o/r");
+    expect(r.rateLimited).toBe(true);
+    expect(r.repo).toBeNull();
+    expect(r.notFound).toBe(false);
   });
 });

@@ -98,14 +98,29 @@ export async function runGitHubReleasePoller(ctx: GitHubReleasePollerContext): P
     deadline: Number.MAX_SAFE_INTEGER,
     logPrefix: "github_releases_poll",
     logContext: { repo: ctx.fullName },
-    fetchPage: async () => {
-      const etag = await readEtag(ctx);
+    fetchPage: async ({ phase }) => {
+      // seed 轮（latest-page 模式下 phase 报作 "backfill"）**不带** If-None-Match。
+      // seed 的全部意义是把当前这一页灌进 dedup 表；一个 304 会让本轮拿到空页、被
+      // markBackfillComplete 标记成「已 seed」，下一轮就把整个历史当新的发出去。
+      // cursor 通常在 seed 时为 NULL，但不是必然：上一轮 seed 若在 writeEtag 之后、
+      // markBackfillComplete 之前抛了（例如 upsertPage 里的 D1 报错），ETag 就留在了
+      // cursor 里，下一轮 seed 正好撞上 304。不发这个头，这条路径就根本不存在。
+      const etag = phase === "incremental" ? await readEtag(ctx) : null;
       const r = await listReleases(ctx.token, ctx.fullName, etag);
       if (r.rateLimited) return { items: [], nextCursor: null, rateLimited: true };
-      // 304 与 notFound 都当作「本轮没有可处理的内容」，不是错误：304 是内容没变，
-      // notFound 是 repo 删了/转私有/无权访问 —— 都不该让整轮失败。
       if (r.releases === null) {
-        if (r.notFound) console.log(JSON.stringify({ event: "github_releases_repo_unavailable", channel_id: ctx.channelId, repo: ctx.fullName }));
+        if (r.notFound) {
+          console.log(JSON.stringify({ event: "github_releases_repo_unavailable", channel_id: ctx.channelId, repo: ctx.fullName, phase }));
+          // 读不到的 repo（404 删除/转私有、403 无权）走**和限流同一个出口**。
+          // rateLimited 这个名字没说这件事，所以说清楚：runPagedPoll 只认这一个标志位表示
+          // 「本轮什么都别推进」—— 不 markBackfillComplete、不写 last_polled_at、下一轮重来。
+          // 用 items: [] 走正常出口是错的：首轮 seed 会被以**空的 seen 集合**标记成已完成，
+          // 下一轮把最多 100 条历史 release 一次性灌进用户的 flow —— 正是 seed 阶段存在的
+          // 意义所要防的那场洪水。403 无权也可能是暂时的（组织权限变更后又恢复），
+          // 与限流一样值得下一轮重试。
+          return { items: [], nextCursor: null, rateLimited: true };
+        }
+        // 304：内容确实没变，是一轮正常的空轮次 —— 照常走完，好让 last_polled_at 推进。
         return { items: [], nextCursor: null, rateLimited: false };
       }
       await writeEtag(ctx, r.etag);
@@ -136,20 +151,38 @@ async function upsertPage(
 
   // 作者字段只在真有新版这一轮才拉 —— /releases 的响应不含 repo 信息（实测确认），
   // 而绝大多数轮次没有新版，每轮都打就是白烧一半配额。
-  const repoResult = await getRepo(ctx.token, ctx.fullName);
-  // 取不到 repo 就带着缺失的作者字段照发，**不能**跳过：上面的 recordTriggerContentSeen
-  // 已经把这条 release 永久标记成「见过」了，跳过就是永久丢失，而下一轮不会补。
-  // 但要把原因记清楚——限流是暂时的，仓库没了是永久的，日志里分辨得出来才有得查。
-  if (!repoResult.repo) {
+  //
+  // 这次调用落在「已标记见过」与「已发出」之间的窗口里，所以**任何**失败都必须降级，
+  // 不能让异常逃出去：getRepo 在 401/403/404/429 之外的状态码（如 500）和网络故障时会
+  // 抛，而此刻 fresh 里每一条都已经被 recordTriggerContentSeen 永久标记成见过了 ——
+  // 异常中断本轮 = 这些 release 永远发不出去，下一轮也不会补。
+  // 三种失败在日志里必须分得开：限流是暂时的，仓库没了是永久的，抛错是要人去查的。
+  let repo: Record<string, unknown> | null = null;
+  let authorFailureReason: string | null = null;
+  try {
+    const repoResult = await getRepo(ctx.token, ctx.fullName);
+    repo = repoResult.repo;
+    if (!repo) authorFailureReason = repoResult.rateLimited ? "rate_limited" : repoResult.notFound ? "not_found" : "unknown";
+  } catch (e) {
+    // GitHubUnauthorizedError 也在这里被降级掉：本轮 fresh 的发射优先于让 channel 停摆，
+    // 而 token 失效下一轮 listReleases 一样会抛，cron 侧照样能停掉这个 channel。
+    authorFailureReason = "threw";
+    console.error(JSON.stringify({
+      event: "github_release_author_fetch_error",
+      channel_id: ctx.channelId, repo: ctx.fullName, error: String(e),
+    }));
+  }
+  // 取不到 repo 就带着缺失的作者字段照发，**不能**跳过（理由见上）。
+  if (!repo) {
     console.log(JSON.stringify({
       event: "github_release_author_unavailable",
       channel_id: ctx.channelId, repo: ctx.fullName,
-      reason: repoResult.rateLimited ? "rate_limited" : repoResult.notFound ? "not_found" : "unknown",
+      reason: authorFailureReason,
       degraded_releases: fresh.map((r) => r.id),
     }));
   }
-  const authorProps = repoResult.repo && GITHUB_METADATA.userProps
-    ? resolveAuthorProps(repoResult.repo, GITHUB_METADATA.userProps)
+  const authorProps = repo && GITHUB_METADATA.userProps
+    ? resolveAuthorProps(repo, GITHUB_METADATA.userProps)
     : {};
   const history = buildReleaseHistory(releases, ctx.now);
 
@@ -170,11 +203,25 @@ async function upsertPage(
     }
     props.release_history = history;
 
-    // envelope 用 owner/repo 全名而不是 repo 数字 id：节点里存的、/internal/github-watches
-    // 返回的、选择器展示的都是全名，用数字 id 匹配器就无从比对了。
-    await ctx.contentService.emitContentTriggerEvent(
-      ctx.channelId, "GITHUB", "repoFullName", ctx.fullName, { ...props, ...authorProps }
-    );
+    // 逐条兜住，别让一条的失败连坐后面的：mark 循环与 emit 循环在这里是分开的
+    // （getRepo 必须夹在中间，且只在确有新版时才打），所以 x-list-posts 那种「逐条
+    // mark+emit 配对、最多一条有风险」的写法在这条路径上做不到。退而求其次：每条 emit
+    // 自己吞掉异常并把丢失的 release id 记进日志，让风险回到「最多一条」。
+    // emitContentTriggerEvent 内部只 .catch() 了 send() 返回的 promise —— send() 同步抛
+    // （序列化失败等）时那个 .catch 根本挂不上，异常照样逃出来，所以这层是必要的。
+    try {
+      // envelope 用 owner/repo 全名而不是 repo 数字 id：节点里存的、/internal/github-watches
+      // 返回的、选择器展示的都是全名，用数字 id 匹配器就无从比对了。
+      await ctx.contentService.emitContentTriggerEvent(
+        ctx.channelId, "GITHUB", "repoFullName", ctx.fullName, { ...props, ...authorProps }
+      );
+    } catch (e) {
+      // 已经被标记成见过、却没发出去 = 永久丢失，日志里必须留下足够定位的 id。
+      console.error(JSON.stringify({
+        event: "github_release_emit_failed",
+        channel_id: ctx.channelId, repo: ctx.fullName, release_id: r.id, error: String(e),
+      }));
+    }
   }
   return fresh.length;
 }

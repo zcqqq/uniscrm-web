@@ -42,9 +42,14 @@ function fakeLinkDb(row: Record<string, unknown> | null) {
 function fakeContentService() {
   const seen = new Set<string>();
   const emitted: Array<{ secondaryValue: string; props: Record<string, unknown> }> = [];
+  // 让某几条 release 的 emit 抛错，用来验证一条失败不会连坐后面的。
+  const failEmitFor = new Set<string>();
   return {
     emitted,
+    failEmitFor,
     seenAll: (ids: string[]) => ids.forEach((i) => seen.add(i)),
+    /** dedup 表里现在记着哪些 id —— seed 阶段「只记不发」的「记」必须能被断言到。 */
+    seenIds: () => [...seen],
     service: {
       async recordTriggerContentSeen(_c: string, _s: string, id: string) {
         if (seen.has(id)) return false;
@@ -52,6 +57,7 @@ function fakeContentService() {
         return true;
       },
       async emitContentTriggerEvent(_c: string, _t: string, _f: string, secondaryValue: string, props: Record<string, unknown>) {
+        if (failEmitFor.has(String(props.source_content_id))) throw new Error("queue send exploded");
         emitted.push({ secondaryValue, props });
       },
     },
@@ -90,10 +96,13 @@ describe("runGitHubReleasePoller", () => {
     tenantId: 7, now: NOW,
   });
 
-  it("seed 阶段只记不发 —— 首次纳入不把历史灌进 flow", async () => {
+  it("seed 阶段只记不发，且真的记进了 dedup —— 下一轮增量必须一条都不发", async () => {
     // dedup 表是「见过」状态的唯一存放处；seed 时不记录，第一次增量轮询会把整个历史
-    // 当成新的发出去（x-list-posts.ts 已经踩过这个坑）
-    const { db } = fakeLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null, since_id: null });
+    // 当成新的发出去（x-list-posts.ts 已经踩过这个坑）。
+    // 只断言「没发出」是不够的：一个在 !emitFlowEvent 时直接 return 0 的实现（正是代码
+    // 注释所警告的那个 bug）同样能通过。所以既断言 dedup 收到了 id，又真的跑第二轮。
+    const row = { cursor: null as string | null, backfill_complete: 0, last_polled_at: null as string | null, since_id: null };
+    const { db } = fakeLinkDb(row);
     const cs = fakeContentService();
     listReleasesMock.mockResolvedValue({ releases: [rel({ id: 1 }), rel({ id: 2 })], etag: 'W/"a"', rateLimited: false, notFound: false });
 
@@ -101,6 +110,41 @@ describe("runGitHubReleasePoller", () => {
 
     expect(cs.emitted).toHaveLength(0);
     expect(getRepoMock).not.toHaveBeenCalled();
+    expect(cs.seenIds().sort()).toEqual(["1", "2"]);
+
+    // 第二轮：seed 已完成，同一页历史再来一次 —— 全都该被 dedup 挡下。
+    row.backfill_complete = 1;
+    row.last_polled_at = "2026-08-09T00:00:00Z";
+    await runGitHubReleasePoller({ ...base(), linkDb: db, contentService: cs.service as never });
+
+    expect(cs.emitted).toHaveLength(0);
+    expect(getRepoMock).not.toHaveBeenCalled();
+  });
+
+  it("seed 轮不发 If-None-Match —— 一个 304 会让空页被当成 seed 完成", async () => {
+    // cursor 在 seed 时通常是 NULL，但不是必然（上一轮 seed 写了 ETag 却在 upsertPage
+    // 抛了，ETag 就留在 cursor 里）。带着它去 seed 正好可能撞上 304 拿到空页。
+    const { db } = fakeLinkDb({ cursor: 'W/"leftover"', backfill_complete: 0, last_polled_at: null, since_id: null });
+    const cs = fakeContentService();
+    listReleasesMock.mockResolvedValue({ releases: [rel({ id: 1 })], etag: 'W/"a"', rateLimited: false, notFound: false });
+
+    await runGitHubReleasePoller({ ...base(), linkDb: db, contentService: cs.service as never });
+
+    expect(listReleasesMock).toHaveBeenCalledWith("tok", "oven-sh/bun", null);
+  });
+
+  it("seed 轮读不到 repo 时不得标记 seed 完成 —— 否则下一轮把整个历史灌进 flow", async () => {
+    // 这是最贵的一个 bug：一次瞬时 404/403 把 (channel, repo) 以**空的 seen 集合**标成
+    // 已 seed，下一轮最多 100 条历史 release 一次性涌进用户的 flow。
+    const { db, writes } = fakeLinkDb({ cursor: null, backfill_complete: 0, last_polled_at: null, since_id: null });
+    const cs = fakeContentService();
+    listReleasesMock.mockResolvedValue({ releases: null, etag: null, rateLimited: false, notFound: true });
+
+    await runGitHubReleasePoller({ ...base(), linkDb: db, contentService: cs.service as never });
+
+    expect(writes.some((w) => w.sql.includes("backfill_complete = 1"))).toBe(false);
+    expect(writes.some((w) => w.sql.includes("last_polled_at = datetime"))).toBe(false);
+    expect(cs.seenIds()).toEqual([]);
   });
 
   it("增量阶段发新 release，并带上 repo 作者字段与 release_history", async () => {
@@ -180,6 +224,33 @@ describe("runGitHubReleasePoller", () => {
     expect(cs.emitted).toHaveLength(1);
     expect(cs.emitted[0].props["user.followers_count"]).toBeUndefined();
     expect(cs.emitted[0].props.content_text).toBe("notes");
+  });
+
+  it("getRepo 抛错也照发 —— 异常逃出去等于本轮 fresh 全部永久丢失", async () => {
+    // getRepo 在 401/403/404/429 之外（如 500）和网络故障时会抛，而此刻两条 release
+    // 都已经被 recordTriggerContentSeen 永久标记成见过了。
+    const { db } = fakeLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "x", since_id: null });
+    const cs = fakeContentService();
+    listReleasesMock.mockResolvedValue({ releases: [rel({ id: 11 }), rel({ id: 12 })], etag: null, rateLimited: false, notFound: false });
+    getRepoMock.mockRejectedValue(new Error("getRepo(o/r) failed 500: boom"));
+
+    await runGitHubReleasePoller({ ...base(), linkDb: db, contentService: cs.service as never });
+
+    expect(cs.emitted).toHaveLength(2);
+    expect(cs.emitted[0].props["user.followers_count"]).toBeUndefined();
+    expect(cs.emitted[0].props.content_type).toBe("RELEASE");
+  });
+
+  it("一条 emit 失败不连坐后面的 —— 每条都已标记见过，中断就是整批丢失", async () => {
+    const { db } = fakeLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "x", since_id: null });
+    const cs = fakeContentService();
+    cs.failEmitFor.add("21");
+    listReleasesMock.mockResolvedValue({ releases: [rel({ id: 21 }), rel({ id: 22 }), rel({ id: 23 })], etag: null, rateLimited: false, notFound: false });
+    getRepoMock.mockResolvedValue({ repo: { id: 1, full_name: "o/r", name: "r", owner: {}, stargazers_count: 1 }, rateLimited: false, notFound: false });
+
+    await runGitHubReleasePoller({ ...base(), linkDb: db, contentService: cs.service as never });
+
+    expect(cs.emitted.map((e) => e.props.source_content_id)).toEqual([22, 23]);
   });
 
   it("content_text 超过 32KB 截断 —— 队列单条消息上限 128KB", async () => {

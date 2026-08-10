@@ -7,7 +7,7 @@ import { passesPropsFilter } from "../../metadata/props-filter";
 import { r2Query, latestRowsSql, sqlStr, sqlInt } from "../../shared/r2-sql";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY, CONDITION_LOGIC_OR, resolveYouTubeSubscriptions, resolveGitHubRepos } from "../nodeTypeRegistry";
-import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage } from "./trigger-health";
+import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage, findGitHubTriggerNoRepos, githubNoRepoMessage } from "./trigger-health";
 import { conditionsNeedAuthor, youtubeConditionRequest, resolveYouTubeCondition, type VideoStatsResponse } from "./youtube-condition";
 import { createInternalAuthMiddleware, resolveAuthMe, resolveSession, spaLoginGuard } from "../../shared/auth";
 
@@ -1444,6 +1444,12 @@ app.post("/api/flows/:id/publish", async (c) => {
     const broken = findBrokenTrigger(flow.graph_json, activeIds);
     if (broken) return c.json({ error: brokenTriggerMessage(broken.nodeType) }, 400);
   }
+
+  // 排在 channel 门之后：账号没连是更根本的一步，两个问题同时存在时先说账号。
+  // 这一条不问 link（纯本地判据），但直连 API 发布同样绕不开它 —— 前端的
+  // findGitHubTriggerNoRepoIds 只挡住 UI 那条路径。
+  const noRepo = findGitHubTriggerNoRepos(flow.graph_json);
+  if (noRepo) return c.json({ error: githubNoRepoMessage() }, 400);
 
   const result = await c.env.FLOW_DB.prepare(
     `UPDATE flows SET status = 'published', updated_at = ? WHERE id = ? AND tenant_id = ?`

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { validateFlowGraph, findGitHubTriggerNoRepoIds } from "../../frontend/lib/validate-flow-graph";
-import { findBrokenTrigger } from "../../src/trigger-health";
+import { findBrokenTrigger, findGitHubTriggerNoRepos } from "../../src/trigger-health";
 
 // 一个最小的「trigger → action」图，data 由用例给。
 const graph = (data: Record<string, unknown>) => ({
@@ -69,5 +69,38 @@ describe("channelId 为空由 publish 的 trigger-health 拦截", () => {
   it("账号已连接则不拦", () => {
     const graphJson = JSON.stringify(graph({ channelId: "gh-1", repos: [{ fullName: "oven-sh/bun" }] }));
     expect(findBrokenTrigger(graphJson, new Set(["gh-1"]))).toBeNull();
+  });
+});
+
+// 服务端那一份门。前端的 findGitHubTriggerNoRepoIds 只挡 UI 路径，直连 API 发布绕开它。
+// 两边共用 resolveGitHubRepos，所以对畸形值的结论必须逐字相同 —— 下面用同一批畸形输入
+// 同时喂两个函数来钉死这一点。
+describe("findGitHubTriggerNoRepos（服务端 publish 门）", () => {
+  it("空 repos 报出节点，供 publish 回 400", () => {
+    expect(findGitHubTriggerNoRepos(JSON.stringify(graph({ channelId: "gh-1", repos: [] })))).toEqual({
+      nodeId: "t1",
+      nodeType: "githubContentTrigger",
+    });
+  });
+
+  it("有 repo 就放行", () => {
+    expect(findGitHubTriggerNoRepos(JSON.stringify(graph({ channelId: "gh-1", repos: [{ fullName: "oven-sh/bun" }] })))).toBeNull();
+  });
+
+  it("不碰别的 trigger 类型，也不被坏 JSON 掀翻", () => {
+    const other = JSON.stringify({ nodes: [{ id: "t1", type: "xTrigger", data: { channelId: "c1" } }], edges: [] });
+    expect(findGitHubTriggerNoRepos(other)).toBeNull();
+    expect(findGitHubTriggerNoRepos("not json")).toBeNull();
+    expect(findGitHubTriggerNoRepos("")).toBeNull();
+  });
+
+  it("与前端那份判据对畸形 repos 的结论逐字相同（共用 resolveGitHubRepos）", () => {
+    for (const repos of [undefined, "oven-sh/bun", [], [{ fullName: "" }], [{ name: "bun" }]]) {
+      const data = { channelId: "gh-1", ...(repos === undefined ? {} : { repos }) };
+      const serverBlocked = findGitHubTriggerNoRepos(JSON.stringify(graph(data))) !== null;
+      const clientBlocked = findGitHubTriggerNoRepoIds(graph(data).nodes).length > 0;
+      expect(serverBlocked).toBe(clientBlocked);
+      expect(serverBlocked).toBe(true);
+    }
   });
 });

@@ -1,4 +1,4 @@
-import { NODE_TYPE_REGISTRY } from "../nodeTypeRegistry";
+import { NODE_TYPE_REGISTRY, resolveGitHubRepos } from "../nodeTypeRegistry";
 import type { Env } from "./types";
 
 export interface BrokenTrigger {
@@ -72,6 +72,25 @@ export function findBrokenTrigger(
   const channelId = (trigger.data?.channelId as string) || "";
   if (channelId && activeIds.has(channelId)) return null;
   return { nodeId: trigger.id, nodeType: trigger.type };
+}
+
+// 一个 repo 都没选的 githubContentTrigger：匹配是「payload.repo_full_name ∈ 选中的 repos」
+// （node-executors.ts），空数组恒 false；/internal/github-watches 也不会为它登记任何
+// (channel, repo)，link 的 poller 压根不会去拉。也就是 flow 发布成功、看着一切正常、
+// 却永远不触发 —— 与产品坏了无法区分，所以发布时必须挡住。
+// 前端 validate-flow-graph.ts 的 findGitHubTriggerNoRepoIds 是同一条判据的客户端副本；
+// 直连 API 发布绕开前端，所以服务端这一份才是真正的门。两边共用 resolveGitHubRepos
+// （nodeTypeRegistry.ts），畸形值的结论不可能与运行时或彼此漂开。
+export function findGitHubTriggerNoRepos(graphJson: string): BrokenTrigger | null {
+  const trigger = findTriggerNode(graphJson);
+  if (!trigger || trigger.type !== "githubContentTrigger") return null;
+  if (resolveGitHubRepos(trigger.data).length > 0) return null;
+  return { nodeId: trigger.id, nodeType: trigger.type };
+}
+
+// publish 被拒时回给前端、由前端原样 toast 出来的人话（与 brokenTriggerMessage 同规格）。
+export function githubNoRepoMessage(): string {
+  return "Cannot publish: the GitHub Trigger has no repository selected, so this flow would never fire. Pick at least one repository in the trigger node.";
 }
 
 const TRIGGER_ACCOUNT_NOUN: Record<string, string> = {

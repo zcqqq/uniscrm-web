@@ -13,6 +13,15 @@ const boundToGone = JSON.stringify({
   nodes: [{ id: "t1", type: "xTrigger", data: { channelId: "chan-gone" }, position: { x: 0, y: 0 } }],
   edges: [],
 });
+// GitHub 触发器：账号连着，但一个 repo 都没选 —— 发布得了却永远不触发。
+const githubNoRepo = JSON.stringify({
+  nodes: [{ id: "t1", type: "githubContentTrigger", data: { channelId: "chan-live", repos: [] }, position: { x: 0, y: 0 } }],
+  edges: [],
+});
+const githubWithRepo = JSON.stringify({
+  nodes: [{ id: "t1", type: "githubContentTrigger", data: { channelId: "chan-live", repos: [{ fullName: "oven-sh/bun" }] }, position: { x: 0, y: 0 } }],
+  edges: [],
+});
 const cronOnly = JSON.stringify({
   nodes: [{ id: "t1", type: "cronTrigger", data: { scheduleType: "daily", dailyTime: "09:00" }, position: { x: 0, y: 0 } }],
   edges: [],
@@ -67,6 +76,14 @@ describe("POST /api/flows/:id/publish trigger gate", () => {
         `INSERT INTO flows (id, tenant_id, name, graph_json, domain, status, created_at, updated_at)
          VALUES ('p-cron', ?, 'cron', ?, 'user', 'draft', datetime('now'), datetime('now'))`
       ).bind(TENANT_ID, cronOnly),
+      env.FLOW_DB.prepare(
+        `INSERT INTO flows (id, tenant_id, name, graph_json, domain, status, created_at, updated_at)
+         VALUES ('p-gh-empty', ?, 'gh empty', ?, 'content', 'draft', datetime('now'), datetime('now'))`
+      ).bind(TENANT_ID, githubNoRepo),
+      env.FLOW_DB.prepare(
+        `INSERT INTO flows (id, tenant_id, name, graph_json, domain, status, created_at, updated_at)
+         VALUES ('p-gh-ok', ?, 'gh ok', ?, 'content', 'draft', datetime('now'), datetime('now'))`
+      ).bind(TENANT_ID, githubWithRepo),
     ]);
   });
 
@@ -110,6 +127,24 @@ describe("POST /api/flows/:id/publish trigger gate", () => {
     const res = await worker.fetch(publishReq("p-cron"), env);
     expect(res.status).toBe(200);
     expect(await statusOf("p-cron")).toBe("published");
+  });
+
+  // 前端的 findGitHubTriggerNoRepoIds 只挡住 UI 那条路径；直连 API 发布必须同样被挡，
+  // 否则 flow 会显示 published 却永远不触发。
+  it("refuses to publish a githubContentTrigger with no repository selected, and leaves it a draft", async () => {
+    stubFetch({ status: 200, body: { channelIds: ["chan-live"] } });
+    const res = await worker.fetch(publishReq("p-gh-empty"), env);
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toContain("repository");
+    expect(await statusOf("p-gh-empty")).toBe("draft");
+  });
+
+  it("publishes a githubContentTrigger that has at least one repository", async () => {
+    stubFetch({ status: 200, body: { channelIds: ["chan-live"] } });
+    const res = await worker.fetch(publishReq("p-gh-ok"), env);
+    expect(res.status).toBe(200);
+    expect(await statusOf("p-gh-ok")).toBe("published");
   });
 
   it("still 404s on another tenant's flow", async () => {

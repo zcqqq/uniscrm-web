@@ -572,18 +572,22 @@ function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data:
   // （组件不按 nodeId 加 key，切节点不会重新挂载）。
   const initialRepos = useMemo(() => resolveGitHubRepos(data), [nodeId]);
   const [state, setState] = useState<{
+    // 首次响应落地前必须是 loading，不能直接摆 connected:false 的文案：listWatchedRepos
+    // 最多要顺序翻 10 页 GitHub（link/src/services/github-api.ts），这几秒里会让一个账号
+    // 好好的用户去"连接 GitHub 账号"——与"502 不许退化成空列表"是同一类误导。
+    loading: boolean;
     connected: boolean;
     accountChannelId: string | null;
     repos: { fullName: string; name: string; description: string | null }[];
     // 取数失败必须与"没有 Watch 任何仓库"分开：两者都是空列表，但一个要用户重试、
     // 另一个要用户去 GitHub 上 Watch 仓库。降级成空列表会让用户白找一圈。
     error: boolean;
-  }>({ connected: false, accountChannelId: null, repos: [], error: false });
+  }>({ loading: true, connected: false, accountChannelId: null, repos: [], error: false });
 
   useEffect(() => {
     api.channels.githubRepos()
-      .then((r) => setState({ ...r, error: false }))
-      .catch(() => setState({ connected: false, accountChannelId: null, repos: [], error: true }));
+      .then((r) => setState({ ...r, loading: false, error: false }))
+      .catch(() => setState({ loading: false, connected: false, accountChannelId: null, repos: [], error: true }));
   }, []);
 
   return (
@@ -599,7 +603,11 @@ function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data:
 
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Repositories", zh: "仓库" })}</Label>
-          {state.error ? (
+          {state.loading ? (
+            <p className="text-xs text-muted-foreground italic">
+              {T({ en: "Loading your watched repositories from GitHub…", zh: "正在从 GitHub 获取你关注的仓库…" })}
+            </p>
+          ) : state.error ? (
             <p className="text-xs text-destructive italic">
               {T({ en: "Could not load your watched repositories from GitHub. Try again later.", zh: "无法从 GitHub 获取你关注的仓库，请稍后重试。" })}
             </p>
@@ -607,7 +615,10 @@ function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data:
             <p className="text-xs text-muted-foreground italic">
               {T({ en: "Connect your GitHub account on the Social page, then pick the repos you watch.", zh: "请先在社交页面连接 GitHub 账号，再选择你关注的仓库。" })}
             </p>
-          ) : state.repos.length === 0 && selectedRepos.length === 0 ? (
+          ) : /* 判 initialRepos 而不是 selectedRepos：接口返回空、但节点里存着一个已取消
+                 Watch 的旧选择时，取消勾选它会让整个面板塌回"未找到关注的仓库"，那条
+                 stale 选项再也勾不回来。快照不随勾选变化，多选框就一直在。 */
+            state.repos.length === 0 && initialRepos.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">
               {T({ en: "No watched repositories found — watch a repo on GitHub first.", zh: "未找到关注的仓库——请先在 GitHub 上 Watch 一个仓库。" })}
             </p>

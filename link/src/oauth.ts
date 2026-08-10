@@ -455,6 +455,92 @@ export function oauthRoutes() {
     return c.redirect(url.origin, 302);
   });
 
+  // GitHub OAuth connect —— 只读公开数据：Watch 列表 (/user/subscriptions) 与 release。
+  // 不申请 repo scope：那会顺带拿到私有仓库读权限，授权页上观感很差，而本功能只需要公开
+  // repo。副作用是用户 Watch 的私有 repo 不会出现在选择器里，这是有意的取舍。
+  router.get("/github/connect", async (c) => {
+    const session = await resolveSession(c);
+    // 与 YouTube connect 同一道守卫：这个流程只把 channel 挂到已有租户上，没有顺便注册的
+    // 分支。不在这里拦，用户走完整个授权流程最后落在一张裸 401 JSON 上，什么都没连上。
+    if (!session) return c.json({ error: "Must be logged in to connect GitHub" }, 401);
+
+    const url = new URL(c.req.url);
+    const state = crypto.randomUUID();
+    await c.env.KV.put(
+      `oauth_state:${state}`,
+      JSON.stringify({ tenantId: String(session.tenant_id), memberId: session.member_id, provider: "github" }),
+      { expirationTtl: 300 }
+    );
+
+    const redirectUri = `${url.origin}/api/auth/github/callback`;
+    const authUrl = new URL("https://github.com/login/oauth/authorize");
+    authUrl.searchParams.set("client_id", c.env.GITHUB_CLIENT_ID);
+    authUrl.searchParams.set("redirect_uri", redirectUri);
+    authUrl.searchParams.set("state", state);
+    // scope 留空 = 只拿公开数据的最小权限。
+    authUrl.searchParams.set("scope", "");
+    return c.redirect(authUrl.toString(), 302);
+  });
+
+  router.get("/github/callback", async (c) => {
+    const url = new URL(c.req.url);
+    const code = c.req.query("code");
+    const state = c.req.query("state");
+    if (!code || !state) return c.json({ error: "Missing code or state" }, 400);
+
+    const stored = await c.env.KV.get(`oauth_state:${state}`);
+    if (!stored) return c.json({ error: "Invalid or expired state" }, 400);
+    await c.env.KV.delete(`oauth_state:${state}`);
+    const { tenantId, memberId } = JSON.parse(stored) as { tenantId?: string; memberId?: string };
+
+    const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({
+        client_id: c.env.GITHUB_CLIENT_ID,
+        client_secret: c.env.GITHUB_CLIENT_SECRET,
+        code,
+        redirect_uri: `${url.origin}/api/auth/github/callback`,
+      }),
+    });
+    if (!tokenRes.ok) return c.json({ error: `Token exchange failed: ${await tokenRes.text()}` }, 400);
+
+    const tokenData = (await tokenRes.json()) as { access_token?: string; error?: string };
+    if (!tokenData.access_token) return c.json({ error: `Token exchange failed: ${tokenData.error || "no access_token"}` }, 400);
+
+    const userRes = await fetch("https://api.github.com/user", {
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "uniscrm-link",
+      },
+    });
+    if (!userRes.ok) return c.json({ error: `Fetching GitHub user failed: ${await userRes.text()}` }, 400);
+    const ghUser = (await userRes.json()) as { id: number; login: string; name?: string; avatar_url?: string };
+
+    // GitHub OAuth App 的 token 默认不过期 —— 没有 refresh_token，也就没有 X/YouTube
+    // 那套 token 刷新与冻结逻辑。token 失效只有一种表现：401，见 GitHubUnauthorizedError。
+    const config = JSON.stringify({
+      login: ghUser.login,
+      name: ghUser.name || ghUser.login,
+      avatar_url: ghUser.avatar_url || "",
+      access_token: tokenData.access_token,
+    });
+
+    const channelId = crypto.randomUUID();
+    await c.env.LINK_DB
+      .prepare(`INSERT INTO channels (id, channel_type, config, source_channel_id, access_token, tenant_id, member_id, created_at, updated_at)
+         VALUES (?, 'GITHUB', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+         ON CONFLICT(channel_type, source_channel_id) DO UPDATE SET config = excluded.config, access_token = excluded.access_token, tenant_id = excluded.tenant_id, member_id = excluded.member_id, is_active = 1, updated_at = datetime('now')`)
+      .bind(channelId, config, String(ghUser.id), tokenData.access_token, tenantId ? parseInt(tenantId) : null, memberId || null)
+      .run();
+
+    // 不 seed channel_poll_state：GitHub 的 poll state 是每 (channel, repo) 一行，而 repo
+    // 是之后在 flow 节点里选的，连接时还不知道。轮询器首次见到某个 pair 时自行建行
+    // （github-releases.ts 的 ensurePollStateRow）。
+    return c.redirect(url.origin, 302);
+  });
+
   // YouTube OAuth connect — reuses the same Google Cloud OAuth client already registered
   // for "Sign in with Google" in the web module (GOOGLE_CLIENT_ID/SECRET), not a new one.
   router.get("/youtube/connect", async (c) => {

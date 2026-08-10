@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { TikTokIcon } from "../../../shared/frontend/ui/icons";
+import { TikTokIcon, GitHubIcon } from "../../../shared/frontend/ui/icons";
 import type { LocalizedString } from "../../../metadata/dataTypes";
 
 export interface SimpleChannelConfig {
@@ -35,5 +35,16 @@ export const SIMPLE_CHANNELS: SimpleChannelConfig[] = [
     displayField: "display_name",
     connectPath: "/api/auth/tiktok/connect",
     helpUrl: "https://cobalt-fountain-6cf.notion.site/TikTok-39a7ddccdac980fd9885cc262ab18dd6",
+  },
+  {
+    type: "GITHUB",
+    name: "GitHub",
+    tagline: {
+      en: "Connect GitHub to trigger flows from releases of the repos you watch.",
+      zh: "连接 GitHub，用你关注仓库的发版触发流程。",
+    },
+    logo: <GitHubIcon className="w-8 h-8" />,
+    displayField: "login",
+    connectPath: "/api/auth/github/connect",
   },
 ];

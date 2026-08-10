@@ -42,6 +42,10 @@ export interface Env {
   TIKTOK_CLIENT_SECRET: string;
   TIKTOK_COOKIE: string;
 
+  // GitHub OAuth App (releases channel) — token never expires, no refresh token.
+  GITHUB_CLIENT_ID: string;
+  GITHUB_CLIENT_SECRET: string;
+
   // YouTube (system-shared, no OAuth — public Data API reads only)
   YOUTUBE_API_KEY: string;
 
@@ -67,7 +71,7 @@ export interface Env {
 }
 
 // Content types
-export type ChannelType = "LOCAL" | "NOTION" | "TIKTOK" | "X" | "YOUTUBE" | "YOUTUBE_ACCOUNT";
+export type ChannelType = "LOCAL" | "NOTION" | "TIKTOK" | "X" | "YOUTUBE" | "YOUTUBE_ACCOUNT" | "GITHUB";
 
 // Shape of a `content` row as ContentService (services/content.ts, D1-backed per the
 // 2026-07-26 user/content-back-to-D1 plan) reads and returns it; also the shape of the R2

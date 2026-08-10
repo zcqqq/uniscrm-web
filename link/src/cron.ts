@@ -7,6 +7,11 @@ import { TikTokTokenService } from "./services/tiktok-token";
 import { pollChannelOnce, pollXListPosts, pollYouTubeChannel } from "./services/pollers/poll-channel";
 import { subscribeWebSub } from "./services/youtube-api";
 import { clearChannelFrozen } from "./services/x-freeze";
+import { runGitHubReleasePoller } from "./services/pollers/github-releases";
+import { GitHubUnauthorizedError } from "./services/github-api";
+import { ContentService } from "./services/content";
+import { EntityStateStore } from "./services/entity-state";
+import { resolveTenantDb } from "./services/tenant-db";
 
 export async function handleCron(env: Env): Promise<void> {
   // The unfreeze probe runs BEFORE the rest: a channel that recovered this hour should be
@@ -22,6 +27,7 @@ export async function handleCron(env: Env): Promise<void> {
     handlePolling(env),
     handleYouTubeRenewal(env),
     handleYouTubeSubscriptions(env),
+    handleGitHubReleases(env),
   ]);
 }
 
@@ -261,4 +267,122 @@ export async function handleYouTubeSubscriptions(env: Env): Promise<void> {
       console.error(JSON.stringify({ event: "youtube_subscriptions_channel_error", channel_id: row.id, error: String(e) }));
     }
   }
+}
+
+// 预算与 YouTube 订阅同步同量级：每个 (channel, repo) 一轮最多 2 次 GitHub 调用
+// （/releases 恒定 1 次，getRepo 只在真有新版时才打），远轻于 X/TikTok 的分页拉取。
+const GITHUB_RELEASES_BUDGET_MS = 20_000;
+
+/**
+ * GitHub release 轮询。像 handleYouTubeSubscriptions 一样拿自己的顶层预算，不挤
+ * handlePolling 那个 50 秒配额池 —— 那个池按 channel 排队且没有 ORDER BY，排在后面的
+ * 永远被饿死（YouTube 订阅同步就是这么被饿死过的）。
+ *
+ * 要盯哪些 repo 的唯一真相来源是 flow 的 graph_json（同 /internal/list-watches、
+ * /internal/youtube-watches）：flow 里删掉节点，下一轮自然不再轮询，无需反向清理。
+ */
+export async function handleGitHubReleases(env: Env): Promise<void> {
+  const runDeadline = Date.now() + GITHUB_RELEASES_BUDGET_MS;
+
+  // 与 handleYouTubeRenewal 同样兜住：拿不到/读不懂 watch 清单就什么都不做。没有清单时
+  // 继续往下走没有任何意义，而一个网络异常逃出去会让本 handler 整体消失在 allSettled 里，
+  // 连一行可查的日志都不留。
+  let watches: { channelId: string; fullName: string }[];
+  try {
+    const res = await fetch(`${env.FLOW_URL}/internal/github-watches`, {
+      headers: { "X-Internal-Secret": env.INTERNAL_SECRET },
+    });
+    if (!res.ok) {
+      console.error(JSON.stringify({ event: "github_watches_fetch_failed", status: res.status }));
+      return;
+    }
+    const body = (await res.json()) as { watches?: { channelId: string; fullName: string }[] };
+    watches = body.watches ?? [];
+  } catch (e) {
+    console.error(JSON.stringify({ event: "github_watches_fetch_error", error: String(e) }));
+    return;
+  }
+  console.log(JSON.stringify({ event: "github_watches_fetched", count: watches.length }));
+
+  // 一个 channel 的 token 与租户只查一次，watches 里同一 channel 通常有多个 repo。
+  const channelCache = new Map<string, { token: string; tenantId: number } | null>();
+  // 本轮已经 401 或已限流的 channel，跳过它剩下的 repo。
+  const stoppedChannels = new Set<string>();
+
+  for (const w of watches) {
+    if (Date.now() >= runDeadline) {
+      console.log(JSON.stringify({ event: "github_releases_budget_exhausted", repo: w.fullName }));
+      break;
+    }
+    if (stoppedChannels.has(w.channelId)) continue;
+
+    if (!channelCache.has(w.channelId)) {
+      const row = await env.LINK_DB
+        // tenant-scope-ok: channelId 来自 flow 的 graph_json，此处按主键取行并回读 tenant_id 供下游使用
+        .prepare("SELECT config, tenant_id FROM channels WHERE id = ? AND channel_type = 'GITHUB' AND is_active = 1")
+        .bind(w.channelId)
+        .first<{ config: string; tenant_id: number | null }>();
+      const config = row ? (JSON.parse(row.config) as { access_token?: string }) : null;
+      channelCache.set(
+        w.channelId,
+        config?.access_token && row?.tenant_id ? { token: config.access_token, tenantId: row.tenant_id } : null
+      );
+    }
+    const channel = channelCache.get(w.channelId);
+    if (!channel) continue;
+
+    try {
+      await pollGitHubRepo(env, w.channelId, w.fullName, channel.token, channel.tenantId);
+    } catch (e) {
+      if (e instanceof GitHubUnauthorizedError) {
+        // token 失效：停掉这个 channel 本轮的所有 repo，并标记需重连。
+        stoppedChannels.add(w.channelId);
+        await env.LINK_DB
+          .prepare("UPDATE channels SET is_active = 0, deactivated_reason = 'github_unauthorized', updated_at = datetime('now') WHERE id = ?")
+          .bind(w.channelId)
+          .run();
+        console.error(JSON.stringify({ event: "github_channel_unauthorized", channel_id: w.channelId }));
+        continue;
+      }
+      console.error(JSON.stringify({ event: "github_releases_poll_error", channel_id: w.channelId, repo: w.fullName, error: String(e) }));
+    }
+  }
+}
+
+/**
+ * 组装 ContentService 并跑一个 (channel, repo) 的轮询。装配顺序与 poll-channel.ts 里
+ * X/TikTok 那两条路径一致：resolveTenantDb → EntityStateStore → new ContentService。
+ * GitHubUnauthorizedError 故意不在这里吞掉 —— 它要逃到 handleGitHubReleases 才能停掉
+ * 该 channel 本轮剩下的 repo 并标记需重连。
+ */
+async function pollGitHubRepo(
+  env: Env,
+  channelId: string,
+  fullName: string,
+  token: string,
+  tenantId: number
+): Promise<void> {
+  // 与 pollXChannel/pollTikTokChannel 同一处检查点：租户还没开库就别花外部 API 配额。
+  // release 是 flowType:"trigger"，本身不落 tenantDb，但保持「是否已开库」这一个统一
+  // 关卡比为这条路径开特例更可靠（同 pollXListPosts 的理由）。
+  const tenantDb = await resolveTenantDb(env, tenantId);
+  if (!tenantDb) {
+    console.log(JSON.stringify({ event: "github_releases_poll_skipped_no_tenant_db", channel_id: channelId, repo: fullName, tenant_id: tenantId }));
+    return;
+  }
+
+  const entityState = new EntityStateStore(env.LINK_DB, tenantId);
+  const contentService = new ContentService(
+    tenantDb, env.VECTORIZE, env.AI, tenantId, env.PIPELINE_CONTENT, env.FLOW_QUEUE, entityState
+  );
+
+  await runGitHubReleasePoller({
+    channelId,
+    fullName,
+    token,
+    tenantId,
+    linkDb: env.LINK_DB,
+    contentService,
+    now: Date.now(),
+  });
 }

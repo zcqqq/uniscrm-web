@@ -562,7 +562,7 @@ export class ContentService {
   async emitContentTriggerEvent(
     channelId: string,
     channelType: ChannelType,
-    secondaryFieldName: "listId" | "subscriptionChannelId",
+    secondaryFieldName: "listId" | "subscriptionChannelId" | "repoFullName",
     secondaryValue: string,
     resolvedProps: Record<string, unknown>
   ): Promise<void> {

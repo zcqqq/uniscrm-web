@@ -154,6 +154,7 @@ export const PROPS = definePropDefinitions([
       { value: "TWEET", label: { en: "Tweet", zh: "推文" } },
       { value: "ARTICLE", label: { en: "Article", zh: "文章" } },
       { value: "VIDEO", label: { en: "Video", zh: "视频" } },
+      { value: "RELEASE", label: { en: "Release", zh: "发版" } },
     ],
   },
   {
@@ -277,5 +278,39 @@ export const PROPS = definePropDefinitions([
     dataType: "INT",
     entity: ["content"],
     label: { en: "Shares", zh: "分享数" },
+  },
+  // --- GitHub release：全部是 flow-payload-only prop，不带 entity ---
+  // 它们不是 user/content 快照表上的列，只在 content trigger 的 flow payload 里出现。
+  // 加 entity 而不加列会被 analytics/tests/unit/content-stream-schema.test.ts 判红。
+  {
+    propId: "tag_name",
+    dataType: "TEXT",
+    label: { en: "Tag", zh: "标签" },
+  },
+  {
+    propId: "is_prerelease",
+    dataType: "ENUM_INT",
+    label: { en: "Is Prerelease", zh: "是否预发布" },
+    enums: [
+      { value: 0, label: { en: "Stable", zh: "正式版" } },
+      { value: 1, label: { en: "Prerelease", zh: "预发布" } },
+    ],
+  },
+  // 三个窗口的发版数。值不在轮询时算 —— 计数口径跟随触发节点的 includePrerelease，
+  // 而轮询按 repo 走、看不到节点配置。flow 侧 trigger 命中后从 release_history 算出来注入。
+  {
+    propId: "release_count_1d",
+    dataType: "INT",
+    label: { en: "Releases (24h)", zh: "24小时发版数" },
+  },
+  {
+    propId: "release_count_7d",
+    dataType: "INT",
+    label: { en: "Releases (7d)", zh: "7天发版数" },
+  },
+  {
+    propId: "release_count_30d",
+    dataType: "INT",
+    label: { en: "Releases (30d)", zh: "30天发版数" },
   },
 ]);

@@ -16,22 +16,30 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("GET /api/channels/github/repos", () => {
   it("没连 GitHub 时返回 connected:false，不打外部 API", async () => {
+    const fetchStub = vi.fn();
+    vi.stubGlobal("fetch", fetchStub);
     const res = await app(null);
     expect(await res.json()).toEqual({ connected: false, accountChannelId: null, repos: [] });
+    expect(fetchStub).not.toHaveBeenCalled();
   });
 
   it("实时拉取 Watch 列表并按 fullName 排序", async () => {
     // 实时拉、不吃快照：刚 Watch 的 repo 要立刻出现在 flow 选择器里
-    vi.stubGlobal("fetch", vi.fn(() =>
+    const fetchStub = vi.fn(() =>
       Promise.resolve(new Response(JSON.stringify([
         { id: 2, full_name: "z/beta", name: "beta", description: "b", private: false },
         { id: 1, full_name: "a/alpha", name: "alpha", description: null, private: false },
       ]), { status: 200 }))
-    ));
+    );
+    vi.stubGlobal("fetch", fetchStub);
     const res = await app({ id: "chan-1", config: JSON.stringify({ access_token: "tok", login: "zc" }) });
     const body = await res.json<{ accountChannelId: string; repos: { fullName: string }[] }>();
     expect(body.accountChannelId).toBe("chan-1");
     expect(body.repos.map((r) => r.fullName)).toEqual(["a/alpha", "z/beta"]);
+    // Verify correct token was forwarded
+    expect(fetchStub).toHaveBeenCalled();
+    const authHeader = (fetchStub.mock.calls[0][1] as RequestInit)?.headers as Record<string, string> | undefined;
+    expect(authHeader?.Authorization).toBe("Bearer tok");
   });
 
   it("GitHub 报错时返回 502 而不是空列表 —— 空列表会被误读成「你没 Watch 任何 repo」", async () => {

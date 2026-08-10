@@ -259,6 +259,22 @@ const REGISTRY = {
    - channelId and subscriptions are left blank — the user picks one or more subscriptions from a multi-select in the Inspector after generation, sourced from their connected YouTube account (OAuth) on the Social page.
    - conditions may filter on "duration" (seconds).`,
   },
+  githubContentTrigger: {
+    reactFlowType: "githubContentTrigger",
+    label: { en: "GitHub Trigger", zh: "GitHub 触发器" },
+    description: { en: "Watches releases of selected repos", zh: "监听所选仓库的发版" },
+    domain: "content",
+    role: "trigger",
+    generatable: true,
+    sidebarSection: "triggers",
+    propsConditions: true,
+    defaultData: () => ({ channelId: "", repos: [], includePrerelease: false, conditions: [] }),
+    promptFragment: `githubContentTrigger - triggers when any of the selected watched GitHub repos publishes a release
+   data: { channelId: "", repos: [], includePrerelease: false, conditions: [] }
+   - channelId and repos are left blank — the user picks one or more repos from a multi-select in the Inspector after generation, sourced from the repos they watch on their connected GitHub account (OAuth) on the Social page.
+   - includePrerelease defaults to false: prereleases (rc/nightly) do not trigger unless the user opts in.
+   - conditions may filter on "release_count_1d" / "release_count_7d" / "release_count_30d" (how many releases the repo published in that window — counted with the same prerelease rule as includePrerelease), "is_prerelease", "tag_name", "title", "content_text", and author fields such as "user.followers_count" (the repo's star count).`,
+  },
   xContentAction: {
     reactFlowType: "action",
     label: { en: "X Action", zh: "X 动作" },
@@ -485,7 +501,7 @@ export const USER_FLOW_SIDEBAR_ORDER: string[] = [
 ];
 
 export const CONTENT_FLOW_SIDEBAR_ORDER: string[] = [
-  "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition", "youtubeCondition",
+  "xContentTrigger", "youtubeContentTrigger", "githubContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition", "youtubeCondition",
   "wait", "timeCondition", "abSplit", "webhook",
 ];
 
@@ -527,4 +543,21 @@ export function resolveYouTubeSubscriptions(
   if (typeof legacyId !== "string" || legacyId === "") return [];
   const legacyName = (data as { subscriptionChannelName?: unknown }).subscriptionChannelName;
   return [{ channelId: legacyId, channelName: typeof legacyName === "string" ? legacyName : "" }];
+}
+
+export interface GitHubRepoRef { fullName: string }
+
+/**
+ * 节点 data 里的 repo 多选。前后端共用这一份 —— 前端禁止 import flow/src/*，所以解析
+ * 必须住在这个两边都 import 的文件里（与 resolveYouTubeSubscriptions 同址同理）。
+ * 每一层都做类型检查：AI 生成的 graph 会带任意形状，抛出去会让整条队列消息重试。
+ */
+export function resolveGitHubRepos(data: Record<string, unknown> | null | undefined): GitHubRepoRef[] {
+  if (!data || typeof data !== "object") return [];
+  const raw = (data as { repos?: unknown }).repos;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((r): r is Record<string, unknown> => !!r && typeof r === "object")
+    .map((r) => ({ fullName: typeof r.fullName === "string" ? r.fullName : "" }))
+    .filter((r) => r.fullName !== "");
 }

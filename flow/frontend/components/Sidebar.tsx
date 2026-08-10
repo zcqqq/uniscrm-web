@@ -11,7 +11,7 @@ import {
   type SidebarSection,
 } from "../../nodeTypeRegistry";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
-import { XIcon, TikTokIcon, YouTubeIcon } from "../../../shared/frontend/ui/icons";
+import { XIcon, TikTokIcon, YouTubeIcon, GitHubIcon } from "../../../shared/frontend/ui/icons";
 import { useToast } from "../../../shared/frontend/hooks/use-toast";
 import { useT } from "../../../shared/frontend/hooks/useT";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
@@ -112,6 +112,7 @@ const NODE_ICONS: Record<NodeTypeKey, React.ReactNode> = {
   addToList: "📋",
   xContentTrigger: <XIcon className="w-4 h-4" />,
   youtubeContentTrigger: <YouTubeIcon className="w-4 h-4" />,
+  githubContentTrigger: <GitHubIcon className="w-4 h-4" />,
   xContentAction: <XIcon className="w-4 h-4" />,
   tiktokContentAction: <TikTokIcon className="w-4 h-4" />,
   youtubeContentAction: <YouTubeIcon className="w-4 h-4" />,

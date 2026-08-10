@@ -78,6 +78,7 @@ const TRIGGER_ACCOUNT_NOUN: Record<string, string> = {
   xTrigger: "X account",
   xContentTrigger: "X account",
   youtubeContentTrigger: "YouTube account",
+  githubContentTrigger: "GitHub account",
 };
 
 // publish 被拒时回给前端、由前端原样 toast 出来的人话。

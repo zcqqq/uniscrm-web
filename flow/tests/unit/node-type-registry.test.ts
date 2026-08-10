@@ -42,7 +42,7 @@ describe("NODE_TYPE_REGISTRY", () => {
       .filter(([, cfg]) => cfg.role === "trigger")
       .map(([key]) => key)
       .sort();
-    expect(triggerKeys).toEqual(["cronTrigger", "xContentTrigger", "xTrigger", "youtubeContentTrigger"].sort());
+    expect(triggerKeys).toEqual(["cronTrigger", "xContentTrigger", "xTrigger", "youtubeContentTrigger", "githubContentTrigger"].sort());
   });
 
   it("tags the action-family entries with reactFlowType 'action'", () => {
@@ -107,12 +107,12 @@ describe("NODE_TYPE_REGISTRY", () => {
     }
   });
 
-  it("tags exactly the five ConditionsEditor-driven types propsConditions (drives the OR-empty publish gate)", () => {
+  it("tags exactly the six ConditionsEditor-driven types propsConditions (drives the OR-empty publish gate)", () => {
     const keys = Object.entries(NODE_TYPE_REGISTRY)
       .filter(([, cfg]) => cfg.propsConditions === true)
       .map(([key]) => key)
       .sort();
-    expect(keys).toEqual(["waitForEvent", "xContentTrigger", "xTrigger", "youtubeCondition", "youtubeContentTrigger"].sort());
+    expect(keys).toEqual(["waitForEvent", "xContentTrigger", "xTrigger", "youtubeCondition", "youtubeContentTrigger", "githubContentTrigger"].sort());
   });
 
   it("derives xContentTrigger/xContentAction Sidebar descriptions from ContentMetadata_X's flowType counts, computed once into both languages", () => {
@@ -275,7 +275,7 @@ describe("generatableKeysForDomain", () => {
   it("content domain: every domain:'content'/'both' type/actionType, now that all of them are generatable", () => {
     expect(generatableKeysForDomain("content").sort()).toEqual(
       [
-        "xContentTrigger", "youtubeContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition", "youtubeCondition",
+        "xContentTrigger", "youtubeContentTrigger", "githubContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition", "youtubeCondition",
         "wait", "timeCondition", "abSplit", "webhook",
       ].sort()
     );

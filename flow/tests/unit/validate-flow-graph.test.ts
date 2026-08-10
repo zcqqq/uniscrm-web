@@ -4,7 +4,7 @@ import { CONDITION_LOGIC_OR } from "../../nodeTypeRegistry";
 
 describe("TRIGGER_NODE_TYPES", () => {
   it("lists the flow-execution entry-point node types", () => {
-    expect(TRIGGER_NODE_TYPES).toEqual(["xTrigger", "cronTrigger", "xContentTrigger", "youtubeContentTrigger"]);
+    expect(TRIGGER_NODE_TYPES).toEqual(["xTrigger", "cronTrigger", "xContentTrigger", "youtubeContentTrigger", "githubContentTrigger"]);
   });
 });
 

@@ -1,6 +1,7 @@
 import { CONDITION_LOGIC_OR } from "../nodeTypeRegistry";
 import { USER_PROP_PREFIX } from "../../metadata/dataTypes";
 import { getNodeExecutor, getTriggerMatcher } from "./node-executors";
+import { computeReleaseCounts, parseReleaseHistory } from "./github-release-count";
 
 // Kept exported from engine.ts (its historical home) for index.ts and the tests; the
 // implementation now lives in node-executors.ts next to the per-actionType builder map.
@@ -56,6 +57,13 @@ export interface ExecutionResult {
   actions: ActionResult[];
   pendingWaits: PendingWait[];
   nodeLogs: NodeLog[];
+  /**
+   * trigger 加工后的 payload。对除 githubContentTrigger 外的每一种 trigger 类型，
+   * 都与传入的 payload 逐字相同（同一个对象引用）。调用方（index.ts 的队列消费者、
+   * content_flow_pending 的写入）必须用这个而不是原始 payload，否则等待恢复后的分支
+   * 会拿不到计数。
+   */
+  payload: Record<string, unknown>;
 }
 
 // `$event.x` / `$user.x` / `$x` 三种引用形式。
@@ -248,7 +256,11 @@ export function conditionsPass(
 export function executeFlow(
   graph: FlowGraph,
   eventType: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  // 发版计数是相对「现在」算的。做成参数而不是从 payload 里读一个 __now 后门：
+  // 生产调用方一个都不用改（默认值就是 Date.now()），测试显式传值拿到确定性，
+  // payload 里不会多出一个只有测试才写的键。
+  now: number = Date.now()
 ): ExecutionResult {
   // Trigger-type set and per-type match rule both come from node-executors' TRIGGER_MATCHERS
   // (keyed by the registry's trigger-role entries) — a non-trigger or unknown type has no
@@ -258,22 +270,50 @@ export function executeFlow(
     return matches ? matches(n, eventType, payload) : false;
   });
 
-  if (triggerNodes.length === 0) return { matched: false, actions: [], pendingWaits: [], nodeLogs: [] };
+  if (triggerNodes.length === 0) return { matched: false, actions: [], pendingWaits: [], nodeLogs: [], payload };
 
   const actions: ActionResult[] = [];
   const pendingWaits: PendingWait[] = [];
   const nodeLogs: NodeLog[] = [];
+  // 单 trigger 约束由 validate-flow-graph 保证（single-trigger-constraint 测试），
+  // 所以「加工后的 payload」是唯一的；多 trigger 的畸形图取最后一个，不为它设计。
+  let resolvedPayload = payload;
 
   for (const trigger of triggerNodes) {
+    resolvedPayload = enrichPayloadForTrigger(trigger, payload, now);
     nodeLogs.push({ nodeId: trigger.id, direction: "enter" });
-    const allPass = conditionsPass(trigger.data.conditions, trigger.data.conditionLogic, payload);
+    const allPass = conditionsPass(trigger.data.conditions, trigger.data.conditionLogic, resolvedPayload);
     if (allPass) {
       nodeLogs.push({ nodeId: trigger.id, direction: "exit" });
-      collectActions(graph, trigger.id, payload, actions, pendingWaits, nodeLogs);
+      collectActions(graph, trigger.id, resolvedPayload, actions, pendingWaits, nodeLogs);
     }
   }
 
-  return { matched: actions.length > 0 || pendingWaits.length > 0, actions, pendingWaits, nodeLogs };
+  return { matched: actions.length > 0 || pendingWaits.length > 0, actions, pendingWaits, nodeLogs, payload: resolvedPayload };
+}
+
+/**
+ * trigger 命中之后、条件求值之前的唯一加工点。只有 githubContentTrigger 需要它：
+ * 发版计数的口径取决于节点的 includePrerelease，而 link 的轮询器按 repo 走、看不到
+ * 节点配置，只能下发原始的 release_history 让这里按口径算。
+ * 其它每一种 trigger 类型都原样返回传入的对象引用，行为逐字不变。
+ */
+function enrichPayloadForTrigger(
+  trigger: FlowNode,
+  payload: Record<string, unknown>,
+  now: number
+): Record<string, unknown> {
+  if (trigger.type !== "githubContentTrigger") return payload;
+
+  const counts = computeReleaseCounts(
+    parseReleaseHistory(payload.release_history),
+    trigger.data.includePrerelease === true,
+    now
+  );
+  // release_history 是中间数据，算完就丢：它对条件编辑器不可见，留在 payload 里只会
+  // 让 flow 日志和 content_flow_pending 白白变大。
+  const { release_history: _dropped, ...rest } = payload;
+  return { ...rest, ...counts };
 }
 
 export function resumeFromNode(
@@ -318,7 +358,10 @@ export function resumeFromNode(
     collectActions(graph, nodeId, payload, actions, pendingWaits, nodeLogs);
   }
 
-  return { matched: actions.length > 0 || pendingWaits.length > 0, actions, pendingWaits, nodeLogs };
+  // Resume runs downstream of a trigger that already fired, so there is no trigger to enrich
+  // for — the stored payload (written from executeFlow's result.payload) is already enriched.
+  // Echoing it back keeps ExecutionResult's contract "payload is what the branch ran against".
+  return { matched: actions.length > 0 || pendingWaits.length > 0, actions, pendingWaits, nodeLogs, payload };
 }
 
 export const FACE_RATIO_DEFAULT_OPERATOR = "<=";

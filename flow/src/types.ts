@@ -32,6 +32,9 @@ export interface FlowQueueMessage {
   contentId?: string; // present for content-domain events (content.created) — mutually exclusive with userId
   listId?: string;    // present only for list-sourced content.created events (xContentTrigger List Posts mode)
   subscriptionChannelId?: string; // present only for youtubeContentTrigger's content.created events
+  // present only for githubContentTrigger's content.created events. 存的是 owner/repo 全名
+  // 而不是 repo 数字 id —— 节点里选中的、watches 端点返回的都是全名，matcher 按它比对。
+  repoFullName?: string;
 }
 
 export interface PendingWait {

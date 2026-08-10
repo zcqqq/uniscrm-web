@@ -3,6 +3,7 @@ import type { ReactFlowNodeType } from "../../nodeTypeRegistry";
 import XTriggerNode from "./XTriggerNode";
 import XContentTriggerNode from "./XContentTriggerNode";
 import YouTubeContentTriggerNode from "./YouTubeContentTriggerNode";
+import GitHubContentTriggerNode from "./GitHubContentTriggerNode";
 import CronTriggerNode from "./CronTriggerNode";
 import ActionNode from "./ActionNode";
 import WaitNode from "./WaitNode";
@@ -22,6 +23,7 @@ export const nodeTypes: Record<ReactFlowNodeType, ComponentType<any>> = {
   xTrigger: XTriggerNode,
   xContentTrigger: XContentTriggerNode,
   youtubeContentTrigger: YouTubeContentTriggerNode,
+  githubContentTrigger: GitHubContentTriggerNode,
   cronTrigger: CronTriggerNode,
   action: ActionNode,
   wait: WaitNode,

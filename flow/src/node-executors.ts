@@ -12,6 +12,7 @@ import {
   NODE_TYPE_REGISTRY,
   CONTENT_X_TRIGGER_MODE_LIST_POSTS,
   resolveYouTubeSubscriptions,
+  resolveGitHubRepos,
   type ReactFlowNodeType,
   type TriggerTypeKey,
   type ActionTypeKey,
@@ -47,6 +48,13 @@ export const TRIGGER_MATCHERS: Record<TriggerTypeKey, TriggerMatcher> = {
     && n.data.channelId === payload.channel_id
     && resolveYouTubeSubscriptions(n.data)
          .some((s) => s.channelId === payload.subscription_channel_id),
+  githubContentTrigger: (n, eventType, payload) =>
+    eventType === "content.created"
+    && n.data.channelId === payload.channel_id
+    && resolveGitHubRepos(n.data).some((r) => r.fullName === payload.repo_full_name)
+    // prerelease 的过滤在这里，不在 link：轮询器按 repo 走，同一个 repo 可能被两个
+    // includePrerelease 不同的 flow 盯着，它没资格替它们决定。
+    && (n.data.includePrerelease === true || payload.is_prerelease !== 1),
 };
 
 /** Runtime lookup for possibly-unknown node types; undefined = not a trigger type. */
@@ -169,6 +177,7 @@ export const NODE_EXECUTORS: Record<ExecutableNodeType, NodeExecutor> = {
   cronTrigger: triggerAsTargetNoop,
   xContentTrigger: triggerAsTargetNoop,
   youtubeContentTrigger: triggerAsTargetNoop,
+  githubContentTrigger: triggerAsTargetNoop,
 
   action: (targetNode, ctx) => {
     const actionData = buildActionData(targetNode);

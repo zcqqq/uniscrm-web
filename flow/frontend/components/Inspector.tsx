@@ -10,10 +10,11 @@ import { Textarea } from "../../../shared/frontend/ui/textarea";
 import { Label } from "../../../shared/frontend/ui/label";
 import { ContentMetadata_X } from "../../../metadata/x-byok";
 import { ContentMetadata_YouTube } from "../../../metadata/youtube";
+import { ContentMetadata_GitHub } from "../../../metadata/github";
 import { PROPS } from "../../../metadata/props";
 import { t as localizeLabel, type Locale } from "../../../metadata/locale";
 import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
-import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, CONDITION_LOGIC_OR, CONDITION_LOGIC_AND, resolveYouTubeSubscriptions, type ActionTypeKey, type ReactFlowNodeType } from "../../nodeTypeRegistry";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, CONDITION_LOGIC_OR, CONDITION_LOGIC_AND, resolveYouTubeSubscriptions, resolveGitHubRepos, type ActionTypeKey, type ReactFlowNodeType } from "../../nodeTypeRegistry";
 import { EventMetadata_X } from "../../../metadata/x";
 import type { PropFilter, LocalizedString } from "../../../metadata/dataTypes";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../../shared/frontend/ui/tooltip";
@@ -22,6 +23,7 @@ import { Toggle } from "../../../shared/frontend/ui/toggle";
 import { cn } from "../../../shared/frontend/lib/utils";
 import { nextConditionLogic } from "../lib/condition-logic";
 import { MultiSelect } from "../../../shared/frontend/ui/multi-select";
+import { Checkbox } from "../../../shared/frontend/ui/checkbox";
 import { toggleSubscription } from "../lib/subscription-summary";
 import { useT } from "../../../shared/frontend/hooks/useT";
 import { useLocale } from "../../../shared/frontend/hooks/useLocale";
@@ -551,6 +553,64 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
           logic={data.conditionLogic}
           onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
           systemFilters={YOUTUBE_TRIGGER_META.contentPropsFilter}
+        />
+      </div>
+    </div>
+  );
+}
+
+const GITHUB_TRIGGER_META = ContentMetadata_GitHub.find((m) => m.sourceContentType === "watch:get-releases")!;
+
+// 占位版：只有 includePrerelease 与条件编辑器。仓库多选（api.channels.githubRepos +
+// MultiSelect，写回 { channelId, repos }）属于 Task 8，本任务只把节点注册进引擎，
+// 但注册即让 NODE_INSPECTORS/NODE_ICONS/nodeTypes 三张穷尽表要求这一项，故先占位。
+function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
+  const { locale } = useLocale();
+  const { updateNodeData } = useFlowEditor();
+  const conditions: Condition[] = data.conditions || [];
+  const repos = resolveGitHubRepos(data);
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("githubContentTrigger"))}</h4>
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">{T({ en: "Event", zh: "事件" })}</Label>
+          <Select value={GITHUB_TRIGGER_META.sourceContentType} disabled className="w-full text-sm">
+            <option value={GITHUB_TRIGGER_META.sourceContentType}>{localizeLabel(GITHUB_TRIGGER_META.label!, locale)}</option>
+          </Select>
+        </div>
+
+        <div>
+          <Label className="text-xs block mb-1">{T({ en: "Repositories", zh: "仓库" })}</Label>
+          <p className="text-xs text-muted-foreground italic">
+            {repos.length > 0
+              ? repos.map((r) => r.fullName).join(", ")
+              : T({ en: "Connect your GitHub account on the Social page, then pick the repos you watch.", zh: "请先在社交页面连接 GitHub 账号，再选择你关注的仓库。" })}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id={`include-prerelease-${nodeId}`}
+            checked={data.includePrerelease === true}
+            onCheckedChange={(v: boolean | "indeterminate") => updateNodeData(nodeId, { includePrerelease: v === true })}
+          />
+          <Label htmlFor={`include-prerelease-${nodeId}`} className="text-xs">
+            {T({ en: "Include prereleases", zh: "包含预发布" })}
+          </Label>
+        </div>
+
+        <p className="text-xs text-muted-foreground">{T({ en: "Fires when any selected repo publishes a release.", zh: "任一选中仓库发布新版本时触发。" })}</p>
+
+        <ConditionsEditor
+          conditions={conditions}
+          fields={getContentTriggerFields(ContentMetadata_GitHub, "watch:get-releases", locale)}
+          onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+          logic={data.conditionLogic}
+          onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
+          systemFilters={GITHUB_TRIGGER_META.contentPropsFilter}
         />
       </div>
     </div>
@@ -1536,6 +1596,7 @@ const NODE_INSPECTORS: Record<ReactFlowNodeType, InspectorComponent> = {
   xTrigger: XTriggerInspector,
   xContentTrigger: XContentTriggerInspector,
   youtubeContentTrigger: YouTubeContentTriggerInspector,
+  githubContentTrigger: GitHubContentTriggerInspector,
   cronTrigger: CronTriggerInspector,
   waitForEvent: WaitForEventInspector,
   wait: WaitInspector,

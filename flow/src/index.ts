@@ -6,7 +6,7 @@ import { EventMetadata_X } from "../../metadata/x";
 import { passesPropsFilter } from "../../metadata/props-filter";
 import { r2Query, latestRowsSql, sqlStr, sqlInt } from "../../shared/r2-sql";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
-import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY, CONDITION_LOGIC_OR, resolveYouTubeSubscriptions } from "../nodeTypeRegistry";
+import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY, CONDITION_LOGIC_OR, resolveYouTubeSubscriptions, resolveGitHubRepos } from "../nodeTypeRegistry";
 import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage } from "./trigger-health";
 import { conditionsNeedAuthor, youtubeConditionRequest, resolveYouTubeCondition, type VideoStatsResponse } from "./youtube-condition";
 import { createInternalAuthMiddleware, resolveAuthMe, resolveSession, spaLoginGuard } from "../../shared/auth";
@@ -1134,6 +1134,41 @@ app.get("/internal/youtube-watches", async (c) => {
   return c.json({ watches });
 });
 
+// Internal: 哪些 (channel, repo) 被已发布 flow 的 githubContentTrigger 盯着。link 的
+// 每小时 cron 拉这个来决定轮询谁 —— 与 /internal/list-watches、/internal/youtube-watches
+// 同一个「graph_json 是唯一真相来源」模式：flow 里删掉节点，下一轮自然不再轮询。
+app.get("/internal/github-watches", async (c) => {
+  const rows = await c.env.FLOW_DB.prepare(
+    `SELECT graph_json FROM flows WHERE status = 'published' AND graph_json LIKE '%githubContentTrigger%'`
+  ).all<{ graph_json: string }>();
+
+  const seen = new Set<string>();
+  const watches: { channelId: string; fullName: string }[] = [];
+  for (const row of rows.results) {
+    let graph: FlowGraph;
+    try {
+      graph = JSON.parse(row.graph_json);
+    } catch {
+      continue;
+    }
+    if (!graph || !Array.isArray(graph.nodes)) continue;
+    for (const node of graph.nodes) {
+      if (!node.data) continue;
+      if (node.type !== "githubContentTrigger") continue;
+      const channelId = node.data.channelId as string;
+      if (!channelId) continue;
+      for (const repo of resolveGitHubRepos(node.data)) {
+        const key = `${channelId}:${repo.fullName}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        watches.push({ channelId, fullName: repo.fullName });
+      }
+    }
+  }
+
+  return c.json({ watches });
+});
+
 // Answered locally from WEB_DB (shared/auth.ts) instead of proxying to web.
 app.get("/api/auth/me", async (c) => {
   const me = await resolveAuthMe(c.env.WEB_DB, c.req.raw.headers.get("Cookie"));
@@ -1198,6 +1233,14 @@ app.get("/api/channels/youtube/playlists", async (c) => {
   });
   const body = await res.text();
   return new Response(body, { status: res.status, headers: { "Content-Type": "application/json" } });
+});
+
+// Proxy watched-repo lookup from link worker (for the githubContentTrigger Inspector)
+app.get("/api/channels/github/repos", async (c) => {
+  const res = await fetch(`${c.env.LINK_URL}/api/channels/github/repos`, {
+    headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
+  });
+  return new Response(await res.text(), { status: res.status, headers: { "Content-Type": "application/json" } });
 });
 
 // Proxy configured LLM providers from content worker (tenant-scoped, forwards the session cookie)
@@ -1601,7 +1644,7 @@ export default {
   async queue(batch: MessageBatch<any>, env: Env): Promise<void> {
     for (const message of batch.messages) {
       try {
-        const { tenantId, eventType, userId, contentId, channelId, listId, subscriptionChannelId, payload } = message.body as FlowQueueMessage;
+        const { tenantId, eventType, userId, contentId, channelId, listId, subscriptionChannelId, repoFullName, payload } = message.body as FlowQueueMessage;
 
         const rows = await env.FLOW_DB.prepare(
           `SELECT id, graph_json FROM flows WHERE tenant_id = ? AND status = 'published'`
@@ -1615,18 +1658,22 @@ export default {
             channel_id: channelId,
             ...(listId ? { list_id: listId } : {}),
             ...(subscriptionChannelId ? { subscription_channel_id: subscriptionChannelId } : {}),
+            ...(repoFullName ? { repo_full_name: repoFullName } : {}),
           };
           for (const flow of rows.results) {
             const graph: FlowGraph = JSON.parse(flow.graph_json);
             const result = executeFlow(graph, eventType, matchPayload);
-            if (result.nodeLogs.length > 0) await emitContentNodeLogs(result.nodeLogs, flow.id, contentId, tenantId, env, matchPayload);
+            // 加工后的 payload —— githubContentTrigger 在这里才拿到三个计数。用原始的
+            // matchPayload 会让等待恢复后的条件读不到计数（fail-closed 静默不通过）。
+            const flowPayload = result.payload;
+            if (result.nodeLogs.length > 0) await emitContentNodeLogs(result.nodeLogs, flow.id, contentId, tenantId, env, flowPayload);
             if (result.actions.length > 0) {
-              const { rateLimited } = await executeContentActions(graph, result.actions, contentId, channelId, tenantId, env, payload, flow.id);
+              const { rateLimited } = await executeContentActions(graph, result.actions, contentId, channelId, tenantId, env, flowPayload, flow.id);
               for (const rl of rateLimited) {
                 await env.FLOW_DB.prepare(
                   `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
                    VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 0)`
-                ).bind(crypto.randomUUID(), flow.id, contentId, tenantId, JSON.stringify(matchPayload), rl.retryAt, new Date().toISOString(), JSON.stringify(rl.action)).run();
+                ).bind(crypto.randomUUID(), flow.id, contentId, tenantId, JSON.stringify(flowPayload), rl.retryAt, new Date().toISOString(), JSON.stringify(rl.action)).run();
               }
               console.log(JSON.stringify({ event: "content_flow_matched", flowId: flow.id, contentId, eventType, actions: result.actions, rateLimited: rateLimited.length }));
             }
@@ -1643,7 +1690,7 @@ export default {
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
               ).bind(
                 crypto.randomUUID(), flow.id, wait.nodeId, contentId, tenantId,
-                JSON.stringify(matchPayload), executeAt, new Date().toISOString(), wait.awaitingEvent || "",
+                JSON.stringify(flowPayload), executeAt, new Date().toISOString(), wait.awaitingEvent || "",
                 wait.conditions ? JSON.stringify(wait.conditions) : "",
                 wait.conditionLogic || ""
               ).run();

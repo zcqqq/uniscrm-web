@@ -85,8 +85,20 @@ export async function ensurePollStateRow(ctx: GitHubReleasePollerContext): Promi
     .run();
 }
 
-export async function runGitHubReleasePoller(ctx: GitHubReleasePollerContext): Promise<void> {
+/**
+ * 返回值只有一个用途：把「这个 channel 的 token 已经被 GitHub 限流」这件事送出去。
+ * runPagedPoll 只把 rateLimited 当成「本轮别推进」的内部信号并吞掉，可 cron 侧必须知道 ——
+ * 一个被限流的租户如果继续把它剩下的 repo 一个个打过去，每个都要 ~300ms 才换回一个 403，
+ * 烧的是全平台共用的那份预算。cron 拿到 true 就把该 channel 加进 stoppedChannels。
+ *
+ * 注意 fetchPage 里 repo 不可读（404/403 无权）也走 rateLimited 这个出口（见那里的注释），
+ * 但那**不是**限流，不能停掉整个 channel —— 所以这里只在 listReleases/getRepo 真的报了
+ * rateLimited 时才置位。
+ */
+export async function runGitHubReleasePoller(ctx: GitHubReleasePollerContext): Promise<{ rateLimited: boolean }> {
   await ensurePollStateRow(ctx);
+
+  const rateLimit = { hit: false };
 
   await runPagedPoll<{ items: unknown[]; nextCursor: string | null; rateLimited: boolean }>({
     linkDb: ctx.linkDb,
@@ -107,7 +119,10 @@ export async function runGitHubReleasePoller(ctx: GitHubReleasePollerContext): P
       // cursor 里，下一轮 seed 正好撞上 304。不发这个头，这条路径就根本不存在。
       const etag = phase === "incremental" ? await readEtag(ctx) : null;
       const r = await listReleases(ctx.token, ctx.fullName, etag);
-      if (r.rateLimited) return { items: [], nextCursor: null, rateLimited: true };
+      if (r.rateLimited) {
+        rateLimit.hit = true;
+        return { items: [], nextCursor: null, rateLimited: true };
+      }
       if (r.releases === null) {
         if (r.notFound) {
           console.log(JSON.stringify({ event: "github_releases_repo_unavailable", channel_id: ctx.channelId, repo: ctx.fullName, phase }));
@@ -126,14 +141,17 @@ export async function runGitHubReleasePoller(ctx: GitHubReleasePollerContext): P
       await writeEtag(ctx, r.etag);
       return { items: r.releases, nextCursor: null, rateLimited: false };
     },
-    upsertPage: (page, emitFlowEvent) => upsertPage(ctx, page.items as GitHubRelease[], emitFlowEvent),
+    upsertPage: (page, emitFlowEvent) => upsertPage(ctx, page.items as GitHubRelease[], emitFlowEvent, rateLimit),
   });
+
+  return { rateLimited: rateLimit.hit };
 }
 
 async function upsertPage(
   ctx: GitHubReleasePollerContext,
   releases: GitHubRelease[],
-  emitFlowEvent: boolean
+  emitFlowEvent: boolean,
+  rateLimit: { hit: boolean }
 ): Promise<number> {
   const fresh: GitHubRelease[] = [];
   for (const r of releases) {
@@ -163,6 +181,8 @@ async function upsertPage(
     const repoResult = await getRepo(ctx.token, ctx.fullName);
     repo = repoResult.repo;
     if (!repo) authorFailureReason = repoResult.rateLimited ? "rate_limited" : repoResult.notFound ? "not_found" : "unknown";
+    // getRepo 的限流同样是「这个 token 这轮打不动了」，一样要送到 cron 侧停掉本 channel。
+    if (repoResult.rateLimited) rateLimit.hit = true;
   } catch (e) {
     // GitHubUnauthorizedError 也在这里被降级掉：本轮 fresh 的发射优先于让 channel 停摆，
     // 而 token 失效下一轮 listReleases 一样会抛，cron 侧照样能停掉这个 channel。

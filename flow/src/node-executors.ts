@@ -54,7 +54,10 @@ export const TRIGGER_MATCHERS: Record<TriggerTypeKey, TriggerMatcher> = {
     && resolveGitHubRepos(n.data).some((r) => r.fullName === payload.repo_full_name)
     // prerelease 的过滤在这里，不在 link：轮询器按 repo 走，同一个 repo 可能被两个
     // includePrerelease 不同的 flow 盯着，它没资格替它们决定。
-    && (n.data.includePrerelease === true || payload.is_prerelease !== 1),
+    // Number() 而不是 !==1 直接比：轮询器确实把 is_prerelease 归一成 0/1，但
+    // /internal/trigger 接受任意 payload，布尔 true 或字符串 "1" 会从 !==1 里溜过去，
+    // 让一个明确勾了「不含预发布」的节点公开发帖宣传一个 RC。fail-closed。
+    && (n.data.includePrerelease === true || Number(payload.is_prerelease) !== 1),
 };
 
 /** Runtime lookup for possibly-unknown node types; undefined = not a trigger type. */

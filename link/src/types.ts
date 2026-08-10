@@ -27,6 +27,10 @@ export interface Env {
   CF_ACCOUNT_ID: string;
   CF_D1_API_TOKEN: string;
   INTERNAL_SECRET: string;
+  // GitHub release 轮询的总开关（配置级，不用改代码就能拉闸 —— 这条链路会公开发帖、
+  // 给真人发私信）。缺省视为开启；只有显式的 "0"/"false" 才关。见 cron.ts 的
+  // githubReleasesEnabled。
+  GITHUB_RELEASES_ENABLED?: string;
 
   // Secrets Store
   ENCRYPTION_KEY: { get(): Promise<string> };

@@ -24,7 +24,12 @@ function app(db: D1Database) {
   } as never);
 }
 
-function fakeDb() {
+/**
+ * `existingGitHubOwner` 是跨租户接管那道闸门的输入：GitHub 回调在 upsert 之前会按
+ * (channel_type='GITHUB', source_channel_id) 查一次仍然 active 的行，读它的 tenant_id。
+ * null = 这个 GitHub 账号还没人连过。
+ */
+function fakeDb(existingGitHubOwner: { tenant_id: number | null } | null = null) {
   const runs: Array<{ sql: string; binds: unknown[] }> = [];
   const db = {
     prepare(sql: string) {
@@ -32,13 +37,24 @@ function fakeDb() {
         bind(...binds: unknown[]) {
           return {
             async run() { runs.push({ sql, binds }); return { success: true }; },
-            async first() { return sql.includes("SELECT id FROM channels") ? { id: "chan-existing" } : null; },
+            async first() {
+              if (sql.includes("SELECT tenant_id FROM channels") && sql.includes("'GITHUB'")) return existingGitHubOwner;
+              return sql.includes("SELECT id FROM channels") ? { id: "chan-existing" } : null;
+            },
           };
         },
       };
     },
   } as unknown as D1Database;
   return { db, runs };
+}
+
+function stubGitHubOAuthFetch() {
+  vi.stubGlobal("fetch", vi.fn((url: string) =>
+    Promise.resolve(url.includes("login/oauth/access_token")
+      ? new Response(JSON.stringify({ access_token: "gho_x", token_type: "bearer" }), { status: 200 })
+      : new Response(JSON.stringify({ id: 4242, login: "zc", name: "ZC", avatar_url: "https://a/x.png" }), { status: 200 }))
+  ));
 }
 
 // SharedSession shape (shared/auth.ts) is camelCase; oauth.ts's resolveSession() wrapper
@@ -87,6 +103,37 @@ describe("GET /api/auth/github/callback", () => {
     expect(insert.binds).toContain("4242");                 // source_channel_id
     expect(JSON.parse(insert.binds[1] as string)).toMatchObject({ login: "zc", access_token: "gho_x" });
     expect(KV.store.has("oauth_state:s1")).toBe(false);      // state 一次性
+  });
+
+  it("重连时清掉 deactivated_reason —— 健康 channel 上不该挂着上次 401 的旧原因", async () => {
+    KV.store.set("oauth_state:s1", JSON.stringify({ tenantId: "7", memberId: "m1", provider: "github" }));
+    stubGitHubOAuthFetch();
+
+    const { db, runs } = fakeDb({ tenant_id: 7 });   // 同一个租户重连
+    const res = await app(db)("/api/auth/github/callback?code=c1&state=s1");
+
+    expect(res.status).toBe(302);
+    const insert = runs.find((r) => r.sql.includes("INSERT INTO channels"))!;
+    expect(insert.sql).toContain("deactivated_reason = NULL");
+  });
+
+  it("同一个 GitHub 账号被别的租户连着时拒绝，且一行都不写", async () => {
+    // 这是 release 洪水的入口：ON CONFLICT(channel_type, source_channel_id) 会把 tenant_id
+    // 改写成新租户，而 channel_poll_state 按 (channel_id, poller_name) 存、仍然
+    // backfill_complete=1，dedup 用的 entity_state 却是**按 tenant_id** 存、对新租户是空的
+    // —— 下一次 cron 会把最新一页上的一百条 release 全当新的发出去（真的公开发帖、真的
+    // 给真人发私信），同时原租户的 flow 直接变哑。
+    KV.store.set("oauth_state:s1", JSON.stringify({ tenantId: "7", memberId: "m1", provider: "github" }));
+    stubGitHubOAuthFetch();
+
+    const { db, runs } = fakeDb({ tenant_id: 99 });  // 已被租户 99 连着
+    const res = await app(db)("/api/auth/github/callback?code=c1&state=s1");
+
+    expect(res.status).toBe(409);
+    const body = await res.json() as { error: string };
+    expect(body.error).toContain("already connected by another workspace");
+    expect(body.error).toContain("已被另一个工作区连接");   // 用户可见文案必须中英双语
+    expect(runs.some((r) => r.sql.includes("INSERT INTO channels"))).toBe(false);
   });
 
   it("state 不存在直接 400，不换 token", async () => {

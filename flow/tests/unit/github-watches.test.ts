@@ -39,6 +39,20 @@ describe("GET /internal/github-watches", () => {
     expect(await watches(["not json", JSON.stringify({}), g("c1", ["a/x"])])).toEqual([{ channelId: "c1", fullName: "a/x" }]);
   });
 
+  // nodes 里的 null 条目在 JSON 里完全合法（AI 生成或手改的图都出过），而 node.data 直接
+  // 解引用会 TypeError → Hono 500 → link 侧 github_watches_fetch_failed 后整轮返回：
+  // **所有**租户当小时一个 repo 都不轮询。一张坏图停掉全平台，所以必须跳过而不是抛。
+  it("nodes 里混入 null 条目时跳过它，其余租户照常返回", async () => {
+    const withNull = JSON.stringify({
+      nodes: [null, { type: "githubContentTrigger", data: { channelId: "c9", repos: [{ fullName: "z/z" }] } }],
+      edges: [],
+    });
+    expect(await watches([withNull, g("c1", ["a/x"])])).toEqual([
+      { channelId: "c9", fullName: "z/z" },
+      { channelId: "c1", fullName: "a/x" },
+    ]);
+  });
+
   it("channelId 或 repos 为空的节点被忽略", async () => {
     expect(await watches([g("", ["a/x"]), g("c1", [])])).toEqual([]);
   });

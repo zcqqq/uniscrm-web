@@ -209,8 +209,45 @@ describe("runGitHubReleasePoller", () => {
     const cs = fakeContentService();
     listReleasesMock.mockResolvedValue({ releases: null, etag: null, rateLimited: false, notFound: true });
 
-    await expect(runGitHubReleasePoller({ ...base(), linkDb: db, contentService: cs.service as never })).resolves.toBeUndefined();
+    // rateLimited:false 是这里的重点，不只是「不抛」：读不到的 repo 在 fetchPage 里走的是
+    // 和限流同一个出口（runPagedPoll 只认这一个标志位），但它**不是**限流。若把它当限流报给
+    // cron，一个被删掉的 repo 就会把该 channel 本轮剩下的所有 repo 一起停掉。
+    await expect(runGitHubReleasePoller({ ...base(), linkDb: db, contentService: cs.service as never }))
+      .resolves.toEqual({ rateLimited: false });
     expect(cs.emitted).toHaveLength(0);
+  });
+
+  // CRITICAL 2 的另一半：限流信号必须真的走出 runPagedPoll 到达 cron，否则 cron 侧的
+  // stoppedChannels 永远等不到它，被限流的租户会把剩下每个 repo 都打成一个 403，
+  // 每次约 300ms 全从全平台共用的预算里扣。
+  it("listReleases 报限流时，把 rateLimited 报给调用方", async () => {
+    const { db } = fakeLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "x", since_id: null });
+    const cs = fakeContentService();
+    listReleasesMock.mockResolvedValue({ releases: null, etag: null, rateLimited: true, notFound: false });
+
+    await expect(runGitHubReleasePoller({ ...base(), linkDb: db, contentService: cs.service as never }))
+      .resolves.toEqual({ rateLimited: true });
+  });
+
+  it("getRepo 报限流时同样报给调用方（作者字段那一次调用也烧同一份配额）", async () => {
+    const { db } = fakeLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "x", since_id: null });
+    const cs = fakeContentService();
+    listReleasesMock.mockResolvedValue({ releases: [rel({ id: 78 })], etag: null, rateLimited: false, notFound: false });
+    getRepoMock.mockResolvedValue({ repo: null, rateLimited: true, notFound: false });
+
+    const r = await runGitHubReleasePoller({ ...base(), linkDb: db, contentService: cs.service as never });
+    expect(r).toEqual({ rateLimited: true });
+    // 降级发射的行为不变：dedup 已消费，跳过就是永久丢失。
+    expect(cs.emitted).toHaveLength(1);
+  });
+
+  it("一切正常时 rateLimited 为 false", async () => {
+    const { db } = fakeLinkDb({ cursor: null, backfill_complete: 1, last_polled_at: "x", since_id: null });
+    const cs = fakeContentService();
+    listReleasesMock.mockResolvedValue({ releases: [], etag: null, rateLimited: false, notFound: false });
+
+    await expect(runGitHubReleasePoller({ ...base(), linkDb: db, contentService: cs.service as never }))
+      .resolves.toEqual({ rateLimited: false });
   });
 
   it("拿不到 repo 时照发，只是没有作者字段 —— dedup 已消费，跳过就是永久丢失", async () => {

@@ -968,7 +968,12 @@ app.post("/internal/trigger", async (c) => {
     const graph: FlowGraph = JSON.parse(flow.graph_json);
     const result = executeFlow(graph, eventType, payload || {});
     if (result.matched) {
-      const { stmts, nodeLogs } = await executeActions(result.actions, userId || "", String(tenantId), c.env, payload, flow.id, graph);
+      // result.payload，不是入参 payload：executeFlow 的条件求值跑在**加工后**的 payload 上
+      // （githubContentTrigger 的 release_count_1d/7d/30d 在那一步注入、release_history 在那一步
+      // 剥掉）。这里回退到原始 payload 会让 action 里的 $content.release_count_7d 插值成空串，
+      // 还会把 release_history 整个漏进 action —— 与队列消费者那三个调用点的行为不一致。
+      // 见 ExecutionResult.payload 的契约注释。
+      const { stmts, nodeLogs } = await executeActions(result.actions, userId || "", String(tenantId), c.env, result.payload, flow.id, graph);
       if (nodeLogs.length > 0) await emitNodeLogs(nodeLogs, flow.id, userId || "", Number(tenantId), c.env);
       if (stmts.length > 0) await c.env.FLOW_DB.batch(stmts);
       results.push({ flowId: flow.id, actions: result.actions.length, matched: true });
@@ -1082,7 +1087,7 @@ app.get("/internal/list-watches", async (c) => {
     if (!graph || !Array.isArray(graph.nodes)) continue;
     for (const node of graph.nodes) {
       // Guard: node.data must exist before accessing properties
-      if (!node.data) continue;
+      if (!node || !node.data) continue;
       if (node.type !== "xContentTrigger" || node.data.mode !== CONTENT_X_TRIGGER_MODE_LIST_POSTS) continue;
       const channelId = node.data.channelId as string;
       const listId = node.data.listId as string;
@@ -1117,7 +1122,11 @@ app.get("/internal/youtube-watches", async (c) => {
     }
     if (!graph || !Array.isArray(graph.nodes)) continue;
     for (const node of graph.nodes) {
-      if (!node.data) continue;
+      // node 本身可能是 null（AI 生成或手改出来的畸形 graph_json，JSON 里 `"nodes": [null]`
+      // 是合法的）。少了这层判空，node.data 直接 TypeError → Hono 500 → link 那边
+      // youtube_watches_fetch_error / github_watches_fetch_failed，**所有**租户当轮一个都不轮询。
+      // 一张坏图就能让全平台停摆，所以这里必须跳过而不是抛。
+      if (!node || !node.data) continue;
       if (node.type !== "youtubeContentTrigger") continue;
       const channelId = node.data.channelId as string;
       if (!channelId) continue;
@@ -1153,7 +1162,9 @@ app.get("/internal/github-watches", async (c) => {
     }
     if (!graph || !Array.isArray(graph.nodes)) continue;
     for (const node of graph.nodes) {
-      if (!node.data) continue;
+      // 与 /internal/youtube-watches 同一处判空，理由见那里：一个 null 节点会 500 掉整个
+      // 端点，让 link 当轮对所有租户都拿不到 watch 清单。
+      if (!node || !node.data) continue;
       if (node.type !== "githubContentTrigger") continue;
       const channelId = node.data.channelId as string;
       if (!channelId) continue;

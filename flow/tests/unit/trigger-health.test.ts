@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage } from "../../src/trigger-health";
+import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage, githubNoRepoMessage } from "../../src/trigger-health";
 
 function graph(nodes: { id: string; type: string; data?: Record<string, unknown> }[]) {
   return JSON.stringify({
@@ -135,5 +135,18 @@ describe("brokenTriggerMessage", () => {
 
   it("falls back to a neutral noun for an unknown trigger type", () => {
     expect(brokenTriggerMessage("somethingNew")).toContain("channel");
+  });
+});
+
+describe("githubNoRepoMessage", () => {
+  // 产品要求：每一条用户可见文案都要有 en + zh。这条串由前端原样 toast，而 publish 路由
+  // 拿不到用户的语言偏好，所以两句拼在同一个串里 —— 少了任何一半都是回归。
+  it("同时给出英文与中文，两边都点明「没有选择仓库」", () => {
+    const msg = githubNoRepoMessage();
+    expect(msg).toContain("no repository selected");
+    expect(msg).toContain("没有选择任何仓库");
+    // 不能只剩一种语言：至少各含一个该语言独有的可诊断词。
+    expect(msg).toMatch(/[\u4e00-\u9fa5]/);
+    expect(msg).toMatch(/[A-Za-z]{4,}/);
   });
 });

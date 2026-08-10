@@ -60,6 +60,24 @@ describe("GET /internal/youtube-watches", () => {
     expect(body.watches).toEqual([]);
   });
 
+  // A null entry inside `nodes` is legal JSON and does occur (AI-generated / hand-edited
+  // graphs). Dereferencing node.data on it throws a TypeError, Hono answers 500, and link's
+  // renewal cron bails out for the hour — so ONE malformed graph would blank the watch list
+  // for every tenant. Identical guard to /internal/github-watches ("fix both or neither").
+  it("skips a null entry in nodes instead of 500-ing the whole endpoint", async () => {
+    const graph = {
+      nodes: [null, { id: "n1", type: "youtubeContentTrigger", data: { channelId: "acct1", subscriptionChannelId: "UCa" } }],
+    };
+    const env = makeEnv([{ graph_json: JSON.stringify(graph) }, { graph_json: JSON.stringify({ nodes: [{ id: "n2", type: "youtubeContentTrigger", data: { channelId: "acct2", subscriptionChannelId: "UCb" } }] }) }]);
+    const res = await worker.fetch(req("/internal/youtube-watches", { "X-Internal-Secret": "secret" }), env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.watches).toEqual([
+      { channelId: "acct1", subscriptionChannelId: "UCa" },
+      { channelId: "acct2", subscriptionChannelId: "UCb" },
+    ]);
+  });
+
   it("expands a multi-subscription node into one watch per subscription", async () => {
     const graph = {
       nodes: [

@@ -33,6 +33,9 @@ X_CLIENT_ID = "cS1kY2RlNnc1VldHSWw0LVJQSFM6MTpjaQ"
 GOOGLE_CLIENT_ID = "1038882920781-unbsoa2prpnvqufeicaqqe1mlgso5ac9.apps.googleusercontent.com"
 TIKTOK_CLIENT_KEY = "sbaw7873x5p4wuwsiw"
 INTERNAL_SECRET = "dev-internal-secret"
+# GitHub release 轮询总开关（cron.ts githubReleasesEnabled）。这条链路会公开发帖、给真人
+# 发私信，出问题时改成 "0" 就能不动代码把它整个停掉。缺省即开启，"1" 只是把默认写明。
+GITHUB_RELEASES_ENABLED = "1"
 
 [[env.dev.d1_databases]]
 binding = "LINK_DB"
@@ -98,6 +101,8 @@ FLOW_URL = "https://flow.uni-scrm.com"
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"
 R2_BUCKET = "uniscrm"
 R2_WAREHOUSE = "b34f3ff4aec4c36584672d5bf1320757_uniscrm"
+# 见 dev 段同名变量的说明。
+GITHUB_RELEASES_ENABLED = "1"
 X_CLIENT_ID = "cXVhYUNyWVJWSlFtdFdjekt3V1U6MTpjaQ"
 GOOGLE_CLIENT_ID = "1038882920781-qado86f0g0hcf7t3l74b8acgu1a8teg4.apps.googleusercontent.com"
 

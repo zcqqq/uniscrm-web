@@ -527,12 +527,39 @@ export function oauthRoutes() {
       access_token: tokenData.access_token,
     });
 
+    // 跨租户接管闸门。下面那条 upsert 的 ON CONFLICT(channel_type, source_channel_id) 会把
+    // tenant_id 改写成新租户，可 channel_poll_state 的主键是 (channel_id, poller_name)、不带
+    // 租户，于是新租户继承了一份 backfill_complete=1 的 seed 状态，而去重表 entity_state 是
+    // **按 tenant_id** 存的、对他来说是空的 —— 下一次 cron 会把最新一页上的一百条 release 全
+    // 当成新的发出去：真的公开发帖、真的给真人发私信。同一刻原租户的 flow 直接变哑。
+    // 所以：同一个 GitHub 账号已经被别的租户连着且仍然 active 时，直接拒绝，不做任何写入。
+    // 只挡 GitHub 这一条回调 —— 别的渠道是同样的形状但没有这个 seed 状态错配，动它们是另一件事。
+    const owner = await c.env.LINK_DB
+      // tenant-scope-ok: 这条查询的目的就是跨租户查重，按 (channel_type, source_channel_id) 唯一键取行
+      .prepare("SELECT tenant_id FROM channels WHERE channel_type = 'GITHUB' AND source_channel_id = ? AND is_active = 1")
+      .bind(String(ghUser.id))
+      .first<{ tenant_id: number | null }>();
+    const newTenantId = tenantId ? parseInt(tenantId) : null;
+    if (owner && owner.tenant_id !== null && owner.tenant_id !== newTenantId) {
+      console.error(JSON.stringify({
+        event: "github_channel_cross_tenant_takeover_refused",
+        github_user_id: String(ghUser.id), owner_tenant_id: owner.tenant_id, requesting_tenant_id: newTenantId,
+      }));
+      return c.json({
+        error:
+          "This GitHub account is already connected by another workspace. Disconnect it there first, or connect a different GitHub account." +
+          " / 该 GitHub 账号已被另一个工作区连接。请先在那边断开，或改用另一个 GitHub 账号连接。",
+      }, 409);
+    }
+
     const channelId = crypto.randomUUID();
     await c.env.LINK_DB
+      // deactivated_reason = NULL：重连就是「已修好」。不清的话，一个健康 channel 上会永远挂着
+      // 上一次 401 留下的 'github_unauthorized'，任何按这个字段做的诊断/展示都会读到假状态。
       .prepare(`INSERT INTO channels (id, channel_type, config, source_channel_id, access_token, tenant_id, member_id, created_at, updated_at)
          VALUES (?, 'GITHUB', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-         ON CONFLICT(channel_type, source_channel_id) DO UPDATE SET config = excluded.config, access_token = excluded.access_token, tenant_id = excluded.tenant_id, member_id = excluded.member_id, is_active = 1, updated_at = datetime('now')`)
-      .bind(channelId, config, String(ghUser.id), tokenData.access_token, tenantId ? parseInt(tenantId) : null, memberId || null)
+         ON CONFLICT(channel_type, source_channel_id) DO UPDATE SET config = excluded.config, access_token = excluded.access_token, tenant_id = excluded.tenant_id, member_id = excluded.member_id, is_active = 1, deactivated_reason = NULL, updated_at = datetime('now')`)
+      .bind(channelId, config, String(ghUser.id), tokenData.access_token, newTenantId, memberId || null)
       .run();
 
     // 不 seed channel_poll_state：GitHub 的 poll state 是每 (channel, repo) 一行，而 repo

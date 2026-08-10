@@ -89,8 +89,15 @@ export function findGitHubTriggerNoRepos(graphJson: string): BrokenTrigger | nul
 }
 
 // publish 被拒时回给前端、由前端原样 toast 出来的人话（与 brokenTriggerMessage 同规格）。
+// 双语拼在同一个串里：这条消息由前端原样 toast，而 publish 是个 /api 调用、服务端这里
+// 拿不到用户的语言偏好（语言存在 member 上，publish 路由不读它）。产品要求每条用户可见
+// 文案都有 en + zh，所以两句都给，用 " / " 分隔。
 export function githubNoRepoMessage(): string {
-  return "Cannot publish: the GitHub Trigger has no repository selected, so this flow would never fire. Pick at least one repository in the trigger node.";
+  return (
+    "Cannot publish: the GitHub Trigger has no repository selected, so this flow would never fire. " +
+    "Pick at least one repository in the trigger node." +
+    " / 无法发布：GitHub Trigger 没有选择任何仓库，这个流程永远不会触发。请在 trigger 节点里至少选一个仓库。"
+  );
 }
 
 const TRIGGER_ACCOUNT_NOUN: Record<string, string> = {

@@ -269,9 +269,21 @@ export async function handleYouTubeSubscriptions(env: Env): Promise<void> {
   }
 }
 
-// 预算与 YouTube 订阅同步同量级：每个 (channel, repo) 一轮最多 2 次 GitHub 调用
-// （/releases 恒定 1 次，getRepo 只在真有新版时才打），远轻于 X/TikTok 的分页拉取。
-const GITHUB_RELEASES_BUDGET_MS = 20_000;
+// 预算与 handlePolling 同量级（50s，两者在同一个 allSettled 里并发跑，cron 的总墙钟时间
+// 因此不变）。原来的 20s 是从 handleYouTubeSubscriptions 抄来的，但那个循环是**每账号**
+// 且自带 23 小时节流，绝大多数轮次直接跳过、几乎不花钱；这个循环是**每 (channel, repo)**
+// 且没有任何节流，每一轮每一对都实打实要 ~5 次 D1 加一次 GitHub 往返，实测约 250–450ms。
+// 也就是说一轮能处理的对数大约是：20s → 45~80 对，50s → 110~200 对。
+// 预算本身**不**是防饿死的机制（那是下面的轮转位点），它只决定「最坏等多少轮」。
+const GITHUB_RELEASES_BUDGET_MS = 50_000;
+
+/** 轮转位点在 cron_state 里的键。值是上一轮最后**考察过**的那一对的 pairKey。 */
+const GITHUB_ROTATION_KEY = "github_releases_rotation";
+
+/** watch 清单里一对 (channel, repo) 的稳定标识；排序与轮转位点都用它。 */
+function pairKey(w: { channelId: string; fullName: string }): string {
+  return `${w.channelId}|${w.fullName}`;
+}
 
 /**
  * GitHub release 轮询。像 handleYouTubeSubscriptions 一样拿自己的顶层预算，不挤
@@ -280,8 +292,33 @@ const GITHUB_RELEASES_BUDGET_MS = 20_000;
  *
  * 要盯哪些 repo 的唯一真相来源是 flow 的 graph_json（同 /internal/list-watches、
  * /internal/youtube-watches）：flow 里删掉节点，下一轮自然不再轮询，无需反向清理。
+ *
+ * === 不饿死任何租户的保证 ===
+ * /internal/github-watches 的 SELECT 没有 ORDER BY，返回顺序在多轮之间基本稳定，所以
+ * 「每轮都从头开始 + 预算耗尽就 break」等价于：排在预算边界之后的租户**永远**不被轮询，
+ * 不是晚一点，是一次都没有 —— 他们已发布的 flow 静默地永不触发。
+ *
+ * 这里改成**环形轮转**：
+ *   1. 先按 pairKey 排序，让「第 i 个位置」在轮与轮之间有确定含义（清单本身的顺序不可信）；
+ *   2. 从 cron_state 里读上一轮最后考察过的 pairKey，从它的**下一个**位置开始，走到头就绕回 0；
+ *   3. 每考察一对就推进位点 —— 无论它是被轮询了、被 stoppedChannels 跳过了、还是抛错了。
+ *      「失败也推进」是关键：否则一个每轮都失败的 pair 会把位点钉死在原地，饿死效应原样复发。
+ *   4. 本轮结束把位点写回去；一对都没考察到（预算一开始就用光）时不写，位点保持不动。
+ * 由此得到的硬保证：设清单长度 N、一轮能处理 B 对，则**任何**一对最多等 ceil(N/B) 轮
+ * （即 ceil(N/B) 小时）必被轮询到一次。位点丢失或清单变动只会让某一轮的起点漂移，
+ * 绕环这件事本身不受影响，永久饿死这个状态不存在。
+ * 观测：github_releases_budget_exhausted 会报出本轮跳过了多少对（skipped），
+ * 用它除以 total 就能判断预算是否需要再调。
  */
 export async function handleGitHubReleases(env: Env): Promise<void> {
+  // 配置级总开关。这条链路会公开发帖、给真人发私信，出问题时必须有一个不改代码就能拉下的闸
+  // （改 wrangler.toml 的 var 或在 Cloudflare 控制台改同名变量即可）。缺省 = 开，
+  // 只有显式写成 "0"/"false" 才关，行为与加这个开关之前一致。
+  if (!githubReleasesEnabled(env)) {
+    console.log(JSON.stringify({ event: "github_releases_disabled" }));
+    return;
+  }
+
   const runDeadline = Date.now() + GITHUB_RELEASES_BUDGET_MS;
 
   // 与 handleYouTubeRenewal 同样兜住：拿不到/读不懂 watch 清单就什么都不做。没有清单时
@@ -302,18 +339,45 @@ export async function handleGitHubReleases(env: Env): Promise<void> {
     console.error(JSON.stringify({ event: "github_watches_fetch_error", error: String(e) }));
     return;
   }
-  console.log(JSON.stringify({ event: "github_watches_fetched", count: watches.length }));
+  if (watches.length === 0) {
+    console.log(JSON.stringify({ event: "github_watches_fetched", count: 0 }));
+    return;
+  }
+
+  // 排序 + 轮转起点：见上面的「不饿死任何租户的保证」。
+  const ordered = [...watches].sort((a, b) => (pairKey(a) < pairKey(b) ? -1 : pairKey(a) > pairKey(b) ? 1 : 0));
+  const resumeKey = await readCronState(env, GITHUB_ROTATION_KEY);
+  const resumeIdx = resumeKey ? ordered.findIndex((w) => pairKey(w) === resumeKey) : -1;
+  // 找不到（首次运行 / 那一对已从清单里消失）就从头开始，不是错误分支。
+  const start = resumeIdx >= 0 ? (resumeIdx + 1) % ordered.length : 0;
+  console.log(JSON.stringify({
+    event: "github_watches_fetched", count: ordered.length, resume_key: resumeKey, start_index: start,
+  }));
 
   // 一个 channel 的 token 与租户只查一次，watches 里同一 channel 通常有多个 repo。
   const channelCache = new Map<string, { token: string; tenantId: number } | null>();
   // 本轮已经 401 或已限流的 channel，跳过它剩下的 repo。
   const stoppedChannels = new Set<string>();
 
-  for (const w of watches) {
+  // 本轮最后考察过的一对；无论结果如何都推进（理由见上面第 3 点）。
+  let lastExaminedKey: string | null = null;
+  let examined = 0;
+
+  for (let i = 0; i < ordered.length; i++) {
+    const w = ordered[(start + i) % ordered.length];
     if (Date.now() >= runDeadline) {
-      console.log(JSON.stringify({ event: "github_releases_budget_exhausted", repo: w.fullName }));
+      // skipped 是给「预算够不够」定量用的：本轮还剩多少对没轮到。只报 repo 名的话，
+      // 缺的恰好就是唯一能拿来调预算的那个数。
+      console.log(JSON.stringify({
+        event: "github_releases_budget_exhausted",
+        repo: w.fullName, channel_id: w.channelId,
+        examined, skipped: ordered.length - i, total: ordered.length,
+      }));
       break;
     }
+    lastExaminedKey = pairKey(w);
+    examined++;
+
     if (stoppedChannels.has(w.channelId)) continue;
 
     if (!channelCache.has(w.channelId)) {
@@ -332,7 +396,15 @@ export async function handleGitHubReleases(env: Env): Promise<void> {
     if (!channel) continue;
 
     try {
-      await pollGitHubRepo(env, w.channelId, w.fullName, channel.token, channel.tenantId);
+      const { rateLimited } = await pollGitHubRepo(env, w.channelId, w.fullName, channel.token, channel.tenantId);
+      if (rateLimited) {
+        // 限流是**每 token**的：这个 channel 剩下的 repo 打过去只会一个个换回 403，
+        // 每次还要 ~300ms —— 烧的是全平台共用的这份预算，等于一个租户就能把一小时占满，
+        // 把所有别的租户挡在门外。所以立刻停掉它本轮剩下的 repo（与 401 同一个出口，
+        // 区别是不停用 channel：限流是暂时的，下一轮自然恢复）。
+        stoppedChannels.add(w.channelId);
+        console.log(JSON.stringify({ event: "github_channel_rate_limited", channel_id: w.channelId, repo: w.fullName }));
+      }
     } catch (e) {
       if (e instanceof GitHubUnauthorizedError) {
         // token 失效：停掉这个 channel 本轮的所有 repo，并标记需重连。
@@ -346,6 +418,47 @@ export async function handleGitHubReleases(env: Env): Promise<void> {
       }
       console.error(JSON.stringify({ event: "github_releases_poll_error", channel_id: w.channelId, repo: w.fullName, error: String(e) }));
     }
+  }
+
+  if (lastExaminedKey) await writeCronState(env, GITHUB_ROTATION_KEY, lastExaminedKey);
+}
+
+/** 缺省开；只有显式的 "0" / "false"（忽略大小写与空白）才关。 */
+export function githubReleasesEnabled(env: Env): boolean {
+  const v = (env.GITHUB_RELEASES_ENABLED ?? "").trim().toLowerCase();
+  return v !== "0" && v !== "false";
+}
+
+// cron_state：跨 cron 轮次的小标量状态（目前只有 GitHub 轮询的轮转位点）。故意不塞进
+// channel_poll_state —— 那张表的主键是 (channel_id, poller_name)，轮转位点不属于任何
+// 单个 channel，硬塞会造出一行永远对不上 channels 的孤儿。
+// 读写都兜住异常：位点是**优化**，轮询本身不该因为它挂掉。最现实的一种失败是迁移 0010
+// 还没跑（手工部署跳过了 migrate 这一步）—— 那时让整个 handler 抛进 allSettled，等于
+// GitHub 轮询整个停摆；退化成「每轮从头开始」明显更好。退化必须留痕，所以照样打 error 日志。
+async function readCronState(env: Env, name: string): Promise<string | null> {
+  try {
+    const row = await env.LINK_DB
+      .prepare("SELECT value FROM cron_state WHERE name = ?")
+      .bind(name)
+      .first<{ value: string | null }>();
+    return row?.value ?? null;
+  } catch (e) {
+    console.error(JSON.stringify({ event: "cron_state_read_failed", name, error: String(e) }));
+    return null;
+  }
+}
+
+async function writeCronState(env: Env, name: string, value: string): Promise<void> {
+  try {
+    await env.LINK_DB
+      .prepare(
+        `INSERT INTO cron_state (name, value, updated_at) VALUES (?, ?, datetime('now'))
+         ON CONFLICT(name) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
+      )
+      .bind(name, value)
+      .run();
+  } catch (e) {
+    console.error(JSON.stringify({ event: "cron_state_write_failed", name, error: String(e) }));
   }
 }
 
@@ -361,14 +474,14 @@ async function pollGitHubRepo(
   fullName: string,
   token: string,
   tenantId: number
-): Promise<void> {
+): Promise<{ rateLimited: boolean }> {
   // 与 pollXChannel/pollTikTokChannel 同一处检查点：租户还没开库就别花外部 API 配额。
   // release 是 flowType:"trigger"，本身不落 tenantDb，但保持「是否已开库」这一个统一
   // 关卡比为这条路径开特例更可靠（同 pollXListPosts 的理由）。
   const tenantDb = await resolveTenantDb(env, tenantId);
   if (!tenantDb) {
     console.log(JSON.stringify({ event: "github_releases_poll_skipped_no_tenant_db", channel_id: channelId, repo: fullName, tenant_id: tenantId }));
-    return;
+    return { rateLimited: false };
   }
 
   const entityState = new EntityStateStore(env.LINK_DB, tenantId);
@@ -376,7 +489,7 @@ async function pollGitHubRepo(
     tenantDb, env.VECTORIZE, env.AI, tenantId, env.PIPELINE_CONTENT, env.FLOW_QUEUE, entityState
   );
 
-  await runGitHubReleasePoller({
+  return await runGitHubReleasePoller({
     channelId,
     fullName,
     token,

@@ -88,7 +88,14 @@ CREATE TABLE skill_context (
 
 技能推荐的做法是"读代码仓起草"，我们没有代码仓；**近期内容是我们手上最富的等价信号**——它直接反映这个租户在发什么、对谁发、什么调性。
 
-**只读内容，不读渠道列表。** 渠道只能提供品牌名，为它新增一条 content→link 的 HTTP 缝不划算。
+**只读内容，不读渠道列表。** 两条理由，都经 dev 实测确认：
+
+1. **渠道里没有定位信号。** `channels.config` 存的是 id、显示名和凭证——X 渠道里唯一的"内容"是 `x_name`，一个品牌名；YouTube/TikTok 同理。没有 bio、没有简介、没有"我们做什么"。
+2. **渠道里存的是凭证。** `config` 同时装着 `access_token` / `refresh_token` / 加密的 `app_client_secret`。为起草新开一条读渠道的接口，等于把凭证放到离 LLM 提示词一步之遥的地方，换回来一个品牌名。
+
+品牌名由对话问一句即可（12 节访谈里本来就要问）。`WEB_DB.tenants` 也没有租户名（只有 `tenant_id / email / created_at / d1_database_id`），所以不存在更便宜的来源。
+
+真正富的信号其实是**租户自己 X 账号的 bio**——那是一段自己写的定位陈述——但它没有被存在任何地方（`UserMetadata_X` 的 `description` 映射的是粉丝简介，不是自己的），要拿得现调 X API。不在起草范围内。
 
 content 需要新增 `CF_D1_API_TOKEN` secret 才能经 `shared/tenant-data-db.ts` 访问 per-tenant D1（租户的 `d1_database_id` 从它已有的 `WEB_DB` 读）。
 
@@ -199,7 +206,7 @@ stage 1 失败（模型报错、超时）→ 沿用现有降级：记 `create_po
 ## 7. 明确不做
 
 - 行级版本历史（文档自带 Changelog）
-- 起草时读渠道列表（近期内容已够，不为品牌名新增跨模块缝）
+- 起草时读渠道列表（渠道无定位信号且装着凭证，见 §3.3）
 - 节点级的美术方向覆盖（风格唯一来源是租户上下文；将来需要再加）
 - 存量 `imagePrompt` 的数据迁移
 - 把 `SKILL_CATALOG` 的技能 id 改成 repo 限定形式（要迁移缓存表和存量节点数据，收益为零）

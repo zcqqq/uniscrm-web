@@ -107,4 +107,36 @@ describe("POST /api/llm-models", () => {
     expect(res.status).toBe(502);
     expect((await res.json() as any).error).toBeTruthy();
   });
+
+  it("lists image models for the default provider when kind is image", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ result: [{ name: "@cf/black-forest-labs/flux-1-schnell", task: { name: "Text-to-Image" } }] }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/api/llm-models", {
+        method: "POST", headers: { Cookie: "session=ok", "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "default", kind: "image" }),
+      }),
+      env
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json() as { models: string[] }).models).toEqual(["@cf/black-forest-labs/flux-1-schnell"]);
+    expect(String(fetchMock.mock.calls.at(-1)![0])).toContain("task=Text-to-Image");
+  });
+
+  // 「Anthropic 没有图片模型」在这里的表现形式：空数组，而不是一条特判。
+  it("returns an empty image model list for anthropic", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: "claude-sonnet-5" }] }), { status: 200 })
+    ));
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/api/llm-models", {
+        method: "POST", headers: { Cookie: "session=ok", "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "anthropic", apiKey: "sk-ant-x", kind: "image" }),
+      }),
+      env
+    );
+    expect((await res.json() as { models: string[] }).models).toEqual([]);
+  });
 });

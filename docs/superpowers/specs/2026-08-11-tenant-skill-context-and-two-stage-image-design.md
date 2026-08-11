@@ -24,7 +24,7 @@
 ```
 AI Content Settings
   「品牌与产品上下文」
-      ├─ 首次：从租户近期内容自动起草 V1
+      ├─ 首次：从租户近期内容 + 渠道清单自动起草 V1
       ├─ 多轮对话修正（受 product-marketing 技能指导）
       └─ 存为 markdown，按 (租户, 技能包) 一份
                     │
@@ -84,22 +84,28 @@ CREATE TABLE skill_context (
 
 ### 3.3 起草
 
-`POST /api/marketing-context/draft`：读该租户 per-tenant D1 里近期内容的 `title` / `content_text`，一次 LLM 调用产出 12 节草稿，作为对话的第一条助手消息返回。
+`POST /api/marketing-context/draft`：读两个信号，一次 LLM 调用产出 12 节草稿，作为对话的第一条助手消息返回。
 
-技能推荐的做法是"读代码仓起草"，我们没有代码仓；**近期内容是我们手上最富的等价信号**——它直接反映这个租户在发什么、对谁发、什么调性。
+技能推荐的做法是"读代码仓起草"，我们没有代码仓。等价信号有两个：
 
-**只读内容，不读渠道列表。** 两条理由，都经 dev 实测确认：
+**近期内容**——读该租户 per-tenant D1 里近期内容的 `title` / `content_text`。它直接反映这个租户在发什么、对谁发、什么调性，是手上最富的信号。
 
-1. **渠道里没有定位信号。** `channels.config` 存的是 id、显示名和凭证——X 渠道里唯一的"内容"是 `x_name`，一个品牌名；YouTube/TikTok 同理。没有 bio、没有简介、没有"我们做什么"。
-2. **渠道里存的是凭证。** `config` 同时装着 `access_token` / `refresh_token` / 加密的 `app_client_secret`。为起草新开一条读渠道的接口，等于把凭证放到离 LLM 提示词一步之遥的地方，换回来一个品牌名。
+起草的第二个信号是**渠道清单**：这个租户在哪些平台上、各有几个账号。"在 X 和 YouTube 上、没有 TikTok"直接说明了他们在什么场域做营销、内容发给谁看，是 Target Audience 与 Goals 两节的真实输入；顺带还给出品牌显示名。
 
-品牌名由对话问一句即可（12 节访谈里本来就要问）。`WEB_DB.tenants` 也没有租户名（只有 `tenant_id / email / created_at / d1_database_id`），所以不存在更便宜的来源。
+**清单只取投影，绝不取 `config`。** dev 实测确认 `channels.config` 同时装着 `access_token` / `refresh_token` / 加密的 `app_client_secret`——把整行交给一条喂 LLM 的路径是不可接受的。所以由 `link` 在自己这边做投影，新增内部端点：
 
-真正富的信号其实是**租户自己 X 账号的 bio**——那是一段自己写的定位陈述——但它没有被存在任何地方（`UserMetadata_X` 的 `description` 映射的是粉丝简介，不是自己的），要拿得现调 X API。不在起草范围内。
+```
+GET link /internal/channels/summary?tenantId=<n>
+→ { channels: { channelType: string; displayName: string | null }[] }
+```
 
-content 需要新增 `CF_D1_API_TOKEN` secret 才能经 `shared/tenant-data-db.ts` 访问 per-tenant D1（租户的 `d1_database_id` 从它已有的 `WEB_DB` 读）。
+`displayName` 由 link 从 `config` 里按渠道类型取（X 的 `x_name`、TikTok 的 `display_name`、YouTube 的 `channel_name` / `channel_title`），**逐字段显式投影，不做整体透传**。content 从头到尾看不到 `config`，凭证不存在离开 link 的路径。这与既有的 `/internal/channels/active`（只回 id 集合）是同一条约定。
 
-租户一条内容都没有时，起草端点返回空草稿并附一句说明，对话从白纸开始——不报错。
+content 需要新增两项配置：`LINK_URL`（调上面这个端点，走 `X-Internal-Secret`，与其它内部跳转一致）和 `CF_D1_API_TOKEN` secret（经 `shared/tenant-data-db.ts` 访问 per-tenant D1 读近期内容；租户的 `d1_database_id` 从它已有的 `WEB_DB` 读）。
+
+**不在起草范围内的信号**：租户自己 X 账号的 bio 其实是最富的——那是一段自己写的定位陈述——但它没有被存在任何地方（`UserMetadata_X` 的 `description` 映射的是粉丝简介，不是自己的），要拿得现调 X API。`WEB_DB.tenants` 也没有租户名（只有 `tenant_id / email / created_at / d1_database_id`）。
+
+两个信号都为空时（新租户既无内容也无渠道），起草端点返回空草稿并附一句说明，对话从白纸开始——不报错。任一信号可用就照常起草。
 
 ### 3.4 对话
 
@@ -186,7 +192,8 @@ stage 1 失败（模型报错、超时）→ 沿用现有降级：记 `create_po
 - `skill_context` 读写、版本递增、按 `(tenant_id, skill_repo)` 隔离
 - 注入顺序：技能 → 租户上下文 → operationContext（断言拼接结果的相对位置）
 - 无上下文时行为与今天完全一致
-- 起草端点：租户有内容 / 一条内容都没有
+- 起草端点：有内容有渠道 / 只有渠道 / 两者皆无
+- **渠道摘要端点只回投影**：断言返回体里不含 `access_token` / `refresh_token` / `app_client_secret`，也不含 `config` 本身
 - chat 端点：转发历史、system 由技能 + 当前文档组成
 - stage 1 契约：断言 user 消息是 title+text、system 含 image 技能
 - **适配器截断**：给 flux 适配器一个 2100 字符提示词，断言实际发出的是 2048；给 2048 的，断言原样发出
@@ -194,6 +201,7 @@ stage 1 失败（模型报错、超时）→ 沿用现有降级：记 `create_po
 
 **link**
 - create-post / photo-post 改传 `sourceTitle` / `sourceText`，不再传 `prompt`
+- `/internal/channels/summary` 按租户隔离；返回体逐字段投影，断言不含 `config` 及其中任何 token 字段
 
 **flow**
 - 节点不再产出 `imagePrompt`；Inspector 不再渲染该输入框
@@ -206,7 +214,7 @@ stage 1 失败（模型报错、超时）→ 沿用现有降级：记 `create_po
 ## 7. 明确不做
 
 - 行级版本历史（文档自带 Changelog）
-- 起草时读渠道列表（渠道无定位信号且装着凭证，见 §3.3）
+- 把 `channels.config` 整体交给起草路径（凭证在里面；只走 link 的显式投影端点，见 §3.3）
 - 节点级的美术方向覆盖（风格唯一来源是租户上下文；将来需要再加）
 - 存量 `imagePrompt` 的数据迁移
 - 把 `SKILL_CATALOG` 的技能 id 改成 repo 限定形式（要迁移缓存表和存量节点数据，收益为零）

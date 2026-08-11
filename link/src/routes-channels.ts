@@ -435,7 +435,7 @@ export function channelsRoutes() {
       .first<{ id: string; config: string }>();
     if (!row) return c.json({ connected: false, accountChannelId: null, repos: [] });
 
-    const config = JSON.parse(row.config) as { access_token?: string };
+    const config = JSON.parse(row.config) as { access_token?: string; login?: string };
     if (!config.access_token) return c.json({ connected: false, accountChannelId: null, repos: [] });
 
     try {
@@ -443,6 +443,11 @@ export function channelsRoutes() {
       return c.json({
         connected: true,
         accountChannelId: row.id,
+        // 账号块要显示人能看懂的东西。只回 accountChannelId 的话前端只有一串 UUID，
+        // 面板上根本没法告诉用户"这个触发器读的是哪个 GitHub 账号"。
+        // login 由 OAuth 回调写入 config（link/src/oauth.ts）；老渠道理论上都有，
+        // 但仍按可缺失处理，前端缺失时退回通用文案。
+        login: config.login ?? null,
         repos: repos
           .map((r) => ({ fullName: r.full_name, name: r.name, description: r.description }))
           .sort((a, b) => a.fullName.localeCompare(b.fullName)),

@@ -109,7 +109,7 @@ export const api = {
     // 后端在 GitHub 取数失败时回 502（不是空列表），request() 会把它抛成带 status 的 Error，
     // 调用方据此显示"取不到"而不是"你没有 Watch 任何仓库"——这两件事对用户是完全不同的动作。
     githubRepos: () =>
-      request<{ connected: boolean; accountChannelId: string | null; repos: { fullName: string; name: string; description: string | null }[] }>(
+      request<{ connected: boolean; accountChannelId: string | null; login?: string | null; repos: { fullName: string; name: string; description: string | null }[] }>(
         `/api/channels/github/repos`
       ),
     youtubePlaylists: () =>

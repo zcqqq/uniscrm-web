@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useFlowEditor, ACTION_CHANNEL_TYPE } from "../store/flow-editor";
 import { getChannelTypes, getContentTriggerFields, type TriggerFieldDefinition } from "../config/trigger-fields";
 import { SelectPropsValue } from "../../../shared/frontend/components/SelectPropsValue";
+import { ChannelNodePanel } from "../../../shared/frontend/components/ChannelNodePanel";
 import { api } from "../lib/api";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
@@ -482,80 +483,81 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
   }, []);
 
   return (
-    <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("youtubeContentTrigger"))}</h4>
-      <div className="space-y-3">
+    <ChannelNodePanel
+      title={T(nodeLabel("youtubeContentTrigger"))}
+      operation={
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Event", zh: "事件" })}</Label>
           <Select value={YOUTUBE_TRIGGER_META.sourceContentType} disabled className="w-full text-sm">
             <option value={YOUTUBE_TRIGGER_META.sourceContentType}>{localizeLabel(YOUTUBE_TRIGGER_META.label!, locale)}</option>
           </Select>
         </div>
-
-        {state.connected && (
+      }
+      account={
+        state.connected ? (
           <div>
             <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
             <Select value={state.accountChannelId || ""} disabled className="w-full text-sm">
               <option value={state.accountChannelId || ""}>{state.email || T({ en: "Connected account", zh: "已连接账号" })}</option>
             </Select>
           </div>
+        ) : null
+      }
+    >
+      <div>
+        <Label className="text-xs block mb-1">{T({ en: "Subscriptions", zh: "订阅" })}</Label>
+        {!state.connected ? (
+          <p className="text-xs text-muted-foreground italic">
+            {T({ en: "Connect your YouTube account from the Social page to pick a subscription.", zh: "请先在社交页面连接 YouTube 账号，再选择订阅。" })}
+          </p>
+        ) : state.subscriptions.length === 0 && selectedSubs.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">
+            {T({ en: "No subscriptions found — check your YouTube account has subscriptions.", zh: "未找到订阅——请检查该 YouTube 账号是否有订阅。" })}
+          </p>
+        ) : (
+          <MultiSelect
+            options={(() => {
+              // 已选但已退订（不在接口返回里）的条目也要出现在列表中，
+              // 否则旧 flow 打开后无法取消勾选它。
+              const fetched = state.subscriptions.map((s) => ({ value: s.channelId, label: s.channelName }));
+              const fetchedIds = new Set(state.subscriptions.map((s) => s.channelId));
+              const stale = initialSubs
+                .filter((s) => !fetchedIds.has(s.channelId))
+                .map((s) => ({ value: s.channelId, label: s.channelName || s.channelId }));
+              return [...fetched, ...stale];
+            })()}
+            selectedValues={selectedSubs.map((s) => s.channelId)}
+            onToggle={(channelId) => {
+              const sub = state.subscriptions.find((s) => s.channelId === channelId);
+              const existing = selectedSubs.find((s) => s.channelId === channelId);
+              updateNodeData(nodeId, {
+                channelId: state.accountChannelId || "",
+                subscriptions: toggleSubscription(selectedSubs, {
+                  channelId,
+                  channelName: sub?.channelName || existing?.channelName || "",
+                }),
+                // 旧标量一并清空：从此该节点只认数组，避免两套字段并存歧义。
+                subscriptionChannelId: "",
+                subscriptionChannelName: "",
+              });
+            }}
+            placeholder={T({ en: "Select subscriptions...", zh: "选择订阅…" })}
+            tooltip={T({ en: "Select one or more subscriptions", zh: "选择一个或多个订阅" })}
+          />
         )}
-
-        <div>
-          <Label className="text-xs block mb-1">{T({ en: "Subscriptions", zh: "订阅" })}</Label>
-          {!state.connected ? (
-            <p className="text-xs text-muted-foreground italic">
-              {T({ en: "Connect your YouTube account from the Social page to pick a subscription.", zh: "请先在社交页面连接 YouTube 账号，再选择订阅。" })}
-            </p>
-          ) : state.subscriptions.length === 0 && selectedSubs.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">
-              {T({ en: "No subscriptions found — check your YouTube account has subscriptions.", zh: "未找到订阅——请检查该 YouTube 账号是否有订阅。" })}
-            </p>
-          ) : (
-            <MultiSelect
-              options={(() => {
-                // 已选但已退订（不在接口返回里）的条目也要出现在列表中，
-                // 否则旧 flow 打开后无法取消勾选它。
-                const fetched = state.subscriptions.map((s) => ({ value: s.channelId, label: s.channelName }));
-                const fetchedIds = new Set(state.subscriptions.map((s) => s.channelId));
-                const stale = initialSubs
-                  .filter((s) => !fetchedIds.has(s.channelId))
-                  .map((s) => ({ value: s.channelId, label: s.channelName || s.channelId }));
-                return [...fetched, ...stale];
-              })()}
-              selectedValues={selectedSubs.map((s) => s.channelId)}
-              onToggle={(channelId) => {
-                const sub = state.subscriptions.find((s) => s.channelId === channelId);
-                const existing = selectedSubs.find((s) => s.channelId === channelId);
-                updateNodeData(nodeId, {
-                  channelId: state.accountChannelId || "",
-                  subscriptions: toggleSubscription(selectedSubs, {
-                    channelId,
-                    channelName: sub?.channelName || existing?.channelName || "",
-                  }),
-                  // 旧标量一并清空：从此该节点只认数组，避免两套字段并存歧义。
-                  subscriptionChannelId: "",
-                  subscriptionChannelName: "",
-                });
-              }}
-              placeholder={T({ en: "Select subscriptions...", zh: "选择订阅…" })}
-              tooltip={T({ en: "Select one or more subscriptions", zh: "选择一个或多个订阅" })}
-            />
-          )}
-        </div>
-
-        <p className="text-xs text-muted-foreground">{T({ en: "Fires when any selected subscription publishes a new video.", zh: "任一选中订阅发布新视频时触发。" })}</p>
-
-        <ConditionsEditor
-          conditions={conditions}
-          fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos", locale)}
-          onChange={(c) => updateNodeData(nodeId, { conditions: c })}
-          logic={data.conditionLogic}
-          onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
-          systemFilters={YOUTUBE_TRIGGER_META.contentPropsFilter}
-        />
       </div>
-    </div>
+
+      <p className="text-xs text-muted-foreground">{T({ en: "Fires when any selected subscription publishes a new video.", zh: "任一选中订阅发布新视频时触发。" })}</p>
+
+      <ConditionsEditor
+        conditions={conditions}
+        fields={getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos", locale)}
+        onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+        logic={data.conditionLogic}
+        onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
+        systemFilters={YOUTUBE_TRIGGER_META.contentPropsFilter}
+      />
+    </ChannelNodePanel>
   );
 }
 
@@ -578,6 +580,8 @@ function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data:
     loading: boolean;
     connected: boolean;
     accountChannelId: string | null;
+    // GitHub 用户名，账号块显示用。老渠道可能没有，按可缺失处理。
+    login?: string | null;
     repos: { fullName: string; name: string; description: string | null }[];
     // 取数失败必须与"没有 Watch 任何仓库"分开：两者都是空列表，但一个要用户重试、
     // 另一个要用户去 GitHub 上 Watch 仓库。降级成空列表会让用户白找一圈。
@@ -591,94 +595,106 @@ function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data:
   }, []);
 
   return (
-    <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("githubContentTrigger"))}</h4>
-      <div className="space-y-3">
+    <ChannelNodePanel
+      title={T(nodeLabel("githubContentTrigger"))}
+      operation={
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Event", zh: "事件" })}</Label>
           <Select value={GITHUB_TRIGGER_META.sourceContentType} disabled className="w-full text-sm">
             <option value={GITHUB_TRIGGER_META.sourceContentType}>{localizeLabel(GITHUB_TRIGGER_META.label!, locale)}</option>
           </Select>
         </div>
-
-        <div>
-          <Label className="text-xs block mb-1">{T({ en: "Repositories", zh: "仓库" })}</Label>
-          {state.loading ? (
-            <p className="text-xs text-muted-foreground italic">
-              {T({ en: "Loading your watched repositories from GitHub…", zh: "正在从 GitHub 获取你关注的仓库…" })}
-            </p>
-          ) : state.error ? (
-            <p className="text-xs text-destructive italic">
-              {T({ en: "Could not load your watched repositories from GitHub. Try again later.", zh: "无法从 GitHub 获取你关注的仓库，请稍后重试。" })}
-            </p>
-          ) : !state.connected ? (
-            <p className="text-xs text-muted-foreground italic">
-              {T({ en: "Connect your GitHub account on the Social page, then pick the repos you watch.", zh: "请先在社交页面连接 GitHub 账号，再选择你关注的仓库。" })}
-            </p>
-          ) : /* 判 initialRepos 而不是 selectedRepos：接口返回空、但节点里存着一个已取消
-                 Watch 的旧选择时，取消勾选它会让整个面板塌回"未找到关注的仓库"，那条
-                 stale 选项再也勾不回来。快照不随勾选变化，多选框就一直在。 */
-            state.repos.length === 0 && initialRepos.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">
-              {T({ en: "No watched repositories found — watch a repo on GitHub first.", zh: "未找到关注的仓库——请先在 GitHub 上 Watch 一个仓库。" })}
-            </p>
-          ) : (
-            <MultiSelect
-              options={(() => {
-                // 已选但已取消 Watch（不在接口返回里）的条目也要出现，否则旧 flow 打开后
-                // 无法取消勾选它。
-                const fetched = state.repos.map((r) => ({ value: r.fullName, label: r.fullName }));
-                const fetchedNames = new Set(state.repos.map((r) => r.fullName));
-                const stale = initialRepos
-                  .filter((r) => !fetchedNames.has(r.fullName))
-                  .map((r) => ({ value: r.fullName, label: r.fullName }));
-                return [...fetched, ...stale];
-              })()}
-              selectedValues={selectedRepos.map((r) => r.fullName)}
-              onToggle={(fullName) => {
-                const exists = selectedRepos.some((r) => r.fullName === fullName);
-                updateNodeData(nodeId, {
-                  channelId: state.accountChannelId || "",
-                  repos: exists
-                    ? selectedRepos.filter((r) => r.fullName !== fullName)
-                    : [...selectedRepos, { fullName }],
-                });
-              }}
-              placeholder={T({ en: "Select repositories...", zh: "选择仓库…" })}
-              tooltip={T({ en: "Select one or more repositories", zh: "选择一个或多个仓库" })}
-            />
-          )}
-        </div>
-
-        <div className="flex items-start gap-2">
-          <Checkbox
-            id={`include-prerelease-${nodeId}`}
-            checked={data.includePrerelease === true}
-            onCheckedChange={(v: boolean | "indeterminate") => updateNodeData(nodeId, { includePrerelease: v === true })}
+      }
+      account={
+        state.connected ? (
+          <div>
+            <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
+            <Select value={state.accountChannelId || ""} disabled className="w-full text-sm">
+              <option value={state.accountChannelId || ""}>
+                {state.login ? `@${state.login}` : T({ en: "Connected account", zh: "已连接账号" })}
+              </option>
+            </Select>
+          </div>
+        ) : null
+      }
+    >
+      <div>
+        <Label className="text-xs block mb-1">{T({ en: "Repositories", zh: "仓库" })}</Label>
+        {state.loading ? (
+          <p className="text-xs text-muted-foreground italic">
+            {T({ en: "Loading your watched repositories from GitHub…", zh: "正在从 GitHub 获取你关注的仓库…" })}
+          </p>
+        ) : state.error ? (
+          <p className="text-xs text-destructive italic">
+            {T({ en: "Could not load your watched repositories from GitHub. Try again later.", zh: "无法从 GitHub 获取你关注的仓库，请稍后重试。" })}
+          </p>
+        ) : !state.connected ? (
+          <p className="text-xs text-muted-foreground italic">
+            {T({ en: "Connect your GitHub account on the Social page, then pick the repos you watch.", zh: "请先在社交页面连接 GitHub 账号，再选择你关注的仓库。" })}
+          </p>
+        ) : /* 判 initialRepos 而不是 selectedRepos：接口返回空、但节点里存着一个已取消
+               Watch 的旧选择时，取消勾选它会让整个面板塌回"未找到关注的仓库"，那条
+               stale 选项再也勾不回来。快照不随勾选变化，多选框就一直在。 */
+          state.repos.length === 0 && initialRepos.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">
+            {T({ en: "No watched repositories found — watch a repo on GitHub first.", zh: "未找到关注的仓库——请先在 GitHub 上 Watch 一个仓库。" })}
+          </p>
+        ) : (
+          <MultiSelect
+            options={(() => {
+              // 已选但已取消 Watch（不在接口返回里）的条目也要出现，否则旧 flow 打开后
+              // 无法取消勾选它。
+              const fetched = state.repos.map((r) => ({ value: r.fullName, label: r.fullName }));
+              const fetchedNames = new Set(state.repos.map((r) => r.fullName));
+              const stale = initialRepos
+                .filter((r) => !fetchedNames.has(r.fullName))
+                .map((r) => ({ value: r.fullName, label: r.fullName }));
+              return [...fetched, ...stale];
+            })()}
+            selectedValues={selectedRepos.map((r) => r.fullName)}
+            onToggle={(fullName) => {
+              const exists = selectedRepos.some((r) => r.fullName === fullName);
+              updateNodeData(nodeId, {
+                channelId: state.accountChannelId || "",
+                repos: exists
+                  ? selectedRepos.filter((r) => r.fullName !== fullName)
+                  : [...selectedRepos, { fullName }],
+              });
+            }}
+            placeholder={T({ en: "Select repositories...", zh: "选择仓库…" })}
+            tooltip={T({ en: "Select one or more repositories", zh: "选择一个或多个仓库" })}
           />
-          <Label htmlFor={`include-prerelease-${nodeId}`} className="text-xs leading-snug">
-            {T({ en: "Include prereleases", zh: "包含预发布" })}
-            <span className="block text-muted-foreground">
-              {T({
-                en: "Prereleases (rc / nightly) also trigger this flow, and count toward the release-count conditions below.",
-                zh: "预发布（rc / nightly）也会触发本流程，并计入下方的发版数条件。",
-              })}
-            </span>
-          </Label>
-        </div>
-
-        <p className="text-xs text-muted-foreground">{T({ en: "Fires when any selected repo publishes a release.", zh: "任一选中仓库发布新版本时触发。" })}</p>
-
-        <ConditionsEditor
-          conditions={conditions}
-          fields={getContentTriggerFields(ContentMetadata_GitHub, "watch:get-releases", locale)}
-          onChange={(c) => updateNodeData(nodeId, { conditions: c })}
-          logic={data.conditionLogic}
-          onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
-          systemFilters={GITHUB_TRIGGER_META.contentPropsFilter}
-        />
+        )}
       </div>
-    </div>
+
+      <div className="flex items-start gap-2">
+        <Checkbox
+          id={`include-prerelease-${nodeId}`}
+          checked={data.includePrerelease === true}
+          onCheckedChange={(v: boolean | "indeterminate") => updateNodeData(nodeId, { includePrerelease: v === true })}
+        />
+        <Label htmlFor={`include-prerelease-${nodeId}`} className="text-xs leading-snug">
+          {T({ en: "Include prereleases", zh: "包含预发布" })}
+          <span className="block text-muted-foreground">
+            {T({
+              en: "Prereleases (rc / nightly) also trigger this flow, and count toward the release-count conditions below.",
+              zh: "预发布（rc / nightly）也会触发本流程，并计入下方的发版数条件。",
+            })}
+          </span>
+        </Label>
+      </div>
+
+      <p className="text-xs text-muted-foreground">{T({ en: "Fires when any selected repo publishes a release.", zh: "任一选中仓库发布新版本时触发。" })}</p>
+
+      <ConditionsEditor
+        conditions={conditions}
+        fields={getContentTriggerFields(ContentMetadata_GitHub, "watch:get-releases", locale)}
+        onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+        logic={data.conditionLogic}
+        onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
+        systemFilters={GITHUB_TRIGGER_META.contentPropsFilter}
+      />
+    </ChannelNodePanel>
   );
 }
 

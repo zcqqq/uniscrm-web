@@ -33,13 +33,26 @@ describe("GET /api/channels/github/repos", () => {
     );
     vi.stubGlobal("fetch", fetchStub);
     const res = await app({ id: "chan-1", config: JSON.stringify({ access_token: "tok", login: "zc" }) });
-    const body = await res.json<{ accountChannelId: string; repos: { fullName: string }[] }>();
+    const body = await res.json<{ accountChannelId: string; login: string | null; repos: { fullName: string }[] }>();
     expect(body.accountChannelId).toBe("chan-1");
+    // 账号块要显示的是人能认出来的用户名，不是一串 channel UUID。
+    expect(body.login).toBe("zc");
     expect(body.repos.map((r) => r.fullName)).toEqual(["a/alpha", "z/beta"]);
     // Verify correct token was forwarded
     expect(fetchStub).toHaveBeenCalled();
     const authHeader = (fetchStub.mock.calls[0][1] as RequestInit)?.headers as Record<string, string> | undefined;
     expect(authHeader?.Authorization).toBe("Bearer tok");
+  });
+
+  it("config 里没有 login 的老渠道回 null，而不是漏掉这个字段或塞 undefined", async () => {
+    // 前端据此退回「已连接账号」的通用文案；字段缺失与 null 在类型上是两回事，别让它漂。
+    vi.stubGlobal("fetch", vi.fn(() =>
+      Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+    ));
+    const res = await app({ id: "chan-1", config: JSON.stringify({ access_token: "tok" }) });
+    const body = await res.json<Record<string, unknown>>();
+    expect("login" in body).toBe(true);
+    expect(body.login).toBeNull();
   });
 
   it("GitHub 报错时返回 502 而不是空列表 —— 空列表会被误读成「你没 Watch 任何 repo」", async () => {

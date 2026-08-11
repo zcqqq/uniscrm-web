@@ -37,4 +37,16 @@ describe("listRecentTenantContent", () => {
     ));
     expect(await listRecentTenantContent(envWith("db-1"), 42)).toEqual([]);
   });
+
+  // WEB_DB 定位租户库这一步本身也可能抛错（D1_ERROR、瞬时绑定失败），
+  // 不能只护住 db.query() —— 整个函数的承诺是永不抛错。
+  it("WEB_DB 查询租户库时抛错，也返回空数组而不是抛错", async () => {
+    const env = {
+      CF_ACCOUNT_ID: "acct",
+      CF_D1_API_TOKEN: "tok",
+      WEB_DB: { prepare: () => ({ bind: () => ({ first: async () => { throw new Error("D1_ERROR"); } }) }) },
+    } as never;
+
+    await expect(listRecentTenantContent(env, 1)).resolves.toEqual([]);
+  });
 });

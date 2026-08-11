@@ -1,6 +1,8 @@
 import type { Env } from "../types";
 import * as credentialsModule from "./llm-credentials";
 import { getSkillContent } from "./skill-content";
+import { getSkillContext } from "./skill-context";
+import { getSkillDefinition } from "../skills/catalog";
 import { WorkersAiProvider } from "../providers/workers-ai";
 import { OpenAiProvider } from "../providers/openai";
 import { AnthropicProvider } from "../providers/anthropic";
@@ -15,12 +17,18 @@ export interface GenerateParams {
 }
 
 export async function generateContent(env: Env, params: GenerateParams): Promise<string> {
-  const skillContent = params.skillId && params.skillId !== "none"
-    ? (await getSkillContent(env, params.skillId)) ?? undefined
-    : undefined;
-  // Skill first, operationContext LAST: LLMs weight the tail of a long system prompt most
-  // heavily, and skill docs can be 60k+ chars — the execution contract must not drown.
-  const systemPrompt = [skillContent, params.operationContext].filter(Boolean).join("\n\n") || undefined;
+  const useSkill = !!params.skillId && params.skillId !== "none";
+  const skillContent = useSkill ? (await getSkillContent(env, params.skillId!)) ?? undefined : undefined;
+  // 租户上下文按技能所属的包取：文档的 12 个小节是照着该包的消费方式写的，脱离该包单独注入
+  // 未经验证；skillId 为 "none" 时没有"哪个包"可言，不查也不注入。
+  const repo = useSkill ? getSkillDefinition(params.skillId!)?.repo : undefined;
+  const tenantContext = repo ? (await getSkillContext(env, params.tenantId, repo)) ?? undefined : undefined;
+
+  // 技能 → 租户上下文 → operationContext，越具体越靠后，契约永远最后：LLMs weight the tail of
+  // a long system prompt most heavily, and skill docs can be 60k+ chars — the execution
+  // contract must not drown (2026-08-09 实测).
+  const systemPrompt =
+    [skillContent, tenantContext, params.operationContext].filter(Boolean).join("\n\n") || undefined;
 
   if (params.provider === "default") {
     const model = await credentialsModule.getDefaultModel(env, params.tenantId);

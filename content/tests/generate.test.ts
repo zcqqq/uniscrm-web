@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { generateContent } from "../src/services/generate";
 import * as credentialsModule from "../src/services/llm-credentials";
 import * as skillContentModule from "../src/services/skill-content";
+import * as skillContextModule from "../src/services/skill-context";
 
 describe("generateContent", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -150,6 +151,74 @@ describe("generateContent", () => {
         messages: expect.arrayContaining([
           { role: "system", content: "Skill guidance here\n\nop context line" },
         ]),
+      })
+    );
+  });
+
+  // 顺序是承重的：技能是 60KB 通用文档，租户上下文是 2-4KB 具体信息，operationContext 是
+  // 执行契约。越具体越靠后，契约永远最后 —— 2026-08-09 实测，契约放前面会被技能文档淹没。
+  it("按「技能 → 租户上下文 → operationContext」拼接系统提示词", async () => {
+    vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("SKILL-DOC");
+    vi.spyOn(skillContextModule, "getSkillContext").mockResolvedValue("TENANT-CTX");
+    const aiRun = vi.fn().mockResolvedValue({ response: "ok" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+
+    await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, {
+      ...baseParams, skillId: "marketingskills-social", operationContext: "OP-CTX",
+    });
+
+    expect(aiRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          { role: "system", content: "SKILL-DOC\n\nTENANT-CTX\n\nOP-CTX" },
+        ]),
+      })
+    );
+  });
+
+  it("按技能所属的包取上下文", async () => {
+    vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("SKILL-DOC");
+    const spy = vi.spyOn(skillContextModule, "getSkillContext").mockResolvedValue(null);
+    const aiRun = vi.fn().mockResolvedValue({ response: "ok" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+
+    await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, {
+      ...baseParams, tenantId: 42, skillId: "marketingskills-social",
+    });
+
+    expect(spy).toHaveBeenCalledWith(expect.anything(), 42, "coreyhaines31/marketingskills");
+  });
+
+  // 上下文是技能作用域的：没选技能就没有"哪个包"可言，不注入。
+  it("skillId 为 none 时不查也不注入上下文", async () => {
+    const spy = vi.spyOn(skillContextModule, "getSkillContext");
+    const aiRun = vi.fn().mockResolvedValue({ response: "ok" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+
+    await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, { ...baseParams, skillId: "none" });
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(aiRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ messages: [{ role: "user", content: baseParams.prompt }] })
+    );
+  });
+
+  it("上下文不存在时行为与今天完全一致", async () => {
+    vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("SKILL-DOC");
+    vi.spyOn(skillContextModule, "getSkillContext").mockResolvedValue(null);
+    const aiRun = vi.fn().mockResolvedValue({ response: "ok" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+
+    await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, {
+      ...baseParams, skillId: "marketingskills-social", operationContext: "OP-CTX",
+    });
+
+    expect(aiRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        messages: expect.arrayContaining([{ role: "system", content: "SKILL-DOC\n\nOP-CTX" }]),
       })
     );
   });

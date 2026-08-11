@@ -371,15 +371,34 @@ ETag 存在既有的 cursor 列里。不新建表。
 
 测试放各自模块的 `tests/` 目录。
 
-## 待验证（实现时必须实测，不得沿用文档假设）
+## 待验证的三条，已在 dev 实测（2026-08-11）
 
-1. **`/user/subscriptions` 的 scope**：用真 token 确认无需额外 scope。
-   若实测需要 `repo` scope（授权页会显示私有仓库读权限），回头重新权衡 D7。
-2. **认证态下 304 是否计入 rate limit**：本设计按「计入」的保守假设做预算，
-   实测若不计入则只是更宽裕，不改设计。
-3. **`GET /user/subscriptions` 的 Watch 语义**：GitHub 的 Watch 有
-   「All activity」「Releases only」「Custom」几档，需确认各档是否都出现在该端点返回中
-   （尤其「Releases only」——那恰恰是本功能最相关的一档）。
+1. **`/user/subscriptions` 的 scope —— 确认无需额外 scope。**
+   OAuth 请求传空 scope，`GET /user` 返回的 `x-oauth-scopes` 头为空字符串，
+   `/user/subscriptions` 返回 200。授权页上不出现私有仓库权限请求。D7 成立，不改。
+   配额是 5000/hr **每用户**（不是 YouTube 那种全平台共享池）。
+
+2. **认证态 304 是否计入 rate limit —— 未单独复测，保持保守假设。**
+   预算按「计入」算的，实测若不计入只会更宽裕，不改设计。未认证态下已实测确认计入
+   （见「实测事实 2」）。
+
+3. **Watch 语义 —— `/user/subscriptions` 只认 "All Activity" 一档。已定性。**
+
+   实测过程：同一个 repo（`anthropics/k12-teacher-skills`）、同一个 token、同一个端点，
+   在用户最初选的那一档下**查不到**；改成 **All Activity** 后**立刻出现**。
+   GitHub 的 REST subscription 模型是二元的（`subscribed` / `ignored`），
+   Custom 那几档（Issues / Pull requests / **Releases** / Discussions / Security alerts）
+   以及默认的 "Participating and @mentions" 都不在其中。
+
+   **附带发现，值得单独记住**：`GET /repos/{owner}/{repo}/subscription` 在列表端点
+   **已经包含该 repo 之后仍然返回 404** —— 两个端点对同一事实给出相反答案。
+   任何时候都不要用单仓端点判断「用户有没有关注这个 repo」。
+
+   **产品决策（用户 2026-08-11 拍板）：接受这个限制，选择器仍然只用 watched 列表。**
+   即用户必须把 repo 设为 All Activity 才能在选择器里看到它。未做（可后续补）：
+   在 Inspector 上加一句提示说明这一点——否则一个把 repo 设成「只看 Releases」的用户
+   会发现选择器是空的，而界面不解释为什么。
+   已评估但未采纳的替代方案：改用 starred 列表、watched ∪ starred、允许手填 `owner/repo`。
 
 ## 明确不做
 

@@ -3,6 +3,8 @@ import { useFlowEditor, ACTION_CHANNEL_TYPE } from "../store/flow-editor";
 import { getChannelTypes, getContentTriggerFields, type TriggerFieldDefinition } from "../config/trigger-fields";
 import { SelectPropsValue } from "../../../shared/frontend/components/SelectPropsValue";
 import { ChannelNodePanel } from "../../../shared/frontend/components/ChannelNodePanel";
+import { RefreshButton } from "../../../shared/frontend/components/RefreshButton";
+import { useRefreshableList, type RefreshableListFetchContext } from "../../../shared/frontend/hooks/useRefreshableList";
 import { api } from "../lib/api";
 import { Button } from "../../../shared/frontend/ui/button";
 import { Input } from "../../../shared/frontend/ui/input";
@@ -44,6 +46,16 @@ interface Condition {
   field: string;
   operator: string;
   value: string;
+}
+
+// 账号列表走 api.channels.listCached 的模块级记忆化，整页刷新之前不会自己失效。
+// 用户点「刷新」时必须先把缓存作废，否则拿回来的还是那条老 promise，按钮看着响应了、
+// 数据一个字没变。所有账号选择器共用这一个 fetcher，免得下一个面板忘了作废那一步。
+function channelListFetcher(channelType: string) {
+  return ({ reason }: RefreshableListFetchContext) => {
+    if (reason === "refresh") api.channels.invalidateListCache(channelType);
+    return api.channels.listCached(channelType);
+  };
 }
 
 function ValueInput({
@@ -275,8 +287,6 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
   const T = useT();
   const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
-  const [channels, setChannels] = useState<ChannelOption[]>([]);
-  const [loadingChannels, setLoadingChannels] = useState(false);
 
   const channelType = data.channelType as string;
   const eventType = data.eventType as string;
@@ -286,20 +296,18 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
   const ctDef = getChannelTypes(locale).find((ct) => ct.channelType === channelType);
   const evDef = ctDef?.events.find((e) => e.eventType === eventType);
 
+  const channelList = useRefreshableList<ChannelOption[]>(channelListFetcher(channelType), [channelType], {
+    enabled: !!eventType,
+  });
+  const loadedChannels = channelList.data;
+  const channels = loadedChannels ?? [];
+
   useEffect(() => {
-    if (!eventType) return;
-    setLoadingChannels(true);
-    api.channels.listCached(channelType)
-      .then((chs) => {
-        setChannels(chs);
-        // Safety net: auto-select the only connected account, same pattern XActionInspector uses.
-        if (chs.length === 1 && !channelId) {
-          updateNodeData(nodeId, { channelId: chs[0].id });
-        }
-      })
-      .catch(() => setChannels([]))
-      .finally(() => setLoadingChannels(false));
-  }, [eventType, channelType]);
+    // Safety net: auto-select the only connected account, same pattern XActionInspector uses.
+    if (loadedChannels?.length === 1 && !channelId) {
+      updateNodeData(nodeId, { channelId: loadedChannels[0].id });
+    }
+  }, [loadedChannels, channelId, nodeId]);
 
   if (!ctDef) return <p className="text-sm text-muted-foreground">{T({ en: "Unknown channel type", zh: "未知渠道类型" })}</p>;
 
@@ -324,8 +332,15 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
       account={
         eventType ? (
           <div>
-            <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
-            {loadingChannels ? (
+            <div className="flex items-center justify-between mb-1">
+              <Label className="text-xs">{T({ en: "Account", zh: "账号" })}</Label>
+              <RefreshButton
+                onClick={channelList.refresh}
+                busy={channelList.loading}
+                tooltip={T({ en: "Reload linked accounts", zh: "重新加载已绑定账号" })}
+              />
+            </div>
+            {channelList.loading ? (
               <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
             ) : channels.length === 0 ? (
               <p className="text-xs text-muted-foreground italic">{T({ en: "No accounts linked", zh: "尚未绑定账号" })}</p>
@@ -365,30 +380,21 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
   const { updateNodeData } = useFlowEditor();
   const conditions: Condition[] = data.conditions || [];
   const channelId = data.channelId as string;
-  const [channels, setChannels] = useState<ChannelOption[]>([]);
-  const [lists, setLists] = useState<{ id: string; name: string }[]>([]);
-  const [loadingLists, setLoadingLists] = useState(false);
+
+  const channelList = useRefreshableList<ChannelOption[]>(channelListFetcher("X"), []);
+  const loadedChannels = channelList.data;
+  const channels = loadedChannels ?? [];
 
   useEffect(() => {
-    api.channels.listCached("X")
-      .then((chs) => {
-        setChannels(chs);
-        // Safety net: auto-select the only connected account, same pattern XActionInspector uses.
-        if (chs.length === 1 && !channelId) {
-          updateNodeData(nodeId, { channelId: chs[0].id, mode: CONTENT_X_TRIGGER_MODE_LIST_POSTS, listId: "", listName: "" });
-        }
-      })
-      .catch(() => setChannels([]));
-  }, []);
+    // Safety net: auto-select the only connected account, same pattern XActionInspector uses.
+    if (loadedChannels?.length === 1 && !channelId) {
+      updateNodeData(nodeId, { channelId: loadedChannels[0].id, mode: CONTENT_X_TRIGGER_MODE_LIST_POSTS, listId: "", listName: "" });
+    }
+  }, [loadedChannels, channelId, nodeId]);
 
-  useEffect(() => {
-    if (!channelId) { setLists([]); return; }
-    setLoadingLists(true);
-    api.channels.xLists(channelId)
-      .then((res) => setLists(res.lists || []))
-      .catch(() => setLists([]))
-      .finally(() => setLoadingLists(false));
-  }, [channelId]);
+  // 名单住在 x.com：用户很可能是发现名单不在列表里，去 X 上新建一个再切回来。
+  const listResult = useRefreshableList(() => api.channels.xLists(channelId), [channelId], { enabled: !!channelId });
+  const lists = listResult.data?.lists ?? [];
 
   return (
     <ChannelNodePanel
@@ -403,7 +409,14 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
       }
       account={
         <div>
-          <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
+          <div className="flex items-center justify-between mb-1">
+            <Label className="text-xs">{T({ en: "Account", zh: "账号" })}</Label>
+            <RefreshButton
+              onClick={channelList.refresh}
+              busy={channelList.loading}
+              tooltip={T({ en: "Reload linked accounts", zh: "重新加载已绑定账号" })}
+            />
+          </div>
           {channels.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">{T({ en: "No X accounts linked", zh: "尚未绑定 X 账号" })}</p>
           ) : (
@@ -422,11 +435,21 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
       }
     >
       <div>
-        <Label className="text-xs block mb-1">{T({ en: "List", zh: "名单" })}</Label>
+        <div className="flex items-center justify-between mb-1">
+          <Label className="text-xs">{T({ en: "List", zh: "名单" })}</Label>
+          <RefreshButton
+            onClick={listResult.refresh}
+            busy={listResult.loading}
+            tooltip={T({ en: "Reload Lists from X", zh: "从 X 重新加载名单" })}
+          />
+        </div>
         {!channelId ? (
           <p className="text-xs text-muted-foreground italic">{T({ en: "Select an account first", zh: "请先选择账号" })}</p>
-        ) : loadingLists ? (
+        ) : listResult.loading ? (
           <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
+        ) : listResult.error ? (
+          // 取不到 ≠ 没有名单：前者要重试，后者要去 X 上建一个。压平成空列表会让用户白找一圈。
+          <p className="text-xs text-destructive italic">{T({ en: "Could not load Lists from X. Try again later.", zh: "无法从 X 获取名单，请稍后重试。" })}</p>
         ) : lists.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">{T({ en: "No owned Lists found on this account", zh: "该账号没有自建名单" })}</p>
         ) : (
@@ -473,15 +496,10 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
   // useMemo 按 nodeId 重新计算快照，而不是 useState 的一次性初始化（否则切节点后
   // 快照会停留在第一个被选中节点上）。
   const initialSubs = useMemo(() => resolveYouTubeSubscriptions(data), [nodeId]);
-  const [state, setState] = useState<{ connected: boolean; accountChannelId: string | null; email?: string; subscriptions: { channelId: string; channelName: string; thumbnailUrl: string }[] }>({
-    connected: false, accountChannelId: null, subscriptions: [],
-  });
 
-  useEffect(() => {
-    api.channels.youtubeSubscriptions()
-      .then(setState)
-      .catch(() => setState({ connected: false, accountChannelId: null, subscriptions: [] }));
-  }, []);
+  // 订阅列表住在 youtube.com：用户会去 YouTube 订阅一个频道再切回这个从未卸载的标签页。
+  const subsResult = useRefreshableList(() => api.channels.youtubeSubscriptions(), []);
+  const state = subsResult.data ?? { connected: false, accountChannelId: null as string | null, email: undefined as string | undefined, subscriptions: [] as { channelId: string; channelName: string; thumbnailUrl: string }[] };
 
   return (
     <ChannelNodePanel
@@ -506,8 +524,25 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
       }
     >
       <div>
-        <Label className="text-xs block mb-1">{T({ en: "Subscriptions", zh: "订阅" })}</Label>
-        {!state.connected ? (
+        <div className="flex items-center justify-between mb-1">
+          <Label className="text-xs">{T({ en: "Subscriptions", zh: "订阅" })}</Label>
+          <RefreshButton
+            onClick={subsResult.refresh}
+            busy={subsResult.loading}
+            tooltip={T({ en: "Reload subscriptions from YouTube", zh: "从 YouTube 重新加载订阅" })}
+          />
+        </div>
+        {/* 首个响应落地前必须是 loading：直接摆「去连接 YouTube 账号」会把一个连着账号的
+            用户支去做无用功——与「取数失败不许退化成空列表」是同一类误导。 */}
+        {subsResult.loading ? (
+          <p className="text-xs text-muted-foreground italic">
+            {T({ en: "Loading your subscriptions from YouTube…", zh: "正在从 YouTube 获取你的订阅…" })}
+          </p>
+        ) : subsResult.error ? (
+          <p className="text-xs text-destructive italic">
+            {T({ en: "Could not load your subscriptions from YouTube. Try again later.", zh: "无法从 YouTube 获取你的订阅，请稍后重试。" })}
+          </p>
+        ) : !state.connected ? (
           <p className="text-xs text-muted-foreground italic">
             {T({ en: "Connect your YouTube account from the Social page to pick a subscription.", zh: "请先在社交页面连接 YouTube 账号，再选择订阅。" })}
           </p>
@@ -574,26 +609,21 @@ function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data:
   // 条目要一直留在选项里，否则取消勾选的瞬间它就消失、再也勾不回来。按 nodeId 重算
   // （组件不按 nodeId 加 key，切节点不会重新挂载）。
   const initialRepos = useMemo(() => resolveGitHubRepos(data), [nodeId]);
-  const [state, setState] = useState<{
-    // 首次响应落地前必须是 loading，不能直接摆 connected:false 的文案：listWatchedRepos
-    // 最多要顺序翻 10 页 GitHub（link/src/services/github-api.ts），这几秒里会让一个账号
-    // 好好的用户去"连接 GitHub 账号"——与"502 不许退化成空列表"是同一类误导。
-    loading: boolean;
-    connected: boolean;
-    accountChannelId: string | null;
-    // GitHub 用户名，账号块显示用。老渠道可能没有，按可缺失处理。
-    login?: string | null;
-    repos: { fullName: string; name: string; description: string | null }[];
-    // 取数失败必须与"没有 Watch 任何仓库"分开：两者都是空列表，但一个要用户重试、
-    // 另一个要用户去 GitHub 上 Watch 仓库。降级成空列表会让用户白找一圈。
-    error: boolean;
-  }>({ loading: true, connected: false, accountChannelId: null, repos: [], error: false });
 
-  useEffect(() => {
-    api.channels.githubRepos()
-      .then((r) => setState({ ...r, loading: false, error: false }))
-      .catch(() => setState({ loading: false, connected: false, accountChannelId: null, repos: [], error: true }));
-  }, []);
+  // useRefreshableList 保住这里原有的三态，一个都不许压平：
+  // - loading：首次响应落地前必须是 loading，不能直接摆 connected:false 的文案。
+  //   listWatchedRepos 最多要顺序翻 10 页 GitHub（link/src/services/github-api.ts），
+  //   这几秒里会让一个账号好好的用户去"连接 GitHub 账号"——与"502 不许退化成空列表"
+  //   是同一类误导。
+  // - error：取数失败必须与"没有 Watch 任何仓库"分开。两者都是空列表，但一个要用户
+  //   重试、另一个要用户去 GitHub 上 Watch 仓库。降级成空列表会让用户白找一圈。
+  // - ready：data 为真实响应，repos 空就是真的空。
+  const repoResult = useRefreshableList(() => api.channels.githubRepos(), []);
+  const connected = repoResult.data?.connected ?? false;
+  const accountChannelId = repoResult.data?.accountChannelId ?? null;
+  // GitHub 用户名，账号块显示用。老渠道可能没有，按可缺失处理。
+  const login = repoResult.data?.login ?? null;
+  const repos = repoResult.data?.repos ?? [];
 
   return (
     <ChannelNodePanel
@@ -607,12 +637,12 @@ function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data:
         </div>
       }
       account={
-        state.connected ? (
+        connected ? (
           <div>
             <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
-            <Select value={state.accountChannelId || ""} disabled className="w-full text-sm">
-              <option value={state.accountChannelId || ""}>
-                {state.login ? `@${state.login}` : T({ en: "Connected account", zh: "已连接账号" })}
+            <Select value={accountChannelId || ""} disabled className="w-full text-sm">
+              <option value={accountChannelId || ""}>
+                {login ? `@${login}` : T({ en: "Connected account", zh: "已连接账号" })}
               </option>
             </Select>
           </div>
@@ -620,23 +650,30 @@ function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data:
       }
     >
       <div>
-        <Label className="text-xs block mb-1">{T({ en: "Repositories", zh: "仓库" })}</Label>
-        {state.loading ? (
+        <div className="flex items-center justify-between mb-1">
+          <Label className="text-xs">{T({ en: "Repositories", zh: "仓库" })}</Label>
+          <RefreshButton
+            onClick={repoResult.refresh}
+            busy={repoResult.loading}
+            tooltip={T({ en: "Reload watched repositories from GitHub", zh: "从 GitHub 重新加载关注的仓库" })}
+          />
+        </div>
+        {repoResult.loading ? (
           <p className="text-xs text-muted-foreground italic">
             {T({ en: "Loading your watched repositories from GitHub…", zh: "正在从 GitHub 获取你关注的仓库…" })}
           </p>
-        ) : state.error ? (
+        ) : repoResult.error ? (
           <p className="text-xs text-destructive italic">
             {T({ en: "Could not load your watched repositories from GitHub. Try again later.", zh: "无法从 GitHub 获取你关注的仓库，请稍后重试。" })}
           </p>
-        ) : !state.connected ? (
+        ) : !connected ? (
           <p className="text-xs text-muted-foreground italic">
             {T({ en: "Connect your GitHub account on the Social page, then pick the repos you watch.", zh: "请先在社交页面连接 GitHub 账号，再选择你关注的仓库。" })}
           </p>
         ) : /* 判 initialRepos 而不是 selectedRepos：接口返回空、但节点里存着一个已取消
                Watch 的旧选择时，取消勾选它会让整个面板塌回"未找到关注的仓库"，那条
                stale 选项再也勾不回来。快照不随勾选变化，多选框就一直在。 */
-          state.repos.length === 0 && initialRepos.length === 0 ? (
+          repos.length === 0 && initialRepos.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">
             {T({ en: "No watched repositories found — watch a repo on GitHub first.", zh: "未找到关注的仓库——请先在 GitHub 上 Watch 一个仓库。" })}
           </p>
@@ -645,8 +682,8 @@ function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data:
             options={(() => {
               // 已选但已取消 Watch（不在接口返回里）的条目也要出现，否则旧 flow 打开后
               // 无法取消勾选它。
-              const fetched = state.repos.map((r) => ({ value: r.fullName, label: r.fullName }));
-              const fetchedNames = new Set(state.repos.map((r) => r.fullName));
+              const fetched = repos.map((r) => ({ value: r.fullName, label: r.fullName }));
+              const fetchedNames = new Set(repos.map((r) => r.fullName));
               const stale = initialRepos
                 .filter((r) => !fetchedNames.has(r.fullName))
                 .map((r) => ({ value: r.fullName, label: r.fullName }));
@@ -656,7 +693,7 @@ function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data:
             onToggle={(fullName) => {
               const exists = selectedRepos.some((r) => r.fullName === fullName);
               updateNodeData(nodeId, {
-                channelId: state.accountChannelId || "",
+                channelId: accountChannelId || "",
                 repos: exists
                   ? selectedRepos.filter((r) => r.fullName !== fullName)
                   : [...selectedRepos, { fullName }],
@@ -666,6 +703,15 @@ function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data:
             tooltip={T({ en: "Select one or more repositories", zh: "选择一个或多个仓库" })}
           />
         )}
+        {/* GitHub 的 /user/subscriptions 只返回 All Activity 的 Watch，Custom（哪怕只勾了
+            Releases）在这个接口里根本不存在。不说清楚，设了 Custom 的用户看到的就是一个
+            没有解释的空列表。所以这条提示在四种状态下都要显示。 */}
+        <p className="text-xs text-muted-foreground mt-1">
+          {T({
+            en: "Only repositories you watch with “All Activity” appear here.",
+            zh: "只有以「All Activity」方式 Watch 的仓库会出现在这里。",
+          })}
+        </p>
       </div>
 
       <div className="flex items-start gap-2">
@@ -860,22 +906,20 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
   const T = useT();
   const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
-  const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
   const channelType = ACTION_CHANNEL_TYPE[data.actionType as string] || "X";
 
+  const channelList = useRefreshableList<ChannelOption[]>(channelListFetcher(channelType), [channelType]);
+  const loadedChannels = channelList.data;
+  const channels = loadedChannels ?? [];
+
   useEffect(() => {
-    api.channels.listCached(channelType)
-      .then((chs) => {
-        setChannels(chs);
-        // Safety net: if only one account is connected and this node hasn't been assigned
-        // one yet (e.g. it existed before this auto-fill feature, or the bulk fill on flow
-        // load raced with this Inspector mounting), auto-select it here too.
-        if (chs.length === 1 && !data.channelId) {
-          updateNodeData(nodeId, { channelId: chs[0].id });
-        }
-      })
-      .catch(() => setChannels([]));
-  }, [channelType]);
+    // Safety net: if only one account is connected and this node hasn't been assigned
+    // one yet (e.g. it existed before this auto-fill feature, or the bulk fill on flow
+    // load raced with this Inspector mounting), auto-select it here too.
+    if (loadedChannels?.length === 1 && !data.channelId) {
+      updateNodeData(nodeId, { channelId: loadedChannels[0].id });
+    }
+  }, [loadedChannels, data.channelId, nodeId]);
 
   return (
     <ChannelNodePanel
@@ -893,7 +937,14 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
       }
       account={
         <div>
-          <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
+          <div className="flex items-center justify-between mb-1">
+            <Label className="text-xs">{T({ en: "Account", zh: "账号" })}</Label>
+            <RefreshButton
+              onClick={channelList.refresh}
+              busy={channelList.loading}
+              tooltip={T({ en: "Reload linked accounts", zh: "重新加载已绑定账号" })}
+            />
+          </div>
           {channels.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">{T({ en: "No X accounts linked", zh: "尚未绑定 X 账号" })}</p>
           ) : (
@@ -949,16 +1000,14 @@ function YouTubeContentActionInspector({ nodeId, data }: { nodeId: string; data:
   const T = useT();
   const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
-  const [playlists, setPlaylists] = useState<{ id: string; title: string }[]>([]);
-  const [needsReconnect, setNeedsReconnect] = useState(false);
   const operation = (data.operation as string) || "save-to-playlist";
 
-  useEffect(() => {
-    if (operation !== "save-to-playlist") return;
-    api.channels.youtubePlaylists()
-      .then((res) => { setPlaylists(res.playlists); setNeedsReconnect(!!res.needsReconnect); })
-      .catch(() => { setPlaylists([]); });
-  }, [operation]);
+  // 播放列表住在 youtube.com：用户会去 YouTube 新建一个播放列表再切回来。
+  const playlistResult = useRefreshableList(() => api.channels.youtubePlaylists(), [], {
+    enabled: operation === "save-to-playlist",
+  });
+  const playlists = playlistResult.data?.playlists ?? [];
+  const needsReconnect = !!playlistResult.data?.needsReconnect;
 
   return (
     <ChannelNodePanel
@@ -983,7 +1032,14 @@ function YouTubeContentActionInspector({ nodeId, data }: { nodeId: string; data:
     >
       {operation === "save-to-playlist" && (
         <div>
-          <Label className="text-xs block mb-1">{T({ en: "Playlist", zh: "播放列表" })}</Label>
+          <div className="flex items-center justify-between mb-1">
+            <Label className="text-xs">{T({ en: "Playlist", zh: "播放列表" })}</Label>
+            <RefreshButton
+              onClick={playlistResult.refresh}
+              busy={playlistResult.loading}
+              tooltip={T({ en: "Reload playlists from YouTube", zh: "从 YouTube 重新加载播放列表" })}
+            />
+          </div>
           <Select
             value={data.playlistId || ""}
             onChange={(e: SelectChange) => {
@@ -998,6 +1054,12 @@ function YouTubeContentActionInspector({ nodeId, data }: { nodeId: string; data:
               <option key={p.id} value={p.id}>{p.title}</option>
             ))}
           </Select>
+          {/* 取不到 ≠ 一个播放列表都没有：前者要重试，后者要去 YouTube 建一个。 */}
+          {playlistResult.error && (
+            <p className="text-xs text-destructive italic mt-1">
+              {T({ en: "Could not load your playlists from YouTube. Try again later.", zh: "无法从 YouTube 获取播放列表，请稍后重试。" })}
+            </p>
+          )}
           {needsReconnect && (
             <p className="text-xs text-muted-foreground mt-1">
               {T({ en: "Reconnect your YouTube account on the Social page to grant save/like permission.", zh: "请在社交页面重新连接 YouTube 账号，以授予收藏/点赞权限。" })}

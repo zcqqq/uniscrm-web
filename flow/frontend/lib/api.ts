@@ -45,6 +45,11 @@ export interface ChannelOption {
 
 // Per-channelType cache so the "auto-fill the only connected account" logic (template load,
 // manual node add, Inspector open) doesn't fire a redundant /api/channels request each time.
+//
+// 这份缓存是模块级的：一个页面会话里记忆化到底，整页刷新之前不会失效。用户在别的页面
+// 连上一个新渠道再切回编辑器（编辑器从未卸载），账号下拉框就还是老的那一组。所以缓存
+// 必须配一个显式作废入口——见 invalidateChannelListCache。记忆化本身要留着：它挡的是
+// 多个 Inspector 同时挂载时对同一个 /api/channels 的并发重复请求。
 const channelListCache: Record<string, Promise<ChannelOption[]>> = {};
 
 export const api = {
@@ -99,6 +104,18 @@ export const api = {
         channelListCache[channelType] = request<ChannelOption[]>(`/api/channels?type=${channelType}`).catch(() => []);
       }
       return channelListCache[channelType];
+    },
+    /**
+     * 丢弃记忆化的渠道列表，下一次 listCached 会真的重新发请求。
+     * 不传 channelType 则全部作废。由用户显式点「刷新」的路径调用——自动路径（如
+     * flow-editor 的 autoFillChannelIds）不该调它，那正是缓存要挡住的并发重复请求。
+     */
+    invalidateListCache: (channelType?: string) => {
+      if (channelType === undefined) {
+        for (const key of Object.keys(channelListCache)) delete channelListCache[key];
+        return;
+      }
+      delete channelListCache[channelType];
     },
     xLists: (channelId: string) =>
       request<{ lists: { id: string; name: string }[] }>(`/api/channels/${channelId}/x-lists`),

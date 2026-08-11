@@ -99,9 +99,22 @@ export const api = {
   channels: {
     list: (channelType: string) =>
       request<ChannelOption[]>(`/api/channels?type=${channelType}`),
+    /**
+     * 失败会 reject（不是回空数组），并且失败的 promise 不留在缓存里。
+     *
+     * 这两条都是硬要求。此前这里是 .catch(() => [])：一次瞬时 502 会被记忆化成
+     * "这个租户一个账号都没有"，整场会话都翻不了身——用户被告知去绑定一个他早就
+     * 绑好的账号，而正确的动作是重试。空列表和取数失败是两件事，不能渲染成同一屏，
+     * 这与 githubRepos 那条 502 不许退化成空列表的规则是同一条。
+     */
     listCached: (channelType: string) => {
       if (!channelListCache[channelType]) {
-        channelListCache[channelType] = request<ChannelOption[]>(`/api/channels?type=${channelType}`).catch(() => []);
+        const pending = request<ChannelOption[]>(`/api/channels?type=${channelType}`).catch((err) => {
+          // 只清掉自己这一条：期间可能已经有人作废过缓存并放进了新的 promise。
+          if (channelListCache[channelType] === pending) delete channelListCache[channelType];
+          throw err;
+        });
+        channelListCache[channelType] = pending;
       }
       return channelListCache[channelType];
     },

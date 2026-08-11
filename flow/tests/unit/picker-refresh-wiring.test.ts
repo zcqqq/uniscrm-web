@@ -34,6 +34,14 @@ describe("外部列表选择器的刷新接线", () => {
     expect(count(inspectorSource, '{ en: "Reload linked accounts", zh: "重新加载已绑定账号" }')).toBe(3);
   });
 
+  it("三个账号选择器都有 loading 与 error 分支，不会把刷新中/取不到渲染成「尚未绑定」", () => {
+    // refresh() 会把 data 清成 null。没有 loading 分支的话，点一下刷新就会闪出
+    // "尚未绑定账号"并让当前已选账号从下拉框里消失；没有 error 分支的话，
+    // 一次 502 会被渲染成"去绑定账号"，而用户早就绑好了、真正该做的是重试。
+    expect(count(inspectorSource, "{channelList.loading ? (")).toBe(3);
+    expect(count(inspectorSource, "T(ACCOUNT_LIST_LOAD_ERROR)")).toBe(3);
+  });
+
   it("四个外部列表 + 三个账号 = 七个刷新按钮", () => {
     expect(count(inspectorSource, "<RefreshButton")).toBe(7);
   });

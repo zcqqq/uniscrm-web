@@ -200,7 +200,10 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
     const channelsByType: Record<string, { id: string; username: string }[]> = {};
     await Promise.all(
       Array.from(neededTypes).map(async (ct) => {
-        channelsByType[ct] = await api.channels.listCached(ct);
+        // listCached 现在会在取数失败时 reject。自动填充是加载 flow 时的尽力而为，
+        // 取不到就当"不知道有哪些账号"跳过这一类，绝不能把整个 flow 的加载带崩，
+        // 也不能凭空判定"只有一个账号"去改图。
+        channelsByType[ct] = await api.channels.listCached(ct).catch(() => []);
       })
     );
 

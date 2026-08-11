@@ -25,6 +25,19 @@ let result: unknown = null;
 let queued: Array<() => void> = [];
 let rendering = false;
 let dirty = false;
+// 每一趟渲染在「effect 还没跑」的那一刻的返回值。用来断言 useState 的初值本身
+// （React 里就是首帧渲染出去的东西），而不只是 effect 跑完之后的状态。
+let snapshots: unknown[] = [];
+// 卸载之后还发生的 setState 次数。React 里这会是一次泄漏（或 act 警告），这里记下来
+// 让测试可以直接断言"没有"，而不是靠"没抛错"这种什么都证明不了的说法。
+let writesAfterUnmount = 0;
+// 渲染失控（effect 依赖写错就会这样：取数 → setState → 重渲染 → 再取数）时熔断。
+// 刻意不抛异常：抛出来的那个错会顺着 promise 回调变成 unhandled rejection，被
+// vitest 的 --dangerouslyIgnoreUnhandledErrors 吞掉，然后剩下的在途 promise 继续
+// 制造新一轮渲染，最后是 worker 被拖死、报一句看不懂的 "Worker exited unexpectedly"。
+// 熔断之后一切渲染变成空操作，测试里那条计数断言就能干干净净地红。
+const MAX_RENDERS = 500;
+let runaway = false;
 
 function depsEqual(a: unknown[] | undefined, b: unknown[] | undefined): boolean {
   if (a === undefined || b === undefined) return false;
@@ -36,12 +49,21 @@ function renderOnce() {
   cursor = 0;
   queued = [];
   result = renderFn!();
+  snapshots.push(result);
   const effects = queued;
   queued = [];
   for (const run of effects) run();
 }
 
 function flushRender() {
+  if (renderFn === null) {
+    // 已卸载。真 React 在这里是警告 + 丢弃，这里记一笔并安静返回——如果任由它去调
+    // renderFn 会在 promise 回调里抛错，而抛出来的错正好被 vitest 的
+    // --dangerouslyIgnoreUnhandledErrors 吞掉，测试反而看不见。
+    writesAfterUnmount++;
+    return;
+  }
+  if (runaway) return;
   if (rendering) {
     dirty = true;
     return;
@@ -52,7 +74,10 @@ function flushRender() {
     do {
       dirty = false;
       renderOnce();
-      if (++guard > 50) throw new Error("mini-react: render loop did not settle in 50 passes");
+      if (++guard > 50 || snapshots.length > MAX_RENDERS) {
+        runaway = true;
+        break;
+      }
     } while (dirty);
   } finally {
     rendering = false;
@@ -115,6 +140,14 @@ export function useEffect(fn: () => (() => void) | void, deps?: unknown[]): void
 
 export interface HookHandle<T> {
   readonly current: T;
+  /** 每一趟渲染在 effect 跑之前的返回值，[0] 就是首帧。 */
+  readonly snapshots: readonly T[];
+  /** 渲染趟数。用来断言"没有重新取数"之类的事没有偷偷多渲染一轮。 */
+  readonly renders: number;
+  /** 卸载之后仍然发生的 setState 次数，应恒为 0。 */
+  readonly writesAfterUnmount: number;
+  /** 渲染是否失控到被熔断。为 true 说明 effect 的依赖数组写错了。 */
+  readonly runaway: boolean;
   /** 外部原因（如 props 变化）导致的重渲染。 */
   rerender: () => void;
   unmount: () => void;
@@ -124,11 +157,26 @@ export interface HookHandle<T> {
 export function renderHook<T>(fn: () => T): HookHandle<T> {
   slots = [];
   cursor = 0;
+  snapshots = [];
+  writesAfterUnmount = 0;
+  runaway = false;
   renderFn = fn as () => unknown;
   flushRender();
   return {
     get current() {
       return result as T;
+    },
+    get snapshots() {
+      return snapshots as readonly T[];
+    },
+    get renders() {
+      return snapshots.length;
+    },
+    get writesAfterUnmount() {
+      return writesAfterUnmount;
+    },
+    get runaway() {
+      return runaway;
     },
     rerender: flushRender,
     unmount() {

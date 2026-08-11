@@ -27,7 +27,13 @@ describe("useRefreshableList", () => {
     const d = deferred<string[]>();
     const hook = renderHook(() => useRefreshableList(() => d.promise, []));
 
-    // 这一帧决定了 GitHub 面板会不会把"你还没连接账号"闪给一个连着账号的用户。
+    // 首帧（effect 还没跑）就必须是 loading —— 这一帧决定了 GitHub 面板会不会把
+    // "你还没连接账号"闪给一个连着账号的用户。用 snapshots[0] 而不是 current：
+    // mini-react 和 React 一样在渲染之后同步跑 effect，只看 current 的话，一个
+    // useState 初值写成 "ready"、靠 effect 才改成 loading 的实现同样能过。
+    expect(hook.snapshots[0].loading).toBe(true);
+    expect(hook.snapshots[0].data).toBeNull();
+
     expect(hook.current.loading).toBe(true);
     expect(hook.current.error).toBe(false);
     expect(hook.current.data).toBeNull();
@@ -118,16 +124,17 @@ describe("useRefreshableList", () => {
     hook.unmount();
   });
 
-  it("deps 变化重新取数，deps 不变的重渲染不重复取数", async () => {
+  it("deps 变化才重新取数，deps 不变的重渲染不重复取数", async () => {
     let dep = "A";
     const fetcher = vi.fn(async () => [dep]);
     const hook = renderHook(() => useRefreshableList(fetcher, [dep]));
     await settle();
     expect(fetcher).toHaveBeenCalledTimes(1);
 
+    // 这里 fetcher 是同一个函数对象，测的只是"deps 没变就不重新取数"。
+    // fetcher 换身份的情形另有一条用例。
     hook.rerender();
     await settle();
-    // fetcher 每次渲染都是新函数，但它不参与依赖比较——否则每渲染一次就打一次外部 API。
     expect(fetcher).toHaveBeenCalledTimes(1);
 
     dep = "B";
@@ -138,13 +145,44 @@ describe("useRefreshableList", () => {
     hook.unmount();
   });
 
-  it("卸载后到达的响应不再写状态", async () => {
+  it("fetcher 每次渲染换新身份也不重新取数——它进了依赖数组就是无限取数循环", async () => {
+    // 七个调用点全都传内联箭头函数，每渲染一次就是一个新函数对象。fetcher 一旦进了
+    // effect 的依赖数组：取数 → setState → 重渲染 → 新 fetcher → 再取数，对
+    // github.com / youtube.com / x.com 打出一个无上限的循环。所以它必须走 ref。
+    let calls = 0;
+    const hook = renderHook(() =>
+      useRefreshableList(async () => {
+        calls++;
+        return [calls];
+      }, [])
+    );
+    await settle();
+    expect(calls).toBe(1);
+
+    for (let i = 0; i < 5; i++) {
+      hook.rerender();
+      await settle();
+    }
+    expect(calls).toBe(1);
+    expect(hook.runaway).toBe(false);
+    expect(hook.current.data).toEqual([1]);
+    hook.unmount();
+  });
+
+  it("卸载后到达的响应不写状态", async () => {
     const d = deferred<string[]>();
     const hook = renderHook(() => useRefreshableList(() => d.promise, []));
+    const rendersAtUnmount = hook.renders;
+
     hook.unmount();
     d.resolve(["late"]);
     await settle();
-    // 没有抛错、也没有把数据写回一个已经卸载的组件即可。
-    expect(true).toBe(true);
+
+    // 断言的是真实性质：effect 的 cleanup 把这次在途取数标成了 cancelled，所以
+    // 响应到达时 hook 根本没有调 setState。写成 expect(true).toBe(true) 的话，
+    // 卸载后写状态引发的报错会被 --dangerouslyIgnoreUnhandledErrors 吞掉，
+    // 这条用例永远绿。
+    expect(hook.writesAfterUnmount).toBe(0);
+    expect(hook.renders).toBe(rendersAtUnmount);
   });
 });

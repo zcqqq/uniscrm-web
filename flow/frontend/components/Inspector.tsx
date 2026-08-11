@@ -58,6 +58,14 @@ function channelListFetcher(channelType: string) {
   };
 }
 
+// 三个账号选择器共用一条失败文案：取不到 ≠ 没绑定账号。前者要用户重试，后者要用户
+// 去绑定；渲染成同一屏就会让一个早就绑好账号的用户再去绑一次。放在这里而不是抄三遍，
+// 是为了让这三处不会各自漂移成三种说法。
+const ACCOUNT_LIST_LOAD_ERROR: LocalizedString = {
+  en: "Could not load your linked accounts. Try again later.",
+  zh: "无法获取已绑定账号，请稍后重试。",
+};
+
 function ValueInput({
   value,
   onChange,
@@ -342,6 +350,8 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
             </div>
             {channelList.loading ? (
               <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
+            ) : channelList.error ? (
+              <p className="text-xs text-destructive italic">{T(ACCOUNT_LIST_LOAD_ERROR)}</p>
             ) : channels.length === 0 ? (
               <p className="text-xs text-muted-foreground italic">{T({ en: "No accounts linked", zh: "尚未绑定账号" })}</p>
             ) : (
@@ -417,7 +427,14 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
               tooltip={T({ en: "Reload linked accounts", zh: "重新加载已绑定账号" })}
             />
           </div>
-          {channels.length === 0 ? (
+          {/* refresh 期间必须显示 loading：hook 会把 data 清成 null，直接落到
+              channels.length === 0 就会在刷新的一瞬间闪出"尚未绑定 X 账号"、
+              并让当前已选账号从下拉框里消失。error 同理要与"没绑定"分开。 */}
+          {channelList.loading ? (
+            <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
+          ) : channelList.error ? (
+            <p className="text-xs text-destructive italic">{T(ACCOUNT_LIST_LOAD_ERROR)}</p>
+          ) : channels.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">{T({ en: "No X accounts linked", zh: "尚未绑定 X 账号" })}</p>
           ) : (
             <Select
@@ -945,7 +962,13 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
               tooltip={T({ en: "Reload linked accounts", zh: "重新加载已绑定账号" })}
             />
           </div>
-          {channels.length === 0 ? (
+          {/* 同 XContentTriggerInspector：refresh 会把 data 清成 null，没有 loading
+              分支就会闪出"尚未绑定"并让已选账号消失；error 也要与"没绑定"分开。 */}
+          {channelList.loading ? (
+            <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
+          ) : channelList.error ? (
+            <p className="text-xs text-destructive italic">{T(ACCOUNT_LIST_LOAD_ERROR)}</p>
+          ) : channels.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">{T({ en: "No X accounts linked", zh: "尚未绑定 X 账号" })}</p>
           ) : (
             <Select

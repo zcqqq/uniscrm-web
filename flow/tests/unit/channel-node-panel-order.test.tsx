@@ -117,6 +117,9 @@ const CHANNEL_NODE_PANELS: [string, string, string | null][] = [
   ["GitHubContentTriggerInspector", 'en: "Event"', 'en: "Account"'],
   // 本次迁移
   ["XTriggerInspector", 'en: "Event"', 'en: "Account"'],
+  // Message 块原本夹在动作块与账号块之间，迁移后落到账号之后（用户拍板：宁可挪一个
+  // 字段，也不留一个手写面板当反面样板）。出现条件 data.xEvent === "create-dm" 不变。
+  ["XActionInspector", 'en: "Action"', 'en: "Account"'],
   ["XContentTriggerInspector", 'en: "Event"', 'en: "Account"'],
   ["XContentActionInspector", 'en: "Operation"', 'en: "Target Account"'],
   ["TikTokContentActionInspector", 'en: "Operation"', 'en: "Target Account"'],

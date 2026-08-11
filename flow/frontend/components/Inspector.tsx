@@ -878,9 +878,9 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
   }, [channelType]);
 
   return (
-    <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("xAction"))}</h4>
-      <div className="space-y-3">
+    <ChannelNodePanel
+      title={T(nodeLabel("xAction"))}
+      operation={
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Action", zh: "动作" })}</Label>
           <OperationSelect
@@ -890,19 +890,8 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
             placeholder={T({ en: "Select action...", zh: "选择动作…" })}
           />
         </div>
-        {data.xEvent === "create-dm" && (
-          <div>
-            <Label className="text-xs block mb-1">{T({ en: "Message", zh: "消息" })}</Label>
-            <Textarea
-              value={data.messageText || ""}
-              onChange={(e: TextareaChange) => updateNodeData(nodeId, { messageText: e.target.value })}
-              placeholder={T({ en: "Hi $user.username!", zh: "你好，$user.username！" })}
-              rows={3}
-              className="w-full text-sm font-mono"
-            />
-            <p className="text-xs text-muted-foreground mt-1">{T({ en: "Use $user.name, $event.message_text etc.", zh: "可使用 $user.name、$event.message_text 等变量。" })}</p>
-          </div>
-        )}
+      }
+      account={
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
           {channels.length === 0 ? (
@@ -920,8 +909,25 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
             </Select>
           )}
         </div>
-      </div>
-    </div>
+      }
+    >
+      {/* 这一块此前夹在动作块与账号块之间，迁移后落到账号之后——本文件唯一一处
+          位置变化，是有意的：留一个手写面板在文件里，下一个人照着抄的就可能是那个
+          不合规范的样板，而这正是 ChannelNodePanel 要挡住的事。出现条件不变。 */}
+      {data.xEvent === "create-dm" && (
+        <div>
+          <Label className="text-xs block mb-1">{T({ en: "Message", zh: "消息" })}</Label>
+          <Textarea
+            value={data.messageText || ""}
+            onChange={(e: TextareaChange) => updateNodeData(nodeId, { messageText: e.target.value })}
+            placeholder={T({ en: "Hi $user.username!", zh: "你好，$user.username！" })}
+            rows={3}
+            className="w-full text-sm font-mono"
+          />
+          <p className="text-xs text-muted-foreground mt-1">{T({ en: "Use $user.name, $event.message_text etc.", zh: "可使用 $user.name、$event.message_text 等变量。" })}</p>
+        </div>
+      )}
+    </ChannelNodePanel>
   );
 }
 

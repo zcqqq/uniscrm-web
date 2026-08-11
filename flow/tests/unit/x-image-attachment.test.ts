@@ -75,6 +75,16 @@ describe("X 图片块的接线", () => {
     expect(inspectorSource).not.toContain("gpt-image-1");
   });
 
+  // Task 10: a 2271-character GitHub release body, once interpolated into a user-written prompt
+  // template ("抽象科技风插画，基于内容：$content.content_text"), produced a 2284-character
+  // prompt — over flux's 2048 limit — and silently degraded to text-only. Removing the field
+  // (not just guarding its length) makes that failure mode structurally impossible: content's
+  // stage 1 now reads the source content itself and writes the visual description.
+  it("节点面板不再有图片提示词输入框", () => {
+    expect(inspectorSource).not.toContain("imagePrompt");
+    expect(inspectorSource).not.toContain("抽象科技风插画");
+  });
+
   it("TikTok 的 Image Skill 下拉已经拿掉", () => {
     expect(inspectorSource).not.toContain('{ en: "Image Skill", zh: "图片技能" }');
     expect(inspectorSource).not.toContain("imageSkillId");

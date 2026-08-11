@@ -117,10 +117,23 @@ describe("buildActionData derives hasBranches from the registry's externalApi fa
   it("carries the X image attachment fields through to the action", () => {
     const built = buildActionData(node({
       actionType: "xContentAction", operation: "create-post", prompt: "p", provider: "default",
-      attachImage: true, imageProvider: "openai", imagePrompt: "an abstract illustration",
+      attachImage: true, imageProvider: "openai",
     }));
     expect(built).toEqual(expect.objectContaining({
-      attachImage: true, imageProvider: "openai", imagePrompt: "an abstract illustration",
+      attachImage: true, imageProvider: "openai",
     }));
+  });
+
+  // 用户曾在图片提示词框里手写 "抽象科技风插画，基于内容：$content.content_text" 这类模板——
+  // 一条 2271 字符的 GitHub release body 插值后变成 2284 字符，超出 flux 的 2048 上限，出图
+  // 静默降级成纯文本。删掉这个字段（连同节点 data 里残留的 imagePrompt）让这类失败从根上
+  // 不可能发生：出图现在由 content 的 stage 1 从触发内容本身读懂、写成视觉描述。
+  it("不再产出 imagePrompt", () => {
+    const built = buildActionData(node({
+      actionType: "xContentAction", operation: "create-post", prompt: "p", provider: "default",
+      attachImage: true, imageProvider: "default", imagePrompt: "旧图里残留的",
+    }));
+    expect(built).not.toHaveProperty("imagePrompt");
+    expect(built).toEqual(expect.objectContaining({ attachImage: true, imageProvider: "default" }));
   });
 });

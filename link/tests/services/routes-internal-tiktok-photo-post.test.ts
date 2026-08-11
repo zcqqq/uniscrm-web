@@ -60,11 +60,14 @@ function withFakeD1(businessFetch: (...args: unknown[]) => unknown) {
 const baseBody = {
   contentId: "content-1",
   channelId: "tiktok-chan-1",
-  prompts: { title: "Write a catchy title", description: "Write a caption", message_image: "a cyberpunk lizard" },
+  prompts: { title: "Write a catchy title", description: "Write a caption" },
   textProvider: "none" as const,
   imageCount: 2,
   imageProvider: "default" as const,
   flowId: "flow-1",
+  // 触发内容原样，与 /content/create-post 同一套契约——不再由用户手写 prompts.message_image。
+  sourceTitle: "v2.10.0",
+  sourceText: "attribution models",
 };
 
 const channelRow = { config: JSON.stringify({ access_token: "tok-1" }), channel_type: "TIKTOK", tenant_id: 1 };
@@ -246,6 +249,38 @@ describe("POST /internal/tiktok/photo-post", () => {
     expect(res.status).toBe(200);
     const imageCall = fetchMock.mock.calls.find((c: any[]) => String(c[0]).includes("/internal/generate-image"))!;
     expect(JSON.parse(imageCall[1].body)).not.toHaveProperty("skillId");
+    vi.unstubAllGlobals();
+  });
+
+  // Task 10: prompts.message_image is gone — the request's own sourceTitle/sourceText (the
+  // triggering content, unchanged) are what get forwarded to every generate-image call, once
+  // per requested image.
+  it("转发请求体的 sourceTitle / sourceText 给 generate-image，不再用 prompts.message_image", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes("/internal/generate-image")) {
+        return new Response(JSON.stringify({ url: "https://content-dev.uni-scrm.com/public/media/fake-key-1" }), { status: 200 });
+      }
+      if (String(url).includes("/v2/post/publish/content/init/")) {
+        return new Response(JSON.stringify({ data: { publish_id: "pub-1" }, error: { code: "ok", message: "" } }), { status: 200 });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/tiktok/photo-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
+        body: JSON.stringify({ ...baseBody, imageCount: 1 }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), PIPELINE_CONTENT: mockPipelineContent() } as any
+    );
+
+    expect(res.status).toBe(200);
+    const imageCall = fetchMock.mock.calls.find((c: any[]) => String(c[0]).includes("/internal/generate-image"))!;
+    const body = JSON.parse(imageCall[1].body);
+    expect(body).toEqual(expect.objectContaining({ sourceTitle: "v2.10.0", sourceText: "attribution models" }));
+    expect(body).not.toHaveProperty("prompt");
     vi.unstubAllGlobals();
   });
 });

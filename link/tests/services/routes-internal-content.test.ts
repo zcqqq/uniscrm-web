@@ -749,7 +749,7 @@ describe("stub content-flow action endpoints", () => {
         body: JSON.stringify({
           contentId: "content-img-1", interpolatedPrompt: "raw prompt", provider: "default",
           channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
-          imagePrompt: "abstract tech illustration", imageProvider: "default",
+          sourceTitle: "v2.10.0", sourceText: "attribution models", imageProvider: "default",
         }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
@@ -759,7 +759,7 @@ describe("stub content-flow action endpoints", () => {
     expect(await res.json()).toEqual({ ok: true, id: "tweet-img-1" });
 
     const genImageCall = fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/internal/generate-image"))!;
-    expect(JSON.parse((genImageCall[1] as RequestInit).body as string)).toEqual({ tenantId: 1, prompt: "abstract tech illustration", provider: "default" });
+    expect(JSON.parse((genImageCall[1] as RequestInit).body as string)).toEqual({ tenantId: 1, sourceTitle: "v2.10.0", sourceText: "attribution models", provider: "default" });
 
     const initCall = fetchMock.mock.calls.find(([u]: [string]) => String(u) === "https://api.x.com/2/media/upload/initialize")!;
     expect(JSON.parse((initCall[1] as RequestInit).body as string).media_category).toBe("tweet_image");
@@ -767,6 +767,60 @@ describe("stub content-flow action endpoints", () => {
     const tweetCall = fetchMock.mock.calls.find(([u]: [string]) => String(u) === "https://api.x.com/2/tweets")!;
     const tweetBody = JSON.parse((tweetCall[1] as RequestInit).body as string);
     expect(tweetBody.media.media_ids).toEqual(["media-img-1"]);
+    vi.unstubAllGlobals();
+  });
+
+  // Task 10: the wire contract dropped the user-authored `prompt` field entirely — link no
+  // longer builds a diffusion prompt itself, it just relays the triggering content's title/text
+  // to content's two-stage /internal/generate-image, which reads it and writes the visual
+  // description itself (stage 1).
+  it("把触发内容原样转给 generate-image，不再自己拼提示词", async () => {
+    const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+
+    const imageBytes = new Uint8Array(200 * 1024);
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/internal/generate-image")) {
+        return new Response(JSON.stringify({ url: "https://content-dev.uni-scrm.com/public/media/img-2" }), { status: 200 });
+      }
+      if (u.includes("/internal/generate")) return new Response(JSON.stringify({ text: "generated post text" }), { status: 200 });
+      if (u === "https://content-dev.uni-scrm.com/public/media/img-2") {
+        return new Response(imageBytes, { status: 200, headers: { "Content-Type": "image/jpeg", "Content-Length": String(imageBytes.length) } });
+      }
+      if (u === "https://api.x.com/2/media/upload/initialize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-img-2" } }), { status: 200 });
+      }
+      if (u === "https://api.x.com/2/media/upload/media-img-2/append" && init?.method === "POST") {
+        return new Response(null, { status: 204 });
+      }
+      if (u === "https://api.x.com/2/media/upload/media-img-2/finalize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-img-2" } }), { status: 200 });
+      }
+      if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-img-2", text: "generated post text" } }), { status: 201 });
+      throw new Error(`Unexpected fetch: ${u}`);
+    });
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({
+          contentId: "content-img-2", interpolatedPrompt: "raw prompt", provider: "default",
+          channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
+          sourceTitle: "v2.10.0", sourceText: "attribution models", imageProvider: "default",
+        }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, id: "tweet-img-2" });
+
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).includes("/internal/generate-image"))!;
+    const body = JSON.parse((call[1] as RequestInit).body as string);
+    expect(body).toEqual(expect.objectContaining({ sourceTitle: "v2.10.0", sourceText: "attribution models" }));
+    expect(body).not.toHaveProperty("prompt");
     vi.unstubAllGlobals();
   });
 
@@ -792,7 +846,7 @@ describe("stub content-flow action endpoints", () => {
         body: JSON.stringify({
           contentId: "content-noimg-1", interpolatedPrompt: "raw prompt", provider: "default",
           channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
-          imagePrompt: "abstract tech illustration", imageProvider: "default",
+          sourceTitle: "v2.10.0", sourceText: "attribution models", imageProvider: "default",
         }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
@@ -832,7 +886,7 @@ describe("stub content-flow action endpoints", () => {
         body: JSON.stringify({
           contentId: "content-netdown-1", interpolatedPrompt: "raw prompt", provider: "default",
           channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
-          imagePrompt: "abstract tech illustration", imageProvider: "default",
+          sourceTitle: "v2.10.0", sourceText: "attribution models", imageProvider: "default",
         }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
@@ -884,7 +938,7 @@ describe("stub content-flow action endpoints", () => {
           contentId: "content-both-1", interpolatedPrompt: "raw prompt", provider: "default",
           channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
           videoUrl: "https://content-dev.uni-scrm.com/public/media/vid-both",
-          imagePrompt: "an image", imageProvider: "default",
+          sourceTitle: "an image", imageProvider: "default",
         }),
       }),
       { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }

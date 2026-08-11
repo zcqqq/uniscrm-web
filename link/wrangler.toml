@@ -32,6 +32,10 @@ R2_WAREHOUSE = "b34f3ff4aec4c36584672d5bf1320757_uniscrm-dev"
 X_CLIENT_ID = "cS1kY2RlNnc1VldHSWw0LVJQSFM6MTpjaQ"
 GOOGLE_CLIENT_ID = "1038882920781-unbsoa2prpnvqufeicaqqe1mlgso5ac9.apps.googleusercontent.com"
 TIKTOK_CLIENT_KEY = "sbaw7873x5p4wuwsiw"
+# GitHub OAuth App（dev 与 prod 是两个独立的 App —— OAuth App 只有一个 callback URL，
+# 两个域名共用不了）。callback 必须逐字等于 https://link-dev.uni-scrm.com/api/auth/github/callback。
+# 对应的 GITHUB_CLIENT_SECRET 走 `wrangler secret put`，不进这个文件。
+GITHUB_CLIENT_ID = "Ov23liUjznh0pNFvKm1Z"
 INTERNAL_SECRET = "dev-internal-secret"
 # GitHub release 轮询总开关（cron.ts githubReleasesEnabled）。这条链路会公开发帖、给真人
 # 发私信，出问题时改成 "0" 就能不动代码把它整个停掉。缺省即开启，"1" 只是把默认写明。
@@ -105,6 +109,9 @@ R2_WAREHOUSE = "b34f3ff4aec4c36584672d5bf1320757_uniscrm"
 GITHUB_RELEASES_ENABLED = "1"
 X_CLIENT_ID = "cXVhYUNyWVJWSlFtdFdjekt3V1U6MTpjaQ"
 GOOGLE_CLIENT_ID = "1038882920781-qado86f0g0hcf7t3l74b8acgu1a8teg4.apps.googleusercontent.com"
+# 见 dev 段同名变量的说明。callback 必须逐字等于
+# https://link.uni-scrm.com/api/auth/github/callback。
+GITHUB_CLIENT_ID = "Ov23liBAMsUGLmckRrjH"
 
 [[env.production.d1_databases]]
 binding = "LINK_DB"

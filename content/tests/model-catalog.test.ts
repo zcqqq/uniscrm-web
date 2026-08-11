@@ -79,3 +79,50 @@ describe("model-catalog", () => {
     });
   });
 });
+
+import {
+  filterImageModels,
+  listOpenAiImageModels,
+  listAnthropicImageModels,
+  listWorkersAiImageModels,
+  OPENAI_STATIC_IMAGE_MODELS,
+  ANTHROPIC_STATIC_IMAGE_MODELS,
+} from "../src/services/model-catalog";
+
+describe("image model discovery", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps image model ids and drops chat/embedding/audio ones", () => {
+    expect(
+      filterImageModels(["gpt-4o", "gpt-image-1", "dall-e-3", "dall-e-2", "text-embedding-3-small", "whisper-1"])
+    ).toEqual(["dall-e-2", "dall-e-3", "gpt-image-1"]);
+  });
+
+  // 这一条就是 spec 里「Anthropic 没有图片模型」那句话的全部实现——不是写死的规则，
+  // 而是同一个正则套在 Anthropic 真实返回的模型列表上自然筛空。
+  it("filters an Anthropic model list down to nothing", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: "claude-sonnet-5" }, { id: "claude-haiku-4-5-20251001" }] }), { status: 200 })
+    ));
+    expect(await listAnthropicImageModels("sk-ant-x")).toEqual([]);
+    expect(ANTHROPIC_STATIC_IMAGE_MODELS).toEqual([]);
+  });
+
+  it("lists OpenAI image models from /v1/models", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: "gpt-4o" }, { id: "gpt-image-1" }] }), { status: 200 })
+    ));
+    expect(await listOpenAiImageModels("sk-x")).toEqual(["gpt-image-1"]);
+    expect(OPENAI_STATIC_IMAGE_MODELS).toContain("gpt-image-1");
+  });
+
+  it("asks Cloudflare for Text-to-Image models, not text generation ones", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ result: [{ name: "@cf/black-forest-labs/flux-1-schnell", task: { name: "Text-to-Image" } }] }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const models = await listWorkersAiImageModels({ CF_ACCOUNT_ID: "acct", CF_API_TOKEN: "tok" } as never);
+    expect(models).toEqual(["@cf/black-forest-labs/flux-1-schnell"]);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("task=Text-to-Image");
+  });
+});

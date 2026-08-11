@@ -101,11 +101,13 @@ app.put("/api/llm-credentials", async (c) => {
   const { provider, apiKey, model } = await c.req.json<{ provider: "openai" | "anthropic" | "default"; apiKey?: string; model: string }>();
   if (!provider || !model) return c.json({ error: "provider, model required" }, 400);
   if (provider === "default") {
-    await setDefaultModel(c.env, tenantId, model);
+    // imageModel is null for now -- Task 3 threads the real per-provider image model
+    // through this route and its request body.
+    await setDefaultModel(c.env, tenantId, model, null);
     return c.json({ ok: true });
   }
   if (!apiKey) return c.json({ error: "apiKey required for this provider" }, 400);
-  await setTenantLlmCredentials(c.env, tenantId, provider, apiKey, model);
+  await setTenantLlmCredentials(c.env, tenantId, provider, apiKey, model, null);
   return c.json({ ok: true });
 });
 

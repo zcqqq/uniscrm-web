@@ -13,13 +13,15 @@ beforeAll(async () => {
   await seedSession(env as never, "sess-79", 79);
   // vitest-pool-workers does not auto-apply this module's migrations/ directory (see
   // tests/llm-credentials.test.ts for the same note) -- create the post-migration schema
-  // by hand, matching migrations/0002_multi_provider_credentials.sql.
+  // by hand, matching migrations/0002_multi_provider_credentials.sql +
+  // migrations/0007_image_model.sql.
   await env.CONTENT_DB.prepare(
     `CREATE TABLE IF NOT EXISTS tenant_llm_credentials (
        tenant_id INTEGER NOT NULL,
        provider TEXT NOT NULL,
        encrypted_api_key TEXT,
        model TEXT NOT NULL,
+       image_model TEXT,
        created_at TEXT NOT NULL,
        updated_at TEXT NOT NULL,
        PRIMARY KEY (tenant_id, provider)
@@ -73,7 +75,7 @@ describe("/api/llm-credentials", () => {
       new Request("https://content-dev.uni-scrm.com/api/llm-credentials", { headers: { Cookie: "session=sess-78" } }),
       testEnv
     );
-    expect(await getRes.json()).toEqual({ providers: [{ provider: "openai", model: "gpt-4o-mini", createdAt: expect.any(String) }], defaultModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" });
+    expect(await getRes.json()).toEqual({ providers: [{ provider: "openai", model: "gpt-4o-mini", imageModel: null, createdAt: expect.any(String) }], defaultModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" });
   });
 
   it("DELETE removes a provider", async () => {

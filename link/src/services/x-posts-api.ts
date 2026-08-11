@@ -185,11 +185,16 @@ export interface MediaUploadResult {
 // POST /2/media/upload with a command= field that the "quickstart" tutorial still documents.
 // Hitting the unified endpoint with command=INIT gets a 400 "Missing media field in JSON" on
 // every call — the tutorial page is stale relative to the real, versioned API.
-export async function initMediaUpload(accessToken: string, totalBytes: number, mediaType: string): Promise<MediaUploadResult> {
+export async function initMediaUpload(
+  accessToken: string,
+  totalBytes: number,
+  mediaType: string,
+  mediaCategory: "tweet_video" | "tweet_image"
+): Promise<MediaUploadResult> {
   const res = await fetch("https://api.x.com/2/media/upload/initialize", {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ media_type: mediaType, total_bytes: totalBytes, media_category: "tweet_video" }),
+    body: JSON.stringify({ media_type: mediaType, total_bytes: totalBytes, media_category: mediaCategory }),
   });
   if (!res.ok) {
     console.error(JSON.stringify({ event: "x_media_init_failed", status: res.status, body: await res.text().catch(() => "") }));

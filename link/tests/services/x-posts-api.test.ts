@@ -182,7 +182,7 @@ describe("initMediaUpload", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await initMediaUpload("access-token-1", 1048576, "video/mp4");
+    const result = await initMediaUpload("access-token-1", 1048576, "video/mp4", "tweet_video");
 
     expect(result).toEqual({ ok: true, mediaId: "media-1" });
     const [url, init] = fetchMock.mock.calls[0];
@@ -195,7 +195,7 @@ describe("initMediaUpload", () => {
 
   it("returns ok: false on a non-2xx response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("error", { status: 400 })));
-    const result = await initMediaUpload("access-token-1", 1048576, "video/mp4");
+    const result = await initMediaUpload("access-token-1", 1048576, "video/mp4", "tweet_video");
     expect(result).toEqual({ ok: false });
     vi.unstubAllGlobals();
   });

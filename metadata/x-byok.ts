@@ -125,6 +125,7 @@ export const ContentMetadata_X: ContentMetadata[] = [
     description: {"en":"Publish a new post via the triggering channel", "zh":"通过触发该内容的账号发布新推文"},
     contentProps: [
       {propId: "message_text", aiType:"TEXT"},
+      {propId: "message_image", aiType:"IMAGE"},
       {propId: "message_video", aiType:"VIDEO"},
     ],
   },

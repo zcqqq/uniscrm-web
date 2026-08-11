@@ -212,10 +212,11 @@ describe("NODE_TYPE_REGISTRY", () => {
     expect(CONTENT_FLOW_SIDEBAR_ORDER).toContain("youtubeContentTrigger");
   });
 
-  it("create-post's contentProps include an optional VIDEO-aiType prop (message_video), alongside the existing TEXT prop", () => {
+  it("create-post's contentProps include optional IMAGE- and VIDEO-aiType props (message_image, message_video), alongside the existing TEXT prop", () => {
     const createPost = ContentMetadata_X.find((m) => m.sourceContentType === "create-post")!;
     expect(createPost.contentProps).toEqual([
       { propId: "message_text", aiType: "TEXT" },
+      { propId: "message_image", aiType: "IMAGE" },
       { propId: "message_video", aiType: "VIDEO" },
     ]);
   });

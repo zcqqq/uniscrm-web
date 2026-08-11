@@ -1165,6 +1165,14 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
                   onChange={(e: SelectChange) => updateNodeData(nodeId, { imageProvider: e.target.value })}
                   className="w-full text-sm"
                 >
+                  {/* 存档值若不在当前可用 provider 列表里（如 OpenAI 已断开、或图片模型被清空），
+                      仍要作为一个选项渲染出来，否则浏览器会把第一个选项显示为"已选中"而
+                      data.imageProvider 实际没变——面板显示的和运行时真正会发的对不上。
+                      与 content/frontend/pages/SettingsPage.tsx 的 ImageModelField 同一模式。 */}
+                  {data.imageProvider && !imageProviders.some((p) => p.provider === data.imageProvider) && (
+                    // i18n-ok: 存的是 provider id 字面量，不是展示文案
+                    <option value={data.imageProvider}>{data.imageProvider}</option>
+                  )}
                   {imageProviders.map((p) => (
                     // i18n-ok: provider 与模型 id 都是品牌名，不翻译
                     <option key={p.provider} value={p.provider}>
@@ -1524,6 +1532,12 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
                 onChange={(e: SelectChange) => updateNodeData(nodeId, { imageProvider: e.target.value })}
                 className="w-full text-sm"
               >
+                {/* 同 XContentActionInspector：存档 provider 不在当前列表里也要保留为选项，
+                    避免面板显示的和运行时真正会发的对不上。 */}
+                {data.imageProvider && !imageProviders.some((p) => p.provider === data.imageProvider) && (
+                  // i18n-ok: 存的是 provider id 字面量，不是展示文案
+                  <option value={data.imageProvider}>{data.imageProvider}</option>
+                )}
                 {imageProviders.map((p) => (
                   // i18n-ok: provider 与模型 id 都是品牌名，不翻译
                   <option key={p.provider} value={p.provider}>

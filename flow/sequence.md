@@ -82,16 +82,18 @@ sequenceDiagram
     participant CFP as content_flow_pending
 
     FW->>FW: interpolate $content.xxx into node's prompt -> interpolatedPrompt
-    Note over FW: when the node's "Attach AI-generated image" checkbox is on (non-video<br/>call site only), FW also interpolates $content.xxx into the image prompt and<br/>merges { imagePrompt, imageProvider } into the same request body below
-    FW->>LW: POST /internal/content/create-post { contentId, interpolatedPrompt, provider, targetChannelId, flowId, imagePrompt?, imageProvider? }
+    Note over FW: when the node's "Attach AI-generated image" checkbox is on (non-video<br/>call site only), FW also reads the triggering content's title/text verbatim and<br/>merges { sourceTitle, sourceText, imageProvider } into the same request body below —<br/>no image prompt is built or interpolated in flow
+    FW->>LW: POST /internal/content/create-post { contentId, interpolatedPrompt, provider, targetChannelId, flowId, sourceTitle?, sourceText?, imageProvider? }
     alt provider !== "none"
         LW->>CW: POST /internal/generate { tenantId, prompt: interpolatedPrompt, provider }
         CW-->>LW: { text }
     else provider === "none"
         Note over LW: skip content entirely, text = interpolatedPrompt verbatim
     end
-    opt imagePrompt present (and no video media id was produced)
-        LW->>CW: POST /internal/generate-image { tenantId, prompt: imagePrompt, provider: imageProvider }
+    opt sourceTitle or sourceText present (and no video media id was produced)
+        LW->>CW: POST /internal/generate-image { tenantId, sourceTitle, sourceText, provider: imageProvider }
+        CW->>CW: stage 1 (text model): distill sourceTitle/sourceText into a short visual description
+        CW->>CW: stage 2 (diffusion model): render that description into an image
         CW-->>LW: { url }  (R2 public media)
         LW->>XAPI: media/upload initialize+append+finalize (media_category="tweet_image")
         XAPI-->>LW: media_id
@@ -121,6 +123,17 @@ poll. If image generation, the image download, or the X media upload fails — i
 network error (fetch/json() rejecting), not just a non-2xx HTTP response — it is logged as
 `create_post_image_failed` (with a `stage` field distinguishing `generate` from `upload`) and the
 node still posts the text-only tweet and still records success; the image is best-effort only.
+
+Image generation inside `content` is two-stage, both stages scoped to the same
+`/internal/generate-image` call: stage 1 is a text model that turns `sourceTitle`/`sourceText`
+into a short plain-text visual description; stage 2 is the diffusion model that renders that
+description. Stage 1's system prompt is composed of the `marketingskills-image` skill's content
+plus the calling tenant's marketing context (`skill_context` row for that skill's repo, when one
+exists) — the same skill+context injection every other `generate`/`generate-image` call goes
+through, not something special-cased for images. Stage 1 itself puts no upper bound on
+`sourceText`'s length before it reaches the text model; prompt-length protection (clamping to a
+provider's max prompt size) lives in the image provider adapters (`clampPrompt`), applied to
+stage 2's diffusion prompt, not in stage 1.
 
 ## X List Posts trigger: demand-sync + per-list dedup
 

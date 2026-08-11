@@ -40,20 +40,14 @@ function count(haystack: string, needle: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// 1. 源码断言：没有面板再手写账号标签
+// 1. 源码断言：账号槽里永远是共享组件
 // ---------------------------------------------------------------------------
-
-// 七个账号选择器，全部按 ChannelNodePanel 的 account 具名槽传入（顺序由
-// channel-node-panel-order.test.tsx 守）。
-const ACCOUNT_PANELS = [
-  "XTriggerInspector",
-  "XContentTriggerInspector",
-  "YouTubeContentTriggerInspector",
-  "GitHubContentTriggerInspector",
-  "XActionInspector",
-  "XContentActionInspector",
-  "TikTokContentActionInspector",
-];
+//
+// 这里刻意不写成「禁止出现这几个标签字面量」的黑名单，也不写成「遍历这七个面板名」：
+// 黑名单只认识今天这几种拼法（en: "Posting Account"、单引号、少个空格都能绕过），
+// 名单只认识今天这七个面板，而这次要防的恰恰是**第八个**面板重新手写一遍标签。
+// 所以断言的是规则本身：ChannelNodePanel 的 account 槽，要么是 null，要么是
+// ChannelAccountField，没有第三种。这条对还不存在的面板同样成立。
 
 function inspectorBody(name: string): string {
   const start = inspectorSource.indexOf(`function ${name}(`);
@@ -63,12 +57,56 @@ function inspectorBody(name: string): string {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
-describe("账号标签只有一份", () => {
-  it("Inspector.tsx 里一个手写的账号标签都没有", () => {
-    // 这两条就是这次要修的漂移本身：五处 Account、两处 Target Account。
-    for (const literal of ['en: "Account"', 'zh: "账号"', 'en: "Target Account"', 'zh: "目标账号"']) {
-      expect(inspectorSource, `Inspector.tsx 又手写了账号标签：${literal}`).not.toContain(literal);
+/** 源码里所有 `account={…}` 槽（按花括号配对扫描），带上所属函数名好定位。 */
+function accountSlots(source: string): { owner: string; expr: string }[] {
+  const slots: { owner: string; expr: string }[] = [];
+  const re = /\baccount=\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) {
+    const from = m.index + "account=".length;
+    let depth = 0;
+    let end = -1;
+    for (let i = from; i < source.length; i++) {
+      if (source[i] === "{") depth++;
+      else if (source[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
     }
+    expect(end, `account={ 的花括号没配平（偏移 ${m.index}）`).toBeGreaterThan(-1);
+    // 往前找最近的函数声明，失败信息里好指名道姓。
+    const before = source.slice(0, m.index);
+    const owner = [...before.matchAll(/\nfunction (\w+)\(/g)].pop()?.[1] ?? "<unknown>";
+    slots.push({ owner, expr: source.slice(from, end) });
+  }
+  return slots;
+}
+
+describe("账号标签只有一份", () => {
+  it("每个 account 槽要么是 null，要么就是 ChannelAccountField——没有第三种", () => {
+    const slots = accountSlots(inspectorSource);
+    // 每个 ChannelNodePanel 恰好一个 account 槽（该 prop 必填）。数量对不上说明扫描漏了，
+    // 那样下面的循环会空转成一条永远绿的断言。
+    expect(slots.length).toBe(count(inspectorSource, "<ChannelNodePanel"));
+    expect(slots.length).toBeGreaterThanOrEqual(9);
+
+    for (const { owner, expr } of slots) {
+      if (expr.trim() === "{null}") continue; // 这个节点没有账号可展示，位置留空
+      expect(
+        expr,
+        `${owner} 的 account 槽没走 ChannelAccountField——账号块又被手写了一遍，标签会再漂一次`
+      ).toContain("<ChannelAccountField");
+    }
+  });
+
+  it("七个账号选择器，两个显式 null", () => {
+    const slots = accountSlots(inspectorSource);
+    const nulls = slots.filter((s) => s.expr.trim() === "{null}");
+    expect(slots.length - nulls.length).toBe(7);
+    expect(nulls.length).toBe(2);
   });
 
   it("标签只在共享组件里出现一次", () => {
@@ -80,12 +118,6 @@ describe("账号标签只有一份", () => {
     // 下一个读到那段的人很可能想把标签改回去。决定写在组件旁边才拦得住。
     expect(accountFieldSource).toContain("Target Account");
     expect(accountFieldSource).toContain("flow/src/index.ts");
-  });
-
-  it("七个账号选择器都渲染共享组件", () => {
-    for (const name of ACCOUNT_PANELS) {
-      expect(inspectorBody(name), `${name} 没用 ChannelAccountField`).toContain("<ChannelAccountField");
-    }
   });
 
   it("两个内容域 action 面板改走可刷新列表，不再直连 api.channels.list", () => {
@@ -168,6 +200,16 @@ describe("ChannelAccountField 的三态", () => {
     const out = texts(renderPicker({ error: true, options: null }).current).join("|");
     expect(out).toContain("Could not load your linked accounts. Try again later.");
     expect(out).not.toContain("No X accounts linked");
+  });
+
+  it("没取过数（options 为 null 且不 loading 不 error）：什么都不显示，不是「尚未绑定」", () => {
+    // useRefreshableList 在 enabled:false 时就是这个状态。把「未知」渲染成「空」是
+    // 这条线上已经修过两次的同一个错误，第三处不能因为「今天恰好没人这么调」就留着。
+    const out = texts(renderPicker({ options: null }).current).join("|");
+    expect(out).toContain("Account");
+    expect(out).not.toContain("No X accounts linked");
+    expect(out).not.toContain("Loading");
+    expect(out).not.toContain("Could not load");
   });
 
   it("ready 且为空：才显示「尚未绑定」，文案由调用方给（各渠道措辞不同）", () => {

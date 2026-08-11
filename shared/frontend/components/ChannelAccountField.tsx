@@ -53,6 +53,8 @@ export interface PickerChannelAccountFieldProps extends ChannelAccountFieldBaseP
   /**
    * 已绑定账号列表。null = 还没拿到（配合 loading / error）——
    * 取数在途与取数失败都不许冒充「空列表」，见 useRefreshableList 的三态说明。
+   * null 且既不 loading 也不 error（useRefreshableList 的 enabled:false）时本组件什么都不渲染：
+   * 那是「还没取过」，不是「一个都没有」。
    */
   options: ChannelAccountOption[] | null;
   loading: boolean;
@@ -94,7 +96,6 @@ export function ChannelAccountField(props: ChannelAccountFieldProps) {
   }
 
   const { value, onChange, options, loading, error, onRefresh, emptyText } = props;
-  const accounts = options ?? [];
 
   return (
     <div>
@@ -115,7 +116,12 @@ export function ChannelAccountField(props: ChannelAccountFieldProps) {
         <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
       ) : error ? (
         <p className="text-xs text-destructive italic">{T(ACCOUNT_LIST_LOAD_ERROR)}</p>
-      ) : accounts.length === 0 ? (
+      ) : options === null ? (
+        // 既不在途、也没失败、还没有数据 —— 就是「压根没取过」（useRefreshableList 的
+        // enabled:false 正是这个状态）。什么都不知道就什么都不说：这里如果落到下面的
+        // emptyText，就又一次把「未知」渲染成了「空」，与 loading/error 两条同一个错误。
+        null
+      ) : options.length === 0 ? (
         <p className="text-xs text-muted-foreground italic">{T(emptyText)}</p>
       ) : (
         <Select
@@ -124,7 +130,7 @@ export function ChannelAccountField(props: ChannelAccountFieldProps) {
           className="w-full text-sm"
         >
           <option value="">{T({ en: "Select account...", zh: "选择账号…" })}</option>
-          {accounts.map((ch) => (
+          {options.map((ch) => (
             <option key={ch.id} value={ch.id}>@{ch.username}</option>
           ))}
         </Select>

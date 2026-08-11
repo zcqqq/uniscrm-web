@@ -3,7 +3,6 @@ import { MARKETING_SKILLS_REPO } from "../skills/catalog";
 import { listRecentTenantContent, type RecentContentRow } from "./tenant-content";
 import { generateContent } from "./generate";
 import { listConfiguredProviders } from "./llm-credentials";
-import { getSkillContext } from "./skill-context";
 
 export const PRODUCT_MARKETING_SKILL_ID = "marketingskills-product-marketing";
 export const CONTEXT_SENTINEL = "PRODUCT-MARKETING-CONTEXT-V1";
@@ -81,9 +80,16 @@ export interface ChatMessage {
 
 // 哨兵写在围栏的语言标签位，而不是认 ```markdown：模型在对话里会为了举例输出各种
 // markdown 块，只有这个串明确表示"这是可保存的成品文档"。
+//
+// 不在这里手动拼租户现有文档：generateContent() 已经按 skillId 对应的 repo 自动注入了同一份
+// skill_context 行（见 generate.ts 的 tenantContext），紧挨在这段合同文本之前。这里只需用
+// 指代性措辞告诉模型"如果上文出现了当前文档就更新它"，覆盖有/无文档两种情况，不重复内联文档
+// 本身——否则每一轮对话都会把整份文档在 system prompt 里放两遍，白烧 token 且随文档增长恶化。
 export function buildChatContract(): string {
   return (
     "You are interviewing this user to produce their Product Marketing Context document." +
+    " If their current document appears above this instruction, update it rather than starting" +
+    " over from scratch; if none appears above, you are starting fresh." +
     " Ask about one section at a time; never dump every question at once." +
     " When — and only when — you have enough to write the full document, output it as a fenced" +
     ` code block whose info string is exactly ${CONTEXT_SENTINEL}, containing the complete markdown` +
@@ -96,16 +102,11 @@ export function buildChatPrompt(messages: ChatMessage[]): string {
 }
 
 export async function chatMarketingContext(env: Env, tenantId: number, messages: ChatMessage[]): Promise<string> {
-  const existing = await getSkillContext(env, tenantId, MARKETING_SKILLS_REPO);
-  const contract = existing
-    ? `${buildChatContract()}\n\nThe tenant's current document follows; update it rather than starting over.\n\n${existing}`
-    : buildChatContract();
-
   return generateContent(env, {
     tenantId,
     prompt: buildChatPrompt(messages),
     provider: await resolveContextProvider(env, tenantId),
     skillId: PRODUCT_MARKETING_SKILL_ID,
-    operationContext: contract,
+    operationContext: buildChatContract(),
   });
 }

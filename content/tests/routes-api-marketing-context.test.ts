@@ -77,6 +77,25 @@ describe("POST /api/marketing-context/chat", () => {
     expect(params.operationContext).toContain("PRODUCT-MARKETING-CONTEXT-V1");
   });
 
+  it("已有存档文档时，不把文档正文重复塞进 operationContext——generateContent 自己按 repo 注入一份，" +
+     "chatMarketingContext 不应该再手动拼第二份", async () => {
+    const marker = "# EXISTING-DOC-MARKER-DO-NOT-DUPLICATE";
+    await call("/api/marketing-context", { method: "PUT", body: JSON.stringify({ content: marker }) });
+
+    const gen = vi.spyOn(generateModule, "generateContent").mockResolvedValue("下一句提问");
+    await call("/api/marketing-context/chat", {
+      method: "POST",
+      body: JSON.stringify({ messages: [{ role: "user", content: "继续" }] }),
+    });
+
+    const params = gen.mock.calls[0][1];
+    // 哨兵合同仍要在，但存档文档正文不该被手动拼进来（generateContent 内部按 skillId 对应的
+    // repo 自动注入同一份 skill_context 行；这里是被 mock 掉的，所以只要 operationContext 里
+    // 没有出现文档正文，就证明 chatMarketingContext 自己没有再内联一份）。
+    expect(params.operationContext).toContain("PRODUCT-MARKETING-CONTEXT-V1");
+    expect(params.operationContext).not.toContain(marker);
+  });
+
   it("messages 为空时 400", async () => {
     const res = await call("/api/marketing-context/chat", { method: "POST", body: JSON.stringify({ messages: [] }) });
     expect(res.status).toBe(400);

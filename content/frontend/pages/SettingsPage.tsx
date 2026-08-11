@@ -115,16 +115,26 @@ function ImageModelField({
 
   useEffect(() => {
     let cancelled = false;
-    api.llmModels.list(provider, apiKey || undefined, "image")
-      .then((res) => {
-        if (cancelled) return;
-        setImageModels(res.models);
-        // 列表刚拿到、用户还没选过时预选首项：BYOK provider 的 image_model 为 NULL 意味着
-        // 「flow 里选不到这个 provider 出图」，不该因为用户没注意到这个新选择器而发生。
-        if (res.models.length > 0 && !model) onChange(res.models[0]);
-      })
-      .catch(() => { if (!cancelled) setImageModels([]); });
-    return () => { cancelled = true; };
+    const load = () => {
+      api.llmModels.list(provider, apiKey || undefined, "image")
+        .then((res) => {
+          if (cancelled) return;
+          setImageModels(res.models);
+          // 列表刚拿到、用户还没选过时预选首项：BYOK provider 的 image_model 为 NULL 意味着
+          // 「flow 里选不到这个 provider 出图」，不该因为用户没注意到这个新选择器而发生。
+          if (res.models.length > 0 && !model) onChange(res.models[0]);
+        })
+        .catch(() => { if (!cancelled) setImageModels([]); });
+    };
+
+    // 与相邻的 ModelPicker 一致：没有 key（含 Default 卡，永远没有 key）时立即拉一次
+    // 静态列表；正在输入 key 时才防抖，避免逐字符敲键触发一次带着半截无效 key 的请求。
+    if (!apiKey) {
+      load();
+      return () => { cancelled = true; };
+    }
+    const timer = setTimeout(load, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [provider, apiKey]);
 
   return imageModels.length > 0 && (

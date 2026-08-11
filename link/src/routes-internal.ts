@@ -519,6 +519,33 @@ export function internalRoutes() {
     return c.json({ channelIds: rows.results.map((r) => r.id) });
   });
 
+  // content 起草 product marketing 上下文时用的渠道清单：租户在哪些平台上、各叫什么。
+  // 「在 X 和 YouTube 上、没有 TikTok」本身就是定位信号。
+  //
+  // 逐字段显式投影，永不透传 config —— config 里装着 access_token / refresh_token /
+  // 加密的 app_client_secret，而这个返回体最终会进 LLM 的提示词。与 /channels/active
+  // 只回 id 集合是同一条约定：内部端点交出去的永远是调用方真正需要的那几个字段。
+  router.get("/channels/summary", async (c) => {
+    const tenantId = Number(c.req.query("tenantId"));
+    if (!Number.isFinite(tenantId)) return c.json({ error: "tenantId required" }, 400);
+
+    const rows = await c.env.LINK_DB
+      .prepare("SELECT channel_type, config FROM channels WHERE tenant_id = ? AND is_active = 1")
+      .bind(tenantId)
+      .all<{ channel_type: string; config: string }>();
+
+    const channels = rows.results.map((r) => {
+      let cfg: Record<string, unknown> = {};
+      try { cfg = JSON.parse(r.config) as Record<string, unknown>; } catch { cfg = {}; }
+      const pick = (k: string) => (typeof cfg[k] === "string" ? (cfg[k] as string) : null);
+      const displayName =
+        pick("x_name") ?? pick("display_name") ?? pick("channel_name") ?? pick("channel_title");
+      return { channelType: r.channel_type, displayName };
+    });
+
+    return c.json({ channels });
+  });
+
   // Lists: add user (called by flow worker)
   router.post("/lists/:id/users", async (c) => {
     const tenantId = c.req.header("X-Tenant-Id");

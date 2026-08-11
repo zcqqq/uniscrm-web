@@ -110,19 +110,24 @@ function propExpr(body: string, prop: string): string {
   throw new Error(`${prop}= 的花括号没配平`);
 }
 
-// 名字 → [操作块里必须出现的标签, 账号块里必须出现的标签或 null]
+// 名字 → [操作块里必须出现的标签, 账号块里必须出现的标记或 null]
+//
+// 账号块的标记不再是标签文案本身：标签已经收进 shared 的 ChannelAccountField，面板里
+// 一个字都不写（见 channel-account-field.test.tsx）。这里改断言"account 槽里放的是那个
+// 共享组件"，它同样能证明账号块没跑到 operation 槽里去。
+const ACCOUNT_FIELD = "<ChannelAccountField";
 const CHANNEL_NODE_PANELS: [string, string, string | null][] = [
   // 迁移前就在用（参照实现）
-  ["YouTubeContentTriggerInspector", 'en: "Event"', 'en: "Account"'],
-  ["GitHubContentTriggerInspector", 'en: "Event"', 'en: "Account"'],
+  ["YouTubeContentTriggerInspector", 'en: "Event"', ACCOUNT_FIELD],
+  ["GitHubContentTriggerInspector", 'en: "Event"', ACCOUNT_FIELD],
   // 本次迁移
-  ["XTriggerInspector", 'en: "Event"', 'en: "Account"'],
+  ["XTriggerInspector", 'en: "Event"', ACCOUNT_FIELD],
   // Message 块原本夹在动作块与账号块之间，迁移后落到账号之后（用户拍板：宁可挪一个
   // 字段，也不留一个手写面板当反面样板）。出现条件 data.xEvent === "create-dm" 不变。
-  ["XActionInspector", 'en: "Action"', 'en: "Account"'],
-  ["XContentTriggerInspector", 'en: "Event"', 'en: "Account"'],
-  ["XContentActionInspector", 'en: "Operation"', 'en: "Target Account"'],
-  ["TikTokContentActionInspector", 'en: "Operation"', 'en: "Target Account"'],
+  ["XActionInspector", 'en: "Action"', ACCOUNT_FIELD],
+  ["XContentTriggerInspector", 'en: "Event"', ACCOUNT_FIELD],
+  ["XContentActionInspector", 'en: "Operation"', ACCOUNT_FIELD],
+  ["TikTokContentActionInspector", 'en: "Operation"', ACCOUNT_FIELD],
   // 没有账号选择器：account={null} 把位置二占住，后面的块不会顶上来
   ["YouTubeContentActionInspector", 'en: "Operation"', null],
   ["VideoActionInspector", 'en: "Operation"', null],

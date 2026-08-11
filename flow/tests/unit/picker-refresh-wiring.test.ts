@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import inspectorSource from "../../frontend/components/Inspector.tsx?raw";
+import accountFieldSource from "../../../shared/frontend/components/ChannelAccountField.tsx?raw";
 
 // 这些 Inspector 是未导出的、用 hook 的组件，在 workerd 里没有 document 也没有
 // testing-library 可以渲染（见 channel-node-panel-order.test.tsx 的说明）。hook 本身的
@@ -29,25 +30,33 @@ describe("外部列表选择器的刷新接线", () => {
     }
   });
 
-  it("三个走 listCached 的账号选择器也接了刷新", () => {
-    // XTrigger / XContentTrigger / XAction 各一个。
-    expect(count(inspectorSource, '{ en: "Reload linked accounts", zh: "重新加载已绑定账号" }')).toBe(3);
+  it("账号选择器的刷新按钮只有一份，住在共享组件里", () => {
+    // 五个账号选择器（XTrigger / XContentTrigger / XAction / XContentAction /
+    // TikTokContentAction）共用 ChannelAccountField，刷新按钮与提示文案因此只存在一处。
+    expect(count(inspectorSource, "Reload linked accounts")).toBe(0);
+    expect(count(accountFieldSource, '{ en: "Reload linked accounts", zh: "重新加载已绑定账号" }')).toBe(1);
   });
 
-  it("三个账号选择器都有 loading 与 error 分支，不会把刷新中/取不到渲染成「尚未绑定」", () => {
+  it("账号块的 loading 与 error 分支在共享组件里，不会把刷新中/取不到渲染成「尚未绑定」", () => {
     // refresh() 会把 data 清成 null。没有 loading 分支的话，点一下刷新就会闪出
     // "尚未绑定账号"并让当前已选账号从下拉框里消失；没有 error 分支的话，
     // 一次 502 会被渲染成"去绑定账号"，而用户早就绑好了、真正该做的是重试。
-    expect(count(inspectorSource, "{channelList.loading ? (")).toBe(3);
-    expect(count(inspectorSource, "T(ACCOUNT_LIST_LOAD_ERROR)")).toBe(3);
+    // 三态的实际行为由 channel-account-field.test.tsx 真渲染验证。
+    expect(accountFieldSource).toContain("{loading ? (");
+    expect(accountFieldSource).toContain("T(ACCOUNT_LIST_LOAD_ERROR)");
+    // 五个调用方都必须把三态如实交给共享组件——少传一个，组件就永远看不到那个状态。
+    expect(count(inspectorSource, "loading={channelList.loading}")).toBe(5);
+    expect(count(inspectorSource, "error={channelList.error}")).toBe(5);
+    expect(count(inspectorSource, "onRefresh={channelList.refresh}")).toBe(5);
   });
 
-  it("四个外部列表 + 三个账号 = 七个刷新按钮", () => {
-    expect(count(inspectorSource, "<RefreshButton")).toBe(7);
+  it("四个外部列表各有一个刷新按钮，账号那五个的按钮都在共享组件里", () => {
+    expect(count(inspectorSource, "<RefreshButton")).toBe(4);
+    expect(count(accountFieldSource, "<RefreshButton")).toBe(1);
   });
 
-  it("四个外部列表 + 三个账号都改由 useRefreshableList 取数", () => {
-    expect(count(inspectorSource, "useRefreshableList<") + count(inspectorSource, "useRefreshableList(")).toBe(7);
+  it("四个外部列表 + 五个账号都改由 useRefreshableList 取数", () => {
+    expect(count(inspectorSource, "useRefreshableList<") + count(inspectorSource, "useRefreshableList(")).toBe(9);
     // 这四个取数不再是 useEffect(..., []) 里挂 setState，而是 hook 的 fetcher。
     for (const call of [
       "useRefreshableList(() => api.channels.githubRepos(), [])",

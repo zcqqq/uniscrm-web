@@ -4,6 +4,7 @@ import { getChannelTypes, getContentTriggerFields, type TriggerFieldDefinition }
 import { SelectPropsValue } from "../../../shared/frontend/components/SelectPropsValue";
 import { ChannelNodePanel } from "../../../shared/frontend/components/ChannelNodePanel";
 import { RefreshButton } from "../../../shared/frontend/components/RefreshButton";
+import { ChannelAccountField } from "../../../shared/frontend/components/ChannelAccountField";
 import { useRefreshableList, type RefreshableListFetchContext } from "../../../shared/frontend/hooks/useRefreshableList";
 import { api } from "../lib/api";
 import { Button } from "../../../shared/frontend/ui/button";
@@ -58,13 +59,9 @@ function channelListFetcher(channelType: string) {
   };
 }
 
-// 三个账号选择器共用一条失败文案：取不到 ≠ 没绑定账号。前者要用户重试，后者要用户
-// 去绑定；渲染成同一屏就会让一个早就绑好账号的用户再去绑一次。放在这里而不是抄三遍，
-// 是为了让这三处不会各自漂移成三种说法。
-const ACCOUNT_LIST_LOAD_ERROR: LocalizedString = {
-  en: "Could not load your linked accounts. Try again later.",
-  zh: "无法获取已绑定账号，请稍后重试。",
-};
+// 账号块（标签 / 刷新 / loading-error-空 三态 / 下拉框）整块住在
+// shared/frontend/components/ChannelAccountField.tsx。本文件不再手写任何账号标签——
+// 曾经七个面板各写一遍，标签就漂成了 Account 与 Target Account 两种说法。
 
 function ValueInput({
   value,
@@ -308,7 +305,6 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
     enabled: !!eventType,
   });
   const loadedChannels = channelList.data;
-  const channels = loadedChannels ?? [];
 
   useEffect(() => {
     // Safety net: auto-select the only connected account, same pattern XActionInspector uses.
@@ -339,34 +335,15 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
       }
       account={
         eventType ? (
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <Label className="text-xs">{T({ en: "Account", zh: "账号" })}</Label>
-              <RefreshButton
-                onClick={channelList.refresh}
-                busy={channelList.loading}
-                tooltip={T({ en: "Reload linked accounts", zh: "重新加载已绑定账号" })}
-              />
-            </div>
-            {channelList.loading ? (
-              <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
-            ) : channelList.error ? (
-              <p className="text-xs text-destructive italic">{T(ACCOUNT_LIST_LOAD_ERROR)}</p>
-            ) : channels.length === 0 ? (
-              <p className="text-xs text-muted-foreground italic">{T({ en: "No accounts linked", zh: "尚未绑定账号" })}</p>
-            ) : (
-              <Select
-                value={channelId || ""}
-                onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
-                className="w-full text-sm"
-              >
-                <option value="">{T({ en: "Select account...", zh: "选择账号…" })}</option>
-                {channels.map((ch) => (
-                  <option key={ch.id} value={ch.id}>@{ch.username}</option>
-                ))}
-              </Select>
-            )}
-          </div>
+          <ChannelAccountField
+            value={channelId || ""}
+            onChange={(id) => updateNodeData(nodeId, { channelId: id })}
+            options={loadedChannels}
+            loading={channelList.loading}
+            error={channelList.error}
+            onRefresh={channelList.refresh}
+            emptyText={{ en: "No accounts linked", zh: "尚未绑定账号" }}
+          />
         ) : null
       }
     >
@@ -393,7 +370,6 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
 
   const channelList = useRefreshableList<ChannelOption[]>(channelListFetcher("X"), []);
   const loadedChannels = channelList.data;
-  const channels = loadedChannels ?? [];
 
   useEffect(() => {
     // Safety net: auto-select the only connected account, same pattern XActionInspector uses.
@@ -418,37 +394,15 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
         </div>
       }
       account={
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <Label className="text-xs">{T({ en: "Account", zh: "账号" })}</Label>
-            <RefreshButton
-              onClick={channelList.refresh}
-              busy={channelList.loading}
-              tooltip={T({ en: "Reload linked accounts", zh: "重新加载已绑定账号" })}
-            />
-          </div>
-          {/* refresh 期间必须显示 loading：hook 会把 data 清成 null，直接落到
-              channels.length === 0 就会在刷新的一瞬间闪出"尚未绑定 X 账号"、
-              并让当前已选账号从下拉框里消失。error 同理要与"没绑定"分开。 */}
-          {channelList.loading ? (
-            <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
-          ) : channelList.error ? (
-            <p className="text-xs text-destructive italic">{T(ACCOUNT_LIST_LOAD_ERROR)}</p>
-          ) : channels.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">{T({ en: "No X accounts linked", zh: "尚未绑定 X 账号" })}</p>
-          ) : (
-            <Select
-              value={channelId || ""}
-              onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value, mode: CONTENT_X_TRIGGER_MODE_LIST_POSTS, listId: "", listName: "" })}
-              className="w-full text-sm"
-            >
-              <option value="">{T({ en: "Select account...", zh: "选择账号…" })}</option>
-              {channels.map((ch) => (
-                <option key={ch.id} value={ch.id}>@{ch.username}</option>
-              ))}
-            </Select>
-          )}
-        </div>
+        <ChannelAccountField
+          value={channelId || ""}
+          onChange={(id) => updateNodeData(nodeId, { channelId: id, mode: CONTENT_X_TRIGGER_MODE_LIST_POSTS, listId: "", listName: "" })}
+          options={loadedChannels}
+          loading={channelList.loading}
+          error={channelList.error}
+          onRefresh={channelList.refresh}
+          emptyText={{ en: "No X accounts linked", zh: "尚未绑定 X 账号" }}
+        />
       }
     >
       <div>
@@ -531,12 +485,13 @@ function YouTubeContentTriggerInspector({ nodeId, data }: { nodeId: string; data
       }
       account={
         state.connected ? (
-          <div>
-            <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
-            <Select value={state.accountChannelId || ""} disabled className="w-full text-sm">
-              <option value={state.accountChannelId || ""}>{state.email || T({ en: "Connected account", zh: "已连接账号" })}</option>
-            </Select>
-          </div>
+          // 账号由「连接了哪个 YouTube 账号」决定，这里只是展示——用只读模式，
+          // 但标签仍与所有可选账号块共用同一份文案。
+          <ChannelAccountField
+            readOnly
+            value={state.accountChannelId || ""}
+            displayText={state.email || T({ en: "Connected account", zh: "已连接账号" })}
+          />
         ) : null
       }
     >
@@ -655,14 +610,12 @@ function GitHubContentTriggerInspector({ nodeId, data }: { nodeId: string; data:
       }
       account={
         connected ? (
-          <div>
-            <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
-            <Select value={accountChannelId || ""} disabled className="w-full text-sm">
-              <option value={accountChannelId || ""}>
-                {login ? `@${login}` : T({ en: "Connected account", zh: "已连接账号" })}
-              </option>
-            </Select>
-          </div>
+          // 同 YouTube 触发器：账号由连接关系决定，只读展示。
+          <ChannelAccountField
+            readOnly
+            value={accountChannelId || ""}
+            displayText={login ? `@${login}` : T({ en: "Connected account", zh: "已连接账号" })}
+          />
         ) : null
       }
     >
@@ -927,7 +880,6 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
 
   const channelList = useRefreshableList<ChannelOption[]>(channelListFetcher(channelType), [channelType]);
   const loadedChannels = channelList.data;
-  const channels = loadedChannels ?? [];
 
   useEffect(() => {
     // Safety net: if only one account is connected and this node hasn't been assigned
@@ -953,36 +905,15 @@ function XActionInspector({ nodeId, data }: { nodeId: string; data: Record<strin
         </div>
       }
       account={
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <Label className="text-xs">{T({ en: "Account", zh: "账号" })}</Label>
-            <RefreshButton
-              onClick={channelList.refresh}
-              busy={channelList.loading}
-              tooltip={T({ en: "Reload linked accounts", zh: "重新加载已绑定账号" })}
-            />
-          </div>
-          {/* 同 XContentTriggerInspector：refresh 会把 data 清成 null，没有 loading
-              分支就会闪出"尚未绑定"并让已选账号消失；error 也要与"没绑定"分开。 */}
-          {channelList.loading ? (
-            <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
-          ) : channelList.error ? (
-            <p className="text-xs text-destructive italic">{T(ACCOUNT_LIST_LOAD_ERROR)}</p>
-          ) : channels.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">{T({ en: "No X accounts linked", zh: "尚未绑定 X 账号" })}</p>
-          ) : (
-            <Select
-              value={data.channelId || ""}
-              onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
-              className="w-full text-sm"
-            >
-              <option value="">{T({ en: "Select account...", zh: "选择账号…" })}</option>
-              {channels.map((ch) => (
-                <option key={ch.id} value={ch.id}>@{ch.username}</option>
-              ))}
-            </Select>
-          )}
-        </div>
+        <ChannelAccountField
+          value={data.channelId || ""}
+          onChange={(id) => updateNodeData(nodeId, { channelId: id })}
+          options={loadedChannels}
+          loading={channelList.loading}
+          error={channelList.error}
+          onRefresh={channelList.refresh}
+          emptyText={{ en: "No X accounts linked", zh: "尚未绑定 X 账号" }}
+        />
       }
     >
       {/* 这一块此前夹在动作块与账号块之间，迁移后落到账号之后——本文件唯一一处
@@ -1098,21 +1029,23 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
   const T = useT();
   const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
-  const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
   const [providers, setProviders] = useState<{ provider: string; model: string }[]>([]);
   const [skills, setSkills] = useState<{ id: string; label: string; hasCachedContent: boolean }[]>([]);
 
+  // 与其余账号选择器同一条路径：listCached（模块级记忆化，刷新时先作废）+ 三态。
+  // 此前这里是 api.channels.list 直连 + .catch(() => setChannels([]))，一次 502 会被
+  // 渲染成"尚未绑定 X 账号"，把一个早就绑好账号的用户支去重新绑一次。
+  const channelList = useRefreshableList<ChannelOption[]>(channelListFetcher("X"), []);
+  const loadedChannels = channelList.data;
+
   useEffect(() => {
-    api.channels.list("X")
-      .then((chs) => {
-        setChannels(chs);
-        // Same one-account auto-fill XActionInspector does. Without a channelId the backend
-        // falls back to the TRIGGERING channel, which silently fails whenever the trigger
-        // isn't an X channel (e.g. a YouTube trigger) — so filling it in matters.
-        if (chs.length === 1 && !data.channelId) updateNodeData(nodeId, { channelId: chs[0].id });
-      })
-      .catch(() => setChannels([]));
-  }, []);
+    // Same one-account auto-fill XActionInspector does. Without a channelId the backend
+    // falls back to the TRIGGERING channel, which silently fails whenever the trigger
+    // isn't an X channel (e.g. a YouTube trigger) — so filling it in matters.
+    if (loadedChannels?.length === 1 && !data.channelId) {
+      updateNodeData(nodeId, { channelId: loadedChannels[0].id });
+    }
+  }, [loadedChannels, data.channelId, nodeId]);
 
   const selectedOperation = CONTENT_ACTION_OPERATIONS.find((op) => op.sourceContentType === (data.operation || "create-post"));
   // VIDEO never means "AI-generates from this prompt" (unlike TEXT/IMAGE) — it means
@@ -1150,21 +1083,15 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
         </div>
       }
       account={
-        <div>
-          <Label className="text-xs block mb-1">{T({ en: "Target Account", zh: "目标账号" })}</Label>
-          {channels.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">{T({ en: "No X accounts linked", zh: "尚未绑定 X 账号" })}</p>
-          ) : (
-            <Select
-              value={data.channelId || ""}
-              onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
-              className="w-full text-sm"
-            >
-              <option value="">{T({ en: "Select account...", zh: "选择账号…" })}</option>
-              {channels.map((ch) => <option key={ch.id} value={ch.id}>@{ch.username}</option>)}
-            </Select>
-          )}
-        </div>
+        <ChannelAccountField
+          value={data.channelId || ""}
+          onChange={(id) => updateNodeData(nodeId, { channelId: id })}
+          options={loadedChannels}
+          loading={channelList.loading}
+          error={channelList.error}
+          onRefresh={channelList.refresh}
+          emptyText={{ en: "No X accounts linked", zh: "尚未绑定 X 账号" }}
+        />
       }
     >
       {aiProp && (
@@ -1411,13 +1338,11 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
   const T = useT();
   const { locale } = useLocale();
   const { updateNodeData } = useFlowEditor();
-  const [channels, setChannels] = useState<{ id: string; username: string }[]>([]);
   const [providers, setProviders] = useState<{ provider: string; model: string }[]>([]);
   const [skills, setSkills] = useState<{ id: string; label: string; hasCachedContent: boolean }[]>([]);
 
-  useEffect(() => {
-    api.channels.list("TIKTOK").then(setChannels).catch(() => setChannels([]));
-  }, []);
+  // 同 XContentActionInspector：改走 listCached + 三态，取数失败不再冒充"没绑定账号"。
+  const channelList = useRefreshableList<ChannelOption[]>(channelListFetcher("TIKTOK"), []);
 
   useEffect(() => {
     api.llmProviders.list().then((res) => setProviders(res.providers)).catch(() => setProviders([]));
@@ -1453,21 +1378,15 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
         </div>
       }
       account={
-        <div>
-          <Label className="text-xs block mb-1">{T({ en: "Target Account", zh: "目标账号" })}</Label>
-          {channels.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">{T({ en: "No TikTok accounts linked", zh: "尚未绑定 TikTok 账号" })}</p>
-          ) : (
-            <Select
-              value={data.channelId || ""}
-              onChange={(e: SelectChange) => updateNodeData(nodeId, { channelId: e.target.value })}
-              className="w-full text-sm"
-            >
-              <option value="">{T({ en: "Select account...", zh: "选择账号…" })}</option>
-              {channels.map((ch) => <option key={ch.id} value={ch.id}>@{ch.username}</option>)}
-            </Select>
-          )}
-        </div>
+        <ChannelAccountField
+          value={data.channelId || ""}
+          onChange={(id) => updateNodeData(nodeId, { channelId: id })}
+          options={channelList.data}
+          loading={channelList.loading}
+          error={channelList.error}
+          onRefresh={channelList.refresh}
+          emptyText={{ en: "No TikTok accounts linked", zh: "尚未绑定 TikTok 账号" }}
+        />
       }
     >
       {textProps.map((prop) => {

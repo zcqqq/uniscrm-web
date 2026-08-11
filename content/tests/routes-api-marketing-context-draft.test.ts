@@ -6,7 +6,18 @@ import { seedSession } from "./helpers/seed-session";
 import * as tenantContentModule from "../src/services/tenant-content";
 import * as generateModule from "../src/services/generate";
 
-beforeAll(async () => { await seedSession(env as never, "mc", 93); });
+beforeAll(async () => {
+  await seedSession(env as never, "mc", 93);
+  // Task 6 起草端点改为经 resolveContextProvider(env, tenantId) 查询 tenant_llm_credentials
+  // 来跟随租户已配置的文本模型 —— vitest-pool-workers 不会自动跑 migrations/，手建表，
+  // 与 tests/llm-credentials.test.ts 的建表语句保持一致（无 BYOK 配置时查出 0 行，落回 default）。
+  await env.CONTENT_DB.prepare(
+    `CREATE TABLE IF NOT EXISTS tenant_llm_credentials (
+       tenant_id INTEGER NOT NULL, provider TEXT NOT NULL, encrypted_api_key TEXT,
+       model TEXT NOT NULL, image_model TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+       PRIMARY KEY (tenant_id, provider))`
+  ).run();
+});
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 async function draft() {

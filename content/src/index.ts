@@ -23,8 +23,13 @@ import {
   OPENAI_STATIC_IMAGE_MODELS,
   ANTHROPIC_STATIC_IMAGE_MODELS,
 } from "./services/model-catalog";
-import { SKILL_CATALOG } from "./skills/catalog";
-import { draftMarketingContext } from "./services/marketing-context";
+import { SKILL_CATALOG, MARKETING_SKILLS_REPO } from "./skills/catalog";
+import {
+  draftMarketingContext,
+  chatMarketingContext,
+  type ChatMessage,
+} from "./services/marketing-context";
+import { getSkillContextRow, setSkillContext } from "./services/skill-context";
 import { processVideoActionJob, type VideoActionQueueMessage } from "./queue-video-action";
 import { createInternalAuthMiddleware, resolveAuthMe, resolveSession, spaLoginGuard } from "../../shared/auth";
 
@@ -209,6 +214,37 @@ app.post("/api/marketing-context/draft", async (c) => {
   } catch (err) {
     console.error(JSON.stringify({ event: "marketing_context_draft_failed", tenantId, error: String(err) }));
     return c.json({ error: "Draft failed" }, 502);
+  }
+});
+
+app.get("/api/marketing-context", async (c) => {
+  const row = await getSkillContextRow(c.env, Number(c.get("tenantId")), MARKETING_SKILLS_REPO);
+  return c.json({ content: row?.content ?? null, version: row?.version ?? null, updatedAt: row?.updatedAt ?? null });
+});
+
+app.put("/api/marketing-context", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
+  const { content, baseVersion } = await c.req.json<{ content: string; baseVersion?: number }>();
+  if (!content || !content.trim()) return c.json({ error: "content required" }, 400);
+
+  // 乐观并发：两个标签页各改各的时，后写的不该无声覆盖前一个。
+  const current = await getSkillContextRow(c.env, tenantId, MARKETING_SKILLS_REPO);
+  if (baseVersion !== undefined && current && current.version !== baseVersion) {
+    return c.json({ error: "version conflict", currentVersion: current.version }, 409);
+  }
+
+  return c.json(await setSkillContext(c.env, tenantId, MARKETING_SKILLS_REPO, content));
+});
+
+app.post("/api/marketing-context/chat", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
+  const { messages } = await c.req.json<{ messages: ChatMessage[] }>();
+  if (!Array.isArray(messages) || messages.length === 0) return c.json({ error: "messages required" }, 400);
+  try {
+    return c.json({ reply: await chatMarketingContext(c.env, tenantId, messages) });
+  } catch (err) {
+    console.error(JSON.stringify({ event: "marketing_context_chat_failed", tenantId, error: String(err) }));
+    return c.json({ error: "Chat failed" }, 502);
   }
 });
 

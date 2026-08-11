@@ -2,6 +2,8 @@ import type { Env } from "../types";
 import { MARKETING_SKILLS_REPO } from "../skills/catalog";
 import { listRecentTenantContent, type RecentContentRow } from "./tenant-content";
 import { generateContent } from "./generate";
+import { listConfiguredProviders } from "./llm-credentials";
+import { getSkillContext } from "./skill-context";
 
 export const PRODUCT_MARKETING_SKILL_ID = "marketingskills-product-marketing";
 export const CONTEXT_SENTINEL = "PRODUCT-MARKETING-CONTEXT-V1";
@@ -55,9 +57,55 @@ export async function draftMarketingContext(env: Env, tenantId: number): Promise
   return generateContent(env, {
     tenantId,
     prompt: buildDraftPrompt(rows, channels),
-    // "default" 是占位——Task 6 会引入 resolveContextProvider(env, tenantId)，让起草和对话
-    // 两个端点共用同一个"跟随租户已配置文本模型"的解析结果。本任务先按 default 实现。
-    provider: "default",
+    provider: await resolveContextProvider(env, tenantId),
     skillId: PRODUCT_MARKETING_SKILL_ID,
+  });
+}
+
+// 对话与起草都跟随租户已配置的文本模型：配了 BYOK 就用 BYOK，没配就用免费默认。
+// 与全站一致，不引入"这个功能专用的模型"这种新概念。
+export async function resolveContextProvider(
+  env: Env,
+  tenantId: number
+): Promise<"default" | "openai" | "anthropic"> {
+  const configured = await listConfiguredProviders(env, tenantId);
+  if (configured.some((p) => p.provider === "anthropic")) return "anthropic";
+  if (configured.some((p) => p.provider === "openai")) return "openai";
+  return "default";
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+// 哨兵写在围栏的语言标签位，而不是认 ```markdown：模型在对话里会为了举例输出各种
+// markdown 块，只有这个串明确表示"这是可保存的成品文档"。
+export function buildChatContract(): string {
+  return (
+    "You are interviewing this user to produce their Product Marketing Context document." +
+    " Ask about one section at a time; never dump every question at once." +
+    " When — and only when — you have enough to write the full document, output it as a fenced" +
+    ` code block whose info string is exactly ${CONTEXT_SENTINEL}, containing the complete markdown` +
+    " document and nothing else. Until then, do not emit a block with that info string."
+  );
+}
+
+export function buildChatPrompt(messages: ChatMessage[]): string {
+  return messages.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`).join("\n\n");
+}
+
+export async function chatMarketingContext(env: Env, tenantId: number, messages: ChatMessage[]): Promise<string> {
+  const existing = await getSkillContext(env, tenantId, MARKETING_SKILLS_REPO);
+  const contract = existing
+    ? `${buildChatContract()}\n\nThe tenant's current document follows; update it rather than starting over.\n\n${existing}`
+    : buildChatContract();
+
+  return generateContent(env, {
+    tenantId,
+    prompt: buildChatPrompt(messages),
+    provider: await resolveContextProvider(env, tenantId),
+    skillId: PRODUCT_MARKETING_SKILL_ID,
+    operationContext: contract,
   });
 }

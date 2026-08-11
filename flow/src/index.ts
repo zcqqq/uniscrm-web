@@ -676,6 +676,16 @@ async function executeContentActions(
         const provider = action.provider as string;
         const skillId = (action.skillId as string) || "none";
         const interpolatedPrompt = String(action.prompt || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""));
+        // 一段式：用户写的图片 prompt 插值后直接送扩散模型，不经文本模型改写。
+        const imagePrompt = action.attachImage
+          ? String(action.imagePrompt || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""))
+          : "";
+        // 勾选框开着但插值后是空串（prompt 本身留空，或整段都是 $content.xxx 而 payload 里
+        // 缺这个字段）——出图请求下面直接不带 imagePrompt 字段，静默退化为纯文本推文。
+        // 图片降级不许让节点失败（4.3 的规则），这条日志只是诊断，不影响 recordContentOutcome。
+        if (action.attachImage && !imagePrompt) {
+          console.log(JSON.stringify({ event: "content_action_x_image_prompt_empty", contentId, channelId: xChannelId }));
+        }
 
         if (action.attachVideo) {
           const videoUrl = String(payload?.processed_video_url ?? "");
@@ -723,10 +733,16 @@ async function executeContentActions(
         res = await fetch(`${env.LINK_URL}/internal/content/create-post`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
-          body: JSON.stringify({ contentId, interpolatedPrompt, provider, channelId: xChannelId, flowId: flowId || null, skillId }),
+          body: JSON.stringify({
+            contentId, interpolatedPrompt, provider, channelId: xChannelId, flowId: flowId || null, skillId,
+            ...(imagePrompt ? { imagePrompt, imageProvider: action.imageProvider || "default" } : {}),
+          }),
         });
         logEvent = "content_action_x_content_action";
-        logExtra = { channelId: xChannelId, provider, skillId };
+        // 记的是节点勾了没有（配置），不是插值结果非空与否（内容）——一个用户确实勾选了
+        // 图片、只是这次 payload 缺字段导致 prompt 插值成空串的节点，不该在分析表里显示成
+        // "没勾"。空 prompt 的诊断由上面 content_action_x_image_prompt_empty 单独记。
+        logExtra = { channelId: xChannelId, provider, skillId, attachImage: !!action.attachImage };
       }
 
       const body = await res.json().catch(() => ({ ok: false })) as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string; reason?: string };
@@ -789,7 +805,6 @@ async function executeContentActions(
         textSkillId: action.textSkillId as string,
         imageCount: action.imageCount as number,
         imageProvider: action.imageProvider as string,
-        imageSkillId: action.imageSkillId as string,
         flowId: flowId || null,
       };
       const res = await fetch(`${env.LINK_URL}/internal/tiktok/photo-post`, {
@@ -1257,6 +1272,19 @@ app.get("/api/channels/github/repos", async (c) => {
 // Proxy configured LLM providers from content worker (tenant-scoped, forwards the session cookie)
 app.get("/api/llm-providers", async (c) => {
   const res = await fetch(`${c.env.CONTENT_URL}/api/llm-credentials`, {
+    headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
+  });
+  return new Response(await res.text(), {
+    status: res.status,
+    headers: { "Content-Type": "application/json" },
+  });
+});
+
+// Proxy the tenant's usable image providers from content worker (for the image provider
+// dropdowns). Deliberately a separate endpoint from /api/llm-providers: that one lists
+// text-capable BYOK providers, this one lists providers that actually have an image model.
+app.get("/api/image-providers", async (c) => {
+  const res = await fetch(`${c.env.CONTENT_URL}/api/image-providers`, {
     headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
   });
   return new Response(await res.text(), {

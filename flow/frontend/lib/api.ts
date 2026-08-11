@@ -45,6 +45,11 @@ export interface ChannelOption {
 
 // Per-channelType cache so the "auto-fill the only connected account" logic (template load,
 // manual node add, Inspector open) doesn't fire a redundant /api/channels request each time.
+//
+// 这份缓存是模块级的：一个页面会话里记忆化到底，整页刷新之前不会失效。用户在别的页面
+// 连上一个新渠道再切回编辑器（编辑器从未卸载），账号下拉框就还是老的那一组。所以缓存
+// 必须配一个显式作废入口——见 invalidateChannelListCache。记忆化本身要留着：它挡的是
+// 多个 Inspector 同时挂载时对同一个 /api/channels 的并发重复请求。
 const channelListCache: Record<string, Promise<ChannelOption[]>> = {};
 
 export const api = {
@@ -94,11 +99,36 @@ export const api = {
   channels: {
     list: (channelType: string) =>
       request<ChannelOption[]>(`/api/channels?type=${channelType}`),
+    /**
+     * 失败会 reject（不是回空数组），并且失败的 promise 不留在缓存里。
+     *
+     * 这两条都是硬要求。此前这里是 .catch(() => [])：一次瞬时 502 会被记忆化成
+     * "这个租户一个账号都没有"，整场会话都翻不了身——用户被告知去绑定一个他早就
+     * 绑好的账号，而正确的动作是重试。空列表和取数失败是两件事，不能渲染成同一屏，
+     * 这与 githubRepos 那条 502 不许退化成空列表的规则是同一条。
+     */
     listCached: (channelType: string) => {
       if (!channelListCache[channelType]) {
-        channelListCache[channelType] = request<ChannelOption[]>(`/api/channels?type=${channelType}`).catch(() => []);
+        const pending = request<ChannelOption[]>(`/api/channels?type=${channelType}`).catch((err) => {
+          // 只清掉自己这一条：期间可能已经有人作废过缓存并放进了新的 promise。
+          if (channelListCache[channelType] === pending) delete channelListCache[channelType];
+          throw err;
+        });
+        channelListCache[channelType] = pending;
       }
       return channelListCache[channelType];
+    },
+    /**
+     * 丢弃记忆化的渠道列表，下一次 listCached 会真的重新发请求。
+     * 不传 channelType 则全部作废。由用户显式点「刷新」的路径调用——自动路径（如
+     * flow-editor 的 autoFillChannelIds）不该调它，那正是缓存要挡住的并发重复请求。
+     */
+    invalidateListCache: (channelType?: string) => {
+      if (channelType === undefined) {
+        for (const key of Object.keys(channelListCache)) delete channelListCache[key];
+        return;
+      }
+      delete channelListCache[channelType];
     },
     xLists: (channelId: string) =>
       request<{ lists: { id: string; name: string }[] }>(`/api/channels/${channelId}/x-lists`),
@@ -123,6 +153,9 @@ export const api = {
   },
   llmProviders: {
     list: (): Promise<{ providers: { provider: string; model: string }[] }> => request("/api/llm-providers"),
+  },
+  imageProviders: {
+    list: (): Promise<{ providers: { provider: string; model: string }[] }> => request("/api/image-providers"),
   },
   skills: {
     list: (): Promise<{ skills: { id: string; label: string; hasCachedContent: boolean }[] }> => request("/api/skills"),

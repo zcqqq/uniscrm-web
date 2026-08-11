@@ -31,11 +31,13 @@ function ModelPicker({
   apiKey,
   model,
   onChange,
+  kind,
 }: {
   provider: ProviderName;
   apiKey: string;
   model: string;
   onChange: (model: string) => void;
+  kind: "text" | "image";
 }) {
   const T = useT();
   const [options, setOptions] = useState<string[] | null>(null);
@@ -47,7 +49,7 @@ function ModelPicker({
     let cancelled = false;
     const load = () => {
       setFetchFailed(false);
-      api.llmModels.list(provider, apiKey || undefined)
+      api.llmModels.list(provider, apiKey || undefined, kind)
         .then((res) => { if (!cancelled) { setOptions(res.models); setSource(res.source); } })
         .catch(() => { if (!cancelled) { setOptions(null); setFetchFailed(true); } });
     };
@@ -60,7 +62,7 @@ function ModelPicker({
     }
     const timer = setTimeout(load, 500);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [provider, apiKey, retryNonce]);
+  }, [provider, apiKey, kind, retryNonce]);
 
   if (fetchFailed) {
     return (
@@ -105,15 +107,58 @@ function ModelPicker({
   );
 }
 
+function ImageModelField({
+  provider, apiKey, model, onChange,
+}: { provider: ProviderName; apiKey: string; model: string; onChange: (m: string) => void }) {
+  const T = useT();
+  const [imageModels, setImageModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      api.llmModels.list(provider, apiKey || undefined, "image")
+        .then((res) => {
+          if (cancelled) return;
+          setImageModels(res.models);
+          // 列表刚拿到、用户还没选过时预选首项：BYOK provider 的 image_model 为 NULL 意味着
+          // 「flow 里选不到这个 provider 出图」，不该因为用户没注意到这个新选择器而发生。
+          if (res.models.length > 0 && !model) onChange(res.models[0]);
+        })
+        .catch(() => { if (!cancelled) setImageModels([]); });
+    };
+
+    // 与相邻的 ModelPicker 一致：没有 key（含 Default 卡，永远没有 key）时立即拉一次
+    // 静态列表；正在输入 key 时才防抖，避免逐字符敲键触发一次带着半截无效 key 的请求。
+    if (!apiKey) {
+      load();
+      return () => { cancelled = true; };
+    }
+    const timer = setTimeout(load, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [provider, apiKey]);
+
+  return imageModels.length > 0 && (
+    <div>
+      <Label className="text-xs block mb-1">{T({ en: "Image model", zh: "图片模型" })}</Label>
+      <Select value={model} onChange={(e: any) => onChange(e.target.value)} className="w-full text-sm">
+        {!imageModels.includes(model) && model && <option value={model}>{model}</option>}
+        {imageModels.map((m) => <option key={m} value={m}>{m}</option>)}
+      </Select>
+    </div>
+  );
+}
+
 function ProviderForm({
   provider,
   initialModel,
+  initialImageModel,
   requiresApiKey,
   onSaved,
   onCancel,
 }: {
   provider: ProviderName;
   initialModel?: string;
+  initialImageModel?: string | null;
   requiresApiKey: boolean;
   onSaved: () => void;
   onCancel: () => void;
@@ -121,6 +166,7 @@ function ProviderForm({
   const T = useT();
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(initialModel || "");
+  const [imageModel, setImageModel] = useState(initialImageModel || "");
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 
@@ -129,7 +175,7 @@ function ProviderForm({
     if (!model) return;
     setSaving(true);
     try {
-      await api.llmCredentials.save(provider, model, requiresApiKey ? apiKey : undefined);
+      await api.llmCredentials.save(provider, model, requiresApiKey ? apiKey : undefined, imageModel || null);
       const label = PROVIDER_LABELS[provider];
       const savedMsg: LocalizedString = requiresApiKey
         ? { en: `${label.en} key saved`, zh: `${label.zh}密钥已保存` }
@@ -154,8 +200,9 @@ function ProviderForm({
       )}
       <div>
         <Label className="text-xs block mb-1">{T({ en: "Model", zh: "模型" })}</Label>
-        <ModelPicker provider={provider} apiKey={apiKey} model={model} onChange={setModel} />
+        <ModelPicker provider={provider} apiKey={apiKey} model={model} onChange={setModel} kind="text" />
       </div>
+      <ImageModelField provider={provider} apiKey={apiKey} model={imageModel} onChange={setImageModel} />
       <div className="flex gap-2">
         <Button onClick={handleSave} disabled={saving || (requiresApiKey && !apiKey) || !model}>{saving ? T({ en: "Saving...", zh: "保存中…" }) : T(C.save)}</Button>
         <Button variant="ghost" onClick={onCancel}>{T(C.cancel)}</Button>
@@ -169,12 +216,17 @@ export function SettingsPage() {
   const { locale } = useLocale();
   const [providers, setProviders] = useState<ProviderCredentialInfo[]>([]);
   const [defaultModel, setDefaultModelState] = useState<string>("");
+  const [defaultImageModel, setDefaultImageModelState] = useState<string>("");
   const [editing, setEditing] = useState<ProviderName | null>(null);
   const { toast } = useToast();
 
   const reload = () => {
     api.llmCredentials.list()
-      .then((res) => { setProviders(res.providers); setDefaultModelState(res.defaultModel); })
+      .then((res) => {
+        setProviders(res.providers);
+        setDefaultModelState(res.defaultModel);
+        setDefaultImageModelState(res.defaultImageModel);
+      })
       .catch(() => {});
   };
 
@@ -203,20 +255,27 @@ export function SettingsPage() {
           const configured = provider === "default" ? undefined : providers.find((p) => p.provider === provider);
           const requiresApiKey = provider !== "default";
           const currentModel = provider === "default" ? defaultModel : configured?.model;
+          const currentImageModel = provider === "default" ? defaultImageModel : configured?.imageModel;
           const modelLabel = T({ en: "Model", zh: "模型" });
+
+          // 有图片模型才追加一行——文本 tagline 不因为一个新字段而对没有图片模型的
+          // provider（如 Anthropic）多出一段永远是空的说明。
+          const baseTagline =
+            provider === "default"
+              ? `${modelLabel}: ${defaultModel}`
+              : configured
+                ? `${modelLabel}: ${configured.model}`
+                : T({ en: "No key configured for this provider", zh: "该服务商尚未配置密钥" });
+          const tagline = currentImageModel
+            ? `${baseTagline} · ${T({ en: "Image", zh: "图片" })}: ${currentImageModel}`
+            : baseTagline;
 
           return (
             <ChannelCard
               key={provider}
               logo={PROVIDER_LOGOS[provider]}
               name={T(PROVIDER_LABELS[provider])}
-              tagline={
-                provider === "default"
-                  ? `${modelLabel}: ${defaultModel}`
-                  : configured
-                    ? `${modelLabel}: ${configured.model}`
-                    : T({ en: "No key configured for this provider", zh: "该服务商尚未配置密钥" })
-              }
+              tagline={tagline}
               status={provider === "default" || configured ? "connected" : "disconnected"}
               createdAt={configured?.createdAt}
               locale={locale}
@@ -225,6 +284,7 @@ export function SettingsPage() {
                   <ProviderForm
                     provider={provider}
                     initialModel={currentModel}
+                    initialImageModel={provider === "default" ? defaultImageModel : configured?.imageModel}
                     requiresApiKey={requiresApiKey}
                     onSaved={() => { setEditing(null); reload(); }}
                     onCancel={() => setEditing(null)}

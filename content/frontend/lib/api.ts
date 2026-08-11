@@ -21,19 +21,21 @@ export interface ProviderCredentialInfo {
   // separately in `defaultModel` below.
   provider: "openai" | "anthropic";
   model: string;
+  imageModel: string | null;
   createdAt: string;
 }
 
 export const api = {
   llmCredentials: {
-    list: (): Promise<{ providers: ProviderCredentialInfo[]; defaultModel: string }> => request("/api/llm-credentials"),
-    save: (provider: ProviderName, model: string, apiKey?: string): Promise<{ ok: boolean }> =>
-      request("/api/llm-credentials", { method: "PUT", body: JSON.stringify({ provider, apiKey, model }) }),
+    list: (): Promise<{ providers: ProviderCredentialInfo[]; defaultModel: string; defaultImageModel: string }> =>
+      request("/api/llm-credentials"),
+    save: (provider: ProviderName, model: string, apiKey?: string, imageModel?: string | null): Promise<{ ok: boolean }> =>
+      request("/api/llm-credentials", { method: "PUT", body: JSON.stringify({ provider, apiKey, model, imageModel }) }),
     remove: (provider: "openai" | "anthropic"): Promise<{ ok: boolean }> =>
       request(`/api/llm-credentials/${provider}`, { method: "DELETE" }),
   },
   llmModels: {
-    list: (provider: ProviderName, apiKey?: string): Promise<{ models: string[]; source: "static" | "live" }> =>
-      request("/api/llm-models", { method: "POST", body: JSON.stringify({ provider, apiKey }) }),
+    list: (provider: ProviderName, apiKey?: string, kind?: "text" | "image"): Promise<{ models: string[]; source: "static" | "live" }> =>
+      request("/api/llm-models", { method: "POST", body: JSON.stringify({ provider, apiKey, kind }) }),
   },
 };

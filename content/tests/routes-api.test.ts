@@ -11,15 +11,18 @@ beforeAll(async () => {
   await seedSession(env as never, "sess-77", 77);
   await seedSession(env as never, "sess-78", 78);
   await seedSession(env as never, "sess-79", 79);
+  await seedSession(env as never, "ok", 80);
   // vitest-pool-workers does not auto-apply this module's migrations/ directory (see
   // tests/llm-credentials.test.ts for the same note) -- create the post-migration schema
-  // by hand, matching migrations/0002_multi_provider_credentials.sql.
+  // by hand, matching migrations/0002_multi_provider_credentials.sql +
+  // migrations/0007_image_model.sql.
   await env.CONTENT_DB.prepare(
     `CREATE TABLE IF NOT EXISTS tenant_llm_credentials (
        tenant_id INTEGER NOT NULL,
        provider TEXT NOT NULL,
        encrypted_api_key TEXT,
        model TEXT NOT NULL,
+       image_model TEXT,
        created_at TEXT NOT NULL,
        updated_at TEXT NOT NULL,
        PRIMARY KEY (tenant_id, provider)
@@ -47,7 +50,11 @@ describe("/api/llm-credentials", () => {
       env
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ providers: [], defaultModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" });
+    expect(await res.json()).toEqual({
+      providers: [],
+      defaultModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      defaultImageModel: "@cf/black-forest-labs/flux-1-schnell",
+    });
   });
 
   it("PUT saves a provider, GET lists it (with model, never the key)", async () => {
@@ -73,7 +80,30 @@ describe("/api/llm-credentials", () => {
       new Request("https://content-dev.uni-scrm.com/api/llm-credentials", { headers: { Cookie: "session=sess-78" } }),
       testEnv
     );
-    expect(await getRes.json()).toEqual({ providers: [{ provider: "openai", model: "gpt-4o-mini", createdAt: expect.any(String) }], defaultModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" });
+    expect(await getRes.json()).toEqual({
+      providers: [{ provider: "openai", model: "gpt-4o-mini", imageModel: null, createdAt: expect.any(String) }],
+      defaultModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      defaultImageModel: "@cf/black-forest-labs/flux-1-schnell",
+    });
+  });
+
+  it("round-trips imageModel through PUT and GET", async () => {
+    const testMasterKey = generateMasterKey();
+    const testEnv = { ...env, ENCRYPTION_KEY: { get: async () => testMasterKey } };
+    await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/api/llm-credentials", {
+        method: "PUT", headers: { Cookie: "session=ok", "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "openai", apiKey: "sk-x", model: "gpt-4.1", imageModel: "gpt-image-1" }),
+      }),
+      testEnv
+    );
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/api/llm-credentials", { headers: { Cookie: "session=ok" } }),
+      testEnv
+    );
+    const body = await res.json() as { providers: { provider: string; imageModel: string | null }[]; defaultImageModel: string };
+    expect(body.providers.find((p) => p.provider === "openai")?.imageModel).toBe("gpt-image-1");
+    expect(body.defaultImageModel).toBe("@cf/black-forest-labs/flux-1-schnell");
   });
 
   it("DELETE removes a provider", async () => {

@@ -713,6 +713,193 @@ describe("stub content-flow action endpoints", () => {
     vi.unstubAllGlobals();
   });
 
+  it("POST /internal/content/create-post generates an image, uploads it as tweet_image and attaches it to the post", async () => {
+    const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+
+    const imageBytes = new Uint8Array(200 * 1024); // well under the 5MB single-append cap
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      // Must be checked before the plain "/internal/generate" branch below — that substring
+      // also matches "/internal/generate-image".
+      if (u.includes("/internal/generate-image")) {
+        return new Response(JSON.stringify({ url: "https://content-dev.uni-scrm.com/public/media/img-1" }), { status: 200 });
+      }
+      if (u.includes("/internal/generate")) return new Response(JSON.stringify({ text: "generated post text" }), { status: 200 });
+      if (u === "https://content-dev.uni-scrm.com/public/media/img-1") {
+        return new Response(imageBytes, { status: 200, headers: { "Content-Type": "image/jpeg", "Content-Length": String(imageBytes.length) } });
+      }
+      if (u === "https://api.x.com/2/media/upload/initialize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-img-1" } }), { status: 200 });
+      }
+      if (u === "https://api.x.com/2/media/upload/media-img-1/append" && init?.method === "POST") {
+        return new Response(null, { status: 204 });
+      }
+      if (u === "https://api.x.com/2/media/upload/media-img-1/finalize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-img-1" } }), { status: 200 }); // no processing_info -> succeeded
+      }
+      if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-img-1", text: "generated post text" } }), { status: 201 });
+      throw new Error(`Unexpected fetch: ${u}`);
+    });
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({
+          contentId: "content-img-1", interpolatedPrompt: "raw prompt", provider: "default",
+          channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
+          imagePrompt: "abstract tech illustration", imageProvider: "default",
+        }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, id: "tweet-img-1" });
+
+    const genImageCall = fetchMock.mock.calls.find(([u]: [string]) => String(u).includes("/internal/generate-image"))!;
+    expect(JSON.parse((genImageCall[1] as RequestInit).body as string)).toEqual({ tenantId: 1, prompt: "abstract tech illustration", provider: "default" });
+
+    const initCall = fetchMock.mock.calls.find(([u]: [string]) => String(u) === "https://api.x.com/2/media/upload/initialize")!;
+    expect(JSON.parse((initCall[1] as RequestInit).body as string).media_category).toBe("tweet_image");
+
+    const tweetCall = fetchMock.mock.calls.find(([u]: [string]) => String(u) === "https://api.x.com/2/tweets")!;
+    const tweetBody = JSON.parse((tweetCall[1] as RequestInit).body as string);
+    expect(tweetBody.media.media_ids).toEqual(["media-img-1"]);
+    vi.unstubAllGlobals();
+  });
+
+  // 配图是锦上添花，内容流不该因为一张图断掉（spec §4.3）。
+  it("POST /internal/content/create-post still posts text when image generation fails", async () => {
+    const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      const u = String(url);
+      // 400 signals a configuration problem (no image model / no BYOK creds for this tenant),
+      // 502 covers everything else — the route treats both identically here (degrade to text).
+      if (u.includes("/internal/generate-image")) return new Response("no image model configured for tenant", { status: 400 });
+      if (u.includes("/internal/generate")) return new Response(JSON.stringify({ text: "generated post text" }), { status: 200 });
+      if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-noimg-1", text: "generated post text" } }), { status: 201 });
+      throw new Error(`Unexpected fetch: ${u}`);
+    });
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({
+          contentId: "content-noimg-1", interpolatedPrompt: "raw prompt", provider: "default",
+          channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
+          imagePrompt: "abstract tech illustration", imageProvider: "default",
+        }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, id: "tweet-noimg-1" });
+
+    const tweetCall = fetchMock.mock.calls.find(([u]: [string]) => String(u) === "https://api.x.com/2/tweets")!;
+    const tweetBody = JSON.parse((tweetCall[1] as RequestInit).body as string);
+    expect(tweetBody.media).toBeUndefined();
+    expect(tweetBody.text).toBeTruthy();
+    // The failed generate-image call short-circuits before any X media-upload endpoint is touched.
+    expect(fetchMock.mock.calls.some(([u]: [string]) => String(u).includes("/2/media/upload"))).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  // Code review finding (round 1): a *thrown* fetch()/json() error (network failure, malformed
+  // body) is a different failure shape than a resolved non-2xx Response, and must degrade to
+  // text-only exactly the same way — an uncaught throw here would skip createPost() entirely.
+  it("POST /internal/content/create-post still posts text when the /internal/generate-image fetch itself throws (network failure, not just a bad status)", async () => {
+    const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/internal/generate-image")) throw new Error("network down");
+      if (u.includes("/internal/generate")) return new Response(JSON.stringify({ text: "generated post text" }), { status: 200 });
+      if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-netdown-1", text: "generated post text" } }), { status: 201 });
+      throw new Error(`Unexpected fetch: ${u}`);
+    });
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({
+          contentId: "content-netdown-1", interpolatedPrompt: "raw prompt", provider: "default",
+          channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
+          imagePrompt: "abstract tech illustration", imageProvider: "default",
+        }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, id: "tweet-netdown-1" });
+
+    const tweetCall = fetchMock.mock.calls.find(([u]: [string]) => String(u) === "https://api.x.com/2/tweets")!;
+    const tweetBody = JSON.parse((tweetCall[1] as RequestInit).body as string);
+    expect(tweetBody.media).toBeUndefined();
+    expect(tweetBody.text).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([u]: [string]) => String(u).includes("/2/media/upload"))).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  // 正常路径已被发布校验挡住，这里守后端的防御性行为，免得畸形图跑出两个 media_id；
+  // 顺带证明省下了那次注定用不上的出图推理调用。
+  it("POST /internal/content/create-post prefers the video and skips image generation when both are supplied", async () => {
+    const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+
+    const videoBytes = new Uint8Array(1024);
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/internal/generate-image")) throw new Error("must not call generate-image when a video is already attached");
+      if (u.includes("/internal/generate")) return new Response(JSON.stringify({ text: "caption text" }), { status: 200 });
+      if (u === "https://content-dev.uni-scrm.com/public/media/vid-both") {
+        return new Response(videoBytes, { status: 200, headers: { "Content-Length": String(videoBytes.length), "Content-Type": "video/mp4" } });
+      }
+      if (u === "https://api.x.com/2/media/upload/initialize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-both-1" } }), { status: 200 });
+      }
+      if (u === "https://api.x.com/2/media/upload/media-both-1/append" && init?.method === "POST") {
+        return new Response(null, { status: 204 });
+      }
+      if (u === "https://api.x.com/2/media/upload/media-both-1/finalize" && init?.method === "POST") {
+        return new Response(JSON.stringify({ data: { id: "media-both-1" } }), { status: 200 }); // no processing_info -> succeeded
+      }
+      if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-both-1", text: "caption text" } }), { status: 201 });
+      throw new Error(`Unexpected fetch: ${u}`);
+    });
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({
+          contentId: "content-both-1", interpolatedPrompt: "raw prompt", provider: "default",
+          channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
+          videoUrl: "https://content-dev.uni-scrm.com/public/media/vid-both",
+          imagePrompt: "an image", imageProvider: "default",
+        }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, id: "tweet-both-1" });
+    expect(fetchMock.mock.calls.some(([u]: [string]) => String(u).includes("/internal/generate-image"))).toBe(false);
+
+    const tweetCall = fetchMock.mock.calls.find(([u]: [string]) => String(u) === "https://api.x.com/2/tweets")!;
+    const tweetBody = JSON.parse((tweetCall[1] as RequestInit).body as string);
+    expect(tweetBody.media.media_ids).toEqual(["media-both-1"]);
+    vi.unstubAllGlobals();
+  });
+
   it("returns rateLimited response (not a bare ok:false) when X createPost is rate-limited", async () => {
     const channelRow = {
       config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }),

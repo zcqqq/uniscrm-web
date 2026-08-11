@@ -3,13 +3,25 @@ import { cors } from "hono/cors";
 import { Container } from "@cloudflare/containers";
 import type { Env } from "./types";
 import { internalRoutes } from "./routes-internal";
-import { setTenantLlmCredentials, listConfiguredProviders, deleteTenantLlmCredentials, getDefaultModel, setDefaultModel } from "./services/llm-credentials";
+import {
+  setTenantLlmCredentials,
+  listConfiguredProviders,
+  deleteTenantLlmCredentials,
+  getDefaultModel,
+  setDefaultModel,
+  getDefaultImageModel,
+} from "./services/llm-credentials";
 import {
   listOpenAiModels,
   listAnthropicModels,
   listWorkersAiModels,
+  listWorkersAiImageModels,
+  listOpenAiImageModels,
+  listAnthropicImageModels,
   OPENAI_STATIC_MODELS,
   ANTHROPIC_STATIC_MODELS,
+  OPENAI_STATIC_IMAGE_MODELS,
+  ANTHROPIC_STATIC_IMAGE_MODELS,
 } from "./services/model-catalog";
 import { SKILL_CATALOG } from "./skills/catalog";
 import { processVideoActionJob, type VideoActionQueueMessage } from "./queue-video-action";
@@ -93,19 +105,22 @@ app.get("/api/llm-credentials", async (c) => {
   const tenantId = Number(c.get("tenantId"));
   const providers = await listConfiguredProviders(c.env, tenantId);
   const defaultModel = await getDefaultModel(c.env, tenantId);
-  return c.json({ providers, defaultModel });
+  const defaultImageModel = await getDefaultImageModel(c.env, tenantId);
+  return c.json({ providers, defaultModel, defaultImageModel });
 });
 
 app.put("/api/llm-credentials", async (c) => {
   const tenantId = Number(c.get("tenantId"));
-  const { provider, apiKey, model } = await c.req.json<{ provider: "openai" | "anthropic" | "default"; apiKey?: string; model: string }>();
+  const { provider, apiKey, model, imageModel } = await c.req.json<{
+    provider: "openai" | "anthropic" | "default"; apiKey?: string; model: string; imageModel?: string | null;
+  }>();
   if (!provider || !model) return c.json({ error: "provider, model required" }, 400);
   if (provider === "default") {
-    await setDefaultModel(c.env, tenantId, model);
+    await setDefaultModel(c.env, tenantId, model, imageModel ?? null);
     return c.json({ ok: true });
   }
   if (!apiKey) return c.json({ error: "apiKey required for this provider" }, 400);
-  await setTenantLlmCredentials(c.env, tenantId, provider, apiKey, model);
+  await setTenantLlmCredentials(c.env, tenantId, provider, apiKey, model, imageModel ?? null);
   return c.json({ ok: true });
 });
 
@@ -129,13 +144,19 @@ app.use("/api/llm-models", sessionAuth);
 
 app.post("/api/llm-models", async (c) => {
   const tenantId = Number(c.get("tenantId"));
-  const { provider, apiKey } = await c.req.json<{ provider: "openai" | "anthropic" | "default"; apiKey?: string }>();
+  const { provider, apiKey, kind } = await c.req.json<{
+    provider: "openai" | "anthropic" | "default";
+    apiKey?: string;
+    kind?: "text" | "image";
+  }>();
+  const wantsImage = kind === "image";
 
   if (provider === "default") {
     try {
-      return c.json({ models: await listWorkersAiModels(c.env), source: "live" });
+      const models = wantsImage ? await listWorkersAiImageModels(c.env) : await listWorkersAiModels(c.env);
+      return c.json({ models, source: "live" });
     } catch (err) {
-      console.error(JSON.stringify({ event: "llm_models_list_failed", tenantId, provider, error: String(err) }));
+      console.error(JSON.stringify({ event: "llm_models_list_failed", tenantId, provider, kind: kind ?? "text", error: String(err) }));
       return c.json({ error: "Could not fetch model list" }, 502);
     }
   }
@@ -143,16 +164,36 @@ app.post("/api/llm-models", async (c) => {
   // BYOK providers: listing their actual models requires a valid key, so without one (or
   // if the live call fails) fall back to the curated static catalog rather than erroring --
   // the model dropdown should always be usable, key or no key.
-  const staticModels = provider === "openai" ? OPENAI_STATIC_MODELS : ANTHROPIC_STATIC_MODELS;
+  const staticModels = wantsImage
+    ? (provider === "openai" ? OPENAI_STATIC_IMAGE_MODELS : ANTHROPIC_STATIC_IMAGE_MODELS)
+    : (provider === "openai" ? OPENAI_STATIC_MODELS : ANTHROPIC_STATIC_MODELS);
   if (!apiKey) return c.json({ models: staticModels, source: "static" });
 
   try {
-    const models = provider === "openai" ? await listOpenAiModels(apiKey) : await listAnthropicModels(apiKey);
+    const models = wantsImage
+      ? (provider === "openai" ? await listOpenAiImageModels(apiKey) : await listAnthropicImageModels(apiKey))
+      : (provider === "openai" ? await listOpenAiModels(apiKey) : await listAnthropicModels(apiKey));
     return c.json({ models, source: "live" });
   } catch (err) {
-    console.error(JSON.stringify({ event: "llm_models_live_fetch_failed", tenantId, provider, error: String(err) }));
+    console.error(JSON.stringify({ event: "llm_models_live_fetch_failed", tenantId, provider, kind: kind ?? "text", error: String(err) }));
     return c.json({ models: staticModels, source: "static" });
   }
+});
+
+app.use("/api/image-providers", sessionAuth);
+
+// flow 的图片 provider 下拉的唯一数据源。规则：default 恒在（其图片模型是初始配置值，
+// 不是兜底）；BYOK provider 当且仅当同时有 key 与非空 image_model 时列出——没配图片
+// 模型的 provider 在 flow 里就是选不到，而不是选了之后运行时才失败。
+app.get("/api/image-providers", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
+  const providers: { provider: string; model: string }[] = [
+    { provider: "default", model: await getDefaultImageModel(c.env, tenantId) },
+  ];
+  for (const row of await listConfiguredProviders(c.env, tenantId)) {
+    if (row.imageModel) providers.push({ provider: row.provider, model: row.imageModel });
+  }
+  return c.json({ providers });
 });
 
 export default {

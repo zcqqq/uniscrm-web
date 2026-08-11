@@ -113,4 +113,14 @@ describe("buildActionData derives hasBranches from the registry's externalApi fa
     const built = buildActionData(node({ actionType: "mysteryAction", foo: "bar" }));
     expect(built).toEqual({ type: "mysteryAction", nodeId: "a1", hasBranches: false });
   });
+
+  it("carries the X image attachment fields through to the action", () => {
+    const built = buildActionData(node({
+      actionType: "xContentAction", operation: "create-post", prompt: "p", provider: "default",
+      attachImage: true, imageProvider: "openai", imagePrompt: "an abstract illustration",
+    }));
+    expect(built).toEqual(expect.objectContaining({
+      attachImage: true, imageProvider: "openai", imagePrompt: "an abstract illustration",
+    }));
+  });
 });

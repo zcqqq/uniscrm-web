@@ -135,7 +135,11 @@ describe("collectActions: new content-domain action types", () => {
     };
     const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
     expect(result.actions).toEqual([
-      { type: "xContentAction", nodeId: "a1", hasBranches: true, operation: "repost-post", prompt: "Rewrite this: $content.content_text", provider: "default", skillId: "none", attachVideo: false },
+      {
+        type: "xContentAction", nodeId: "a1", hasBranches: true, operation: "repost-post",
+        channelId: undefined, prompt: "Rewrite this: $content.content_text", provider: "default", skillId: "none",
+        attachVideo: false, attachImage: false, imageProvider: "default", imagePrompt: "",
+      },
     ]);
   });
 
@@ -194,7 +198,7 @@ describe("collectActions: new content-domain action types", () => {
     ]);
   });
 
-  it("collects a tiktokContentAction action carrying its prompts record and other fields, defaulting textSkillId/imageSkillId to 'none' and imageCount to 1 when unset", () => {
+  it("collects a tiktokContentAction action carrying its prompts record and other fields, defaulting textSkillId to 'none' and imageCount to 1 when unset", () => {
     const graph: FlowGraph = {
       nodes: [
         { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
@@ -216,12 +220,12 @@ describe("collectActions: new content-domain action types", () => {
         type: "tiktokContentAction", nodeId: "a1", hasBranches: true, operation: "photo-post", channelId: "tiktok-chan-1",
         prompts: { title: "Write a title: $content.title", description: "Write a caption: $content.content_text", message_image: "A photo of: $content.title" },
         textProvider: "default", textSkillId: "none",
-        imageCount: 1, imageProvider: "default", imageSkillId: "none",
+        imageCount: 1, imageProvider: "default",
       },
     ]);
   });
 
-  it("carries a set imageCount/textSkillId/imageSkillId through for tiktokContentAction", () => {
+  it("carries a set imageCount/textSkillId through for tiktokContentAction", () => {
     const graph: FlowGraph = {
       nodes: [
         { id: "t1", type: "xContentTrigger", data: { channelId: "chan1", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
@@ -231,7 +235,7 @@ describe("collectActions: new content-domain action types", () => {
             actionType: "tiktokContentAction", channelId: "tiktok-chan-1",
             prompts: { title: "t", description: "d", message_image: "i" },
             textProvider: "default", textSkillId: "marketingskills-social",
-            imageCount: 5, imageProvider: "openai", imageSkillId: "marketingskills-social",
+            imageCount: 5, imageProvider: "openai",
           },
           position: { x: 200, y: 0 },
         },
@@ -239,7 +243,14 @@ describe("collectActions: new content-domain action types", () => {
       edges: [{ id: "e1", source: "t1", target: "a1" }],
     };
     const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
-    expect(result.actions[0]).toMatchObject({ imageCount: 5, textSkillId: "marketingskills-social", imageSkillId: "marketingskills-social" });
+    expect(result.actions).toEqual([
+      {
+        type: "tiktokContentAction", nodeId: "a1", hasBranches: true, operation: "photo-post", channelId: "tiktok-chan-1",
+        prompts: { title: "t", description: "d", message_image: "i" },
+        textProvider: "default", textSkillId: "marketingskills-social",
+        imageCount: 5, imageProvider: "openai",
+      },
+    ]);
   });
 
   it("collects attachVideo:true on an xContentAction node when data.attachVideo is set", () => {

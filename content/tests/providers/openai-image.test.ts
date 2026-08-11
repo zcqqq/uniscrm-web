@@ -30,4 +30,25 @@ describe("OpenAiImageProvider", () => {
     const provider = new OpenAiImageProvider("sk-bad");
     await expect(provider.generate("a lizard", "gpt-image-1")).rejects.toThrow("OpenAI image generate failed: 401");
   });
+
+  // Regression guard: dall-e-3 is a real option in the "Image model" dropdown (spec §2.3),
+  // and it rejects output_format outright while defaulting response_format to "url" -- the
+  // gpt-image-1 request shape above would 400 or silently return no b64_json for it.
+  it("calls the images/generations endpoint requesting b64_json for dall-e-3, never sending output_format", async () => {
+    const base64Png = btoa("fake-png-bytes");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ b64_json: base64Png }] }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new OpenAiImageProvider("sk-test");
+    const result = await provider.generate("a cyberpunk lizard", "dall-e-3");
+
+    expect(new TextDecoder().decode(result.bytes)).toBe("fake-png-bytes");
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body).toEqual({ model: "dall-e-3", prompt: "a cyberpunk lizard", size: "1024x1024", response_format: "b64_json" });
+    expect(body.output_format).toBeUndefined();
+  });
 });

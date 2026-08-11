@@ -73,7 +73,7 @@ async function uploadVideoToX(
   }
 
   const contentType = videoRes.headers.get("Content-Type") || "video/mp4";
-  const init = await initMediaUpload(accessToken, contentLength, contentType);
+  const init = await initMediaUpload(accessToken, contentLength, contentType, "tweet_video");
   if (!init.ok || !init.mediaId) return { ok: false };
 
   const reader = videoRes.body.getReader();
@@ -111,6 +111,87 @@ async function uploadVideoToX(
   const final = await finalizeMediaUpload(accessToken, init.mediaId!);
   if (!final.ok || !final.state) return { ok: false };
   return { ok: true, mediaId: init.mediaId!, state: final.state, checkAfterSecs: final.checkAfterSecs };
+}
+
+// X 单图上限 5MB（https://docs.x.com/x-api/media/quickstart/media-upload-chunked）。
+// 出图产物是 JPEG、通常几百 KB，所以一次 append 就够——图片也没有 X 侧的异步转码，
+// finalize 不返回 processing_info，因此这里不需要视频那套 pending 轮询。
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+async function uploadImageToX(
+  accessToken: string,
+  imageUrl: string
+): Promise<{ ok: true; mediaId: string } | { ok: false }> {
+  const imageRes = await fetch(imageUrl);
+  if (!imageRes.ok) {
+    console.error(JSON.stringify({ event: "x_image_fetch_failed", imageUrl, status: imageRes.status }));
+    return { ok: false };
+  }
+  const bytes = new Uint8Array(await imageRes.arrayBuffer());
+  if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES) {
+    console.error(JSON.stringify({ event: "x_image_size_rejected", imageUrl, byteLength: bytes.length }));
+    return { ok: false };
+  }
+
+  const contentType = imageRes.headers.get("Content-Type") || "image/jpeg";
+  const init = await initMediaUpload(accessToken, bytes.length, contentType, "tweet_image");
+  if (!init.ok || !init.mediaId) return { ok: false };
+
+  const appended = await appendMediaChunk(accessToken, init.mediaId, 0, bytes);
+  if (!appended.ok) return { ok: false };
+
+  const finalized = await finalizeMediaUpload(accessToken, init.mediaId);
+  if (!finalized.ok || finalized.state !== "succeeded") {
+    console.error(JSON.stringify({ event: "x_image_finalize_failed", mediaId: init.mediaId, state: finalized.state }));
+    return { ok: false };
+  }
+  return { ok: true, mediaId: init.mediaId };
+}
+
+// 出图失败一律降级成纯文本推：配图是锦上添花，内容流不该因为一张图断掉（spec §4.3）。
+// 失败原因只进日志，不进 reason —— reason 会写进 content_flow_log 这张分析表，
+// 外部错误体长度不可控（与 YouTube 那几个出口同一条约定）。
+async function generateAndUploadImage(
+  env: Env, tenantId: number, prompt: string, provider: string,
+  accessToken: string, contentId: string, channelId: string
+): Promise<string | null> {
+  let url: string;
+  try {
+    const genRes = await fetch(`${env.CONTENT_URL}/internal/generate-image`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+      body: JSON.stringify({ tenantId, prompt, provider }),
+    });
+    if (!genRes.ok) {
+      console.error(JSON.stringify({
+        event: "create_post_image_failed", contentId, channelId, provider,
+        stage: "generate", status: genRes.status, body: await genRes.text().catch(() => ""),
+      }));
+      return null;
+    }
+    ({ url } = await genRes.json<{ url: string }>());
+  } catch (e) {
+    // fetch()/json() 抛出而不是 resolve 成非 2xx —— 网络层失败（DNS/连接被拒/超时）或 content
+    // 服务返回了畸形/截断的响应体。同一个降级策略：记日志、返回 null，让上层照发纯文本推文。
+    console.error(JSON.stringify({ event: "create_post_image_failed", contentId, channelId, provider, stage: "generate", error: String(e) }));
+    return null;
+  }
+
+  let upload: { ok: true; mediaId: string } | { ok: false };
+  try {
+    upload = await uploadImageToX(accessToken, url);
+  } catch (e) {
+    // uploadImageToX 内部也有裸 fetch/arrayBuffer（图片下载、以及它调用的 init/append/finalize），
+    // 同样可能抛出而非 resolve 非 2xx —— 这里兜底，不让上传阶段的异常逃出降级路径。
+    console.error(JSON.stringify({ event: "create_post_image_failed", contentId, channelId, provider, stage: "upload", error: String(e) }));
+    return null;
+  }
+  if (!upload.ok) {
+    console.error(JSON.stringify({ event: "create_post_image_failed", contentId, channelId, provider, stage: "upload" }));
+    return null;
+  }
+  console.log(JSON.stringify({ event: "create_post_image_attached", contentId, channelId, provider, mediaId: upload.mediaId }));
+  return upload.mediaId;
 }
 
 // A deactivated channel must never reach the X API — when X freezes an account, every further
@@ -775,8 +856,9 @@ export function internalRoutes() {
   // spec's non-goals) — channelId resolving to a TIKTOK channel_type falls through to the
   // generic ok:false path below.
   router.post("/content/create-post", async (c) => {
-    const { contentId, interpolatedPrompt, provider, channelId, flowId, skillId, videoUrl } = await c.req.json<{
+    const { contentId, interpolatedPrompt, provider, channelId, flowId, skillId, videoUrl, imagePrompt, imageProvider } = await c.req.json<{
       contentId: string; interpolatedPrompt: string; provider: "default" | "openai" | "anthropic" | "none"; channelId: string; flowId?: string | null; skillId?: string; videoUrl?: string;
+      imagePrompt?: string; imageProvider?: "default" | "openai";
     }>();
 
     const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id, is_active FROM channels WHERE id = ?")
@@ -861,6 +943,15 @@ export function internalRoutes() {
         console.error(JSON.stringify({ event: "create_post_video_upload_failed", contentId, channelId, mediaId: upload.mediaId, state: upload.state }));
         return c.json({ ok: false, reason: `video_upload_failed: X media processing state "${upload.state}"` }, 200);
       }
+    }
+
+    // videoUrl 优先：X 一条推文只能挂一种媒体。正常路径下两者同时出现已被发布校验挡住
+    // （validate-flow-graph.ts），这里是后端防御——顺带省下一次注定用不上的出图推理。
+    if (!mediaId && imagePrompt) {
+      const imageMediaId = await generateAndUploadImage(
+        c.env, channel.tenant_id, imagePrompt, imageProvider || "default", accessToken, contentId, channelId
+      );
+      if (imageMediaId) mediaId = imageMediaId;
     }
 
     const postResult = await createPost(accessToken, text, mediaId);
@@ -1009,13 +1100,13 @@ export function internalRoutes() {
   router.post("/tiktok/photo-post", async (c) => {
     const {
       contentId, channelId, prompts, textProvider, textSkillId,
-      imageCount, imageProvider, imageSkillId, flowId,
+      imageCount, imageProvider, flowId,
     } = await c.req.json<{
       contentId: string; channelId: string;
       prompts: { title: string; description: string; message_image: string };
       textProvider: "default" | "openai" | "anthropic" | "none"; textSkillId?: string;
       imageCount: number;
-      imageProvider: "default" | "openai"; imageSkillId?: string;
+      imageProvider: "default" | "openai";
       flowId?: string | null;
     }>();
 
@@ -1069,7 +1160,7 @@ export function internalRoutes() {
       const res = await fetch(`${c.env.CONTENT_URL}/internal/generate-image`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": c.env.INTERNAL_SECRET },
-        body: JSON.stringify({ tenantId, prompt: prompts.message_image, provider: imageProvider, skillId: imageSkillId }),
+        body: JSON.stringify({ tenantId, prompt: prompts.message_image, provider: imageProvider }),
       });
       if (!res.ok) continue;
       const body = await res.json() as { url: string };

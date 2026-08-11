@@ -177,6 +177,155 @@ describe("queue(): xContentAction branch resolution", () => {
     vi.unstubAllGlobals();
   });
 
+  it("interpolates $content.* in the image prompt and forwards it to link", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const graphWithImage = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        {
+          id: "a1", type: "action",
+          data: {
+            actionType: "xContentAction", channelId: "x-chan-1", prompt: "T: $content.title",
+            provider: "default", attachImage: true, imageProvider: "default",
+            imagePrompt: "Abstract art about: $content.title",
+          },
+          position: { x: 200, y: 0 },
+        },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-image', 1, 'image flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithImage).run();
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-image", channelId: "src-chan", payload: { title: "Original Title" } }),
+      env
+    );
+
+    // flow-branch1 (same trigger channelId "src-chan") also calls /internal/content/create-post
+    // for this event — find the call that carries the x-chan-1 channelId (flow-image's own), not
+    // just the first call to this URL, since flow-branch1's own call could come first.
+    const call = fetchMock.mock.calls.find((c) => {
+      if (!String(c[0]).includes("/internal/content/create-post")) return false;
+      const body = JSON.parse(c[1].body as string);
+      return body.channelId === "x-chan-1";
+    })!;
+    const body = JSON.parse(call[1].body as string);
+    expect(body.imagePrompt).toBe("Abstract art about: Original Title");
+    expect(body.imageProvider).toBe("default");
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-image'`).run();
+    vi.unstubAllGlobals();
+  });
+
+  // 没勾图片就不该给 link 任何图片字段，否则 link 会照着一段空 prompt 去出图。
+  it("omits the image fields when attachImage is off", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const graphNoImage = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        {
+          id: "a1", type: "action",
+          data: { actionType: "xContentAction", channelId: "x-chan-1", prompt: "T: $content.title", provider: "default" },
+          position: { x: 200, y: 0 },
+        },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-no-image', 1, 'no image flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphNoImage).run();
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-no-image", channelId: "src-chan", payload: { title: "Original Title" } }),
+      env
+    );
+
+    const call = fetchMock.mock.calls.find((c) => {
+      if (!String(c[0]).includes("/internal/content/create-post")) return false;
+      const body = JSON.parse(c[1].body as string);
+      return body.channelId === "x-chan-1";
+    })!;
+    const body = JSON.parse(call[1].body as string);
+    expect(body.imagePrompt).toBeUndefined();
+    expect(body.imageProvider).toBeUndefined();
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-no-image'`).run();
+    vi.unstubAllGlobals();
+  });
+
+  // attachImage checked + a $content.* placeholder whose field is missing from the payload ->
+  // interpolates to "" -> a text-only tweet still goes out (degrade-never-fail), but the node
+  // log must say the checkbox WAS checked (config), and a dedicated diagnostic event must fire
+  // so an empty-prompt run doesn't look identical to "user never checked the box".
+  it("logs attachImage:true (not the empty interpolated content) and a diagnostic event when the image prompt interpolates to empty", async () => {
+    // mockImplementation (not mockResolvedValue) so flow-branch1's own concurrent call to the
+    // same URL gets its own fresh Response instance, not a body already consumed by this flow's
+    // call — see the identical note a few tests below.
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const graphEmptyPrompt = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        {
+          id: "a1", type: "action",
+          data: {
+            actionType: "xContentAction", channelId: "x-chan-1", prompt: "T: $content.title",
+            provider: "default", attachImage: true, imageProvider: "default",
+            imagePrompt: "$content.missing_field",
+          },
+          position: { x: 200, y: 0 },
+        },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-empty-prompt', 1, 'empty prompt flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphEmptyPrompt).run();
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-empty-prompt", channelId: "src-chan", payload: { title: "Original Title" } }),
+      env
+    );
+
+    // The prompt interpolated to "" (missing_field isn't in payload) -> imagePrompt omitted from
+    // the wire request -> link generates no image -> tweet still goes out text-only.
+    const call = fetchMock.mock.calls.find((c) => {
+      if (!String(c[0]).includes("/internal/content/create-post")) return false;
+      const body = JSON.parse(c[1].body as string);
+      return body.channelId === "x-chan-1";
+    })!;
+    const requestBody = JSON.parse(call[1].body as string);
+    expect(requestBody.imagePrompt).toBeUndefined();
+
+    // flow-branch1 (from the describe-level beforeEach, same trigger channelId "src-chan") also
+    // fires concurrently with its own xContentAction node (no channelId of its own, so it logs
+    // under the SOURCE channelId "src-chan") — filter by "x-chan-1" to isolate this test's node.
+    const loggedEvents = logSpy.mock.calls
+      .map((c) => JSON.parse(c[0] as string))
+      .filter((e) => e.channelId === "x-chan-1");
+    const emptyPromptLog = loggedEvents.find((e) => e.event === "content_action_x_image_prompt_empty");
+    expect(emptyPromptLog).toMatchObject({ contentId: "content-empty-prompt", channelId: "x-chan-1" });
+
+    const outcomeLog = loggedEvents.find((e) => e.event === "content_action_x_content_action");
+    // 配置是"勾了"，即使这次插值结果是空串——不能把这次记成用户没勾图片。
+    expect(outcomeLog).toMatchObject({ attachImage: true, ok: true });
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-empty-prompt'`).run();
+    logSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
   it("routes a repost-post operation to /internal/x/repost with the source channel and the payload's source_content_id as tweetId", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

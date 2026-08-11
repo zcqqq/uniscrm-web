@@ -116,6 +116,26 @@ export function findGitHubTriggerNoRepoIds(
     .map((n) => n.id);
 }
 
+// X 一条推文只能挂一种媒体（https://docs.x.com/x-api/posts/create-post）。两个勾选框
+// 同时勾中在画布上完全看不出异常，运行时则是后端悄悄以视频为准、用户配的图片凭空消失——
+// 与产品坏了无法区分，所以挡在上线之前。只管 create-post：别的操作没有媒体字段，
+// 畸形图里残留的 attachImage 不该把一个本来合法的节点拦下。
+//
+// 判的是 data.actionType，不是 node.type：action 家族在 React Flow 里统一收敛成
+// node.type === "action"（nodeTypeRegistry.ts 的 reactFlowType 注释），具体是哪种 action
+// 全部记在 data.actionType 上——与 youtubeCondition/githubContentTrigger 这类 condition/
+// trigger（各自有自己的 reactFlowType，可以直接判 node.type）不同。判错会让这个 filter
+// 对任何真实保存的图恒为空，发布口子形同虚设。
+export function findXImageVideoConflictIds(
+  nodes: { id: string; type?: string; data?: Record<string, unknown> }[]
+): string[] {
+  return nodes
+    .filter((n) => n.data?.actionType === "xContentAction")
+    .filter((n) => ((n.data?.operation as string) || "create-post") === "create-post")
+    .filter((n) => !!n.data?.attachImage && !!n.data?.attachVideo)
+    .map((n) => n.id);
+}
+
 export function validateFlowGraph(
   nodes: { id: string; type?: string; data?: Record<string, unknown> }[],
   edges: { source: string; target: string }[]
@@ -127,6 +147,7 @@ export function validateFlowGraph(
   orLogicEmptyNodeIds: string[];
   youtubeNoSubscriptionNodeIds: string[];
   githubNoRepoNodeIds: string[];
+  xMediaConflictNodeIds: string[];
 } {
   const orphanNodeIds = findOrphanNodeIds(nodes, edges);
   const misplacedNodeIds = findMisplacedYouTubeConditionIds(nodes);
@@ -134,6 +155,7 @@ export function validateFlowGraph(
   const orLogicEmptyNodeIds = findOrLogicEmptyNodeIds(nodes);
   const youtubeNoSubscriptionNodeIds = findYouTubeTriggerNoSubscriptionIds(nodes);
   const githubNoRepoNodeIds = findGitHubTriggerNoRepoIds(nodes);
+  const xMediaConflictNodeIds = findXImageVideoConflictIds(nodes);
   return {
     valid:
       orphanNodeIds.length === 0 &&
@@ -141,12 +163,14 @@ export function validateFlowGraph(
       emptyConditionNodeIds.length === 0 &&
       orLogicEmptyNodeIds.length === 0 &&
       youtubeNoSubscriptionNodeIds.length === 0 &&
-      githubNoRepoNodeIds.length === 0,
+      githubNoRepoNodeIds.length === 0 &&
+      xMediaConflictNodeIds.length === 0,
     orphanNodeIds,
     misplacedNodeIds,
     emptyConditionNodeIds,
     orLogicEmptyNodeIds,
     youtubeNoSubscriptionNodeIds,
     githubNoRepoNodeIds,
+    xMediaConflictNodeIds,
   };
 }

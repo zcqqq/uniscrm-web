@@ -154,6 +154,9 @@ export const api = {
   llmProviders: {
     list: (): Promise<{ providers: { provider: string; model: string }[] }> => request("/api/llm-providers"),
   },
+  imageProviders: {
+    list: (): Promise<{ providers: { provider: string; model: string }[] }> => request("/api/image-providers"),
+  },
   skills: {
     list: (): Promise<{ skills: { id: string; label: string; hasCachedContent: boolean }[] }> => request("/api/skills"),
   },

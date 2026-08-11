@@ -1031,6 +1031,7 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
   const { updateNodeData } = useFlowEditor();
   const [providers, setProviders] = useState<{ provider: string; model: string }[]>([]);
   const [skills, setSkills] = useState<{ id: string; label: string; hasCachedContent: boolean }[]>([]);
+  const [imageProviders, setImageProviders] = useState<{ provider: string; model: string }[]>([]);
 
   // 与其余账号选择器同一条路径：listCached（模块级记忆化，刷新时先作废）+ 三态。
   // 此前这里是 api.channels.list 直连 + .catch(() => setChannels([]))，一次 502 会被
@@ -1052,11 +1053,17 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
   // "optionally attach $content.processed_video_url". Exclude it from the prompt-box lookup.
   const aiProp = selectedOperation?.contentProps.find((p) => p.aiType && p.aiType !== "VIDEO");
   const videoProp = selectedOperation?.contentProps.find((p) => p.aiType === "VIDEO");
+  const imageProp = selectedOperation?.contentProps.find((p) => p.aiType === "IMAGE");
 
   useEffect(() => {
     if (!aiProp) return;
     api.llmProviders.list().then((res) => setProviders(res.providers)).catch(() => setProviders([]));
   }, [aiProp]);
+
+  // imageProviders 只在勾了图片时才需要，但列表要先有才能渲染下拉，所以与 providers 一样在挂载时拉一次。
+  useEffect(() => {
+    api.imageProviders.list().then((res) => setImageProviders(res.providers)).catch(() => setImageProviders([]));
+  }, []);
 
   useEffect(() => {
     api.skills.list().then((res) => setSkills(res.skills)).catch(() => setSkills([]));
@@ -1136,6 +1143,52 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
             </div>
           </>
         )}
+      {imageProp && (
+        <>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id={`${nodeId}-attach-image`}
+              checked={!!data.attachImage}
+              onChange={(e) => updateNodeData(nodeId, { attachImage: e.target.checked })}
+            />
+            <Label htmlFor={`${nodeId}-attach-image`} className="text-xs cursor-pointer">
+              {T({ en: "Attach AI-generated image", zh: "附加 AI 生成的图片" })}
+            </Label>
+          </div>
+          {data.attachImage && (
+            <>
+              <div>
+                <Label className="text-xs block mb-1">{T({ en: "Image Provider", zh: "图片模型" })}</Label>
+                <Select
+                  value={data.imageProvider || "default"}
+                  onChange={(e: SelectChange) => updateNodeData(nodeId, { imageProvider: e.target.value })}
+                  className="w-full text-sm"
+                >
+                  {imageProviders.map((p) => (
+                    // i18n-ok: provider 与模型 id 都是品牌名，不翻译
+                    <option key={p.provider} value={p.provider}>
+                      {p.provider === "default" ? T({ en: "Default (Cloudflare Workers AI)", zh: "默认（Cloudflare Workers AI）" }) : "OpenAI"} ({p.model})
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs block mb-1">
+                  {propLabel(imageProp.propId, locale)} {T({ en: "Prompt", zh: "提示词" })}
+                </Label>
+                <Textarea
+                  value={data.imagePrompt || ""}
+                  onChange={(e: TextareaChange) => updateNodeData(nodeId, { imagePrompt: e.target.value })}
+                  placeholder={T({ en: "Abstract tech illustration about: $content.title", zh: "抽象科技风插画，主题：$content.title" })}
+                  rows={3}
+                  className="w-full text-sm font-mono"
+                />
+              </div>
+            </>
+          )}
+        </>
+      )}
       {videoProp && (
         <div className="flex items-center gap-2">
           <input
@@ -1340,6 +1393,7 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
   const { updateNodeData } = useFlowEditor();
   const [providers, setProviders] = useState<{ provider: string; model: string }[]>([]);
   const [skills, setSkills] = useState<{ id: string; label: string; hasCachedContent: boolean }[]>([]);
+  const [imageProviders, setImageProviders] = useState<{ provider: string; model: string }[]>([]);
 
   // 同 XContentActionInspector：改走 listCached + 三态，取数失败不再冒充"没绑定账号"。
   const channelList = useRefreshableList<ChannelOption[]>(channelListFetcher("TIKTOK"), []);
@@ -1350,6 +1404,10 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
 
   useEffect(() => {
     api.skills.list().then((res) => setSkills(res.skills)).catch(() => setSkills([]));
+  }, []);
+
+  useEffect(() => {
+    api.imageProviders.list().then((res) => setImageProviders(res.providers)).catch(() => setImageProviders([]));
   }, []);
 
   const operation = (data.operation as string) || "photo-post";
@@ -1466,23 +1524,11 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
                 onChange={(e: SelectChange) => updateNodeData(nodeId, { imageProvider: e.target.value })}
                 className="w-full text-sm"
               >
-                <option value="default">{T({ en: "Default (Cloudflare Workers AI)", zh: "默认（Cloudflare Workers AI）" })}</option>
-                {providers.filter((p) => p.provider === "openai").map((p) => (
-                  // i18n-ok: provider + model brand name (OpenAI gpt-image-1), never localized
-                  <option key={p.provider} value="openai">OpenAI (gpt-image-1)</option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs block mb-1">{T({ en: "Image Skill", zh: "图片技能" })}</Label>
-              <Select
-                value={data.imageSkillId || "none"}
-                onChange={(e: SelectChange) => updateNodeData(nodeId, { imageSkillId: e.target.value })}
-                className="w-full text-sm"
-              >
-                <option value="none">{T({ en: "None (current behavior)", zh: "不使用（当前默认行为）" })}</option>
-                {skills.map((s) => (
-                  <option key={s.id} value={s.id}>{s.label}{!s.hasCachedContent ? T({ en: " (not yet fetched)", zh: "（尚未抓取）" }) : ""}</option>
+                {imageProviders.map((p) => (
+                  // i18n-ok: provider 与模型 id 都是品牌名，不翻译
+                  <option key={p.provider} value={p.provider}>
+                    {p.provider === "default" ? T({ en: "Default (Cloudflare Workers AI)", zh: "默认（Cloudflare Workers AI）" }) : "OpenAI"} ({p.model})
+                  </option>
                 ))}
               </Select>
             </div>

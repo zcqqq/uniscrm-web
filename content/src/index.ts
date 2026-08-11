@@ -24,6 +24,7 @@ import {
   ANTHROPIC_STATIC_IMAGE_MODELS,
 } from "./services/model-catalog";
 import { SKILL_CATALOG } from "./skills/catalog";
+import { draftMarketingContext } from "./services/marketing-context";
 import { processVideoActionJob, type VideoActionQueueMessage } from "./queue-video-action";
 import { createInternalAuthMiddleware, resolveAuthMe, resolveSession, spaLoginGuard } from "../../shared/auth";
 
@@ -194,6 +195,21 @@ app.get("/api/image-providers", async (c) => {
     if (row.imageModel) providers.push({ provider: row.provider, model: row.imageModel });
   }
   return c.json({ providers });
+});
+
+// `/*` 通配注册——同上一条注释：只注册一次通配形式，不要再加裸路径
+// "/api/marketing-context"，否则 sessionAuth 会跑两次并二次消费其内部 fetch() 的 Response body。
+// Task 6 在这条注册之下加 GET/PUT /api/marketing-context，同样受这一次注册覆盖。
+app.use("/api/marketing-context/*", sessionAuth);
+
+app.post("/api/marketing-context/draft", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
+  try {
+    return c.json({ draft: await draftMarketingContext(c.env, tenantId) });
+  } catch (err) {
+    console.error(JSON.stringify({ event: "marketing_context_draft_failed", tenantId, error: String(err) }));
+    return c.json({ error: "Draft failed" }, 502);
+  }
 });
 
 export default {

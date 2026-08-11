@@ -90,6 +90,9 @@ const ACTION_DATA_BUILDERS: Record<ActionTypeKey, ActionDataBuilder> = {
     a.provider = node.data.provider as string;
     a.skillId = (node.data.skillId as string) || "none";
     a.attachVideo = !!node.data.attachVideo;
+    a.attachImage = !!node.data.attachImage;
+    a.imageProvider = (node.data.imageProvider as string) || "default";
+    a.imagePrompt = (node.data.imagePrompt as string) || "";
   },
   tiktokContentAction: (node, a) => {
     a.operation = (node.data.operation as string) || "photo-post";

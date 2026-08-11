@@ -676,6 +676,10 @@ async function executeContentActions(
         const provider = action.provider as string;
         const skillId = (action.skillId as string) || "none";
         const interpolatedPrompt = String(action.prompt || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""));
+        // 一段式：用户写的图片 prompt 插值后直接送扩散模型，不经文本模型改写。
+        const imagePrompt = action.attachImage
+          ? String(action.imagePrompt || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""))
+          : "";
 
         if (action.attachVideo) {
           const videoUrl = String(payload?.processed_video_url ?? "");
@@ -723,10 +727,13 @@ async function executeContentActions(
         res = await fetch(`${env.LINK_URL}/internal/content/create-post`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
-          body: JSON.stringify({ contentId, interpolatedPrompt, provider, channelId: xChannelId, flowId: flowId || null, skillId }),
+          body: JSON.stringify({
+            contentId, interpolatedPrompt, provider, channelId: xChannelId, flowId: flowId || null, skillId,
+            ...(imagePrompt ? { imagePrompt, imageProvider: action.imageProvider || "default" } : {}),
+          }),
         });
         logEvent = "content_action_x_content_action";
-        logExtra = { channelId: xChannelId, provider, skillId };
+        logExtra = { channelId: xChannelId, provider, skillId, attachImage: !!imagePrompt };
       }
 
       const body = await res.json().catch(() => ({ ok: false })) as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string; reason?: string };
@@ -1257,6 +1264,19 @@ app.get("/api/channels/github/repos", async (c) => {
 // Proxy configured LLM providers from content worker (tenant-scoped, forwards the session cookie)
 app.get("/api/llm-providers", async (c) => {
   const res = await fetch(`${c.env.CONTENT_URL}/api/llm-credentials`, {
+    headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
+  });
+  return new Response(await res.text(), {
+    status: res.status,
+    headers: { "Content-Type": "application/json" },
+  });
+});
+
+// Proxy the tenant's usable image providers from content worker (for the image provider
+// dropdowns). Deliberately a separate endpoint from /api/llm-providers: that one lists
+// text-capable BYOK providers, this one lists providers that actually have an image model.
+app.get("/api/image-providers", async (c) => {
+  const res = await fetch(`${c.env.CONTENT_URL}/api/image-providers`, {
     headers: { Cookie: c.req.raw.headers.get("Cookie") || "" },
   });
   return new Response(await res.text(), {

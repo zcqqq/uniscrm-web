@@ -177,6 +177,90 @@ describe("queue(): xContentAction branch resolution", () => {
     vi.unstubAllGlobals();
   });
 
+  it("interpolates $content.* in the image prompt and forwards it to link", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const graphWithImage = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        {
+          id: "a1", type: "action",
+          data: {
+            actionType: "xContentAction", channelId: "x-chan-1", prompt: "T: $content.title",
+            provider: "default", attachImage: true, imageProvider: "default",
+            imagePrompt: "Abstract art about: $content.title",
+          },
+          position: { x: 200, y: 0 },
+        },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-image', 1, 'image flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithImage).run();
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-image", channelId: "src-chan", payload: { title: "Original Title" } }),
+      env
+    );
+
+    // flow-branch1 (same trigger channelId "src-chan") also calls /internal/content/create-post
+    // for this event — find the call that carries the x-chan-1 channelId (flow-image's own), not
+    // just the first call to this URL, since flow-branch1's own call could come first.
+    const call = fetchMock.mock.calls.find((c) => {
+      if (!String(c[0]).includes("/internal/content/create-post")) return false;
+      const body = JSON.parse(c[1].body as string);
+      return body.channelId === "x-chan-1";
+    })!;
+    const body = JSON.parse(call[1].body as string);
+    expect(body.imagePrompt).toBe("Abstract art about: Original Title");
+    expect(body.imageProvider).toBe("default");
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-image'`).run();
+    vi.unstubAllGlobals();
+  });
+
+  // 没勾图片就不该给 link 任何图片字段，否则 link 会照着一段空 prompt 去出图。
+  it("omits the image fields when attachImage is off", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const graphNoImage = JSON.stringify({
+      nodes: [
+        { id: "t1", type: "xContentTrigger", data: { channelId: "src-chan", mode: "own:get-posts", conditions: [] }, position: { x: 0, y: 0 } },
+        {
+          id: "a1", type: "action",
+          data: { actionType: "xContentAction", channelId: "x-chan-1", prompt: "T: $content.title", provider: "default" },
+          position: { x: 200, y: 0 },
+        },
+      ],
+      edges: [{ id: "e1", source: "t1", target: "a1" }],
+    });
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-no-image', 1, 'no image flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphNoImage).run();
+
+    await worker.queue(
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-no-image", channelId: "src-chan", payload: { title: "Original Title" } }),
+      env
+    );
+
+    const call = fetchMock.mock.calls.find((c) => {
+      if (!String(c[0]).includes("/internal/content/create-post")) return false;
+      const body = JSON.parse(c[1].body as string);
+      return body.channelId === "x-chan-1";
+    })!;
+    const body = JSON.parse(call[1].body as string);
+    expect(body.imagePrompt).toBeUndefined();
+    expect(body.imageProvider).toBeUndefined();
+
+    await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-no-image'`).run();
+    vi.unstubAllGlobals();
+  });
+
   it("routes a repost-post operation to /internal/x/repost with the source channel and the payload's source_content_id as tweetId", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

@@ -135,7 +135,11 @@ describe("collectActions: new content-domain action types", () => {
     };
     const result = executeFlow(graph, "content.created", { channel_id: "chan1" });
     expect(result.actions).toEqual([
-      { type: "xContentAction", nodeId: "a1", hasBranches: true, operation: "repost-post", prompt: "Rewrite this: $content.content_text", provider: "default", skillId: "none", attachVideo: false },
+      {
+        type: "xContentAction", nodeId: "a1", hasBranches: true, operation: "repost-post",
+        channelId: undefined, prompt: "Rewrite this: $content.content_text", provider: "default", skillId: "none",
+        attachVideo: false, attachImage: false, imageProvider: "default", imagePrompt: "",
+      },
     ]);
   });
 

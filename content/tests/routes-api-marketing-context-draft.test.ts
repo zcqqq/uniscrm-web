@@ -62,14 +62,19 @@ describe("POST /api/marketing-context/draft", () => {
     expect(gen).not.toHaveBeenCalled();
   });
 
-  // 渠道端点挂了不该让起草整个失败 —— 还有内容这一路信号。
+  // 渠道端点挂了不该让起草整个失败 —— 还有内容这一路信号。断言必须落到 draft 内容和
+  // generateContent 是否被调用上：只查 status===200 时，"两个信号都空"的短路分支同样会
+  // 返回 200，测不出 rows.length===0 && channels.length===0 被误改成 || 的回归。
   it("渠道摘要取不到时降级为只用内容", async () => {
     vi.spyOn(tenantContentModule, "listRecentTenantContent").mockResolvedValue([
       { channelType: "X", title: "T", contentText: "B" },
     ]);
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("link down")));
-    vi.spyOn(generateModule, "generateContent").mockResolvedValue("# draft");
-    expect((await draft()).status).toBe(200);
+    const gen = vi.spyOn(generateModule, "generateContent").mockResolvedValue("# draft");
+    const { status, body } = await draft();
+    expect(status).toBe(200);
+    expect(body.draft).toBe("# draft");
+    expect(gen).toHaveBeenCalled();
   });
 
   it("未登录返回 401", async () => {

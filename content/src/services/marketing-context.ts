@@ -3,10 +3,12 @@ import { MARKETING_SKILLS_REPO } from "../skills/catalog";
 import { listRecentTenantContent, type RecentContentRow } from "./tenant-content";
 import { generateContent } from "./generate";
 import { listConfiguredProviders } from "./llm-credentials";
+// 哨兵字符串的唯一定义处在 shared/（前端 content/frontend/lib/context-block.ts 也从这里
+// import）——两侧各写一份字面量会悄悄失配，且失配时没有任何报错，只是保存按钮永远不出现。
+import { CONTEXT_SENTINEL } from "../../../shared/marketing-context-sentinel";
 
 export const PRODUCT_MARKETING_SKILL_ID = "marketingskills-product-marketing";
-export const CONTEXT_SENTINEL = "PRODUCT-MARKETING-CONTEXT-V1";
-export { MARKETING_SKILLS_REPO };
+export { MARKETING_SKILLS_REPO, CONTEXT_SENTINEL };
 
 export interface ChannelSummaryRow {
   channelType: string;

@@ -27,4 +27,12 @@ describe("MarketingContextCard 接线", () => {
   it("卡片挂进了设置页", () => {
     expect(settingsSource).toContain("MarketingContextCard");
   });
+
+  // 409（baseVersion 冲突）不能被通用 catch 一律吞成"请求失败"——否则用户只能反复点、
+  // 反复 409，没有任何走出去的路（见 code review 记录）。
+  it("保存冲突（409）单独处理，且给出双语提示", () => {
+    expect(cardSource).toContain("status === 409");
+    expect(cardSource).toContain('en: "This document changed elsewhere. Synced to the latest version — please save again."');
+    expect(cardSource).toContain('zh: "这份文档在别处被修改过。已同步到最新版本——请重新点击保存。"');
+  });
 });

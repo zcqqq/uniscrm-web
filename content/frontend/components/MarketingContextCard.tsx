@@ -53,12 +53,35 @@ export function MarketingContextCard() {
     setMessages([...next, { role: "assistant", content: reply }]);
   });
 
-  const handleSave = (content: string) => run(async () => {
-    const { version: v } = await api.marketingContext.save(content, version ?? undefined);
-    setDoc(content);
-    setVersion(v);
-    toast({ title: T({ en: "Context saved", zh: "上下文已保存" }) });
-  });
+  // 不复用 run()：409（baseVersion 冲突）需要专门处理，不能被 run() 的通用 catch
+  // 一律吞成"请求失败"——那样用户只会反复点、反复 409，没有任何走出去的路。
+  const handleSave = async (content: string) => {
+    setBusy(true);
+    try {
+      const { version: v } = await api.marketingContext.save(content, version ?? undefined);
+      setDoc(content);
+      setVersion(v);
+      toast({ title: T({ en: "Context saved", zh: "上下文已保存" }) });
+    } catch (err) {
+      if ((err as { status?: number } | undefined)?.status === 409) {
+        // 文档在别处被改过（另一个标签页、另一次对话）。只把本地 version 同步到最新，
+        // 不覆盖用户还没提交的正文——覆盖了就是把用户刚打的字静默冲掉。version 对齐后，
+        // 用户再点一次保存就能成功，不用刷新整个页面。
+        toast({
+          title: T({
+            en: "This document changed elsewhere. Synced to the latest version — please save again.",
+            zh: "这份文档在别处被修改过。已同步到最新版本——请重新点击保存。",
+          }),
+          variant: "destructive",
+        });
+        api.marketingContext.get().then((r) => setVersion(r.version)).catch(() => {});
+      } else {
+        toast({ title: T({ en: "Request failed", zh: "请求失败" }), variant: "destructive" });
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="rounded-lg border p-4 space-y-3">

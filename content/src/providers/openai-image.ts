@@ -1,5 +1,9 @@
 import type { ImageProvider } from "./image-interface";
-import { base64ToBytes } from "./image-interface";
+import { base64ToBytes, clampPrompt } from "./image-interface";
+
+// OpenAI 两个族的提示词上限不同（gpt-image-1 32000、dall-e-3 4000），来自 OpenAI 文档，非实测。
+const GPT_IMAGE_MAX_PROMPT_CHARS = 32000;
+const DALL_E_MAX_PROMPT_CHARS = 4000;
 
 export class OpenAiImageProvider implements ImageProvider {
   constructor(private apiKey: string) {}
@@ -16,7 +20,8 @@ export class OpenAiImageProvider implements ImageProvider {
     //    output_format outright and defaults response_format to "url" -- we need b64_json
     //    explicitly to keep returning bytes instead of a URL.
     const isGptImage = /^gpt-image/i.test(model);
-    const body: Record<string, unknown> = { model, prompt, size: "1024x1024" };
+    const clampedPrompt = clampPrompt(prompt, isGptImage ? GPT_IMAGE_MAX_PROMPT_CHARS : DALL_E_MAX_PROMPT_CHARS);
+    const body: Record<string, unknown> = { model, prompt: clampedPrompt, size: "1024x1024" };
     if (isGptImage) {
       body.output_format = "jpeg";
     } else {

@@ -221,4 +221,31 @@ describe("POST /internal/tiktok/photo-post", () => {
     }
     vi.unstubAllGlobals();
   });
+
+  it("never forwards a skill to the image generator, even if an old graph still sends one", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes("/internal/generate-image")) {
+        return new Response(JSON.stringify({ url: "https://content-dev.uni-scrm.com/public/media/fake-key-1" }), { status: 200 });
+      }
+      if (String(url).includes("/v2/post/publish/content/init/")) {
+        return new Response(JSON.stringify({ data: { publish_id: "pub-1" }, error: { code: "ok", message: "" } }), { status: 200 });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/tiktok/photo-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
+        body: JSON.stringify({ ...baseBody, imageSkillId: "marketingskills-social" }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), PIPELINE_CONTENT: mockPipelineContent() } as any
+    );
+
+    expect(res.status).toBe(200);
+    const imageCall = fetchMock.mock.calls.find((c: any[]) => String(c[0]).includes("/internal/generate-image"))!;
+    expect(JSON.parse(imageCall[1].body)).not.toHaveProperty("skillId");
+    vi.unstubAllGlobals();
+  });
 });

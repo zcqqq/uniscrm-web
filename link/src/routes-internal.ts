@@ -1100,13 +1100,13 @@ export function internalRoutes() {
   router.post("/tiktok/photo-post", async (c) => {
     const {
       contentId, channelId, prompts, textProvider, textSkillId,
-      imageCount, imageProvider, imageSkillId, flowId,
+      imageCount, imageProvider, flowId,
     } = await c.req.json<{
       contentId: string; channelId: string;
       prompts: { title: string; description: string; message_image: string };
       textProvider: "default" | "openai" | "anthropic" | "none"; textSkillId?: string;
       imageCount: number;
-      imageProvider: "default" | "openai"; imageSkillId?: string;
+      imageProvider: "default" | "openai";
       flowId?: string | null;
     }>();
 
@@ -1160,7 +1160,7 @@ export function internalRoutes() {
       const res = await fetch(`${c.env.CONTENT_URL}/internal/generate-image`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": c.env.INTERNAL_SECRET },
-        body: JSON.stringify({ tenantId, prompt: prompts.message_image, provider: imageProvider, skillId: imageSkillId }),
+        body: JSON.stringify({ tenantId, prompt: prompts.message_image, provider: imageProvider }),
       });
       if (!res.ok) continue;
       const body = await res.json() as { url: string };

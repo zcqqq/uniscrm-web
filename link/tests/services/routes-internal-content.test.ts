@@ -810,6 +810,45 @@ describe("stub content-flow action endpoints", () => {
     vi.unstubAllGlobals();
   });
 
+  // Code review finding (round 1): a *thrown* fetch()/json() error (network failure, malformed
+  // body) is a different failure shape than a resolved non-2xx Response, and must degrade to
+  // text-only exactly the same way — an uncaught throw here would skip createPost() entirely.
+  it("POST /internal/content/create-post still posts text when the /internal/generate-image fetch itself throws (network failure, not just a bad status)", async () => {
+    const channelRow = { config: JSON.stringify({ x_user_id: "x-user-1", access_token: "tok", refresh_token: null }), channel_type: "X", tenant_id: 1 };
+
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/internal/generate-image")) throw new Error("network down");
+      if (u.includes("/internal/generate")) return new Response(JSON.stringify({ text: "generated post text" }), { status: 200 });
+      if (u === "https://api.x.com/2/tweets") return new Response(JSON.stringify({ data: { id: "tweet-netdown-1", text: "generated post text" } }), { status: 201 });
+      throw new Error(`Unexpected fetch: ${u}`);
+    });
+    vi.stubGlobal("fetch", withFakeD1(fetchMock));
+
+    const res = await worker.fetch(
+      new Request("https://link-dev.uni-scrm.com/internal/content/create-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Secret": testSecret },
+        body: JSON.stringify({
+          contentId: "content-netdown-1", interpolatedPrompt: "raw prompt", provider: "default",
+          channelId: "tgt-chan", flowId: "flow-1", skillId: "none",
+          imagePrompt: "abstract tech illustration", imageProvider: "default",
+        }),
+      }),
+      { ...testEnv, LINK_DB: mockLinkDb(channelRow), WEB_DB: mockWebDb("tenant-db-1") }
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, id: "tweet-netdown-1" });
+
+    const tweetCall = fetchMock.mock.calls.find(([u]: [string]) => String(u) === "https://api.x.com/2/tweets")!;
+    const tweetBody = JSON.parse((tweetCall[1] as RequestInit).body as string);
+    expect(tweetBody.media).toBeUndefined();
+    expect(tweetBody.text).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([u]: [string]) => String(u).includes("/2/media/upload"))).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
   // 正常路径已被发布校验挡住，这里守后端的防御性行为，免得畸形图跑出两个 media_id；
   // 顺带证明省下了那次注定用不上的出图推理调用。
   it("POST /internal/content/create-post prefers the video and skips image generation when both are supplied", async () => {

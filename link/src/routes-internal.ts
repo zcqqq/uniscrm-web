@@ -155,21 +155,37 @@ async function generateAndUploadImage(
   env: Env, tenantId: number, prompt: string, provider: string,
   accessToken: string, contentId: string, channelId: string
 ): Promise<string | null> {
-  const genRes = await fetch(`${env.CONTENT_URL}/internal/generate-image`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
-    body: JSON.stringify({ tenantId, prompt, provider }),
-  });
-  if (!genRes.ok) {
-    console.error(JSON.stringify({
-      event: "create_post_image_failed", contentId, channelId, provider,
-      stage: "generate", status: genRes.status, body: await genRes.text().catch(() => ""),
-    }));
+  let url: string;
+  try {
+    const genRes = await fetch(`${env.CONTENT_URL}/internal/generate-image`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+      body: JSON.stringify({ tenantId, prompt, provider }),
+    });
+    if (!genRes.ok) {
+      console.error(JSON.stringify({
+        event: "create_post_image_failed", contentId, channelId, provider,
+        stage: "generate", status: genRes.status, body: await genRes.text().catch(() => ""),
+      }));
+      return null;
+    }
+    ({ url } = await genRes.json<{ url: string }>());
+  } catch (e) {
+    // fetch()/json() 抛出而不是 resolve 成非 2xx —— 网络层失败（DNS/连接被拒/超时）或 content
+    // 服务返回了畸形/截断的响应体。同一个降级策略：记日志、返回 null，让上层照发纯文本推文。
+    console.error(JSON.stringify({ event: "create_post_image_failed", contentId, channelId, provider, stage: "generate", error: String(e) }));
     return null;
   }
-  const { url } = await genRes.json<{ url: string }>();
 
-  const upload = await uploadImageToX(accessToken, url);
+  let upload: { ok: true; mediaId: string } | { ok: false };
+  try {
+    upload = await uploadImageToX(accessToken, url);
+  } catch (e) {
+    // uploadImageToX 内部也有裸 fetch/arrayBuffer（图片下载、以及它调用的 init/append/finalize），
+    // 同样可能抛出而非 resolve 非 2xx —— 这里兜底，不让上传阶段的异常逃出降级路径。
+    console.error(JSON.stringify({ event: "create_post_image_failed", contentId, channelId, provider, stage: "upload", error: String(e) }));
+    return null;
+  }
   if (!upload.ok) {
     console.error(JSON.stringify({ event: "create_post_image_failed", contentId, channelId, provider, stage: "upload" }));
     return null;

@@ -33,11 +33,10 @@ export function internalRoutes() {
   });
 
   router.post("/generate-image", async (c) => {
-    const { tenantId, prompt, provider, skillId } = await c.req.json<{
+    const { tenantId, prompt, provider } = await c.req.json<{
       tenantId: number;
       prompt: string;
       provider: "default" | "openai";
-      skillId?: string;
     }>();
 
     if (!tenantId || !prompt || !provider) {
@@ -45,12 +44,18 @@ export function internalRoutes() {
     }
 
     try {
-      const { bytes, contentType } = await generateImage(c.env, { tenantId, prompt, provider, skillId });
+      const { bytes, contentType } = await generateImage(c.env, { tenantId, prompt, provider });
       const key = crypto.randomUUID();
       await c.env.MEDIA_BUCKET.put(key, bytes, { httpMetadata: { contentType } });
       return c.json({ url: `${c.env.CONTENT_URL}/public/media/${key}` });
     } catch (err) {
-      console.error(JSON.stringify({ event: "generate_image_failed", tenantId, provider, error: String(err) }));
+      const message = String(err);
+      // 配置问题（没选图片模型 / 没有 key）是 400：调用方据此知道这是用户配置错、
+      // 不是模型抽风，不值得重试。
+      if (message.includes("No image model configured") || message.includes("credentials configured")) {
+        return c.json({ error: message }, 400);
+      }
+      console.error(JSON.stringify({ event: "generate_image_failed", tenantId, provider, error: message }));
       return c.json({ error: "Image generation failed" }, 502);
     }
   });

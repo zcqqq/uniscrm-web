@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../src/index";
+import * as generateImageModule from "../src/services/generate-image";
 
 describe("POST /internal/generate", () => {
   // Stub env.AI.run so this route test stays deterministic and free: every other test in this
@@ -20,12 +21,16 @@ describe("POST /internal/generate", () => {
     // create the post-migration schema by hand (matching migrations/0002_multi_provider_credentials.sql)
     // so generateContent's BYOK lookup (a SELECT against tenant_llm_credentials, including the
     // `model` column) doesn't fail with "no such table"/"no such column" for a tenant with no key.
+    // Schema mirrors post-migration tenant_llm_credentials (0003_nullable_api_key_for_default_provider.sql
+    // + 0007_image_model.sql): encrypted_api_key nullable (the 'default' provider has none) and
+    // image_model present (generate-image's getImageModel/getDefaultImageModel select it below).
     await env.CONTENT_DB.prepare(
       `CREATE TABLE IF NOT EXISTS tenant_llm_credentials (
          tenant_id INTEGER NOT NULL,
          provider TEXT NOT NULL,
-         encrypted_api_key TEXT NOT NULL,
+         encrypted_api_key TEXT,
          model TEXT NOT NULL,
+         image_model TEXT,
          created_at TEXT NOT NULL,
          updated_at TEXT NOT NULL,
          PRIMARY KEY (tenant_id, provider)
@@ -182,7 +187,11 @@ describe("POST /internal/generate-image", () => {
     expect(new TextDecoder().decode(await stored!.arrayBuffer())).toBe("fake-jpeg-bytes");
   });
 
-  it("returns 502 when provider: 'openai' has no configured credentials", async () => {
+  it("returns 400 (end-to-end, unmocked) when provider: 'openai' has no image model or credentials configured", async () => {
+    // Real DB round-trip (no generateImage mock): tenant 999 has zero tenant_llm_credentials
+    // rows for 'openai', so getImageModel resolves null before credentials are ever looked up --
+    // this is a config-class failure, not a flaky-model failure, so it's 400 (see "returns 400
+    // (not 502)" above, which covers the same branch via a mocked generateImage).
     const res = await worker.fetch(
       new Request("https://content-dev.uni-scrm.com/internal/generate-image", {
         method: "POST",
@@ -191,6 +200,19 @@ describe("POST /internal/generate-image", () => {
       }),
       testEnv
     );
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 (not 502) when the tenant has no image model for the provider", async () => {
+    vi.spyOn(generateImageModule, "generateImage").mockRejectedValue(new Error("No image model configured for provider openai"));
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/generate-image", {
+        method: "POST",
+        headers: { "X-Internal-Secret": "test-internal-secret", "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId: 1, prompt: "a lizard", provider: "openai" }),
+      }),
+      testEnv
+    );
+    expect(res.status).toBe(400);
   });
 });

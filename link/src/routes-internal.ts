@@ -21,6 +21,7 @@ import { YouTubeTokenService } from "./services/youtube-token";
 import { rateVideo, insertPlaylistItem } from "./services/youtube-actions";
 import { recordYouTubeQuota } from "./services/youtube-quota";
 import { fetchYouTubeVideoProps, fetchYouTubeAuthorProps, type YouTubeVideoProps } from "./services/pollers/youtube-content";
+import { handleGitHubReleases, githubReleasesEnabled } from "./cron";
 
 // User-approved system-prompt line for LLM-backed node operations (spec 2026-08-09):
 // operation-level metadata only — prop-level metadata is the user's own prompt's business.
@@ -406,6 +407,23 @@ export function internalRoutes() {
       console.error(JSON.stringify({ event: "xaa_manual_repair_failed", channelId, error }));
       return c.json({ ok: false, error }, 502);
     }
+  });
+
+  // 手动跑一次 GitHub release 轮询 —— 与 cron 里的 handleGitHubReleases 走同一个函数。
+  // cron 每小时才跑一次，而 `wrangler dev --remote` 不支持 queues（"Queues are not yet
+  // supported in wrangler dev remote mode"），这条链路发事件恰恰是靠 FLOW_QUEUE.send，
+  // 所以「改完等一小时」一直是排查它的主要成本，和 /x/repair-subscriptions 是同一个理由。
+  // 幂等：不重置轮转位点、不清 dedup 记录——就是把 cron 会做的这一轮，原地手动催一次。
+  // 与 cron 一样尊重 GITHUB_RELEASES_ENABLED 总开关：关闭时不调用 handleGitHubReleases，
+  // 直接回 ran:false，让调用方能区分"真的跑了"和"被开关拦下"。不接收也不透传租户参数——
+  // 这是催一次 cron 本来就会做的全租户轮询，不是新增的按租户触发能力。
+  router.post("/github/poll-once", async (c) => {
+    if (!githubReleasesEnabled(c.env)) {
+      console.log(JSON.stringify({ event: "github_poll_once_disabled" }));
+      return c.json({ ok: true, ran: false, reason: "disabled" });
+    }
+    await handleGitHubReleases(c.env);
+    return c.json({ ok: true, ran: true });
   });
 
   // flow 用来判断一个 published flow 的 trigger 绑的 channel 是否还活着。只回 id 集合，

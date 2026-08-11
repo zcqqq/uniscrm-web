@@ -82,12 +82,19 @@ sequenceDiagram
     participant CFP as content_flow_pending
 
     FW->>FW: interpolate $content.xxx into node's prompt -> interpolatedPrompt
-    FW->>LW: POST /internal/content/create-post { contentId, interpolatedPrompt, provider, targetChannelId, flowId }
+    Note over FW: when the node's "Attach AI-generated image" checkbox is on (non-video<br/>call site only), FW also interpolates $content.xxx into the image prompt and<br/>merges { imagePrompt, imageProvider } into the same request body below
+    FW->>LW: POST /internal/content/create-post { contentId, interpolatedPrompt, provider, targetChannelId, flowId, imagePrompt?, imageProvider? }
     alt provider !== "none"
         LW->>CW: POST /internal/generate { tenantId, prompt: interpolatedPrompt, provider }
         CW-->>LW: { text }
     else provider === "none"
         Note over LW: skip content entirely, text = interpolatedPrompt verbatim
+    end
+    opt imagePrompt present (and no video media id was produced)
+        LW->>CW: POST /internal/generate-image { tenantId, prompt: imagePrompt, provider: imageProvider }
+        CW-->>LW: { url }  (R2 public media)
+        LW->>XAPI: media/upload initialize+append+finalize (media_category="tweet_image")
+        XAPI-->>LW: media_id
     end
     alt targetChannel.channel_type === "X"
         LW->>XAPI: POST /2/tweets
@@ -106,6 +113,14 @@ sequenceDiagram
         FW->>FW: resumeFromNode(graph, nodeId, payload, ok ? "success" : "failed")
     end
 ```
+
+The image path never enters the video branch's `pending: true` / poll-and-reschedule machinery
+(`content_flow_pending`'s `xVideoStatusPoll` retry_action): X performs no asynchronous
+transcoding for images, so `finalize` never returns `processing_info` and there is nothing to
+poll. If image generation, the image download, or the X media upload fails — including a thrown
+network error (fetch/json() rejecting), not just a non-2xx HTTP response — it is logged as
+`create_post_image_failed` (with a `stage` field distinguishing `generate` from `upload`) and the
+node still posts the text-only tweet and still records success; the image is best-effort only.
 
 ## X List Posts trigger: demand-sync + per-list dedup
 

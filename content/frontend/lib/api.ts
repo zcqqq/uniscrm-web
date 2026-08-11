@@ -38,4 +38,14 @@ export const api = {
     list: (provider: ProviderName, apiKey?: string, kind?: "text" | "image"): Promise<{ models: string[]; source: "static" | "live" }> =>
       request("/api/llm-models", { method: "POST", body: JSON.stringify({ provider, apiKey, kind }) }),
   },
+  marketingContext: {
+    get: (): Promise<{ content: string | null; version: number | null; updatedAt: string | null }> =>
+      request("/api/marketing-context"),
+    draft: (): Promise<{ draft: string }> =>
+      request("/api/marketing-context/draft", { method: "POST", body: "{}" }),
+    chat: (messages: { role: "user" | "assistant"; content: string }[]): Promise<{ reply: string }> =>
+      request("/api/marketing-context/chat", { method: "POST", body: JSON.stringify({ messages }) }),
+    save: (content: string, baseVersion?: number): Promise<{ version: number }> =>
+      request("/api/marketing-context", { method: "PUT", body: JSON.stringify({ content, baseVersion }) }),
+  },
 };

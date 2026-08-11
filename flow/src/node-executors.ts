@@ -102,7 +102,6 @@ const ACTION_DATA_BUILDERS: Record<ActionTypeKey, ActionDataBuilder> = {
     a.textSkillId = (node.data.textSkillId as string) || "none";
     a.imageCount = (node.data.imageCount as number) || 1;
     a.imageProvider = node.data.imageProvider as string;
-    a.imageSkillId = (node.data.imageSkillId as string) || "none";
   },
   youtubeContentAction: (node, a) => {
     a.operation = (node.data.operation as string) || "save-to-playlist";

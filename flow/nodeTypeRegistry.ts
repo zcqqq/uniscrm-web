@@ -306,10 +306,10 @@ ${CONTENT_X_ACTION_BULLETS}`,
     defaultData: () => ({
       actionType: "tiktokContentAction", channelId: "", prompts: {},
       textProvider: "default", textSkillId: "none",
-      imageCount: 1, imageProvider: "default", imageSkillId: "none",
+      imageCount: 1, imageProvider: "default",
     }),
-    promptFragment: `   For TikTok content actions: data: { actionType: "tiktokContentAction", operation: ${CONTENT_TIKTOK_ACTION_OPERATIONS}, channelId: "", prompts: {}, textProvider: "default", textSkillId: "none", imageCount: 1, imageProvider: "default", imageSkillId: "none" }
-   - Leave all fields at these defaults for the user to configure via the Inspector. imageCount/imageProvider/imageSkillId only apply to "photo-post".
+    promptFragment: `   For TikTok content actions: data: { actionType: "tiktokContentAction", operation: ${CONTENT_TIKTOK_ACTION_OPERATIONS}, channelId: "", prompts: {}, textProvider: "default", textSkillId: "none", imageCount: 1, imageProvider: "default" }
+   - Leave all fields at these defaults for the user to configure via the Inspector. imageCount/imageProvider only apply to "photo-post".
 ${CONTENT_TIKTOK_ACTION_BULLETS}`,
   },
   youtubeContentAction: {

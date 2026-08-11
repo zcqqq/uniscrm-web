@@ -680,6 +680,12 @@ async function executeContentActions(
         const imagePrompt = action.attachImage
           ? String(action.imagePrompt || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""))
           : "";
+        // 勾选框开着但插值后是空串（prompt 本身留空，或整段都是 $content.xxx 而 payload 里
+        // 缺这个字段）——出图请求下面直接不带 imagePrompt 字段，静默退化为纯文本推文。
+        // 图片降级不许让节点失败（4.3 的规则），这条日志只是诊断，不影响 recordContentOutcome。
+        if (action.attachImage && !imagePrompt) {
+          console.log(JSON.stringify({ event: "content_action_x_image_prompt_empty", contentId, channelId: xChannelId }));
+        }
 
         if (action.attachVideo) {
           const videoUrl = String(payload?.processed_video_url ?? "");
@@ -733,7 +739,10 @@ async function executeContentActions(
           }),
         });
         logEvent = "content_action_x_content_action";
-        logExtra = { channelId: xChannelId, provider, skillId, attachImage: !!imagePrompt };
+        // 记的是节点勾了没有（配置），不是插值结果非空与否（内容）——一个用户确实勾选了
+        // 图片、只是这次 payload 缺字段导致 prompt 插值成空串的节点，不该在分析表里显示成
+        // "没勾"。空 prompt 的诊断由上面 content_action_x_image_prompt_empty 单独记。
+        logExtra = { channelId: xChannelId, provider, skillId, attachImage: !!action.attachImage };
       }
 
       const body = await res.json().catch(() => ({ ok: false })) as { ok: boolean; rateLimited?: boolean; rateLimitReset?: string; reason?: string };
@@ -796,7 +805,6 @@ async function executeContentActions(
         textSkillId: action.textSkillId as string,
         imageCount: action.imageCount as number,
         imageProvider: action.imageProvider as string,
-        imageSkillId: action.imageSkillId as string,
         flowId: flowId || null,
       };
       const res = await fetch(`${env.LINK_URL}/internal/tiktok/photo-post`, {

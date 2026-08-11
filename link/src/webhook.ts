@@ -316,7 +316,26 @@ async function processXEvent(
       console.log(JSON.stringify({ event: "xaa_inbound_like_processed", channelId, userId: liker.id }));
       return;
     }
-    console.log(JSON.stringify({ event: "xaa_inbound_like_no_liker_in_includes", channelId }));
+    // 一条 inbound 赞解不出点赞人，就只能退回通用分支、记在被点赞的账号名下 ——「本账号点了
+    // 个赞」，和事实相反。prod 自 2026-07-28 起的 7 条 inbound 赞全部走了这里，findCounterparty
+    // 一次都没成功过，包括 2026-08-10 01:34 那条由重建后的 inbound 订阅投递的。
+    //
+    // 文档（docs.x.com/x-api/activity/event-payloads）说 includes.users 是扁平对象、且 inbound
+    // 时含点赞人，与代码的读法一致；但同一份文档也说列表接口会回显 filter.direction，实测并不会。
+    // 所以这里把真实形状打出来，别再按文档推断：includes 有哪些键、users 有几个、每个 user 的
+    // id 和 username 各是什么。若 id 是 undefined，说明 X 又把 user 包了一层（follow.follow 的
+    // payload.source.data.id 就是这么包的），findCounterparty 读浅了一级。
+    const rawUsers = (activity.includes?.users as Array<Record<string, unknown>> | undefined);
+    console.log(JSON.stringify({
+      event: "xaa_inbound_like_no_liker_in_includes",
+      channelId,
+      filterUserId,
+      includesKeys: activity.includes ? Object.keys(activity.includes) : null,
+      usersCount: Array.isArray(rawUsers) ? rawUsers.length : null,
+      users: Array.isArray(rawUsers)
+        ? rawUsers.slice(0, 5).map((u) => ({ keys: Object.keys(u ?? {}).slice(0, 12), id: u?.id, username: u?.username }))
+        : null,
+    }));
   }
 
   if (eventType === "dm.read" || eventType === "dm.received") {

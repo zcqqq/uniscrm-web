@@ -152,19 +152,53 @@ describe("POST /internal/generate-image", () => {
   const testEnv = {
     ...env,
     INTERNAL_SECRET: "test-internal-secret",
-    AI: { run: async () => ({ image: btoa("fake-jpeg-bytes") }) } as unknown as Ai,
+    // 两段式出图后 stage 1（文本）和 stage 2（出图）都打在同一个 env.AI.run 上，两种
+    // 响应形状都得给到：文本模型读 { response }（见 workers-ai.ts），扩散模型读
+    // { image }（见 workers-ai-image.ts）。
+    AI: { run: async () => ({ response: "a lizard", image: btoa("fake-jpeg-bytes") }) } as unknown as Ai,
   };
+
+  beforeEach(async () => {
+    // stage 1 现在总是带 skillId: "marketingskills-image" 跑一次 generateContent，
+    // 它会读 skill_content_cache（技能文档缓存）和 skill_context（租户上下文）——两张表
+    // 不在这个 describe 之前的任何 beforeEach 里保证存在，自己建，别依赖执行顺序。
+    await env.CONTENT_DB.prepare(
+      `CREATE TABLE IF NOT EXISTS skill_content_cache (
+         skill_id TEXT PRIMARY KEY,
+         content TEXT NOT NULL,
+         source_url TEXT NOT NULL,
+         fetched_at TEXT NOT NULL
+       )`
+    ).run();
+    await env.CONTENT_DB.prepare(
+      `CREATE TABLE IF NOT EXISTS skill_context (
+         tenant_id INTEGER NOT NULL, skill_repo TEXT NOT NULL, content TEXT NOT NULL,
+         version INTEGER NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (tenant_id, skill_repo))`
+    ).run();
+  });
 
   it("rejects requests missing the internal secret", async () => {
     const res = await worker.fetch(
       new Request("https://content-dev.uni-scrm.com/internal/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tenantId: 1, prompt: "a lizard", provider: "default" }),
+        body: JSON.stringify({ tenantId: 1, provider: "default", sourceTitle: "a lizard" }),
       }),
       testEnv
     );
     expect(res.status).toBe(403);
+  });
+
+  it("缺少 sourceTitle 和 sourceText 时 400", async () => {
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/generate-image", {
+        method: "POST",
+        headers: { "X-Internal-Secret": "test-internal-secret", "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId: 1, provider: "default" }),
+      }),
+      testEnv
+    );
+    expect(res.status).toBe(400);
   });
 
   it("stores the generated image in R2 and returns its public URL on success (default provider, Workers AI)", async () => {
@@ -172,7 +206,7 @@ describe("POST /internal/generate-image", () => {
       new Request("https://content-dev.uni-scrm.com/internal/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
-        body: JSON.stringify({ tenantId: 999, prompt: "a lizard", provider: "default" }),
+        body: JSON.stringify({ tenantId: 999, provider: "default", sourceTitle: "a lizard" }),
       }),
       { ...testEnv, CONTENT_URL: "https://content-dev.uni-scrm.com" }
     );
@@ -189,14 +223,14 @@ describe("POST /internal/generate-image", () => {
 
   it("returns 400 (end-to-end, unmocked) when provider: 'openai' has no image model or credentials configured", async () => {
     // Real DB round-trip (no generateImage mock): tenant 999 has zero tenant_llm_credentials
-    // rows for 'openai', so getImageModel resolves null before credentials are ever looked up --
-    // this is a config-class failure, not a flaky-model failure, so it's 400 (see "returns 400
-    // (not 502)" above, which covers the same branch via a mocked generateImage).
+    // rows for 'openai', so getImageModel resolves null before credentials — or stage 1 — are
+    // ever touched; this is a config-class failure, not a flaky-model failure, so it's 400
+    // (see "returns 400 (not 502)" above, which covers the same branch via a mocked generateImage).
     const res = await worker.fetch(
       new Request("https://content-dev.uni-scrm.com/internal/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": "test-internal-secret" },
-        body: JSON.stringify({ tenantId: 999, prompt: "a lizard", provider: "openai" }),
+        body: JSON.stringify({ tenantId: 999, provider: "openai", sourceTitle: "a lizard" }),
       }),
       testEnv
     );
@@ -209,7 +243,7 @@ describe("POST /internal/generate-image", () => {
       new Request("https://content-dev.uni-scrm.com/internal/generate-image", {
         method: "POST",
         headers: { "X-Internal-Secret": "test-internal-secret", "Content-Type": "application/json" },
-        body: JSON.stringify({ tenantId: 1, prompt: "a lizard", provider: "openai" }),
+        body: JSON.stringify({ tenantId: 1, provider: "openai", sourceTitle: "a lizard" }),
       }),
       testEnv
     );

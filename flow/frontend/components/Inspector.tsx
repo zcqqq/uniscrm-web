@@ -304,10 +304,9 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
   if (!ctDef) return <p className="text-sm text-muted-foreground">{T({ en: "Unknown channel type", zh: "未知渠道类型" })}</p>;
 
   return (
-    <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{ctDef.label} {T({ en: "Trigger", zh: "触发器" })}</h4>
-
-      <div className="space-y-3">
+    <ChannelNodePanel
+      title={<>{ctDef.label} {T({ en: "Trigger", zh: "触发器" })}</>}
+      operation={
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Event", zh: "事件" })}</Label>
           <Select
@@ -321,8 +320,9 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
             ))}
           </Select>
         </div>
-
-        {eventType && (
+      }
+      account={
+        eventType ? (
           <div>
             <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
             {loadingChannels ? (
@@ -342,19 +342,19 @@ function XTriggerInspector({ nodeId, data }: { nodeId: string; data: Record<stri
               </Select>
             )}
           </div>
-        )}
-
-        {evDef && evDef.contextFields.length > 0 && (
-          <ConditionsEditor
-            conditions={conditions}
-            fields={evDef.contextFields}
-            onChange={(c) => updateNodeData(nodeId, { conditions: c })}
-            logic={data.conditionLogic}
-            onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
-          />
-        )}
-      </div>
-    </div>
+        ) : null
+      }
+    >
+      {evDef && evDef.contextFields.length > 0 && (
+        <ConditionsEditor
+          conditions={conditions}
+          fields={evDef.contextFields}
+          onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+          logic={data.conditionLogic}
+          onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
+        />
+      )}
+    </ChannelNodePanel>
   );
 }
 
@@ -391,16 +391,17 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
   }, [channelId]);
 
   return (
-    <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("xContentTrigger"))}</h4>
-      <div className="space-y-3">
+    <ChannelNodePanel
+      title={T(nodeLabel("xContentTrigger"))}
+      operation={
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Event", zh: "事件" })}</Label>
           <Select value={CONTENT_X_TRIGGER_MODE_LIST_POSTS} disabled className="w-full text-sm">
             <option value={CONTENT_X_TRIGGER_MODE_LIST_POSTS}>{T({ en: "List Posts", zh: "名单帖子" })}</option>
           </Select>
         </div>
-
+      }
+      account={
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Account", zh: "账号" })}</Label>
           {channels.length === 0 ? (
@@ -418,43 +419,43 @@ function XContentTriggerInspector({ nodeId, data }: { nodeId: string; data: Reco
             </Select>
           )}
         </div>
-
-        <div>
-          <Label className="text-xs block mb-1">{T({ en: "List", zh: "名单" })}</Label>
-          {!channelId ? (
-            <p className="text-xs text-muted-foreground italic">{T({ en: "Select an account first", zh: "请先选择账号" })}</p>
-          ) : loadingLists ? (
-            <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
-          ) : lists.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">{T({ en: "No owned Lists found on this account", zh: "该账号没有自建名单" })}</p>
-          ) : (
-            <Select
-              value={data.listId || ""}
-              onChange={(e: SelectChange) => {
-                const list = lists.find((l) => l.id === e.target.value);
-                updateNodeData(nodeId, { listId: e.target.value, listName: list?.name || "" });
-              }}
-              className="w-full text-sm"
-            >
-              <option value="">{T({ en: "Select list...", zh: "选择名单…" })}</option>
-              {lists.map((l) => (
-                <option key={l.id} value={l.id}>{l.name}</option>
-              ))}
-            </Select>
-          )}
-        </div>
-
-        <p className="text-xs text-muted-foreground">{T({ en: "Fires when a new post appears in this X List (from any account).", zh: "该 X 名单出现新帖子时触发（不限账号）。" })}</p>
-
-        <ConditionsEditor
-          conditions={conditions}
-          fields={getContentTriggerFields(ContentMetadata_X, data.mode || CONTENT_X_TRIGGER_MODE_LIST_POSTS, locale)}
-          onChange={(c) => updateNodeData(nodeId, { conditions: c })}
-          logic={data.conditionLogic}
-          onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
-        />
+      }
+    >
+      <div>
+        <Label className="text-xs block mb-1">{T({ en: "List", zh: "名单" })}</Label>
+        {!channelId ? (
+          <p className="text-xs text-muted-foreground italic">{T({ en: "Select an account first", zh: "请先选择账号" })}</p>
+        ) : loadingLists ? (
+          <p className="text-xs text-muted-foreground">{T(C.loading)}</p>
+        ) : lists.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">{T({ en: "No owned Lists found on this account", zh: "该账号没有自建名单" })}</p>
+        ) : (
+          <Select
+            value={data.listId || ""}
+            onChange={(e: SelectChange) => {
+              const list = lists.find((l) => l.id === e.target.value);
+              updateNodeData(nodeId, { listId: e.target.value, listName: list?.name || "" });
+            }}
+            className="w-full text-sm"
+          >
+            <option value="">{T({ en: "Select list...", zh: "选择名单…" })}</option>
+            {lists.map((l) => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </Select>
+        )}
       </div>
-    </div>
+
+      <p className="text-xs text-muted-foreground">{T({ en: "Fires when a new post appears in this X List (from any account).", zh: "该 X 名单出现新帖子时触发（不限账号）。" })}</p>
+
+      <ConditionsEditor
+        conditions={conditions}
+        fields={getContentTriggerFields(ContentMetadata_X, data.mode || CONTENT_X_TRIGGER_MODE_LIST_POSTS, locale)}
+        onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+        logic={data.conditionLogic}
+        onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
+      />
+    </ChannelNodePanel>
   );
 }
 
@@ -954,9 +955,9 @@ function YouTubeContentActionInspector({ nodeId, data }: { nodeId: string; data:
   }, [operation]);
 
   return (
-    <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("youtubeContentAction"))}</h4>
-      <div className="space-y-3">
+    <ChannelNodePanel
+      title={T(nodeLabel("youtubeContentAction"))}
+      operation={
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Operation", zh: "操作" })}</Label>
           <OperationSelect
@@ -970,32 +971,35 @@ function YouTubeContentActionInspector({ nodeId, data }: { nodeId: string; data:
             placeholder={T({ en: "Select operation...", zh: "选择操作…" })}
           />
         </div>
-        {operation === "save-to-playlist" && (
-          <div>
-            <Label className="text-xs block mb-1">{T({ en: "Playlist", zh: "播放列表" })}</Label>
-            <Select
-              value={data.playlistId || ""}
-              onChange={(e: SelectChange) => {
-                const id = e.target.value;
-                const title = playlists.find((p) => p.id === id)?.title || "";
-                updateNodeData(nodeId, { playlistId: id, playlistTitle: title });
-              }}
-              className="w-full text-sm"
-            >
-              <option value="">{T({ en: "Select a playlist…", zh: "选择播放列表…" })}</option>
-              {playlists.map((p) => (
-                <option key={p.id} value={p.id}>{p.title}</option>
-              ))}
-            </Select>
-            {needsReconnect && (
-              <p className="text-xs text-muted-foreground mt-1">
-                {T({ en: "Reconnect your YouTube account on the Social page to grant save/like permission.", zh: "请在社交页面重新连接 YouTube 账号，以授予收藏/点赞权限。" })}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+      }
+      /* 这个节点用触发渠道的 YouTube 账号，面板里没有账号选择器——传 null 占住位置二。 */
+      account={null}
+    >
+      {operation === "save-to-playlist" && (
+        <div>
+          <Label className="text-xs block mb-1">{T({ en: "Playlist", zh: "播放列表" })}</Label>
+          <Select
+            value={data.playlistId || ""}
+            onChange={(e: SelectChange) => {
+              const id = e.target.value;
+              const title = playlists.find((p) => p.id === id)?.title || "";
+              updateNodeData(nodeId, { playlistId: id, playlistTitle: title });
+            }}
+            className="w-full text-sm"
+          >
+            <option value="">{T({ en: "Select a playlist…", zh: "选择播放列表…" })}</option>
+            {playlists.map((p) => (
+              <option key={p.id} value={p.id}>{p.title}</option>
+            ))}
+          </Select>
+          {needsReconnect && (
+            <p className="text-xs text-muted-foreground mt-1">
+              {T({ en: "Reconnect your YouTube account on the Social page to grant save/like permission.", zh: "请在社交页面重新连接 YouTube 账号，以授予收藏/点赞权限。" })}
+            </p>
+          )}
+        </div>
+      )}
+    </ChannelNodePanel>
   );
 }
 
@@ -1037,9 +1041,9 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
   const promptLabel = aiProp ? PROPS.find((p) => p.propId === aiProp.propId)?.label : undefined;
 
   return (
-    <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("xContentAction"))}</h4>
-      <div className="space-y-3">
+    <ChannelNodePanel
+      title={T(nodeLabel("xContentAction"))}
+      operation={
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Operation", zh: "操作" })}</Label>
           <OperationSelect
@@ -1053,7 +1057,8 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
             placeholder={T({ en: "Select operation...", zh: "选择操作…" })}
           />
         </div>
-
+      }
+      account={
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Target Account", zh: "目标账号" })}</Label>
           {channels.length === 0 ? (
@@ -1069,7 +1074,9 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
             </Select>
           )}
         </div>
-        {aiProp && (
+      }
+    >
+      {aiProp && (
           <>
             <div>
               <Select
@@ -1111,21 +1118,20 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
             </div>
           </>
         )}
-        {videoProp && (
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id={`${nodeId}-attach-video`}
-              checked={!!data.attachVideo}
-              onChange={(e) => updateNodeData(nodeId, { attachVideo: e.target.checked })}
-            />
-            <Label htmlFor={`${nodeId}-attach-video`} className="text-xs cursor-pointer">
-              {T({ en: "Attach video (uses this flow's processed video, if any)", zh: "附加视频（若有，使用本流程处理后的视频）" })}
-            </Label>
-          </div>
-        )}
-      </div>
-    </div>
+      {videoProp && (
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id={`${nodeId}-attach-video`}
+            checked={!!data.attachVideo}
+            onChange={(e) => updateNodeData(nodeId, { attachVideo: e.target.checked })}
+          />
+          <Label htmlFor={`${nodeId}-attach-video`} className="text-xs cursor-pointer">
+            {T({ en: "Attach video (uses this flow's processed video, if any)", zh: "附加视频（若有，使用本流程处理后的视频）" })}
+          </Label>
+        </div>
+      )}
+    </ChannelNodePanel>
   );
 }
 
@@ -1276,9 +1282,9 @@ function VideoActionInspector({ nodeId, data }: { nodeId: string; data: Record<s
   const operation = (data.operation as string) || "add-subtitle";
 
   return (
-    <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("videoAction"))}</h4>
-      <div className="space-y-3">
+    <ChannelNodePanel
+      title={T(nodeLabel("videoAction"))}
+      operation={
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Operation", zh: "操作" })}</Label>
           <OperationSelect
@@ -1288,22 +1294,25 @@ function VideoActionInspector({ nodeId, data }: { nodeId: string; data: Record<s
             placeholder={T({ en: "Select operation...", zh: "选择操作…" })}
           />
         </div>
-        {operation === "add-subtitle" && (
-          <div>
-            <Label className="text-xs block mb-1">{T({ en: "Target Language", zh: "目标语言" })}</Label>
-            <Select
-              value={data.targetLanguage || "zh"}
-              onChange={(e: SelectChange) => updateNodeData(nodeId, { targetLanguage: e.target.value })}
-              className="w-full text-sm"
-            >
-              {VIDEO_ACTION_LANGUAGES.map((l) => (
-                <option key={l.value} value={l.value}>{T(l.label)}</option>
-              ))}
-            </Select>
-          </div>
-        )}
-      </div>
-    </div>
+      }
+      /* 视频处理走本流程内的素材，不绑定渠道账号，面板里没有账号选择器——传 null 占住位置二。 */
+      account={null}
+    >
+      {operation === "add-subtitle" && (
+        <div>
+          <Label className="text-xs block mb-1">{T({ en: "Target Language", zh: "目标语言" })}</Label>
+          <Select
+            value={data.targetLanguage || "zh"}
+            onChange={(e: SelectChange) => updateNodeData(nodeId, { targetLanguage: e.target.value })}
+            className="w-full text-sm"
+          >
+            {VIDEO_ACTION_LANGUAGES.map((l) => (
+              <option key={l.value} value={l.value}>{T(l.label)}</option>
+            ))}
+          </Select>
+        </div>
+      )}
+    </ChannelNodePanel>
   );
 }
 
@@ -1336,9 +1345,9 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
   const imageProps = activeProps.filter((p) => p.aiType === "IMAGE");
 
   return (
-    <div>
-      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("tiktokContentAction"))}</h4>
-      <div className="space-y-3">
+    <ChannelNodePanel
+      title={T(nodeLabel("tiktokContentAction"))}
+      operation={
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Operation", zh: "操作" })}</Label>
           <OperationSelect
@@ -1351,7 +1360,8 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
             placeholder={T({ en: "Select operation...", zh: "选择操作…" })}
           />
         </div>
-
+      }
+      account={
         <div>
           <Label className="text-xs block mb-1">{T({ en: "Target Account", zh: "目标账号" })}</Label>
           {channels.length === 0 ? (
@@ -1367,8 +1377,9 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
             </Select>
           )}
         </div>
-
-        {textProps.map((prop) => {
+      }
+    >
+      {textProps.map((prop) => {
           const propText = propLabel(prop.propId, locale);
           return (
             <div key={prop.propId}>
@@ -1467,8 +1478,7 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
             </div>
           </>
         )}
-      </div>
-    </div>
+    </ChannelNodePanel>
   );
 }
 

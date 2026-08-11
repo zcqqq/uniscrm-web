@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { SocialChannels } from "../components/SocialChannels";
+import { SocialChannels, SimpleContentChannels } from "../components/SocialChannels";
 import { LocalImport } from "../components/LocalImport";
 import { NotionConnect } from "../components/NotionConnect";
 import { ConfirmOverflow } from "../components/ConfirmOverflow";
@@ -25,6 +25,7 @@ export function Social() {
 
       <h2 className="text-lg font-semibold mt-10 mb-4">{T({ en: "Content Channels", zh: "内容渠道" })}</h2>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <SimpleContentChannels />
         <LocalImport key={importKey} onImport={importFiles} />
         <NotionConnect onSyncComplete={handleSyncComplete} />
       </div>

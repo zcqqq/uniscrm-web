@@ -14,6 +14,8 @@ export interface SimpleChannelConfig {
   connectPath: string;
   /** Optional help doc link, rendered as a "Read more" link on the card */
   helpUrl?: string;
+  /** Which page section this channel's card renders in. Defaults to "social" when omitted. */
+  section?: "social" | "content";
 }
 
 /**
@@ -46,5 +48,6 @@ export const SIMPLE_CHANNELS: SimpleChannelConfig[] = [
     logo: <GitHubIcon className="w-8 h-8" />,
     displayField: "login",
     connectPath: "/api/auth/github/connect",
+    section: "content",
   },
 ];

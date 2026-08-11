@@ -442,6 +442,12 @@ function XByokChannelCard({ locale }: { locale: Locale }) {
 
 // ─── Generic simple channel — data-driven, one component for all future channels ──
 
+// SIMPLE_CHANNELS split by `section` (default "social"). SocialChannels() renders
+// SOCIAL_SIMPLE_CHANNELS; SimpleContentChannels() below renders CONTENT_SIMPLE_CHANNELS.
+// Exported so a test can assert the split directly instead of diffing rendered output.
+export const SOCIAL_SIMPLE_CHANNELS = SIMPLE_CHANNELS.filter((c) => (c.section ?? "social") === "social");
+export const CONTENT_SIMPLE_CHANNELS = SIMPLE_CHANNELS.filter((c) => c.section === "content");
+
 function SimpleChannelCard({ config, locale }: { config: SimpleChannelConfig; locale: Locale }) {
   const { connected, displayName, createdAt, loading, disconnect } = useSimpleChannel(config.type, config.displayField);
 
@@ -561,7 +567,21 @@ export function SocialChannels() {
       <XChannelCard locale={locale} />
       <XByokChannelCard locale={locale} />
       <YouTubeAccountCard locale={locale} />
-      {SIMPLE_CHANNELS.map((cfg) => (
+      {SOCIAL_SIMPLE_CHANNELS.map((cfg) => (
+        <SimpleChannelCard key={cfg.type} config={cfg} locale={locale} />
+      ))}
+    </>
+  );
+}
+
+// Content-section counterpart of SocialChannels(): renders SIMPLE_CHANNELS entries
+// marked `section: "content"` (e.g. GitHub) using the same generic card. Placed by
+// Social.tsx inside the Content Channels grid, not the Social Channels grid.
+export function SimpleContentChannels() {
+  const { locale } = useLocale();
+  return (
+    <>
+      {CONTENT_SIMPLE_CHANNELS.map((cfg) => (
         <SimpleChannelCard key={cfg.type} config={cfg} locale={locale} />
       ))}
     </>

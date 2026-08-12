@@ -1,0 +1,188 @@
+import type { Env } from "../types";
+import { MARKETING_SKILLS_REPO } from "../skills/catalog";
+import { listRecentTenantContent, type RecentContentRow } from "./tenant-content";
+import { generateContent } from "./generate";
+import { listConfiguredProviders } from "./llm-credentials";
+
+export const PRODUCT_MARKETING_SKILL_ID = "marketingskills-product-marketing";
+export { MARKETING_SKILLS_REPO };
+
+export interface ChannelSummaryRow {
+  channelType: string;
+  displayName: string | null;
+}
+
+// 渠道摘要是"锦上添花"的第二路信号；link 挂了就当没有，内容那一路还在。
+export async function fetchChannelSummary(env: Env, tenantId: number): Promise<ChannelSummaryRow[]> {
+  try {
+    const res = await fetch(`${env.LINK_URL}/internal/channels/summary?tenantId=${tenantId}`, {
+      headers: { "X-Internal-Secret": env.INTERNAL_SECRET },
+    });
+    if (!res.ok) return [];
+    return (await res.json<{ channels: ChannelSummaryRow[] }>()).channels ?? [];
+  } catch (err) {
+    console.error(JSON.stringify({ event: "channel_summary_fetch_failed", tenantId, error: String(err) }));
+    return [];
+  }
+}
+
+// 与 buildChatContract/buildDocumentContract 同样的治理（设计文档 §8.4）：零参数、常量输出，
+// 结构性地保证这段固定指令不可能从技能内容里读出小节名/字段名再插值进去（见
+// routes-api-marketing-context.test.ts 的"执行契约的结构保证"，现在把这个函数也纳入同一组
+// 检查）。这段话曾经写死"following your skill's 12-section structure"——技能改版后就跟真实
+// 小节数悄悄脱节，且没有任何报错（本分支自己的 dev 实测已经从 12 变成 13）。改用跟
+// buildChatContract/buildDocumentContract 一致的指代性措辞，把结构的权威交还给注入的技能
+// 全文，不再由我们数它有几节。
+//
+// buildDraftPrompt 会在这段指令之后另外拼接租户自己的证据（渠道列表、近期内容摘要）——那
+// 部分不受这条治理约束：bullet 列表来自租户数据本身，不是我们对技能结构的复述。
+export function buildDraftInstruction(): string {
+  return (
+    "Draft a Product Marketing Context document for this tenant, following the structure the" +
+    " instructions above describe." +
+    " You have no codebase to read. Everything known about them is below. Where a section cannot be" +
+    " supported by this evidence, write a short best guess and mark it clearly as an assumption to confirm."
+  );
+}
+
+export function buildDraftPrompt(rows: RecentContentRow[], channels: ChannelSummaryRow[]): string {
+  const channelLines = channels
+    .map((c) => `- ${c.channelType}${c.displayName ? `: ${c.displayName}` : ""}`)
+    .join("\n");
+  const contentLines = rows
+    .map((r) => `- [${r.channelType}] ${r.title ?? ""}\n  ${(r.contentText ?? "").slice(0, 500)}`)
+    .join("\n");
+
+  return [
+    buildDraftInstruction(),
+    channels.length ? `\nConnected marketing channels:\n${channelLines}` : "",
+    rows.length ? `\nTheir most recent published/ingested content:\n${contentLines}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+export async function draftMarketingContext(env: Env, tenantId: number): Promise<string> {
+  const [rows, channels] = await Promise.all([
+    listRecentTenantContent(env, tenantId),
+    fetchChannelSummary(env, tenantId),
+  ]);
+  // 两个信号都空 = 这个租户我们一无所知。生成一份纯靠猜的文档只会给用户一堆要删的东西，
+  // 不如把对话交回给他们从白纸开始。
+  if (rows.length === 0 && channels.length === 0) return "";
+
+  return generateContent(env, {
+    tenantId,
+    prompt: buildDraftPrompt(rows, channels),
+    provider: await resolveContextProvider(env, tenantId),
+    skillId: PRODUCT_MARKETING_SKILL_ID,
+  });
+}
+
+// 对话与起草都跟随租户已配置的文本模型：配了 BYOK 就用 BYOK，没配就用免费默认。
+// 与全站一致，不引入"这个功能专用的模型"这种新概念。
+export async function resolveContextProvider(
+  env: Env,
+  tenantId: number
+): Promise<"default" | "openai" | "anthropic"> {
+  const configured = await listConfiguredProviders(env, tenantId);
+  if (configured.some((p) => p.provider === "anthropic")) return "anthropic";
+  if (configured.some((p) => p.provider === "openai")) return "openai";
+  return "default";
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+// 哨兵围栏契约在 dev 实测 0/6 合规后删除（详见设计文档 §8.1–§8.2）：技能自带的 9KB 指令里
+// 就有"展示完整文档"这一条，跟我们哨兵契约的"先别写"直接打架，模型选择听技能的。文档生成
+// 改走独立的 /generate 端点（见 generateMarketingContextDocument），聊天这条路径此后只负责
+// 提问，不再兼职吐文档。
+//
+// 不在这里手动拼租户现有文档：chatMarketingContext 把调用方转发来的 currentDocument 原样
+// 传给 generateContent，由它注入到系统提示里（见 generate.ts 的 tenantContext），紧挨在这段
+// 合同文本之前。这里只需用指代性措辞告诉模型"如果上文出现了当前文档就更新它"，覆盖有/无
+// 文档两种情况，不重复内联文档本身——否则每一轮对话都会把整份文档在 system prompt 里放
+// 两遍，白烧 token 且随文档增长恶化。
+//
+// "一次问一节"里的"一节"指的是谁的节？我们没有小节列表，这个概念完全来自技能。以前这句话
+// 没有显式指回"上文"，模型能不能对上"一节"= 技能定义的那个小节，全靠它自己猜。补一句
+// "跟随上文指令描述的结构"，跟 buildDocumentContract() 用的同一个指代性措辞，把这个隐含
+// 依赖挑明——而不是让"哪些节"这件事在两处契约里一处显式一处隐含。
+export function buildChatContract(): string {
+  return (
+    "You are interviewing this user to produce their Product Marketing Context document." +
+    " You have no filesystem and no tools; do not propose saving a file or reading a codebase." +
+    " If their current document appears above this instruction, update it rather than starting" +
+    " over from scratch; if none appears above, you are starting fresh." +
+    " Ask about one section at a time, following the structure the instructions above describe;" +
+    " never dump every question at once."
+  );
+}
+
+// 生成文档的契约里刻意不出现任何小节名、字段名或文档结构——技能内容会随公开仓库改版，
+// 我们必须永远适配最新版，硬编码它的结构等于把自己焊死在某个快照上。结构的权威完全交还
+// "上文的指令"（技能全文，由 generateContent 按 skillId 自动注入，见 generate.ts）；这份
+// 契约只描述我们自己运行时缺什么（文件系统、工具）以及响应体的形状（纯文档、无解释、无围栏）。
+export function buildDocumentContract(): string {
+  return (
+    "You have no filesystem and no tools. Do not propose saving a file or reading a codebase." +
+    " The user's current document, if any, appears above this instruction." +
+    " Output the complete document itself now — no explanation, no code fence, no alternatives —" +
+    " following the structure the instructions above describe."
+  );
+}
+
+export function buildChatPrompt(messages: ChatMessage[]): string {
+  return messages.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`).join("\n\n");
+}
+
+// currentDocument 是编辑框里的实时内容，由前端随请求一起发来——同一个 bug、同一个修法
+// 在 6cabcbb 里已经给 /generate 修过（见下面 generateMarketingContextDocument 的注释），
+// 这里只是把同一条线接到 /chat：真实流程是「帮我起草」把草稿落进编辑框（从不落库）→
+// 用户接着聊几句 → 这时聊天看到的必须是编辑框里那份草稿，而不是 D1 里空的或更旧的存档。
+// 转发给 generateContent 的 currentDocument 参数会取代它默认的 D1 读取（见 generate.ts），
+// 保证同一次调用只有一份"当前文档"抵达模型——不会既读浏览器草稿又读 D1 存档。
+export async function chatMarketingContext(
+  env: Env,
+  tenantId: number,
+  messages: ChatMessage[],
+  currentDocument: string
+): Promise<string> {
+  return generateContent(env, {
+    tenantId,
+    prompt: buildChatPrompt(messages),
+    provider: await resolveContextProvider(env, tenantId),
+    skillId: PRODUCT_MARKETING_SKILL_ID,
+    operationContext: buildChatContract(),
+    currentDocument,
+  });
+}
+
+// 文档始终活在编辑框里，对话只是修改它的手段：这一步是单独一次调用，响应体本身就是完整文档，
+// 直接覆盖编辑框——不需要哨兵、不需要解析、不存在合规率。messages 允许为空（用户可能起草完
+// 就直接点"生成文档"，一句话都没说）；此时给一句占位提示而不是空字符串，因为部分 provider
+// （如 Anthropic）的 API 拒绝空 content 的 user turn。
+//
+// currentDocument 是编辑框里的实时内容，由前端随请求一起发来。真实流程是「帮我起草」把草稿
+// 落进编辑框 → 用户聊几句 → 点「生成文档」——这份草稿从未被保存过，D1 里的 skill_context 行
+// 要么是空的、要么是更早的旧版本。所以这里必须把 currentDocument 转发给 generateContent 的
+// currentDocument 参数（它会取代默认的 D1 读取，见 generate.ts），而不是让 generateContent
+// 按 skillId 对应的 repo 自己去 D1 捞——那样模型看到的"当前文档"会是用户根本没在看的旧版本，
+// 就是这个函数本来要修的那个 bug。这也保证了同一次生成只有一份"当前文档"：要么是这里转发的
+// 浏览器副本，要么（currentDocument 为空串时）什么都没有，不会跟 D1 存档重复注入。
+export async function generateMarketingContextDocument(
+  env: Env,
+  tenantId: number,
+  messages: ChatMessage[],
+  currentDocument: string
+): Promise<string> {
+  return generateContent(env, {
+    tenantId,
+    prompt: messages.length ? buildChatPrompt(messages) : "Generate the document now.",
+    provider: await resolveContextProvider(env, tenantId),
+    skillId: PRODUCT_MARKETING_SKILL_ID,
+    operationContext: buildDocumentContract(),
+    currentDocument,
+  });
+}

@@ -676,16 +676,11 @@ async function executeContentActions(
         const provider = action.provider as string;
         const skillId = (action.skillId as string) || "none";
         const interpolatedPrompt = String(action.prompt || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""));
-        // 一段式：用户写的图片 prompt 插值后直接送扩散模型，不经文本模型改写。
-        const imagePrompt = action.attachImage
-          ? String(action.imagePrompt || "").replace(/\$content\.(\w+)/g, (_, field) => String(payload?.[field] ?? ""))
-          : "";
-        // 勾选框开着但插值后是空串（prompt 本身留空，或整段都是 $content.xxx 而 payload 里
-        // 缺这个字段）——出图请求下面直接不带 imagePrompt 字段，静默退化为纯文本推文。
-        // 图片降级不许让节点失败（4.3 的规则），这条日志只是诊断，不影响 recordContentOutcome。
-        if (action.attachImage && !imagePrompt) {
-          console.log(JSON.stringify({ event: "content_action_x_image_prompt_empty", contentId, channelId: xChannelId }));
-        }
+        // 触发内容原样交给 content，由那边的 stage 1 读懂并写成视觉描述 ——
+        // 前端不再让用户手写图片提示词，"把正文插进提示词"这个失败模式随之消失。
+        const imageSource = action.attachImage
+          ? { sourceTitle: String(payload?.title ?? ""), sourceText: String(payload?.content_text ?? "") }
+          : null;
 
         if (action.attachVideo) {
           const videoUrl = String(payload?.processed_video_url ?? "");
@@ -735,13 +730,13 @@ async function executeContentActions(
           headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
           body: JSON.stringify({
             contentId, interpolatedPrompt, provider, channelId: xChannelId, flowId: flowId || null, skillId,
-            ...(imagePrompt ? { imagePrompt, imageProvider: action.imageProvider || "default" } : {}),
+            ...(imageSource ? { ...imageSource, imageProvider: action.imageProvider || "default" } : {}),
           }),
         });
         logEvent = "content_action_x_content_action";
-        // 记的是节点勾了没有（配置），不是插值结果非空与否（内容）——一个用户确实勾选了
-        // 图片、只是这次 payload 缺字段导致 prompt 插值成空串的节点，不该在分析表里显示成
-        // "没勾"。空 prompt 的诊断由上面 content_action_x_image_prompt_empty 单独记。
+        // 记的是节点勾了没有（配置），不是这次触发内容里 title/content_text 是否非空
+        // （请求内容）——一个用户确实勾选了图片、只是这次 payload 缺字段导致 sourceTitle/
+        // sourceText 都插值成空串的节点，不该在分析表里显示成"没勾"。
         logExtra = { channelId: xChannelId, provider, skillId, attachImage: !!action.attachImage };
       }
 
@@ -797,6 +792,9 @@ async function executeContentActions(
       for (const key of Object.keys(rawPrompts)) {
         interpolatedPrompts[key] = interpolate(rawPrompts[key]);
       }
+      // 触发内容原样交给 content——同一份来源（payload 的 title/content_text）、同一份理由
+      // 见上面 xContentAction 分支的 imageSource 注释。photo-post 没有 attachImage 勾选框
+      // （出图是这个 operation 本身的意义），所以这里不像 X 那样有条件地展开，直接带上。
       const body = {
         contentId,
         channelId: action.channelId as string,
@@ -806,6 +804,8 @@ async function executeContentActions(
         imageCount: action.imageCount as number,
         imageProvider: action.imageProvider as string,
         flowId: flowId || null,
+        sourceTitle: String(payload?.title ?? ""),
+        sourceText: String(payload?.content_text ?? ""),
       };
       const res = await fetch(`${env.LINK_URL}/internal/tiktok/photo-post`, {
         method: "POST",

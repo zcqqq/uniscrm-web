@@ -51,4 +51,20 @@ describe("OpenAiImageProvider", () => {
     expect(body).toEqual({ model: "dall-e-3", prompt: "a cyberpunk lizard", size: "1024x1024", response_format: "b64_json" });
     expect(body.output_format).toBeUndefined();
   });
+
+  // gpt-image-1 与 dall-e-3 的提示词上限不同，各按各的截。
+  it("按模型各自的上限截断", async () => {
+    // 用 mockImplementation 而非 mockResolvedValue：这条用例内 generate() 调两次，
+    // 复用同一个 Response 实例会在第二次 res.json() 时抛 "Body has already been used"。
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({ data: [{ b64_json: btoa("x") }] }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new OpenAiImageProvider("sk-x").generate("a".repeat(40000), "gpt-image-1");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).prompt).toHaveLength(32000);
+
+    await new OpenAiImageProvider("sk-x").generate("a".repeat(5000), "dall-e-3");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).prompt).toHaveLength(4000);
+  });
 });

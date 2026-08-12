@@ -138,7 +138,7 @@ describe("collectActions: new content-domain action types", () => {
       {
         type: "xContentAction", nodeId: "a1", hasBranches: true, operation: "repost-post",
         channelId: undefined, prompt: "Rewrite this: $content.content_text", provider: "default", skillId: "none",
-        attachVideo: false, attachImage: false, imageProvider: "default", imagePrompt: "",
+        attachVideo: false, attachImage: false, imageProvider: "default",
       },
     ]);
   });

@@ -1,6 +1,7 @@
 // content/frontend/pages/SettingsPage.tsx
 import { useEffect, useState } from "react";
 import { ChannelCard } from "../../../link/frontend/components/ChannelCard";
+import { MarketingContextCard } from "../components/MarketingContextCard";
 import { Label } from "../../../shared/frontend/ui/label";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Button } from "../../../shared/frontend/ui/button";
@@ -319,6 +320,7 @@ export function SettingsPage() {
           zh: '还没为 OpenAI 或 Anthropic 配置密钥？流程节点仍可使用免费的内置模型（"default"），或完全不经 AI 直接发布文本（"none"）。',
         })}
       </p>
+      <div className="mt-8"><MarketingContextCard /></div>
     </div>
   );
 }

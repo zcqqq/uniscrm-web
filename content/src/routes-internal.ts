@@ -33,18 +33,22 @@ export function internalRoutes() {
   });
 
   router.post("/generate-image", async (c) => {
-    const { tenantId, prompt, provider } = await c.req.json<{
+    const { tenantId, provider, sourceTitle, sourceText } = await c.req.json<{
       tenantId: number;
-      prompt: string;
       provider: "default" | "openai";
+      sourceTitle?: string;
+      sourceText?: string;
     }>();
 
-    if (!tenantId || !prompt || !provider) {
-      return c.json({ error: "tenantId, prompt, provider required" }, 400);
+    // 不再接受 prompt：调用方拼出的自由文本没有长度概念，2271 字的 GitHub release body
+    // 曾经这样变成 2284 字的提示词把 flux（2048 上限）撞崩，还悄悄降级成纯文字帖子。
+    // 换成 sourceTitle/sourceText 后，stage 1 的技能 + 适配器截断结构性地堵死这条路。
+    if (!tenantId || !provider || (!sourceTitle && !sourceText)) {
+      return c.json({ error: "tenantId, provider, and one of sourceTitle/sourceText required" }, 400);
     }
 
     try {
-      const { bytes, contentType } = await generateImage(c.env, { tenantId, prompt, provider });
+      const { bytes, contentType } = await generateImage(c.env, { tenantId, provider, sourceTitle, sourceText });
       const key = crypto.randomUUID();
       await c.env.MEDIA_BUCKET.put(key, bytes, { httpMetadata: { contentType } });
       return c.json({ url: `${c.env.CONTENT_URL}/public/media/${key}` });

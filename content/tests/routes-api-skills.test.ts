@@ -38,8 +38,12 @@ describe("GET /api/skills", () => {
     );
     expect(res.status).toBe(200);
     const body = await res.json<{ skills: { id: string; label: string; hasCachedContent: boolean }[] }>();
+    // Catalog now carries the full marketingskills trio (see content/src/skills/catalog.ts) --
+    // all share one skill pack (repo) but each keeps its own cache row.
     expect(body.skills).toEqual([
       { id: "marketingskills-social", label: "Social (marketingskills)", hasCachedContent: false },
+      { id: "marketingskills-image", label: "Image (marketingskills)", hasCachedContent: false },
+      { id: "marketingskills-product-marketing", label: "Product Marketing (marketingskills)", hasCachedContent: false },
     ]);
   });
 

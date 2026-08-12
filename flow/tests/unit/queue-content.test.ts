@@ -177,7 +177,10 @@ describe("queue(): xContentAction branch resolution", () => {
     vi.unstubAllGlobals();
   });
 
-  it("interpolates $content.* in the image prompt and forwards it to link", async () => {
+  // Task 10: the node no longer holds a user-authored imagePrompt at all — attachImage now just
+  // forwards the triggering content's own title/content_text (unchanged) as sourceTitle/
+  // sourceText, and content's stage 1 is the one that turns them into a visual description.
+  it("forwards the payload's title/content_text as sourceTitle/sourceText to link when attachImage is on", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -189,7 +192,6 @@ describe("queue(): xContentAction branch resolution", () => {
           data: {
             actionType: "xContentAction", channelId: "x-chan-1", prompt: "T: $content.title",
             provider: "default", attachImage: true, imageProvider: "default",
-            imagePrompt: "Abstract art about: $content.title",
           },
           position: { x: 200, y: 0 },
         },
@@ -202,7 +204,10 @@ describe("queue(): xContentAction branch resolution", () => {
     ).bind(graphWithImage).run();
 
     await worker.queue(
-      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-image", channelId: "src-chan", payload: { title: "Original Title" } }),
+      makeBatch({
+        tenantId: "1", eventType: "content.created", contentId: "content-image", channelId: "src-chan",
+        payload: { title: "Original Title", content_text: "Original body text" },
+      }),
       env
     );
 
@@ -215,8 +220,10 @@ describe("queue(): xContentAction branch resolution", () => {
       return body.channelId === "x-chan-1";
     })!;
     const body = JSON.parse(call[1].body as string);
-    expect(body.imagePrompt).toBe("Abstract art about: Original Title");
+    expect(body.sourceTitle).toBe("Original Title");
+    expect(body.sourceText).toBe("Original body text");
     expect(body.imageProvider).toBe("default");
+    expect(body).not.toHaveProperty("imagePrompt");
 
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-image'`).run();
     vi.unstubAllGlobals();
@@ -254,18 +261,22 @@ describe("queue(): xContentAction branch resolution", () => {
       return body.channelId === "x-chan-1";
     })!;
     const body = JSON.parse(call[1].body as string);
-    expect(body.imagePrompt).toBeUndefined();
+    expect(body.sourceTitle).toBeUndefined();
+    expect(body.sourceText).toBeUndefined();
     expect(body.imageProvider).toBeUndefined();
 
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-no-image'`).run();
     vi.unstubAllGlobals();
   });
 
-  // attachImage checked + a $content.* placeholder whose field is missing from the payload ->
-  // interpolates to "" -> a text-only tweet still goes out (degrade-never-fail), but the node
-  // log must say the checkbox WAS checked (config), and a dedicated diagnostic event must fire
-  // so an empty-prompt run doesn't look identical to "user never checked the box".
-  it("logs attachImage:true (not the empty interpolated content) and a diagnostic event when the image prompt interpolates to empty", async () => {
+  // attachImage checked but the triggering payload has neither title nor content_text -> both
+  // sourceTitle/sourceText interpolate to "" -> still sent to link (link's own truthy check on
+  // the two strings is what skips image generation there) -> a text-only tweet still goes out
+  // (degrade-never-fail). Task 10 dropped the dedicated "empty prompt" diagnostic log along with
+  // imagePrompt itself — there's no user-authored string left to interpolate empty — but the
+  // node log must still say the checkbox WAS checked (config), regardless of whether the
+  // triggering content happened to have a title/body this time.
+  it("logs attachImage:true even when the triggering payload has no title/content_text to source an image from", async () => {
     // mockImplementation (not mockResolvedValue) so flow-branch1's own concurrent call to the
     // same URL gets its own fresh Response instance, not a body already consumed by this flow's
     // call — see the identical note a few tests below.
@@ -281,7 +292,6 @@ describe("queue(): xContentAction branch resolution", () => {
           data: {
             actionType: "xContentAction", channelId: "x-chan-1", prompt: "T: $content.title",
             provider: "default", attachImage: true, imageProvider: "default",
-            imagePrompt: "$content.missing_field",
           },
           position: { x: 200, y: 0 },
         },
@@ -294,19 +304,21 @@ describe("queue(): xContentAction branch resolution", () => {
     ).bind(graphEmptyPrompt).run();
 
     await worker.queue(
-      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-empty-prompt", channelId: "src-chan", payload: { title: "Original Title" } }),
+      makeBatch({ tenantId: "1", eventType: "content.created", contentId: "content-empty-prompt", channelId: "src-chan", payload: {} }),
       env
     );
 
-    // The prompt interpolated to "" (missing_field isn't in payload) -> imagePrompt omitted from
-    // the wire request -> link generates no image -> tweet still goes out text-only.
+    // Neither field was in the payload -> both interpolate to "" -> still forwarded as empty
+    // strings (link's own truthy check is what skips image generation, not an omitted field).
     const call = fetchMock.mock.calls.find((c) => {
       if (!String(c[0]).includes("/internal/content/create-post")) return false;
       const body = JSON.parse(c[1].body as string);
       return body.channelId === "x-chan-1";
     })!;
     const requestBody = JSON.parse(call[1].body as string);
-    expect(requestBody.imagePrompt).toBeUndefined();
+    expect(requestBody.sourceTitle).toBe("");
+    expect(requestBody.sourceText).toBe("");
+    expect(requestBody).not.toHaveProperty("imagePrompt");
 
     // flow-branch1 (from the describe-level beforeEach, same trigger channelId "src-chan") also
     // fires concurrently with its own xContentAction node (no channelId of its own, so it logs
@@ -314,11 +326,8 @@ describe("queue(): xContentAction branch resolution", () => {
     const loggedEvents = logSpy.mock.calls
       .map((c) => JSON.parse(c[0] as string))
       .filter((e) => e.channelId === "x-chan-1");
-    const emptyPromptLog = loggedEvents.find((e) => e.event === "content_action_x_image_prompt_empty");
-    expect(emptyPromptLog).toMatchObject({ contentId: "content-empty-prompt", channelId: "x-chan-1" });
-
     const outcomeLog = loggedEvents.find((e) => e.event === "content_action_x_content_action");
-    // 配置是"勾了"，即使这次插值结果是空串——不能把这次记成用户没勾图片。
+    // 配置是"勾了"，即使这次触发内容没有 title/content_text 可用——不能把这次记成用户没勾图片。
     expect(outcomeLog).toMatchObject({ attachImage: true, ok: true });
 
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-empty-prompt'`).run();
@@ -710,6 +719,11 @@ describe("queue(): tiktokContentAction dispatch", () => {
     expect(body.imageCount).toBe(3);
     expect(body.imageProvider).toBe("default");
     expect(body.channelId).toBe("tiktok-chan-1");
+    // Task 10: link's /tiktok/photo-post no longer reads prompts.message_image for image
+    // generation — it forwards the triggering content's own title/content_text (unchanged,
+    // same source as xContentAction's sourceTitle/sourceText) to content's two-stage endpoint.
+    expect(body.sourceTitle).toBe("Original Title");
+    expect(body.sourceText).toBe("original body text");
   });
 
   it("schedules a content_flow_pending retry row when link reports rateLimited", async () => {

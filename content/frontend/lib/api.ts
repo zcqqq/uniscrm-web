@@ -8,7 +8,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error((err as any).error || res.statusText);
+    // .status 让调用方能区分具体错误码（比如保存时的 409 baseVersion 冲突）而不是一律
+    // 提示"请求失败"——做法照抄 flow/frontend/lib/api.ts 的 request()。
+    const e = new Error((err as any).error || res.statusText) as Error & { status?: number };
+    e.status = res.status;
+    throw e;
   }
   return res.json();
 }
@@ -37,5 +41,28 @@ export const api = {
   llmModels: {
     list: (provider: ProviderName, apiKey?: string, kind?: "text" | "image"): Promise<{ models: string[]; source: "static" | "live" }> =>
       request("/api/llm-models", { method: "POST", body: JSON.stringify({ provider, apiKey, kind }) }),
+  },
+  marketingContext: {
+    get: (): Promise<{ content: string | null; version: number | null; updatedAt: string | null }> =>
+      request("/api/marketing-context"),
+    draft: (): Promise<{ draft: string }> =>
+      request("/api/marketing-context/draft", { method: "POST", body: "{}" }),
+    // document 是编辑框当前的实时内容（可能从未保存过）——服务端拿它当"用户当前的文档"，
+    // 镜像 generate() 下面同一条注释：不会再回头去读 D1 里可能不存在或已过期的存档版本。
+    chat: (
+      messages: { role: "user" | "assistant"; content: string }[],
+      document: string
+    ): Promise<{ reply: string }> =>
+      request("/api/marketing-context/chat", { method: "POST", body: JSON.stringify({ messages, document }) }),
+    // messages 允许为空数组——用户可能起草完/手改完编辑框就直接点"生成文档"，一句话没说。
+    // document 是编辑框当前的实时内容（可能从未保存过）——服务端拿它当"用户当前的文档"，
+    // 不会再回头去读 D1 里可能不存在或已过期的存档版本。
+    generate: (
+      messages: { role: "user" | "assistant"; content: string }[],
+      document: string
+    ): Promise<{ document: string }> =>
+      request("/api/marketing-context/generate", { method: "POST", body: JSON.stringify({ messages, document }) }),
+    save: (content: string, baseVersion?: number): Promise<{ version: number }> =>
+      request("/api/marketing-context", { method: "PUT", body: JSON.stringify({ content, baseVersion }) }),
   },
 };

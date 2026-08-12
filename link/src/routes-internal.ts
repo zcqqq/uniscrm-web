@@ -151,8 +151,11 @@ async function uploadImageToX(
 // 出图失败一律降级成纯文本推：配图是锦上添花，内容流不该因为一张图断掉（spec §4.3）。
 // 失败原因只进日志，不进 reason —— reason 会写进 content_flow_log 这张分析表，
 // 外部错误体长度不可控（与 YouTube 那几个出口同一条约定）。
+// sourceTitle/sourceText 是触发内容原样——不再是用户手写、经插值拼好的 prompt。content 的
+// stage 1 文本模型负责把它们读懂、写成视觉描述，再喂给扩散模型；那类"正文太长撑爆
+// diffusion 的 prompt 上限"的失败模式，从 link 这一侧起就不存在了。
 async function generateAndUploadImage(
-  env: Env, tenantId: number, prompt: string, provider: string,
+  env: Env, tenantId: number, sourceTitle: string | undefined, sourceText: string | undefined, provider: string,
   accessToken: string, contentId: string, channelId: string
 ): Promise<string | null> {
   let url: string;
@@ -160,7 +163,7 @@ async function generateAndUploadImage(
     const genRes = await fetch(`${env.CONTENT_URL}/internal/generate-image`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
-      body: JSON.stringify({ tenantId, prompt, provider }),
+      body: JSON.stringify({ tenantId, provider, sourceTitle, sourceText }),
     });
     if (!genRes.ok) {
       console.error(JSON.stringify({
@@ -519,6 +522,33 @@ export function internalRoutes() {
     return c.json({ channelIds: rows.results.map((r) => r.id) });
   });
 
+  // content 起草 product marketing 上下文时用的渠道清单：租户在哪些平台上、各叫什么。
+  // 「在 X 和 YouTube 上、没有 TikTok」本身就是定位信号。
+  //
+  // 逐字段显式投影，永不透传 config —— config 里装着 access_token / refresh_token /
+  // 加密的 app_client_secret，而这个返回体最终会进 LLM 的提示词。与 /channels/active
+  // 只回 id 集合是同一条约定：内部端点交出去的永远是调用方真正需要的那几个字段。
+  router.get("/channels/summary", async (c) => {
+    const tenantId = Number(c.req.query("tenantId"));
+    if (!Number.isFinite(tenantId)) return c.json({ error: "tenantId required" }, 400);
+
+    const rows = await c.env.LINK_DB
+      .prepare("SELECT channel_type, config FROM channels WHERE tenant_id = ? AND is_active = 1")
+      .bind(tenantId)
+      .all<{ channel_type: string; config: string }>();
+
+    const channels = rows.results.map((r) => {
+      let cfg: Record<string, unknown> = {};
+      try { cfg = JSON.parse(r.config) as Record<string, unknown>; } catch { cfg = {}; }
+      const pick = (k: string) => (typeof cfg[k] === "string" ? (cfg[k] as string) : null);
+      const displayName =
+        pick("x_name") ?? pick("display_name") ?? pick("channel_name") ?? pick("channel_title");
+      return { channelType: r.channel_type, displayName };
+    });
+
+    return c.json({ channels });
+  });
+
   // Lists: add user (called by flow worker)
   router.post("/lists/:id/users", async (c) => {
     const tenantId = c.req.header("X-Tenant-Id");
@@ -856,9 +886,9 @@ export function internalRoutes() {
   // spec's non-goals) — channelId resolving to a TIKTOK channel_type falls through to the
   // generic ok:false path below.
   router.post("/content/create-post", async (c) => {
-    const { contentId, interpolatedPrompt, provider, channelId, flowId, skillId, videoUrl, imagePrompt, imageProvider } = await c.req.json<{
+    const { contentId, interpolatedPrompt, provider, channelId, flowId, skillId, videoUrl, sourceTitle, sourceText, imageProvider } = await c.req.json<{
       contentId: string; interpolatedPrompt: string; provider: "default" | "openai" | "anthropic" | "none"; channelId: string; flowId?: string | null; skillId?: string; videoUrl?: string;
-      imagePrompt?: string; imageProvider?: "default" | "openai";
+      sourceTitle?: string; sourceText?: string; imageProvider?: "default" | "openai";
     }>();
 
     const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id, is_active FROM channels WHERE id = ?")
@@ -947,9 +977,9 @@ export function internalRoutes() {
 
     // videoUrl 优先：X 一条推文只能挂一种媒体。正常路径下两者同时出现已被发布校验挡住
     // （validate-flow-graph.ts），这里是后端防御——顺带省下一次注定用不上的出图推理。
-    if (!mediaId && imagePrompt) {
+    if (!mediaId && (sourceTitle || sourceText)) {
       const imageMediaId = await generateAndUploadImage(
-        c.env, channel.tenant_id, imagePrompt, imageProvider || "default", accessToken, contentId, channelId
+        c.env, channel.tenant_id, sourceTitle, sourceText, imageProvider || "default", accessToken, contentId, channelId
       );
       if (imageMediaId) mediaId = imageMediaId;
     }
@@ -1100,14 +1130,15 @@ export function internalRoutes() {
   router.post("/tiktok/photo-post", async (c) => {
     const {
       contentId, channelId, prompts, textProvider, textSkillId,
-      imageCount, imageProvider, flowId,
+      imageCount, imageProvider, flowId, sourceTitle, sourceText,
     } = await c.req.json<{
       contentId: string; channelId: string;
-      prompts: { title: string; description: string; message_image: string };
+      prompts: { title: string; description: string };
       textProvider: "default" | "openai" | "anthropic" | "none"; textSkillId?: string;
       imageCount: number;
       imageProvider: "default" | "openai";
       flowId?: string | null;
+      sourceTitle?: string; sourceText?: string;
     }>();
 
     const channel = await c.env.LINK_DB.prepare("SELECT config, channel_type, tenant_id FROM channels WHERE id = ?")
@@ -1154,13 +1185,16 @@ export function internalRoutes() {
       return c.json({ ok: false, reason: "text_generation_failed: content/internal/generate returned no text" }, 200);
     }
 
+    // sourceTitle/sourceText 是触发内容原样，同一份数据在每次循环里原样转发——见
+    // generateAndUploadImage 顶上的注释：用户不再手写图片 prompt，content 的 stage 1
+    // 文本模型负责读懂它们、写成视觉描述。
     const requestedCount = Math.max(1, Math.min(9, imageCount || 1));
     const photoUrls: string[] = [];
     for (let i = 0; i < requestedCount; i++) {
       const res = await fetch(`${c.env.CONTENT_URL}/internal/generate-image`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Internal-Secret": c.env.INTERNAL_SECRET },
-        body: JSON.stringify({ tenantId, prompt: prompts.message_image, provider: imageProvider }),
+        body: JSON.stringify({ tenantId, provider: imageProvider, sourceTitle, sourceText }),
       });
       if (!res.ok) continue;
       const body = await res.json() as { url: string };

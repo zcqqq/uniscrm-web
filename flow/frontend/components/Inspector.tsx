@@ -1181,18 +1181,6 @@ function XContentActionInspector({ nodeId, data }: { nodeId: string; data: Recor
                   ))}
                 </Select>
               </div>
-              <div>
-                <Label className="text-xs block mb-1">
-                  {propLabel(imageProp.propId, locale)} {T({ en: "Prompt", zh: "提示词" })}
-                </Label>
-                <Textarea
-                  value={data.imagePrompt || ""}
-                  onChange={(e: TextareaChange) => updateNodeData(nodeId, { imagePrompt: e.target.value })}
-                  placeholder={T({ en: "Abstract tech illustration about: $content.title", zh: "抽象科技风插画，主题：$content.title" })}
-                  rows={3}
-                  className="w-full text-sm font-mono"
-                />
-              </div>
             </>
           )}
         </>
@@ -1424,7 +1412,6 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
   const prompts = (data.prompts as Record<string, string>) || {};
   const updatePrompt = (propId: string, value: string) => updateNodeData(nodeId, { prompts: { ...prompts, [propId]: value } });
   const textProps = activeProps.filter((p) => p.aiType === "TEXT");
-  const imageProps = activeProps.filter((p) => p.aiType === "IMAGE");
 
   return (
     <ChannelNodePanel
@@ -1502,18 +1489,6 @@ function TikTokContentActionInspector({ nodeId, data }: { nodeId: string; data: 
 
         {!isVideoPost && (
           <>
-            {imageProps.map((prop) => (
-              <div key={prop.propId}>
-                <Label className="text-xs block mb-1">{propLabel(prop.propId, locale)} {T({ en: "Prompt", zh: "提示词" })}</Label>
-                <Textarea
-                  value={prompts[prop.propId] || ""}
-                  onChange={(e: TextareaChange) => updatePrompt(prop.propId, e.target.value)}
-                  placeholder={T({ en: "A photo of: $content.title", zh: "照片描述：$content.title" })}
-                  rows={3}
-                  className="w-full text-sm font-mono"
-                />
-              </div>
-            ))}
             <div>
               <Label className="text-xs block mb-1">{T({ en: "Image Count", zh: "图片数量" })}</Label>
               <Input

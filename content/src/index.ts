@@ -23,7 +23,14 @@ import {
   OPENAI_STATIC_IMAGE_MODELS,
   ANTHROPIC_STATIC_IMAGE_MODELS,
 } from "./services/model-catalog";
-import { SKILL_CATALOG } from "./skills/catalog";
+import { SKILL_CATALOG, MARKETING_SKILLS_REPO } from "./skills/catalog";
+import {
+  draftMarketingContext,
+  chatMarketingContext,
+  generateMarketingContextDocument,
+  type ChatMessage,
+} from "./services/marketing-context";
+import { getSkillContextRow, setSkillContext } from "./services/skill-context";
 import { processVideoActionJob, type VideoActionQueueMessage } from "./queue-video-action";
 import { createInternalAuthMiddleware, resolveAuthMe, resolveSession, spaLoginGuard } from "../../shared/auth";
 
@@ -194,6 +201,76 @@ app.get("/api/image-providers", async (c) => {
     if (row.imageModel) providers.push({ provider: row.provider, model: row.imageModel });
   }
   return c.json({ providers });
+});
+
+// `/*` 通配注册——同上一条注释：只注册一次通配形式，不要再加裸路径
+// "/api/marketing-context"，否则 sessionAuth 会跑两次并二次消费其内部 fetch() 的 Response body。
+// Task 6 在这条注册之下加 GET/PUT /api/marketing-context，同样受这一次注册覆盖。
+app.use("/api/marketing-context/*", sessionAuth);
+
+app.post("/api/marketing-context/draft", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
+  try {
+    return c.json({ draft: await draftMarketingContext(c.env, tenantId) });
+  } catch (err) {
+    console.error(JSON.stringify({ event: "marketing_context_draft_failed", tenantId, error: String(err) }));
+    return c.json({ error: "Draft failed" }, 502);
+  }
+});
+
+app.get("/api/marketing-context", async (c) => {
+  const row = await getSkillContextRow(c.env, Number(c.get("tenantId")), MARKETING_SKILLS_REPO);
+  return c.json({ content: row?.content ?? null, version: row?.version ?? null, updatedAt: row?.updatedAt ?? null });
+});
+
+app.put("/api/marketing-context", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
+  const { content, baseVersion } = await c.req.json<{ content: string; baseVersion?: number }>();
+  if (!content || !content.trim()) return c.json({ error: "content required" }, 400);
+
+  // 乐观并发：两个标签页各改各的时，后写的不该无声覆盖前一个。
+  const current = await getSkillContextRow(c.env, tenantId, MARKETING_SKILLS_REPO);
+  if (baseVersion !== undefined && current && current.version !== baseVersion) {
+    return c.json({ error: "version conflict", currentVersion: current.version }, 409);
+  }
+
+  return c.json(await setSkillContext(c.env, tenantId, MARKETING_SKILLS_REPO, content));
+});
+
+// document 是编辑框当前的实时内容（真实流程里可能从未被保存过），前端随请求一起带来，
+// 转发给 chatMarketingContext 的 currentDocument 参数——跟下面 /generate 端点同一个理由、
+// 同一种做法（同一个 bug 修了两处，见设计文档 §8 与 6cabcbb）：不能让它按 skillId 自己去
+// D1 读旧存档，那样对话会看不到用户正盯着的草稿。document 缺省时按空串处理。
+app.post("/api/marketing-context/chat", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
+  const { messages, document } = await c.req.json<{ messages: ChatMessage[]; document?: string }>();
+  if (!Array.isArray(messages) || messages.length === 0) return c.json({ error: "messages required" }, 400);
+  try {
+    return c.json({ reply: await chatMarketingContext(c.env, tenantId, messages, document ?? "") });
+  } catch (err) {
+    console.error(JSON.stringify({ event: "marketing_context_chat_failed", tenantId, error: String(err) }));
+    return c.json({ error: "Chat failed" }, 502);
+  }
+});
+
+// 与 /chat 不同：这里空 messages 不是错误请求，而是合法输入——用户可能刚点了"帮我起草"或
+// 手改了编辑框，一句话没说就直接点"生成文档"。响应体本身就是完整文档，前端直接拿去覆盖
+// 编辑框，不需要像旧的哨兵围栏方案那样再解析一层。
+//
+// document 是编辑框当前的实时内容（真实流程里从未被保存过），前端随请求一起带来，转发给
+// generateMarketingContextDocument 的 currentDocument 参数——不能让它按 skillId 自己去 D1
+// 读旧存档，那正是这个端点本来要修的 bug。document 缺省时按空串处理，等同"当前没有文档"，
+// 让"起草信号也没有、编辑框也没打字"的全新租户仍能从零生成一份可用文档。
+app.post("/api/marketing-context/generate", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
+  const { messages, document } = await c.req.json<{ messages: ChatMessage[]; document?: string }>();
+  if (!Array.isArray(messages)) return c.json({ error: "messages required" }, 400);
+  try {
+    return c.json({ document: await generateMarketingContextDocument(c.env, tenantId, messages, document ?? "") });
+  } catch (err) {
+    console.error(JSON.stringify({ event: "marketing_context_generate_failed", tenantId, error: String(err) }));
+    return c.json({ error: "Generate failed" }, 502);
+  }
 });
 
 export default {

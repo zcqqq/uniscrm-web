@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { zipSync, strToU8 } from "fflate";
-import { parseSkillFiles, unzipToEntries } from "../frontend/lib/skill-package";
+import { parseSkillFiles, unzipToEntries, SkillPackageError } from "../frontend/lib/skill-package";
+import { extractReferenceLinks as serverExtractReferenceLinks } from "../src/services/skill-content";
 
 // refs 是要在正文里内联的 markdown 链接（服务端 REFERENCE_LINK_RE 靠这个识别，不是靠文件是否
 // 上传了），不传就是没有任何 references 链接的最简 SKILL.md。
@@ -114,6 +115,49 @@ describe("parseSkillFiles — 过滤与上限", () => {
 
   it("空清单 → 抛错", () => {
     expect(() => parseSkillFiles([])).toThrow(/SKILL\.md/);
+  });
+
+  // scripts/i18n-audit.mjs 曾经把这条抛出的 Error 消息标记为唯一的英文单语用户可见文案——
+  // 它会原样显示在 toast 里。改成 SkillPackageError 后消息本身仍是英文（Error.message 就是
+  // 内部诊断用途），但同时带上 { en, zh } 两份文案，供 SkillUploadCard 的 ingest() 用 T() 选
+  // 出正确语种渲染给用户；这里只钉住"两份文案都在、且都提到 SKILL.md"这个不变量。
+  it("找不到任何 SKILL.md 时抛的是带双语文案的 SkillPackageError", () => {
+    // 单个非 SKILL.md 的 .md 文件会走"单文件技能"分支，不会抛错（见上面的测试）——这里要
+    // 命中真正的"两者都不满足"分支，得用与那条既有回归用例相同的多文件、都没有 SKILL.md 的
+    // 清单。
+    try {
+      parseSkillFiles([{ path: "readme.md", text: "x" }, { path: "a/b.md", text: "y" }]);
+      throw new Error("expected parseSkillFiles to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(SkillPackageError);
+      const err = e as SkillPackageError;
+      expect(err.copy.en).toMatch(/SKILL\.md/);
+      expect(err.copy.zh).toMatch(/SKILL\.md/);
+      expect(err.copy.zh).not.toBe(err.copy.en);
+    }
+  });
+});
+
+// Minor（final review）：extractReferenceLinks 在服务端（src/services/skill-content.ts）与
+// 前端（frontend/lib/skill-package.ts，本文件顶部 import 的 parseSkillFiles 内部用的那份）各
+// 有一份拷贝——前端不能 import 服务端模块，会把 Env/D1 类型拖进浏览器 bundle。两份代码今天
+// 字节相同，但没有任何机制强制它们保持一致；一旦漂移，最坏情况是悄悄漏内联某个 references
+// 文件，而生成流程本身不会报错。这里不比较源码文本（那是脆弱的实现细节），而是钉住行为：
+// 同一份超过 8 个链接的 fixture，服务端 extractReferenceLinks 选中的路径必须与前端解析器
+// 实际保留下来的 references/* 路径完全一致。
+describe("extractReferenceLinks — 服务端与前端两份拷贝的行为必须一致", () => {
+  it("同一份含 12 个链接的 SKILL.md，服务端选取的前 8 个与前端解析器保留的 references 完全一致", () => {
+    const refPaths = Array.from({ length: 12 }, (_, i) => `references/r${i}.md`);
+    const main = md("pinned", refPaths);
+
+    const serverLinks = serverExtractReferenceLinks(main);
+
+    const refFiles = refPaths.map((path, i) => ({ path, text: `${i}` }));
+    const out = parseSkillFiles([{ path: "SKILL.md", text: main }, ...refFiles]);
+    const frontendKept = out[0].files.filter((f) => f.path.startsWith("references/")).map((f) => f.path);
+
+    expect(serverLinks).toHaveLength(8);
+    expect(serverLinks).toEqual(frontendKept);
   });
 });
 

@@ -18,6 +18,18 @@ function extractReferenceLinks(markdown: string): string[] {
   return [...seen];
 }
 
+// parseSkillFiles 的失败信息要直接展示给用户（拖入的东西读不出来），必须双语——但这个模块
+// 是纯 TS，没有 useT()/T() 可用（那是个 hook，只能在组件里调）。所以错误本身带上 { en, zh }
+// 两份文案，真正的翻译选择留给调用方（SkillUploadCard 的 ingest() 有 T()）在渲染 toast 时做。
+export class SkillPackageError extends Error {
+  readonly copy: { en: string; zh: string };
+  constructor(copy: { en: string; zh: string }) {
+    super(copy.en);
+    this.name = "SkillPackageError";
+    this.copy = copy;
+  }
+}
+
 export interface UploadFile {
   path: string;
   content: string;
@@ -94,7 +106,10 @@ export function parseSkillFiles(entries: { path: string; text: string }[]): Pars
     .map((e) => e.path.slice(0, -"/SKILL.md".length));
 
   if (skillDirs.length === 0) {
-    throw new Error("No SKILL.md found — expected a skill folder or a package of skill folders");
+    throw new SkillPackageError({
+      en: "No SKILL.md found — expected a skill folder or a package of skill folders",
+      zh: "没有找到 SKILL.md——应为一个技能文件夹，或多个技能文件夹打的包",
+    });
   }
 
   return skillDirs.map((dir) =>

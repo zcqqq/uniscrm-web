@@ -26,6 +26,25 @@ export async function fetchChannelSummary(env: Env, tenantId: number): Promise<C
   }
 }
 
+// 与 buildChatContract/buildDocumentContract 同样的治理（设计文档 §8.4）：零参数、常量输出，
+// 结构性地保证这段固定指令不可能从技能内容里读出小节名/字段名再插值进去（见
+// routes-api-marketing-context.test.ts 的"执行契约的结构保证"，现在把这个函数也纳入同一组
+// 检查）。这段话曾经写死"following your skill's 12-section structure"——技能改版后就跟真实
+// 小节数悄悄脱节，且没有任何报错（本分支自己的 dev 实测已经从 12 变成 13）。改用跟
+// buildChatContract/buildDocumentContract 一致的指代性措辞，把结构的权威交还给注入的技能
+// 全文，不再由我们数它有几节。
+//
+// buildDraftPrompt 会在这段指令之后另外拼接租户自己的证据（渠道列表、近期内容摘要）——那
+// 部分不受这条治理约束：bullet 列表来自租户数据本身，不是我们对技能结构的复述。
+export function buildDraftInstruction(): string {
+  return (
+    "Draft a Product Marketing Context document for this tenant, following the structure the" +
+    " instructions above describe." +
+    " You have no codebase to read. Everything known about them is below. Where a section cannot be" +
+    " supported by this evidence, write a short best guess and mark it clearly as an assumption to confirm."
+  );
+}
+
 export function buildDraftPrompt(rows: RecentContentRow[], channels: ChannelSummaryRow[]): string {
   const channelLines = channels
     .map((c) => `- ${c.channelType}${c.displayName ? `: ${c.displayName}` : ""}`)
@@ -35,9 +54,7 @@ export function buildDraftPrompt(rows: RecentContentRow[], channels: ChannelSumm
     .join("\n");
 
   return [
-    "Draft a Product Marketing Context document for this tenant, following your skill's 12-section structure.",
-    "You have no codebase to read. Everything known about them is below. Where a section cannot be",
-    "supported by this evidence, write a short best guess and mark it clearly as an assumption to confirm.",
+    buildDraftInstruction(),
     channels.length ? `\nConnected marketing channels:\n${channelLines}` : "",
     rows.length ? `\nTheir most recent published/ingested content:\n${contentLines}` : "",
   ].filter(Boolean).join("\n");

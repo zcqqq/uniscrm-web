@@ -5,7 +5,7 @@ import worker from "../src/index";
 import { seedSession } from "./helpers/seed-session";
 import * as generateModule from "../src/services/generate";
 import * as skillContentModule from "../src/services/skill-content";
-import { buildChatContract, buildDocumentContract } from "../src/services/marketing-context";
+import { buildChatContract, buildDocumentContract, buildDraftInstruction } from "../src/services/marketing-context";
 
 beforeAll(async () => {
   await seedSession(env as never, "mc2", 94);
@@ -65,8 +65,13 @@ describe("执行契约的结构保证", () => {
   // 这是"契约不可能读技能内容再插值"这个属性唯一能被机械验证的角度：零参数 + 两次调用
   // 输出相同，排除了"从某处读小节名/字段名再拼进字符串"这条代码路径。想动态注入技能的
   // 结构，就必须先给函数加参数或引入某种隐藏状态——那会是显眼的 diff，逃不过 review。
-  it("buildChatContract / buildDocumentContract 都是零参数、无副作用的常量输出", () => {
-    for (const fn of [buildChatContract, buildDocumentContract]) {
+  //
+  // buildDraftInstruction 是起草任务固定指令的那部分（不含租户自己的证据——渠道列表/近期
+  // 内容摘要由 buildDraftPrompt 在它之后单独拼接，那部分不受这条治理约束）。它以前就是
+  // "following your skill's 12-section structure"这句复述在生产代码里的落地位置（本次修的
+  // Finding 1），补进这组常量输出的检查里，跟另外两个契约函数享受同一条结构性保证。
+  it("buildChatContract / buildDocumentContract / buildDraftInstruction 都是零参数、无副作用的常量输出", () => {
+    for (const fn of [buildChatContract, buildDocumentContract, buildDraftInstruction]) {
       expect(fn.length).toBe(0);
       expect(fn()).toBe(fn());
     }
@@ -81,6 +86,20 @@ describe("执行契约的结构保证", () => {
 function assertHandsBackStructuralAuthority(contract: string) {
   expect(contract).toMatch(/structure.*above|above.*structure/i);
 }
+
+// Finding 1 的回归守卫：起草流程的 prompt 走的是 generateContent 的 prompt 参数，不是
+// operationContext（起草不传 operationContext）——旧版 assertNoSkillStructureRestatement
+// 只查过 operationContext，所以"following your skill's 12-section structure"这句复述能在
+// 这条路径上活下来，直到 dev 实测发现技能已经是 13 节。buildDraftInstruction() 是这条 prompt
+// 里唯一的固定部分（渠道/内容证据由 buildDraftPrompt 另外拼接，不受这条治理约束——那是
+// 租户自己的数据，不是我们对技能结构的复述），用同一对守卫断言覆盖它，把这个洞堵上。
+describe("起草 prompt 的结构保证", () => {
+  it("不复述技能结构，且仍把结构权威交还给技能", () => {
+    const instruction = buildDraftInstruction();
+    assertNoSkillStructureRestatement(instruction);
+    assertHandsBackStructuralAuthority(instruction);
+  });
+});
 
 describe("marketing context 读写", () => {
   it("没写过时返回空", async () => {

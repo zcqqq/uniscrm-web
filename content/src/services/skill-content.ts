@@ -63,3 +63,22 @@ export async function refreshSkillContent(env: Env, skillId: string): Promise<vo
        content = excluded.content, source_url = excluded.source_url, fetched_at = excluded.fetched_at`
   ).bind(skillId, content, def.sourceUrl, now).run();
 }
+
+// 与 refreshSkillContent 内联 references 的规则完全一致，只是来源从 fetch 换成上传的这批文件
+// ——同一套 extractReferenceLinks（含 8 个上限），产出的拼接格式也刻意一模一样，这样预置技能
+// 与上传技能进到模型眼里的形状没有差别。
+export function inlineReferencesFromFiles(files: { path: string; content: string }[]): string {
+  const main = files.find((f) => f.path === "SKILL.md");
+  if (!main) throw new Error("Missing SKILL.md");
+
+  const byPath = new Map(files.map((f) => [f.path, f.content]));
+  const sections = [main.content];
+  for (const ref of extractReferenceLinks(main.content)) {
+    const body = byPath.get(ref);
+    // 链接指向的文件没随包上传：跳过而不是整个失败 —— 正文本身仍然有价值，
+    // 而缺一份参考资料并不比"技能里根本没有这个链接"更糟。
+    if (body === undefined) continue;
+    sections.push(`\n\n---\n\n# Referenced file: ${ref}\n\n${body}`);
+  }
+  return sections.join("");
+}

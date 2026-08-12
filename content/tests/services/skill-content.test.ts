@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
-import { getSkillContent, refreshSkillContent } from "../../src/services/skill-content";
+import { getSkillContent, refreshSkillContent, inlineReferencesFromFiles } from "../../src/services/skill-content";
 import { UPLOAD_PREFIX, upsertTenantSkill } from "../../src/services/tenant-skill";
 
 describe("skill-content", () => {
@@ -167,6 +167,33 @@ describe("skill-content", () => {
          VALUES ('upload:trap', '不该被读到', 'https://example/SKILL.md', '2026-01-01T00:00:00Z')`
       ).run();
       expect(await getSkillContent(env as never, 8205, "upload:trap")).toBeNull();
+    });
+  });
+
+  describe("inlineReferencesFromFiles", () => {
+    it("把 SKILL.md 里链接到的 references 从同一批文件里内联进来", () => {
+      const out = inlineReferencesFromFiles([
+        { path: "SKILL.md", content: "# S\n\nSee [references/limits.md](references/limits.md)." },
+        { path: "references/limits.md", content: "280 chars." },
+      ]);
+      expect(out).toContain("# S");
+      expect(out).toContain("# Referenced file: references/limits.md");
+      expect(out).toContain("280 chars.");
+    });
+
+    // 链接指向的文件没随包上传时不能整个失败——正文本身仍然有价值。
+    it("链接指向的文件缺失时跳过它，其余照常", () => {
+      const out = inlineReferencesFromFiles([
+        { path: "SKILL.md", content: "[references/gone.md](references/gone.md) 和 [references/here.md](references/here.md)" },
+        { path: "references/here.md", content: "在的" },
+      ]);
+      expect(out).toContain("在的");
+      expect(out).not.toContain("references/gone.md\n\n");
+    });
+
+    it("没有 SKILL.md 时抛错", () => {
+      expect(() => inlineReferencesFromFiles([{ path: "references/a.md", content: "x" }]))
+        .toThrow(/SKILL\.md/);
     });
   });
 });

@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { ChannelCard } from "../../../link/frontend/components/ChannelCard";
 import { MarketingContextCard } from "../components/MarketingContextCard";
+import { SkillUploadCard } from "../components/SkillUploadCard";
 import { Label } from "../../../shared/frontend/ui/label";
 import { Input } from "../../../shared/frontend/ui/input";
 import { Button } from "../../../shared/frontend/ui/button";
@@ -321,6 +322,7 @@ export function SettingsPage() {
         })}
       </p>
       <div className="mt-8"><MarketingContextCard /></div>
+      <div className="mt-8"><SkillUploadCard /></div>
     </div>
   );
 }

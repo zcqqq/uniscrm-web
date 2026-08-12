@@ -31,6 +31,15 @@ import {
   type ChatMessage,
 } from "./services/marketing-context";
 import { getSkillContextRow, setSkillContext } from "./services/skill-context";
+import { inlineReferencesFromFiles } from "./services/skill-content";
+import {
+  UPLOAD_PREFIX,
+  slugifySkillName,
+  listTenantSkills,
+  upsertTenantSkill,
+  deleteTenantSkill,
+  findExistingSkillIds,
+} from "./services/tenant-skill";
 import { processVideoActionJob, type VideoActionQueueMessage } from "./queue-video-action";
 import { createInternalAuthMiddleware, resolveAuthMe, resolveSession, spaLoginGuard } from "../../shared/auth";
 
@@ -140,11 +149,105 @@ app.delete("/api/llm-credentials/:provider", async (c) => {
 
 app.use("/api/skills/*", sessionAuth);
 
+// MAX_SKILL_BYTES 是字符数上限，不是字节数——JS 字符串 .length 数的是 UTF-16 code unit，
+// tenant_skill 表里 length(content)（TenantSkillRow.bytes）数的是 SQLite 的字符数，两者
+// 口径一致但都不是真正的"字节"。名字沿用自最初的设计，别把 256KB 读成存储配额。
+const MAX_SKILL_BYTES = 256 * 1024;
+const MAX_SKILLS_PER_IMPORT = 20;
+
 app.get("/api/skills", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
   const cached = await c.env.CONTENT_DB.prepare("SELECT skill_id FROM skill_content_cache").all<{ skill_id: string }>();
   const cachedIds = new Set(cached.results.map((r) => r.skill_id));
-  const skills = SKILL_CATALOG.map((s) => ({ id: s.id, label: s.label, hasCachedContent: cachedIds.has(s.id) }));
-  return c.json({ skills });
+  const preset = SKILL_CATALOG.map((s) => ({
+    id: s.id, label: s.label, hasCachedContent: cachedIds.has(s.id), uploaded: false,
+  }));
+  // 上传的技能内容随行存储，不存在"尚未抓取"这个状态，所以 hasCachedContent 恒为 true。
+  const uploaded = (await listTenantSkills(c.env, tenantId)).map((s) => ({
+    id: s.skillId, label: s.label, hasCachedContent: true, uploaded: true,
+  }));
+  return c.json({ skills: [...preset, ...uploaded] });
+});
+
+app.post("/api/skills/import", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
+  const { skills } = await c.req.json<{
+    skills: { name: string; source: string; overwrite?: boolean; files: { path: string; content: string }[] }[];
+  }>();
+
+  if (!Array.isArray(skills) || skills.length === 0) return c.json({ error: "skills required" }, 400);
+  if (skills.length > MAX_SKILLS_PER_IMPORT) {
+    return c.json({ error: `At most ${MAX_SKILLS_PER_IMPORT} skills per import` }, 400);
+  }
+
+  const prepared: { skillId: string; label: string; content: string; source: string; overwrite: boolean }[] = [];
+  // 同一批内两个名字 slugify 后可能撞到同一个 skillId（"Social (v2)" 与 "Social v2" 都变成
+  // "social-v2"）：findExistingSkillIds 只查 D1 里已有的行，两条都还没落库，409 判重会直接
+  // 放过；upsert 的 ON CONFLICT 会让后写的一条悄悄吞掉先写的一条，response 却谎称两条都
+  // imported。必须在写库之前、就着这个 map 把批内碰撞拦下来。
+  const seenInBatch = new Map<string, string>(); // skillId -> 本批次第一次产生它的 name
+  for (const s of skills) {
+    if (!s.name || !Array.isArray(s.files)) return c.json({ error: "each skill needs name and files" }, 400);
+    let content: string;
+    try {
+      content = inlineReferencesFromFiles(s.files);
+    } catch {
+      return c.json({ error: `Skill "${s.name}" has no SKILL.md` }, 400);
+    }
+    if (content.length > MAX_SKILL_BYTES) {
+      return c.json({ error: `Skill "${s.name}" exceeds ${MAX_SKILL_BYTES} characters` }, 400);
+    }
+    // 名字全是标点/emoji 之类时 slugify 会返回空串：skillId 就退化成裸的 "upload:"，同一
+    // 租户两个这样的名字会撞在同一个 (tenant_id, skill_id) 主键上、互相静默覆盖。宁可拒绝
+    // 也不能让空 slug 蒙混过关。
+    const slug = slugifySkillName(s.name);
+    if (!slug) return c.json({ error: `Skill name "${s.name}" has no usable characters` }, 400);
+    const skillId = UPLOAD_PREFIX + slug;
+
+    const firstName = seenInBatch.get(skillId);
+    if (firstName !== undefined) {
+      // 400 而不是 409：这不是"和已存在的技能重名"，是同一次提交里两个从未存在过的名字互相
+      // 撞了 id——"覆盖"在这里没有意义（没有任何一方是"已有的"），唯一出路是改名，所以不走
+      // 409 的 Overwrite 恢复流程，直接把两个名字都点出来，让用户在预览里改掉其中一个。
+      return c.json({
+        error: `Skills "${firstName}" and "${s.name}" both resolve to the same id (${skillId}) — rename one of them to import both`,
+      }, 400);
+    }
+    seenInBatch.set(skillId, s.name);
+
+    prepared.push({
+      skillId, label: s.name, content, source: s.source || s.name, overwrite: !!s.overwrite,
+    });
+  }
+
+  // 后端自己查重名，不信前端传来的判断：两个标签页并发、或列表过期时，静默覆盖会让用户
+  // 丢掉自己写的技能。只有显式带 overwrite 的才放行。
+  const existing = new Set(await findExistingSkillIds(c.env, tenantId, prepared.map((p) => p.skillId)));
+  // conflicts 带上提交时的 name（不只是 skillId）：前端判重按可编辑的 label，后端按 slug 后
+  // 的 skillId，两者不是同一个等价关系（"Foo Bar" 与 "foo_bar" 标签不同但 slug 相同）。带上
+  // name 让前端能把冲突精确映射回提交它的那一行，而不必在前端重新实现一遍 slugify。
+  const conflicts = prepared
+    .filter((p) => existing.has(p.skillId) && !p.overwrite)
+    .map((p) => ({ skillId: p.skillId, name: p.label }));
+  if (conflicts.length > 0) {
+    return c.json({ error: "Some skills already exist", conflicts }, 409);
+  }
+
+  for (const p of prepared) {
+    await upsertTenantSkill(c.env, tenantId, { skillId: p.skillId, label: p.label, content: p.content, source: p.source });
+  }
+  return c.json({ imported: prepared.length });
+});
+
+app.delete("/api/skills/:id", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
+  const skillId = decodeURIComponent(c.req.param("id"));
+  // 预置技能存在全局表里、所有租户共享，一个租户删掉它等于替所有人删。
+  if (!skillId.startsWith(UPLOAD_PREFIX)) {
+    return c.json({ error: "Only uploaded skills can be deleted" }, 400);
+  }
+  await deleteTenantSkill(c.env, tenantId, skillId);
+  return c.json({ ok: true });
 });
 
 app.use("/api/llm-models", sessionAuth);

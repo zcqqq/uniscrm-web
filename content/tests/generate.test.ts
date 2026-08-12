@@ -75,13 +75,25 @@ describe("generateContent", () => {
 
     await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, { ...baseParams, skillId: "marketingskills-social" });
 
-    expect(skillContentModule.getSkillContent).toHaveBeenCalledWith(expect.anything(), "marketingskills-social");
+    expect(skillContentModule.getSkillContent).toHaveBeenCalledWith(expect.anything(), 1, "marketingskills-social");
     expect(aiRun).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         messages: expect.arrayContaining([{ role: "system", content: "Skill guidance here" }]),
       })
     );
+  });
+
+  it("把 tenantId 传给 getSkillContent，让上传技能能按租户取到", async () => {
+    const spy = vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("SKILL-DOC");
+    const aiRun = vi.fn().mockResolvedValue({ response: "ok" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+
+    await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, {
+      ...baseParams, tenantId: 4242, skillId: "upload:mine",
+    });
+
+    expect(spy).toHaveBeenCalledWith(expect.anything(), 4242, "upload:mine");
   });
 
   it("omits the system prompt when skillId is 'none' or absent, unchanged from before", async () => {

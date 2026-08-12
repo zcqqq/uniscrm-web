@@ -49,6 +49,9 @@ export const api = {
       request("/api/marketing-context/draft", { method: "POST", body: "{}" }),
     chat: (messages: { role: "user" | "assistant"; content: string }[]): Promise<{ reply: string }> =>
       request("/api/marketing-context/chat", { method: "POST", body: JSON.stringify({ messages }) }),
+    // messages 允许为空数组——用户可能起草完/手改完编辑框就直接点"生成文档"，一句话没说。
+    generate: (messages: { role: "user" | "assistant"; content: string }[]): Promise<{ document: string }> =>
+      request("/api/marketing-context/generate", { method: "POST", body: JSON.stringify({ messages }) }),
     save: (content: string, baseVersion?: number): Promise<{ version: number }> =>
       request("/api/marketing-context", { method: "PUT", body: JSON.stringify({ content, baseVersion }) }),
   },

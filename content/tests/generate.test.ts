@@ -111,6 +111,52 @@ describe("generateContent", () => {
     );
   });
 
+  // Finding 3：refreshSkillContent 只能手动触发（POST /internal/skills/:id/refresh），一次
+  // prod 部署里没人手动跑过它，两条新目录技能（image、product-marketing）就查得到 null——
+  // 出图仍会降级到只用契约（可接受），但 /generate 吐出的文档会因为"没有上文可听"而变成
+  // 一份没有结构的文档，且不报错、不留痕。这里断言这种情况必须留一条日志，diagnose 时靠它，
+  // 而不是靠事后猜。
+  it("Finding 3：getSkillContent 返回 null 时记录一条可诊断的日志（不 throw，仍照旧降级生成）", async () => {
+    vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue(null);
+    const aiRun = vi.fn().mockResolvedValue({ response: "punchy text" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const text = await generateContent(
+      { AI: { run: aiRun }, CONTENT_DB: mockDb } as any,
+      { ...baseParams, tenantId: 77, skillId: "marketingskills-product-marketing" }
+    );
+
+    expect(text).toBe("punchy text"); // 不 throw——缺失的技能必须仍然降级，不能让请求失败。
+    const logged = logSpy.mock.calls.map((c) => c[0]).find((line) => String(line).includes("skill_content_cache_miss"));
+    expect(logged).toBeDefined();
+    const parsed = JSON.parse(logged as string);
+    expect(parsed.event).toBe("skill_content_cache_miss");
+    expect(parsed.tenantId).toBe(77);
+    expect(parsed.skillId).toBe("marketingskills-product-marketing");
+  });
+
+  it("skillId 未设置或为 'none' 时不记录 skill_content_cache_miss（没有'被请求过的技能'可言）", async () => {
+    const aiRun = vi.fn().mockResolvedValue({ response: "punchy text" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, { ...baseParams, skillId: "none" });
+
+    expect(logSpy.mock.calls.map((c) => c[0]).some((line) => String(line).includes("skill_content_cache_miss"))).toBe(false);
+  });
+
+  it("技能命中缓存时不记录 skill_content_cache_miss", async () => {
+    vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("Skill guidance here");
+    const aiRun = vi.fn().mockResolvedValue({ response: "punchy text" });
+    const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, { ...baseParams, skillId: "marketingskills-social" });
+
+    expect(logSpy.mock.calls.map((c) => c[0]).some((line) => String(line).includes("skill_content_cache_miss"))).toBe(false);
+  });
+
   it("passes operationContext as the system prompt when no skill is set", async () => {
     const aiRun = vi.fn().mockResolvedValue({ response: "punchy text" });
     const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };

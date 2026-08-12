@@ -25,6 +25,17 @@ export interface GenerateParams {
 export async function generateContent(env: Env, params: GenerateParams): Promise<string> {
   const useSkill = !!params.skillId && params.skillId !== "none";
   const skillContent = useSkill ? (await getSkillContent(env, params.skillId!)) ?? undefined : undefined;
+  // 缓存未命中在 prod 上不该静默：refreshSkillContent 只能手动触发（POST
+  // /internal/skills/:id/refresh），一次新部署如果没人手动跑过它，skill_content_cache 里
+  // 对应的技能行就是空的——这一路仍会正常出文档/出图（不 throw，见下方注释），只是契约
+  // 里"结构听上文的指令"变成了没有上文可听。日志是唯一能发现这件事发生过的地方。
+  if (useSkill && skillContent === undefined) {
+    console.log(JSON.stringify({
+      event: "skill_content_cache_miss",
+      tenantId: params.tenantId,
+      skillId: params.skillId,
+    }));
+  }
   // 租户上下文按技能所属的包取：文档结构是照着该包的消费方式写的，脱离该包单独注入未经
   // 验证；skillId 为 "none" 时没有"哪个包"可言，不查也不注入。
   const repo = useSkill ? getSkillDefinition(params.skillId!)?.repo : undefined;

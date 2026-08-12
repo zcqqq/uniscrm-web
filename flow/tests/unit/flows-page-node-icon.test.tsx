@@ -23,6 +23,19 @@ describe("getNodeIcon", () => {
     expect(getNodeIcon("action", { actionType: "videoAction" })).not.toBe(XIcon);
   });
 
+  it("maps youtubeContentAction to YouTubeIcon, not the action-branch XIcon default", () => {
+    expect(getNodeIcon("action", { actionType: "youtubeContentAction" })).toBe(YouTubeIcon);
+  });
+
+  it("gives videoCondition the same icon as videoAction, not the generic fallback", () => {
+    expect(getNodeIcon("videoCondition", {})).toBe(getNodeIcon("action", { actionType: "videoAction" }));
+    expect(getNodeIcon("videoCondition", {})).not.toBe(getNodeIcon("wait", {}));
+  });
+
+  it("gives youtubeCondition the same icon as youtubeContentTrigger", () => {
+    expect(getNodeIcon("youtubeCondition", {})).toBe(YouTubeIcon);
+  });
+
   it("still maps xAction (the only remaining action default) to XIcon", () => {
     expect(getNodeIcon("action", { actionType: "xAction" })).toBe(XIcon);
   });

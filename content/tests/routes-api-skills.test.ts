@@ -100,11 +100,38 @@ describe("POST /api/skills/import", () => {
   });
 
   // 后端不信任前端的重名判断：两个标签页并发时，静默覆盖会让用户丢掉自己写的技能。
-  it("重名且未授权 → 409 并回列冲突名", async () => {
+  // conflicts 带上提交时的 name（不只是 skillId）——前端判重按可编辑的 label，后端按
+  // slug 后的 skillId，两者不是同一个等价关系，前端需要这个 name 才能精确映射回是哪一行
+  // 提交的，而不必在前端重新实现一遍 slugify（Important 3）。
+  it("重名且未授权 → 409 并回列冲突的 skillId 与提交时的 name", async () => {
     await call("/api/skills/import", { method: "POST", body: JSON.stringify({ skills: [oneSkill("dup")] }) });
     const res = await call("/api/skills/import", { method: "POST", body: JSON.stringify({ skills: [oneSkill("dup")] }) });
     expect(res.status).toBe(409);
-    expect((await res.json() as { conflicts: string[] }).conflicts).toEqual(["upload:dup"]);
+    expect((await res.json() as { conflicts: { skillId: string; name: string }[] }).conflicts)
+      .toEqual([{ skillId: "upload:dup", name: "dup" }]);
+  });
+
+  // Important 1（final review）：两个名字 slugify 后撞到同一个 skillId 时，findExistingSkillIds
+  // 只看 D1 里已有的行，两条都还没落库，409 判重会直接放过——upsert 的 ON CONFLICT 会让后写
+  // 的一条悄悄吞掉先写的一条正文，response 却谎称两条都成功了（imported: 2）。必须在写库之前
+  // 就把批内碰撞拦下来，不能只查已存在的行。
+  it("批内两个名字 slugify 后撞到同一个 skillId → 拒绝，不出现 imported: 2 也不静默丢弃其中一条", async () => {
+    const res = await call("/api/skills/import", {
+      method: "POST",
+      body: JSON.stringify({
+        skills: [
+          { name: "Foo Bar", source: "a.zip", files: [{ path: "SKILL.md", content: "AAA" }] },
+          { name: "foo  bar", source: "b.zip", files: [{ path: "SKILL.md", content: "BBB" }] },
+        ],
+      }),
+    });
+    expect(res.status).not.toBe(200);
+    const body = await res.json() as { imported?: number };
+    expect(body.imported).toBeUndefined();
+
+    // 拒绝时两条都不落地——不能变成"后写的那条覆盖了先写的那条，只留一行在库里"。
+    const list = await (await call("/api/skills", {})).json() as { skills: { id: string; label: string }[] };
+    expect(list.skills.map((s) => s.id)).not.toContain("upload:foo-bar");
   });
 
   it("重名且带 overwrite → 覆盖那一行，不新增", async () => {

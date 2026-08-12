@@ -181,6 +181,11 @@ app.post("/api/skills/import", async (c) => {
   }
 
   const prepared: { skillId: string; label: string; content: string; source: string; overwrite: boolean }[] = [];
+  // 同一批内两个名字 slugify 后可能撞到同一个 skillId（"Social (v2)" 与 "Social v2" 都变成
+  // "social-v2"）：findExistingSkillIds 只查 D1 里已有的行，两条都还没落库，409 判重会直接
+  // 放过；upsert 的 ON CONFLICT 会让后写的一条悄悄吞掉先写的一条，response 却谎称两条都
+  // imported。必须在写库之前、就着这个 map 把批内碰撞拦下来。
+  const seenInBatch = new Map<string, string>(); // skillId -> 本批次第一次产生它的 name
   for (const s of skills) {
     if (!s.name || !Array.isArray(s.files)) return c.json({ error: "each skill needs name and files" }, 400);
     let content: string;
@@ -197,16 +202,33 @@ app.post("/api/skills/import", async (c) => {
     // 也不能让空 slug 蒙混过关。
     const slug = slugifySkillName(s.name);
     if (!slug) return c.json({ error: `Skill name "${s.name}" has no usable characters` }, 400);
+    const skillId = UPLOAD_PREFIX + slug;
+
+    const firstName = seenInBatch.get(skillId);
+    if (firstName !== undefined) {
+      // 400 而不是 409：这不是"和已存在的技能重名"，是同一次提交里两个从未存在过的名字互相
+      // 撞了 id——"覆盖"在这里没有意义（没有任何一方是"已有的"），唯一出路是改名，所以不走
+      // 409 的 Overwrite 恢复流程，直接把两个名字都点出来，让用户在预览里改掉其中一个。
+      return c.json({
+        error: `Skills "${firstName}" and "${s.name}" both resolve to the same id (${skillId}) — rename one of them to import both`,
+      }, 400);
+    }
+    seenInBatch.set(skillId, s.name);
+
     prepared.push({
-      skillId: UPLOAD_PREFIX + slug,
-      label: s.name, content, source: s.source || s.name, overwrite: !!s.overwrite,
+      skillId, label: s.name, content, source: s.source || s.name, overwrite: !!s.overwrite,
     });
   }
 
   // 后端自己查重名，不信前端传来的判断：两个标签页并发、或列表过期时，静默覆盖会让用户
   // 丢掉自己写的技能。只有显式带 overwrite 的才放行。
   const existing = new Set(await findExistingSkillIds(c.env, tenantId, prepared.map((p) => p.skillId)));
-  const conflicts = prepared.filter((p) => existing.has(p.skillId) && !p.overwrite).map((p) => p.skillId);
+  // conflicts 带上提交时的 name（不只是 skillId）：前端判重按可编辑的 label，后端按 slug 后
+  // 的 skillId，两者不是同一个等价关系（"Foo Bar" 与 "foo_bar" 标签不同但 slug 相同）。带上
+  // name 让前端能把冲突精确映射回提交它的那一行，而不必在前端重新实现一遍 slugify。
+  const conflicts = prepared
+    .filter((p) => existing.has(p.skillId) && !p.overwrite)
+    .map((p) => ({ skillId: p.skillId, name: p.label }));
   if (conflicts.length > 0) {
     return c.json({ error: "Some skills already exist", conflicts }, 409);
   }

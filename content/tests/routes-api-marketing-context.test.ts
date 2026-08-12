@@ -28,6 +28,30 @@ const H = { Cookie: "session=mc2", "Content-Type": "application/json" };
 const call = (path: string, init: RequestInit) =>
   worker.fetch(new Request(`https://content-dev.uni-scrm.com${path}`, { headers: H, ...init }), env);
 
+// 治理原则（设计文档 §8.4）：代码里的契约只描述我们的运行时，永远不复述技能的内容——技能
+// 从公开仓库拉取、会独立改版，硬编码它当下的小节/字段会悄悄跟真实技能脱节且没有任何报错。
+//
+// 一份四个词的黑名单挡不住"换个说法复述"——比如把 "Product Overview" 换成
+// "the Elevator Pitch section" 照样违反原则却照样通过黑名单。真正该守的是复述这件事在
+// 契约字符串里必然留下的*形状*：技能文档本身就是用 markdown 小节标题（`##`）、
+// `**字段名:**` 这种粗体标签、以及编号/项目符号列表来表达它的结构（参见 §8.2 表格里
+// 技能文本的偏移量）——把结构誊抄回契约，几乎不可能不带上这几种形状之一，而且抄一份
+// 十几节的列表，契约不可能还维持"几句话"的长度。下面这条断言链检查的是这些形状，
+// 而不是猜哪几个词会被抄。
+//
+// 仍保留原来那几个词作为一道便宜的绊线（真复述大概率会踩到），但绊线不是防线本身——
+// 下次有人想"简化"掉形状检查、只留字面量黑名单之前，请重读这段注释。
+function assertNoSkillStructureRestatement(contract: string) {
+  // 当前两份契约都是几句话（395 / 305 字符）；抄一份十几节的结构进来，长度会明显冒头。
+  expect(contract.length).toBeLessThan(500);
+  expect(contract).not.toMatch(/(^|\n)\s{0,3}#{1,6}\s/); // markdown 小节标题，如 "## Brand Voice"
+  expect(contract).not.toMatch(/\*\*[^*\n]{1,60}:\*\*/); // "**Field:**" 这种粗体字段标签
+  expect(contract).not.toMatch(/(^|\n)\s{0,3}(\d+[.)]|[-*•])\s/); // 编号或项目符号列表行
+  for (const forbidden of ["Product Overview", "Brand Voice", "Target Audience", "12"]) {
+    expect(contract).not.toContain(forbidden);
+  }
+}
+
 describe("marketing context 读写", () => {
   it("没写过时返回空", async () => {
     const res = await call("/api/marketing-context", {});
@@ -76,6 +100,7 @@ describe("POST /api/marketing-context/chat", () => {
     // 聊天契约只负责"没文件系统/别提议存文件"这类运行时事实，不再兼职吐文档——
     // 哨兵围栏方案已删（dev 实测 0/6 合规，见设计文档 §8.1）。
     expect(params.operationContext).toContain("no filesystem");
+    assertNoSkillStructureRestatement(params.operationContext!);
   });
 
   it("已有存档文档时，不把文档正文重复塞进 operationContext——generateContent 自己按 repo 注入一份，" +
@@ -95,6 +120,7 @@ describe("POST /api/marketing-context/chat", () => {
     // 没有出现文档正文，就证明 chatMarketingContext 自己没有再内联一份）。
     expect(params.operationContext).toContain("no filesystem");
     expect(params.operationContext).not.toContain(marker);
+    assertNoSkillStructureRestatement(params.operationContext!);
   });
 
   it("messages 为空时 400", async () => {
@@ -125,9 +151,9 @@ describe("POST /api/marketing-context/generate", () => {
     expect(params.skillId).toBe("marketingskills-product-marketing");
   });
 
-  // 治理原则的回归守卫：契约里一旦出现小节名/字段名，就说明有人把技能的结构又手抄回了
-  // 代码里——技能会改版，硬编码的小节列表会悄悄跟真实技能脱节且没有任何报错。
-  it("契约里不出现任何技能专属词汇", async () => {
+  // 治理原则的回归守卫（负半边）：契约里一旦长出"复述技能结构"的形状——见
+  // assertNoSkillStructureRestatement 的注释——就说明有人把技能的结构又手抄回了代码里。
+  it("契约里不出现技能结构的复述", async () => {
     const gen = vi.spyOn(generateModule, "generateContent").mockResolvedValue("doc");
     await call("/api/marketing-context/generate", {
       method: "POST",
@@ -135,9 +161,21 @@ describe("POST /api/marketing-context/generate", () => {
     });
 
     const params = gen.mock.calls[0][1];
-    for (const forbidden of ["Product Overview", "Brand Voice", "Target Audience", "12"]) {
-      expect(params.operationContext).not.toContain(forbidden);
-    }
+    assertNoSkillStructureRestatement(params.operationContext!);
+  });
+
+  // 治理原则的回归守卫（正半边）：光是"不点名"还不够——如果连"结构听上文技能的"这句指望都
+  // 没了，模型拿到的就是一份没有任何结构指望的契约，产出的文档同样没有结构。这条断言防的是
+  // 把上面那条负向守卫过度收紧、连这句"交还权威"的指代也一并删掉的回归。
+  it("契约仍把结构的权威交还给技能（\"跟上文的指令走\"这句指代还在）", async () => {
+    const gen = vi.spyOn(generateModule, "generateContent").mockResolvedValue("doc");
+    await call("/api/marketing-context/generate", {
+      method: "POST",
+      body: JSON.stringify({ messages: [] }),
+    });
+
+    const params = gen.mock.calls[0][1];
+    expect(params.operationContext).toMatch(/structure.*above|above.*structure/i);
   });
 
   it("messages 为空数组时不 400——用户可能起草完就直接点生成，没多说一句话", async () => {

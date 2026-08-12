@@ -16,6 +16,15 @@ type Uploaded = { id: string; label: string; uploaded: boolean };
 // 一次性分配、之后永不随改名变化，专门用来给每一行钉住一个独立、稳定的 key。
 type PreviewRow = ParsedSkill & { rowId: string };
 
+// 一个待解析的文件，连同它相对于"被选中的那个根"的路径。路径必须跟着文件一起传，不能在
+// 下游从 File 上反推——见 ingest() 与 readDirectory() 的注释。
+export type PickedFile = { file: File; path: string };
+
+// <input type=file> 选出来的文件：多选目录时 webkitRelativePath 形如 "pack/social/SKILL.md"，
+// 单选文件时是空串，退回文件名。
+const fromInput = (files: File[]): PickedFile[] =>
+  files.map((f) => ({ file: f, path: (f as any).webkitRelativePath || f.name }));
+
 export function SkillUploadCard() {
   const T = useT();
   const { toast } = useToast();
@@ -43,15 +52,19 @@ export function SkillUploadCard() {
   const existingLabels = new Set(existing.map((s) => s.label.toLowerCase()));
   const isConflict = (row: PreviewRow) => conflictedRowIds.has(row.rowId);
 
-  const ingest = async (files: File[]) => {
+  // 每一项都自带 path —— 不是从 File 上现推。File.webkitRelativePath 只有 <input
+  // webkitdirectory> 选出来的文件才有值；拖入文件夹时 FileSystemFileEntry.file() 给的 File
+  // 这个字段是空串，路径信息只存在于遍历过程里（见 readDirectory）。让调用方各自把路径带
+  // 进来，两条入口才能给出同一种形状，parseSkillFiles 也才认得出 references/ 和整包结构。
+  const ingest = async (picked: PickedFile[]) => {
     try {
-      const zip = files.find((f) => f.name.endsWith(".zip"));
+      const zip = picked.find((p) => p.path.endsWith(".zip"));
       const entries = zip
-        ? unzipToEntries(new Uint8Array(await zip.arrayBuffer()))
+        ? unzipToEntries(new Uint8Array(await zip.file.arrayBuffer()))
         : await Promise.all(
-            files
-              .filter((f) => f.name.endsWith(".md"))
-              .map(async (f) => ({ path: (f as any).webkitRelativePath || f.name, text: await f.text() }))
+            picked
+              .filter((p) => p.path.endsWith(".md"))
+              .map(async (p) => ({ path: p.path, text: await p.file.text() }))
           );
       const rows: PreviewRow[] = parseSkillFiles(entries).map((s) => ({ ...s, rowId: `r${nextRowId.current++}` }));
       setPreview(rows);
@@ -73,12 +86,15 @@ export function SkillUploadCard() {
     // 专门把这条不变量钉死成结构，而不是靠注释提醒。
     const grabbed = grabDroppedEntries(Array.from(e.dataTransfer.items) as unknown as DropItem[]);
     try {
-      const files: File[] = [];
+      const picked: PickedFile[] = [];
       for (const { entry, file } of grabbed) {
-        if (entry?.isDirectory) files.push(...(await readDirectory(entry)));
-        else if (file) files.push(file);
+        // 前缀带上被拖入的那个文件夹自己的名字，与 <input webkitdirectory> 的
+        // webkitRelativePath 语义对齐（它也是 "<所选目录>/..." 开头）——两条入口给出同一种
+        // 路径形状，parseSkillFiles 才有唯一一套判定规则。
+        if (entry?.isDirectory) picked.push(...(await readDirectory(entry, `${entry.name}/`)));
+        else if (file) picked.push({ file, path: file.name });
       }
-      await ingest(files);
+      await ingest(picked);
     } catch (err) {
       // readDirectory 之前没接错误回调时，失败会让这个 await 永久 pending——用户既看不到
       // 导入结果也看不到任何提示。现在错误会真的 reject 上来，这里兜住给出 toast。
@@ -170,9 +186,9 @@ export function SkillUploadCard() {
           </Button>
         </div>
         <input ref={fileRef} type="file" accept=".zip,.md" className="hidden"
-          onChange={(e) => ingest(Array.from(e.target.files ?? []))} />
+          onChange={(e) => ingest(fromInput(Array.from(e.target.files ?? [])))} />
         <input ref={dirRef} type="file" className="hidden"
-          onChange={(e) => ingest(Array.from(e.target.files ?? []))}
+          onChange={(e) => ingest(fromInput(Array.from(e.target.files ?? [])))}
           {...({ webkitdirectory: "", directory: "" } as any)} />
       </div>
 
@@ -244,8 +260,12 @@ export function grabDroppedEntries(items: DropItem[]): DropGrab[] {
   }));
 }
 
-export async function readDirectory(entry: any): Promise<File[]> {
-  const files: File[] = [];
+// prefix 是"这个目录相对于被拖入的根的路径"，逐层拼下去——递归时不带上它，遍历结束后就再也
+// 无从知道某个 File 原本躺在 references/ 里（FileSystemFileEntry.file() 给出的 File 的
+// webkitRelativePath 是空串），SKILL.md 里的 references/x.md 链接一个都对不上，整包也会塌成
+// 一个技能：两个文件夹的 SKILL.md 都变成根路径 "SKILL.md"，后一个把前一个顶掉。
+export async function readDirectory(entry: any, prefix = ""): Promise<PickedFile[]> {
+  const files: PickedFile[] = [];
   const reader = entry.createReader();
   // Chrome 的 readEntries 一次最多返回 100 条，必须反复调用直到收到空数组——只调一次会把
   // 目录里第 101 项之后的文件（可能是另一个技能的 SKILL.md，或者整个 references/ 目录）
@@ -254,8 +274,12 @@ export async function readDirectory(entry: any): Promise<File[]> {
     const batch: any[] = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
     if (batch.length === 0) break;
     for (const e of batch) {
-      if (e.isFile) files.push(await new Promise<File>((resolve, reject) => e.file(resolve, reject)));
-      else if (e.isDirectory) files.push(...(await readDirectory(e)));
+      if (e.isFile) {
+        const file = await new Promise<File>((resolve, reject) => e.file(resolve, reject));
+        files.push({ file, path: `${prefix}${e.name}` });
+      } else if (e.isDirectory) {
+        files.push(...(await readDirectory(e, `${prefix}${e.name}/`)));
+      }
     }
   }
   return files;

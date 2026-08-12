@@ -132,12 +132,17 @@ describe("grabDroppedEntries — 必须在任何 await 之前同步读完每一�
 });
 
 describe("readDirectory — 必须翻页读完整个目录，且错误回调要真的传上去", () => {
-  function fakeFileEntry(name: string) {
-    return { isFile: true, isDirectory: false, file: (ok: (f: File) => void) => ok({ name } as unknown as File) };
+  function fakeFileEntry(name: string, text = "") {
+    return {
+      isFile: true, isDirectory: false, name,
+      // 真实浏览器里 FileSystemFileEntry.file() 给出的 File，webkitRelativePath 是空串——
+      // 这里照着造，路径必须由 readDirectory 自己拼出来，而不是从 File 上读出来。
+      file: (ok: (f: File) => void) => ok({ name, text: async () => text, webkitRelativePath: "" } as unknown as File),
+    };
   }
-  function fakeReaderYielding(batches: unknown[][]) {
+  function fakeReaderYielding(batches: unknown[][], name = "root") {
     let call = 0;
-    return { createReader: () => ({ readEntries: (ok: (b: unknown[]) => void) => ok(batches[call++] ?? []) }) };
+    return { name, isDirectory: true, createReader: () => ({ readEntries: (ok: (b: unknown[]) => void) => ok(batches[call++] ?? []) }) };
   }
 
   // Chrome 的 readEntries 一次最多返回 100 条；这里只用 3 条模拟"分好几批"，重点不是凑够
@@ -150,7 +155,7 @@ describe("readDirectory — 必须翻页读完整个目录，且错误回调要�
 
     const files = await readDirectory(entry);
 
-    expect(files.map((f) => f.name).sort()).toEqual(["a.md", "b.md"]);
+    expect(files.map((f) => f.path).sort()).toEqual(["a.md", "b.md"]);
   });
 
   it("readEntries 的错误回调被真正接上——失败时 promise reject，不是永久 pending", async () => {
@@ -169,5 +174,63 @@ describe("readDirectory — 必须翻页读完整个目录，且错误回调要�
     ]]);
 
     await expect(readDirectory(entry)).rejects.toThrow("read failed");
+  });
+});
+
+// 真实浏览器实测（content-dev，2026-08-12）：把两个技能文件夹一起拖进上传区，预览里只出现
+// 一个技能、1 KB，另一个连同它的 150 个 references 一声不响地消失。
+//
+// 根因不是 readEntries 翻页，也不是 DataTransfer 的同步读取（那两条都已经修好了），而是
+// readDirectory 只把 File 交出去、把它在目录树里的位置丢了：FileSystemFileEntry.file() 给的
+// File 的 webkitRelativePath 是空串（那个字段只有 <input webkitdirectory> 会填），于是下游
+// 拿到的路径全塌成裸文件名——"references/r001.md" 变成 "r001.md"（SKILL.md 里的链接一个都
+// 对不上，references 全丢），两个文件夹的 SKILL.md 都变成根路径 "SKILL.md"（后一个把前一个
+// 顶掉，整包塌成一个技能）。路径必须在遍历时就拼好带出来。
+describe("readDirectory — 必须带出相对路径，否则 references 与整包结构静默消失", () => {
+  function fileEntry(name: string, text = "") {
+    return {
+      isFile: true, isDirectory: false, name,
+      file: (ok: (f: File) => void) => ok({ name, text: async () => text, webkitRelativePath: "" } as unknown as File),
+    };
+  }
+  function dirEntry(name: string, children: unknown[]) {
+    return {
+      isFile: false, isDirectory: true, name,
+      createReader: () => {
+        let done = false;
+        return { readEntries: (ok: (b: unknown[]) => void) => { ok(done ? [] : children); done = true; } };
+      },
+    };
+  }
+
+  it("嵌套子目录里的文件带着完整相对路径出来，不是裸文件名", async () => {
+    const entry = dirEntry("social", [
+      fileEntry("SKILL.md"),
+      dirEntry("references", [fileEntry("limits.md"), fileEntry("tone.md")]),
+    ]);
+
+    const picked = await readDirectory(entry, `${entry.name}/`);
+
+    // 修复前这里是 ["SKILL.md", "limits.md", "tone.md"]——references/ 这一层完全看不出来。
+    expect(picked.map((p) => p.path).sort()).toEqual([
+      "social/SKILL.md",
+      "social/references/limits.md",
+      "social/references/tone.md",
+    ]);
+  });
+
+  it("两个文件夹一起拖入时互不覆盖：各自的 SKILL.md 落在各自的目录下", async () => {
+    const a = dirEntry("alpha", [fileEntry("SKILL.md", "A")]);
+    const b = dirEntry("beta", [fileEntry("SKILL.md", "B")]);
+
+    const picked = [
+      ...(await readDirectory(a, `${a.name}/`)),
+      ...(await readDirectory(b, `${b.name}/`)),
+    ];
+
+    // 修复前两项的 path 都是 "SKILL.md"，parseSkillFiles 走"根目录有 SKILL.md"那条分支，
+    // 只产出一个技能，后一个把前一个顶掉。
+    expect(picked.map((p) => p.path)).toEqual(["alpha/SKILL.md", "beta/SKILL.md"]);
+    expect(new Set(picked.map((p) => p.path)).size).toBe(2);
   });
 });

@@ -4,6 +4,7 @@ import { env } from "cloudflare:test";
 import worker from "../src/index";
 import { seedSession } from "./helpers/seed-session";
 import * as generateModule from "../src/services/generate";
+import { buildChatContract, buildDocumentContract } from "../src/services/marketing-context";
 
 beforeAll(async () => {
   await seedSession(env as never, "mc2", 94);
@@ -31,18 +32,25 @@ const call = (path: string, init: RequestInit) =>
 // 治理原则（设计文档 §8.4）：代码里的契约只描述我们的运行时，永远不复述技能的内容——技能
 // 从公开仓库拉取、会独立改版，硬编码它当下的小节/字段会悄悄跟真实技能脱节且没有任何报错。
 //
-// 一份四个词的黑名单挡不住"换个说法复述"——比如把 "Product Overview" 换成
-// "the Elevator Pitch section" 照样违反原则却照样通过黑名单。真正该守的是复述这件事在
-// 契约字符串里必然留下的*形状*：技能文档本身就是用 markdown 小节标题（`##`）、
-// `**字段名:**` 这种粗体标签、以及编号/项目符号列表来表达它的结构（参见 §8.2 表格里
-// 技能文本的偏移量）——把结构誊抄回契约，几乎不可能不带上这几种形状之一，而且抄一份
-// 十几节的列表，契约不可能还维持"几句话"的长度。下面这条断言链检查的是这些形状，
-// 而不是猜哪几个词会被抄。
+// 这套违规有两条路径，只有一条是单元测试管得着的：
 //
-// 仍保留原来那几个词作为一道便宜的绊线（真复述大概率会踩到），但绊线不是防线本身——
-// 下次有人想"简化"掉形状检查、只留字面量黑名单之前，请重读这段注释。
+// 1. 自动化路径——代码从技能内容里读出小节名，拼进契约字符串。这条路径可以被结构性地
+//    堵死，见下面 describe("执行契约的结构保证")：两个契约函数零参数、两次调用输出完全
+//    相同，就说明它们不可能读了什么东西再插值进去。这是本文件里唯一"关死"的一条路径。
+//
+// 2. 手写措辞路径——有人把技能当前的小节直接抄成大白话塞进契约里（"记得覆盖 Elevator
+//    Pitch 和 Pricing Model"），不带任何 markdown 记号。assertNoSkillStructureRestatement
+//    只是这条路径上的粗糙绊线，挡的是"直接复制技能文档的 markdown 语法"这种最省事的抄法
+//    ——小节标题、粗体字段标签、编号/项目符号列表，以及随之而来的长度暴涨。它挡不住换一种
+//    说法的改写：单元测试没有"技能现在有哪些小节"这个事实可比对（技能内容活在 D1 里、从
+//    会变的公开仓库拉取，测试运行时不知道它长什么样），没有基准就没法判断一句大白话是不是
+//    "复述"。把长度阈值收紧到能卡住几十字符的改写，只会留下几乎不留余量的窗口——下一次
+//    合理的措辞调整就会绊到，这种"狼来了"的守卫最终会被下一个人删掉，等于什么都没守住。
+//    这条路径真正的防线是 §8.4 的原则本身 + code review，不是这个测试文件。
+//
+// 换句话说：下面这条断言链只证明"没有人复制粘贴技能的 markdown 结构"，不证明"契约没有
+// 任何形式复述技能内容"——后者对单元测试不可达。不要把这条守卫的覆盖范围想大了。
 function assertNoSkillStructureRestatement(contract: string) {
-  // 当前两份契约都是几句话（395 / 305 字符）；抄一份十几节的结构进来，长度会明显冒头。
   expect(contract.length).toBeLessThan(500);
   expect(contract).not.toMatch(/(^|\n)\s{0,3}#{1,6}\s/); // markdown 小节标题，如 "## Brand Voice"
   expect(contract).not.toMatch(/\*\*[^*\n]{1,60}:\*\*/); // "**Field:**" 这种粗体字段标签
@@ -50,6 +58,27 @@ function assertNoSkillStructureRestatement(contract: string) {
   for (const forbidden of ["Product Overview", "Brand Voice", "Target Audience", "12"]) {
     expect(contract).not.toContain(forbidden);
   }
+}
+
+describe("执行契约的结构保证", () => {
+  // 这是"契约不可能读技能内容再插值"这个属性唯一能被机械验证的角度：零参数 + 两次调用
+  // 输出相同，排除了"从某处读小节名/字段名再拼进字符串"这条代码路径。想动态注入技能的
+  // 结构，就必须先给函数加参数或引入某种隐藏状态——那会是显眼的 diff，逃不过 review。
+  it("buildChatContract / buildDocumentContract 都是零参数、无副作用的常量输出", () => {
+    for (const fn of [buildChatContract, buildDocumentContract]) {
+      expect(fn.length).toBe(0);
+      expect(fn()).toBe(fn());
+    }
+  });
+});
+
+// 正半边：光"不点名"还不够——如果契约连"结构听上文（技能）的"这句指望都没有，模型拿到的
+// 就是一份没有任何结构指望的契约，产出同样没有结构。两份契约现在都靠同一句指代性措辞
+// （"following the structure the instructions above describe"）把结构的权威交还给注入的
+// 技能内容：buildChatContract 用它来定义"一次问一节"里的"节"是谁的节，buildDocumentContract
+// 用它来定义最终文档该长成什么样。用一个共享断言，对称地守住两处。
+function assertHandsBackStructuralAuthority(contract: string) {
+  expect(contract).toMatch(/structure.*above|above.*structure/i);
 }
 
 describe("marketing context 读写", () => {
@@ -101,6 +130,7 @@ describe("POST /api/marketing-context/chat", () => {
     // 哨兵围栏方案已删（dev 实测 0/6 合规，见设计文档 §8.1）。
     expect(params.operationContext).toContain("no filesystem");
     assertNoSkillStructureRestatement(params.operationContext!);
+    assertHandsBackStructuralAuthority(params.operationContext!);
   });
 
   it("已有存档文档时，不把文档正文重复塞进 operationContext——generateContent 自己按 repo 注入一份，" +
@@ -121,6 +151,7 @@ describe("POST /api/marketing-context/chat", () => {
     expect(params.operationContext).toContain("no filesystem");
     expect(params.operationContext).not.toContain(marker);
     assertNoSkillStructureRestatement(params.operationContext!);
+    assertHandsBackStructuralAuthority(params.operationContext!);
   });
 
   it("messages 为空时 400", async () => {
@@ -164,9 +195,7 @@ describe("POST /api/marketing-context/generate", () => {
     assertNoSkillStructureRestatement(params.operationContext!);
   });
 
-  // 治理原则的回归守卫（正半边）：光是"不点名"还不够——如果连"结构听上文技能的"这句指望都
-  // 没了，模型拿到的就是一份没有任何结构指望的契约，产出的文档同样没有结构。这条断言防的是
-  // 把上面那条负向守卫过度收紧、连这句"交还权威"的指代也一并删掉的回归。
+  // 治理原则的回归守卫（正半边，见 assertHandsBackStructuralAuthority 的注释）。
   it("契约仍把结构的权威交还给技能（\"跟上文的指令走\"这句指代还在）", async () => {
     const gen = vi.spyOn(generateModule, "generateContent").mockResolvedValue("doc");
     await call("/api/marketing-context/generate", {
@@ -175,7 +204,7 @@ describe("POST /api/marketing-context/generate", () => {
     });
 
     const params = gen.mock.calls[0][1];
-    expect(params.operationContext).toMatch(/structure.*above|above.*structure/i);
+    assertHandsBackStructuralAuthority(params.operationContext!);
   });
 
   it("messages 为空数组时不 400——用户可能起草完就直接点生成，没多说一句话", async () => {

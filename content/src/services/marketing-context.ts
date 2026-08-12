@@ -86,13 +86,19 @@ export interface ChatMessage {
 // skill_context 行（见 generate.ts 的 tenantContext），紧挨在这段合同文本之前。这里只需用
 // 指代性措辞告诉模型"如果上文出现了当前文档就更新它"，覆盖有/无文档两种情况，不重复内联文档
 // 本身——否则每一轮对话都会把整份文档在 system prompt 里放两遍，白烧 token 且随文档增长恶化。
+//
+// "一次问一节"里的"一节"指的是谁的节？我们没有小节列表，这个概念完全来自技能。以前这句话
+// 没有显式指回"上文"，模型能不能对上"一节"= 技能定义的那个小节，全靠它自己猜。补一句
+// "跟随上文指令描述的结构"，跟 buildDocumentContract() 用的同一个指代性措辞，把这个隐含
+// 依赖挑明——而不是让"哪些节"这件事在两处契约里一处显式一处隐含。
 export function buildChatContract(): string {
   return (
     "You are interviewing this user to produce their Product Marketing Context document." +
     " You have no filesystem and no tools; do not propose saving a file or reading a codebase." +
     " If their current document appears above this instruction, update it rather than starting" +
     " over from scratch; if none appears above, you are starting fresh." +
-    " Ask about one section at a time; never dump every question at once."
+    " Ask about one section at a time, following the structure the instructions above describe;" +
+    " never dump every question at once."
   );
 }
 

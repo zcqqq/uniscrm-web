@@ -10,15 +10,22 @@ import { parseSkillFiles, unzipToEntries, type ParsedSkill } from "../lib/skill-
 
 type Uploaded = { id: string; label: string; uploaded: boolean };
 
+// name 是用户可编辑的字段（改名就是这个 Task 的"第二条出路"），不能拿它当 React state 的
+// key —— 两行撞了同一个 name（比如两个技能文件夹的 frontmatter 都写 name: "Foo"）时，name
+// 相同的行会共享同一个 overwrite 状态，点一行的"覆盖"会连带解锁另一行。rowId 在 ingest 时
+// 一次性分配、之后永不随改名变化，专门用来给每一行钉住一个独立、稳定的 key。
+type PreviewRow = ParsedSkill & { rowId: string };
+
 export function SkillUploadCard() {
   const T = useT();
   const { toast } = useToast();
   const [existing, setExisting] = useState<Uploaded[]>([]);
-  const [preview, setPreview] = useState<ParsedSkill[]>([]);
+  const [preview, setPreview] = useState<PreviewRow[]>([]);
   const [overwrite, setOverwrite] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const dirRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const nextRowId = useRef(0);
 
   const reload = () =>
     api.skills.list().then((r) => setExisting(r.skills.filter((s) => s.uploaded))).catch(() => {});
@@ -39,7 +46,7 @@ export function SkillUploadCard() {
               .filter((f) => f.name.endsWith(".md"))
               .map(async (f) => ({ path: (f as any).webkitRelativePath || f.name, text: await f.text() }))
           );
-      setPreview(parseSkillFiles(entries));
+      setPreview(parseSkillFiles(entries).map((s) => ({ ...s, rowId: `r${nextRowId.current++}` })));
       setOverwrite({});
     } catch (e) {
       toast({ title: T({ en: "Could not read that upload", zh: "这个上传读不出来" }), description: String(e), variant: "destructive" });
@@ -64,7 +71,7 @@ export function SkillUploadCard() {
     setBusy(true);
     try {
       await api.skills.import(
-        preview.map((s) => ({ name: s.name, source: s.name, overwrite: !!overwrite[s.name], files: s.files }))
+        preview.map((s) => ({ name: s.name, source: s.name, overwrite: !!overwrite[s.rowId], files: s.files }))
       );
       toast({ title: T({ en: "Skills imported", zh: "技能已导入" }) });
       setPreview([]);
@@ -72,10 +79,18 @@ export function SkillUploadCard() {
     } catch (e: any) {
       // 后端自己也查重名（前端列表可能过期，或者是第二个标签页导入的）——409 时把提示摊开，
       // 让用户回到预览里勾选覆盖或改名，而不是被通用错误吞掉，无路可走。
-      const msg = e?.status === 409
-        ? T({ en: "Some names already exist — choose Overwrite or rename them.", zh: "有重名——请选择覆盖或改名。" })
-        : T({ en: "Import failed", zh: "导入失败" });
-      toast({ title: msg, variant: "destructive" });
+      if (e?.status === 409) {
+        // existing 是过期的：另一个标签页/请求在我们拉取列表之后抢先用了这个名字，所以本地
+        // 的 isConflict 还没把这一行标红、Overwrite 按钮也就没渲染出来。重新拉一次列表，让
+        // isConflict 用最新的 existing 重新算一遍，冲突行才会亮起来，Overwrite 才可点。
+        // （没有反过来去解析响应体里的 conflicts skillId 列表——那是按后端的 slugify 算法
+        // 生成的，要把它映射回这一行的 name 就得在前端重新实现一遍 slugify，而这个判断权
+        // 按设计只归后端，见 isConflict 上面的注释。）
+        await reload();
+        toast({ title: T({ en: "Some names already exist — choose Overwrite or rename them.", zh: "有重名——请选择覆盖或改名。" }), variant: "destructive" });
+      } else {
+        toast({ title: T({ en: "Import failed", zh: "导入失败" }), variant: "destructive" });
+      }
     } finally {
       setBusy(false);
     }
@@ -111,14 +126,16 @@ export function SkillUploadCard() {
           {preview.map((s, i) => {
             const conflict = isConflict(s.name);
             return (
-              <div key={i} className="flex items-center gap-2 text-sm">
+              <div key={s.rowId} className="flex items-center gap-2 text-sm">
                 <Input value={s.name} onChange={(e: any) => rename(i, e.target.value)} className="flex-1 text-sm" />
                 <span className="text-xs text-muted-foreground shrink-0">{Math.ceil(s.bytes / 1024)} KB</span>
                 {conflict && (
                   <>
                     <span className="text-xs text-destructive shrink-0">{T({ en: "Name exists", zh: "已存在同名" })}</span>
-                    <Button variant={overwrite[s.name] ? "default" : "ghost"} className="shrink-0"
-                      onClick={() => setOverwrite((o) => ({ ...o, [s.name]: !o[s.name] }))}>
+                    {/* rowId（不是 s.name）当 key：两行重名时各自独立的覆盖开关，点一行不会
+                        连带解锁另一行——即使它俩眼下顶着同一个名字。 */}
+                    <Button variant={overwrite[s.rowId] ? "default" : "ghost"} className="shrink-0"
+                      onClick={() => setOverwrite((o) => ({ ...o, [s.rowId]: !o[s.rowId] }))}>
                       {T({ en: "Overwrite", zh: "覆盖" })}
                     </Button>
                     {/* 改名不是一个单独的按钮/接口——就是直接编辑左边那个 Input。这行只是提示用户
@@ -132,7 +149,7 @@ export function SkillUploadCard() {
             );
           })}
           <div className="flex gap-2">
-            <Button onClick={confirm} disabled={busy || preview.some((s) => isConflict(s.name) && !overwrite[s.name])}>
+            <Button onClick={confirm} disabled={busy || preview.some((s) => isConflict(s.name) && !overwrite[s.rowId])}>
               {T({ en: "Import", zh: "导入" })}
             </Button>
             <Button variant="ghost" onClick={() => setPreview([])}>{T({ en: "Cancel", zh: "取消" })}</Button>

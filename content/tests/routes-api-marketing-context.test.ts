@@ -4,6 +4,7 @@ import { env } from "cloudflare:test";
 import worker from "../src/index";
 import { seedSession } from "./helpers/seed-session";
 import * as generateModule from "../src/services/generate";
+import * as skillContentModule from "../src/services/skill-content";
 import { buildChatContract, buildDocumentContract } from "../src/services/marketing-context";
 
 beforeAll(async () => {
@@ -214,5 +215,98 @@ describe("POST /api/marketing-context/generate", () => {
       body: JSON.stringify({ messages: [] }),
     });
     expect(res.status).toBe(200);
+  });
+
+  // 本次修的 bug：真实流程是「帮我起草」把草稿落进编辑框（从不落库）→ 聊几句 → 点「生成
+  // 文档」。之前 generateMarketingContextDocument 只传 skillId，靠 generateContent 自动去
+  // D1 读"已保存"的那一行——编辑框里的草稿从未保存过，模型完全看不到它。断言请求体里的
+  // document 字段被原样转发进 currentDocument，这是 generateContent 用来代替 D1 读取的参数
+  // （见 generate.ts）。
+  it("请求体里的 document 转发为 currentDocument，取代 generateContent 默认的 D1 读取", async () => {
+    const gen = vi.spyOn(generateModule, "generateContent").mockResolvedValue("doc");
+    await call("/api/marketing-context/generate", {
+      method: "POST",
+      body: JSON.stringify({ messages: [], document: "# 编辑框里还没保存的草稿" }),
+    });
+
+    const params = gen.mock.calls[0][1];
+    expect(params.currentDocument).toBe("# 编辑框里还没保存的草稿");
+  });
+
+  // 空情形：新租户第一次打开这个卡片，编辑框是空的、也没起草过。document 字段缺省时
+  // 必须落到空串而不是 undefined——undefined 会让 generate.ts 落回默认的 D1 读取路径，
+  // 那正是本次要避免的双重来源。空串则明确表示"当前没有文档"，让模型从零开始写第一份。
+  it("document 缺省时 currentDocument 落到空串，而不是回退去读 D1", async () => {
+    const gen = vi.spyOn(generateModule, "generateContent").mockResolvedValue("doc");
+    await call("/api/marketing-context/generate", {
+      method: "POST",
+      body: JSON.stringify({ messages: [] }),
+    });
+
+    const params = gen.mock.calls[0][1];
+    expect(params.currentDocument).toBe("");
+  });
+});
+
+// 上面这个 describe 全程 mock 掉了 generateContent，只能证明"参数被转发"，证不出"模型最终
+// 只看到一份文档"——真正的双重注入 bug 发生在 generateContent 内部（skillId 对应的 repo 会
+// 让它自己再去 D1 读一次）。这里不 mock generateContent，只 mock 技能正文（避免依赖
+// skill_content_cache 表/网络），换真实的 skill_context D1 表 + 一个能读到发给模型的完整
+// system prompt 的 AI.run 桩，端到端验证进入模型的"当前文档"有且只有一份。
+describe("POST /api/marketing-context/generate — 端到端：只有一份「当前文档」抵达模型", () => {
+  const GEN_H = { Cookie: "session=mc-gen", "Content-Type": "application/json" };
+  const callWithAi = (path: string, init: RequestInit, aiRun: (...args: unknown[]) => unknown) =>
+    worker.fetch(
+      new Request(`https://content-dev.uni-scrm.com${path}`, { headers: GEN_H, ...init }),
+      { ...env, AI: { run: aiRun } } as never
+    );
+
+  beforeAll(async () => {
+    await seedSession(env as never, "mc-gen", 96);
+  });
+
+  it("浏览器里未保存的草稿是模型看到的唯一「当前文档」——D1 里的旧存档不会被并列注入", async () => {
+    vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("SKILL BODY");
+    // D1 里存着一份旧版本：用户之前保存过，但此刻编辑框里已经是另一份还没保存的草稿。
+    await env.CONTENT_DB.prepare(
+      `INSERT INTO skill_context (tenant_id, skill_repo, content, version, updated_at)
+       VALUES (96, 'coreyhaines31/marketingskills', '# SAVED-OLD-VERSION', 1, ?)`
+    ).bind(new Date().toISOString()).run();
+
+    const systemPrompts: string[] = [];
+    const aiRun = vi.fn(async (_model: string, opts: { messages: { role: string; content: string }[] }) => {
+      systemPrompts.push(opts.messages.find((m) => m.role === "system")?.content ?? "");
+      return { response: "generated doc" };
+    });
+
+    const res = await callWithAi(
+      "/api/marketing-context/generate",
+      { method: "POST", body: JSON.stringify({ messages: [], document: "# BROWSER-DRAFT-UNSAVED" }) },
+      aiRun
+    );
+
+    expect(res.status).toBe(200);
+    const sys = systemPrompts[0];
+    expect(sys).toContain("# BROWSER-DRAFT-UNSAVED");
+    expect(sys).not.toContain("SAVED-OLD-VERSION");
+    // 不只是"出现过"，还要求恰好出现一次——排除"浏览器版本 + D1 版本"两份都被拼进去的回归。
+    expect(sys.split("BROWSER-DRAFT-UNSAVED").length - 1).toBe(1);
+  });
+
+  // 空的情形：全新租户，D1 没有存档，编辑框也没打字/没起草出东西——generate 仍要给出一份
+  // 可用的首份文档，而不是报错或空转。
+  it("既无存档也无编辑框内容时，仍正常生成——这就是从零起草的样子", async () => {
+    vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("SKILL BODY");
+    const aiRun = vi.fn(async () => ({ response: "# fresh first document" }));
+
+    const res = await callWithAi(
+      "/api/marketing-context/generate",
+      { method: "POST", body: JSON.stringify({ messages: [] }) },
+      aiRun
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ document: "# fresh first document" });
+    expect(aiRun).toHaveBeenCalled();
   });
 });

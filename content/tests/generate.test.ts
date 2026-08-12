@@ -222,4 +222,79 @@ describe("generateContent", () => {
       })
     );
   });
+
+  // currentDocument 是调用方（marketing-context 的 /generate 端点）已经知道"用户当前正看着
+  // 的文档"时用来取代默认 D1 读取的参数——不能既用它又去 D1 读一遍，两份文档谁真谁假模型
+  // 分不清（本分支已经因为这个 bug 修过一次，见设计文档 §8）。
+  describe("currentDocument：调用方明确给出「当前文档」时，取代默认的 D1 读取", () => {
+    it("提供 currentDocument 时不再查 D1，直接把它当租户上下文拼进系统提示词", async () => {
+      const contextSpy = vi.spyOn(skillContextModule, "getSkillContext");
+      vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("SKILL-DOC");
+      const aiRun = vi.fn().mockResolvedValue({ response: "ok" });
+      const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+
+      await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, {
+        ...baseParams,
+        skillId: "marketingskills-social",
+        operationContext: "OP-CTX",
+        currentDocument: "# BROWSER-DRAFT",
+      });
+
+      expect(contextSpy).not.toHaveBeenCalled();
+      expect(aiRun).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          messages: expect.arrayContaining([
+            { role: "system", content: "SKILL-DOC\n\n# BROWSER-DRAFT\n\nOP-CTX" },
+          ]),
+        })
+      );
+    });
+
+    it("currentDocument 是空字符串时视为「当前没有文档」，不注入任何租户上下文段落，也不查 D1", async () => {
+      const contextSpy = vi.spyOn(skillContextModule, "getSkillContext");
+      vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("SKILL-DOC");
+      const aiRun = vi.fn().mockResolvedValue({ response: "ok" });
+      const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+
+      await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, {
+        ...baseParams,
+        skillId: "marketingskills-social",
+        operationContext: "OP-CTX",
+        currentDocument: "",
+      });
+
+      expect(contextSpy).not.toHaveBeenCalled();
+      expect(aiRun).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          messages: expect.arrayContaining([{ role: "system", content: "SKILL-DOC\n\nOP-CTX" }]),
+        })
+      );
+    });
+
+    it("不提供 currentDocument（undefined）时行为不变——照旧按 skillId 对应的 repo 去 D1 读", async () => {
+      vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("SKILL-DOC");
+      const contextSpy = vi.spyOn(skillContextModule, "getSkillContext").mockResolvedValue("DB-SAVED-DOC");
+      const aiRun = vi.fn().mockResolvedValue({ response: "ok" });
+      const mockDb = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+
+      await generateContent({ AI: { run: aiRun }, CONTENT_DB: mockDb } as any, {
+        ...baseParams,
+        tenantId: 42,
+        skillId: "marketingskills-social",
+        operationContext: "OP-CTX",
+      });
+
+      expect(contextSpy).toHaveBeenCalledWith(expect.anything(), 42, "coreyhaines31/marketingskills");
+      expect(aiRun).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          messages: expect.arrayContaining([
+            { role: "system", content: "SKILL-DOC\n\nDB-SAVED-DOC\n\nOP-CTX" },
+          ]),
+        })
+      );
+    });
+  });
 });

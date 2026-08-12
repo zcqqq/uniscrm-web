@@ -133,10 +133,19 @@ export async function chatMarketingContext(env: Env, tenantId: number, messages:
 // 直接覆盖编辑框——不需要哨兵、不需要解析、不存在合规率。messages 允许为空（用户可能起草完
 // 就直接点"生成文档"，一句话都没说）；此时给一句占位提示而不是空字符串，因为部分 provider
 // （如 Anthropic）的 API 拒绝空 content 的 user turn。
+//
+// currentDocument 是编辑框里的实时内容，由前端随请求一起发来。真实流程是「帮我起草」把草稿
+// 落进编辑框 → 用户聊几句 → 点「生成文档」——这份草稿从未被保存过，D1 里的 skill_context 行
+// 要么是空的、要么是更早的旧版本。所以这里必须把 currentDocument 转发给 generateContent 的
+// currentDocument 参数（它会取代默认的 D1 读取，见 generate.ts），而不是让 generateContent
+// 按 skillId 对应的 repo 自己去 D1 捞——那样模型看到的"当前文档"会是用户根本没在看的旧版本，
+// 就是这个函数本来要修的那个 bug。这也保证了同一次生成只有一份"当前文档"：要么是这里转发的
+// 浏览器副本，要么（currentDocument 为空串时）什么都没有，不会跟 D1 存档重复注入。
 export async function generateMarketingContextDocument(
   env: Env,
   tenantId: number,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  currentDocument: string
 ): Promise<string> {
   return generateContent(env, {
     tenantId,
@@ -144,5 +153,6 @@ export async function generateMarketingContextDocument(
     provider: await resolveContextProvider(env, tenantId),
     skillId: PRODUCT_MARKETING_SKILL_ID,
     operationContext: buildDocumentContract(),
+    currentDocument,
   });
 }

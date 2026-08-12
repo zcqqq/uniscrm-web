@@ -252,12 +252,17 @@ app.post("/api/marketing-context/chat", async (c) => {
 // 与 /chat 不同：这里空 messages 不是错误请求，而是合法输入——用户可能刚点了"帮我起草"或
 // 手改了编辑框，一句话没说就直接点"生成文档"。响应体本身就是完整文档，前端直接拿去覆盖
 // 编辑框，不需要像旧的哨兵围栏方案那样再解析一层。
+//
+// document 是编辑框当前的实时内容（真实流程里从未被保存过），前端随请求一起带来，转发给
+// generateMarketingContextDocument 的 currentDocument 参数——不能让它按 skillId 自己去 D1
+// 读旧存档，那正是这个端点本来要修的 bug。document 缺省时按空串处理，等同"当前没有文档"，
+// 让"起草信号也没有、编辑框也没打字"的全新租户仍能从零生成一份可用文档。
 app.post("/api/marketing-context/generate", async (c) => {
   const tenantId = Number(c.get("tenantId"));
-  const { messages } = await c.req.json<{ messages: ChatMessage[] }>();
+  const { messages, document } = await c.req.json<{ messages: ChatMessage[]; document?: string }>();
   if (!Array.isArray(messages)) return c.json({ error: "messages required" }, 400);
   try {
-    return c.json({ document: await generateMarketingContextDocument(c.env, tenantId, messages) });
+    return c.json({ document: await generateMarketingContextDocument(c.env, tenantId, messages, document ?? "") });
   } catch (err) {
     console.error(JSON.stringify({ event: "marketing_context_generate_failed", tenantId, error: String(err) }));
     return c.json({ error: "Generate failed" }, 502);

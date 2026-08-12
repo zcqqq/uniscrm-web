@@ -50,8 +50,13 @@ export const api = {
     chat: (messages: { role: "user" | "assistant"; content: string }[]): Promise<{ reply: string }> =>
       request("/api/marketing-context/chat", { method: "POST", body: JSON.stringify({ messages }) }),
     // messages 允许为空数组——用户可能起草完/手改完编辑框就直接点"生成文档"，一句话没说。
-    generate: (messages: { role: "user" | "assistant"; content: string }[]): Promise<{ document: string }> =>
-      request("/api/marketing-context/generate", { method: "POST", body: JSON.stringify({ messages }) }),
+    // document 是编辑框当前的实时内容（可能从未保存过）——服务端拿它当"用户当前的文档"，
+    // 不会再回头去读 D1 里可能不存在或已过期的存档版本。
+    generate: (
+      messages: { role: "user" | "assistant"; content: string }[],
+      document: string
+    ): Promise<{ document: string }> =>
+      request("/api/marketing-context/generate", { method: "POST", body: JSON.stringify({ messages, document }) }),
     save: (content: string, baseVersion?: number): Promise<{ version: number }> =>
       request("/api/marketing-context", { method: "PUT", body: JSON.stringify({ content, baseVersion }) }),
   },

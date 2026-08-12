@@ -23,8 +23,15 @@ describe("MarketingContextCard 接线", () => {
 
   it("有专门的「生成文档」调用，响应体直接覆盖文档 state", () => {
     expect(cardSource).toContain("api.marketingContext.generate(");
-    expect(cardSource).toContain("const { document } = await api.marketingContext.generate(messages)");
+    expect(cardSource).toContain("const { document } = await api.marketingContext.generate(messages, doc)");
     expect(cardSource).toContain("setDoc(document)");
+  });
+
+  // 本次修的 bug：真实流程是「帮我起草」把草稿落进编辑框（从不落库）→ 聊几句 → 点「生成
+  // 文档」。generate 调用必须带上编辑框当前内容（doc），否则服务端只能去读 D1 里可能没有
+  // /过期的存档，看不到用户实际在编辑的东西。
+  it("生成文档时把编辑框当前内容（doc）一起发给服务端", () => {
+    expect(cardSource).toContain("api.marketingContext.generate(messages, doc)");
   });
 
   // 不自动保存是这个功能最重要的一条约束：无论起草、对话生成回复、生成文档，都只改本地

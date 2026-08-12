@@ -76,15 +76,25 @@ export function MarketingContextCard() {
 
   // 单独一次调用，响应体本身就是完整文档，直接覆盖编辑框——不需要哨兵、不需要解析
   // （详见设计文档 §8.4）。messages 允许为空：用户可能刚起草完/手改完就直接点这个按钮。
+  //
+  // 把编辑框当前内容（doc）一起发过去，让服务端拿它当"用户正看着的文档"：真实流程是
+  // 「帮我起草」把草稿落进编辑框、聊几句、再点这个按钮——这份草稿从没被保存过，服务端
+  // 自己去 D1 读只会读到空的或过期的旧版本，模型就看不见用户实际在编辑的内容。
   const runGenerate = () => run(async () => {
-    const { document } = await api.marketingContext.generate(messages);
+    const { document } = await api.marketingContext.generate(messages, doc);
     setDoc(document);
     setLastSyncedDoc(document);
   });
 
-  // 起草/生成前若发现编辑框里有还没保存的手改，先弹确认——不弹的话，点一下按钮
-  // 就把用户刚打的字换掉了，而且换的还不是那份手改，是服务端上一次保存的旧版本
-  // （generate 端点从 D1 读当前文档，读不到浏览器里未保存的内容），双重不知情。
+  // 起草/生成前若发现编辑框里有还没保存的手改，先弹确认——两个动作都会用服务端响应整体
+  // 覆盖编辑框，不弹的话用户刚打的字就没了。
+  //
+  // 「帮我起草」的草稿完全来自租户近期内容 + 渠道清单，跟编辑框此刻写的什么无关，手改
+  // 一定会被无声换掉——这个确认对它是必需的。「生成文档」现在会把编辑框当前内容当作
+  // "用户当前的文档"发给模型（见 runGenerate），手改不再是对模型不可见的；但响应体仍会
+  // 整体覆盖编辑框，而模型未必逐字保留用户的原始措辞，所以这里仍然保留确认——只是把
+  // 弹窗文案换成了对两种情况都成立的说法，不再声称"从上一次保存的版本生成"（generate
+  // 现在读的是编辑框，不是 D1 存档）。
   const requestOverwrite = (kind: "draft" | "generate") => {
     if (hasUnsavedEdits) { setPendingOverwrite({ kind }); return; }
     if (kind === "draft") runDraft(); else runGenerate();
@@ -187,8 +197,8 @@ export function MarketingContextCard() {
             <AlertDialogTitle>{T({ en: "You have unsaved edits", zh: "有还没保存的修改" })}</AlertDialogTitle>
             <AlertDialogDescription>
               {T({
-                en: "This will replace the text in the box with a new version, starting from the last saved copy — your unsaved edits won't be included and will be lost.",
-                zh: "这会用新版本整体替换编辑框里的内容，且新版本是从上一次保存的版本生成的——你还没保存的修改不会被带入，会被丢弃。",
+                en: "This will replace the text in the box with a new version. Your current unsaved text won't necessarily be preserved as-is.",
+                zh: "这会用新版本整体替换编辑框里的内容。你还没保存的文字不一定会被原样保留。",
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>

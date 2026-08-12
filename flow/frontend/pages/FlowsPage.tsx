@@ -29,11 +29,16 @@ export function getNodeIcon(type: string, data: Record<string, unknown>) {
   if (type === "githubContentTrigger") return GitHubIcon;
   if (type === "waitForEvent") return SearchIcon;
   if (type === "wait") return ClockIcon;
+  // 条件节点与它们同主体的动作/触发器共用图标（视频条件=视频动作，YouTube 条件=YouTube 触发器），
+  // 否则这里会掉到兜底的 ClockIcon，模板卡片上看起来像个等待节点。
+  if (type === "videoCondition") return ClapperboardIcon;
+  if (type === "youtubeCondition") return YouTubeIcon;
   if (type === "action") {
     const at = data.actionType as string;
     if (at === "addToList") return ListIcon;
     if (at === "xContentAction") return XIcon;
     if (at === "tiktokContentAction") return TikTokIcon;
+    if (at === "youtubeContentAction") return YouTubeIcon;
     if (at === "videoAction") return ClapperboardIcon;
     return XIcon;
   }

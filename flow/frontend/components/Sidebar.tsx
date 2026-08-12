@@ -117,8 +117,10 @@ const NODE_ICONS: Record<NodeTypeKey, React.ReactNode> = {
   tiktokContentAction: <TikTokIcon className="w-4 h-4" />,
   youtubeContentAction: <YouTubeIcon className="w-4 h-4" />,
   videoAction: "🎬",
-  videoCondition: "👁️",
-  youtubeCondition: "📊",
+  // 同一主体用同一图标：视频条件 = 视频动作，YouTube 条件 = YouTube 触发器/动作。
+  // Sidebar 分区（动作 / 触发器 / 流程控制）本身已经把它们分开了，图标重复不会混淆。
+  videoCondition: "🎬",
+  youtubeCondition: <YouTubeIcon className="w-4 h-4" />,
   wait: "⏳",
   timeCondition: "🕐",
   abSplit: "⚡",

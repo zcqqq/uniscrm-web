@@ -1,6 +1,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import AnalyticsBadges from "./AnalyticsBadges";
 import { nodeLabel } from "../../nodeTypeRegistry";
+import { Tooltip, TooltipTrigger, TooltipContent } from "../../../shared/frontend/ui/tooltip";
 import { useT } from "../../../shared/frontend/hooks/useT";
 import type { LocalizedString } from "../../../metadata/dataTypes";
 
@@ -21,7 +22,13 @@ export default function VideoConditionNode({ data, selected }: NodeProps) {
     <div className={`px-4 py-3 rounded-lg border-2 bg-white min-w-[170px] ${selected ? "border-blue-500 shadow-md" : "border-purple-300"}`}>
       <Handle type="target" position={Position.Left} className="!bg-purple-500 !w-3 !h-3" />
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-base leading-none">👁️</span>
+        {/* 与视频动作同图标 —— 靠 tooltip（和节点标题）区分二者，不靠图标本身。 */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="text-base leading-none">🎬</span>
+          </TooltipTrigger>
+          <TooltipContent>{T(nodeLabel("videoCondition"))}</TooltipContent>
+        </Tooltip>
         <span className="font-semibold text-sm text-purple-700">{T(nodeLabel("videoCondition"))}</span>
       </div>
       <p className="text-xs text-gray-700">{summary}</p>

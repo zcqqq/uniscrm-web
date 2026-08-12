@@ -10,8 +10,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     // .status 让调用方能区分具体错误码（比如保存时的 409 baseVersion 冲突）而不是一律
     // 提示"请求失败"——做法照抄 flow/frontend/lib/api.ts 的 request()。
-    const e = new Error((err as any).error || res.statusText) as Error & { status?: number };
+    // .body 把整个解析后的响应体也带上：像 /api/skills/import 的 409 那样，错误信息之外
+    // 还带结构化数据（conflicts: [{ skillId, name }]），调用方需要它，不能只留一个字符串。
+    const e = new Error((err as any).error || res.statusText) as Error & { status?: number; body?: unknown };
     e.status = res.status;
+    e.body = err;
     throw e;
   }
   return res.json();

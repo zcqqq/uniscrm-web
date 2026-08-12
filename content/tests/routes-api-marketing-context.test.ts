@@ -153,11 +153,51 @@ describe("POST /api/marketing-context/chat", () => {
     assertHandsBackStructuralAuthority(params.operationContext!);
   });
 
-  it("已有存档文档时，不把文档正文重复塞进 operationContext——generateContent 自己按 repo 注入一份，" +
-     "chatMarketingContext 不应该再手动拼第二份", async () => {
+  it("请求体里的 document 转发为 currentDocument，不把文档正文重复塞进 operationContext——" +
+     "同一份文档只能走 currentDocument 一条路径进模型，不能在 operationContext 里再内联一份", async () => {
     const marker = "# EXISTING-DOC-MARKER-DO-NOT-DUPLICATE";
     await call("/api/marketing-context", { method: "PUT", body: JSON.stringify({ content: marker }) });
 
+    const gen = vi.spyOn(generateModule, "generateContent").mockResolvedValue("下一句提问");
+    await call("/api/marketing-context/chat", {
+      method: "POST",
+      body: JSON.stringify({ messages: [{ role: "user", content: "继续" }], document: marker }),
+    });
+
+    const params = gen.mock.calls[0][1];
+    // Finding 2：chat 现在跟 generate 一样，把编辑框当前内容（document）转发为
+    // currentDocument，取代 generateContent 默认的 D1 读取——不能只靠"PUT 存过档"就指望
+    // generateContent 自己按 repo 去 D1 捞（那正是这个 bug 本来的样子：D1 里可能是空的或
+    // 过期的旧版本，编辑框里的草稿从未被保存过）。文档正文本身不该出现在 operationContext
+    // 里（那样会跟 currentDocument 重复注入两份）。
+    expect(params.currentDocument).toBe(marker);
+    expect(params.operationContext).toContain("no filesystem");
+    expect(params.operationContext).not.toContain(marker);
+    assertNoSkillStructureRestatement(params.operationContext!);
+    assertHandsBackStructuralAuthority(params.operationContext!);
+  });
+
+  // 本次修的 bug（Finding 2）：真实流程是「帮我起草」把草稿落进编辑框（从未保存过，D1
+  // 里没有这行）→ 用户接着聊几句。之前 chatMarketingContext 只传 skillId，靠 generateContent
+  // 按 repo 自动去读 D1——编辑框里的草稿完全看不见。断言请求体里的 document 字段被原样
+  // 转发进 currentDocument，这是 generateContent 用来代替 D1 读取的参数（同 /generate）。
+  it("请求体里的 document 转发为 currentDocument，取代 generateContent 默认的 D1 读取", async () => {
+    const gen = vi.spyOn(generateModule, "generateContent").mockResolvedValue("下一句提问");
+    await call("/api/marketing-context/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "继续" }],
+        document: "# 编辑框里还没保存的草稿",
+      }),
+    });
+
+    const params = gen.mock.calls[0][1];
+    expect(params.currentDocument).toBe("# 编辑框里还没保存的草稿");
+  });
+
+  // 空情形：镜像 /generate 的同名测试——document 缺省时必须落到空串而不是 undefined，
+  // undefined 会让 generate.ts 落回默认的 D1 读取路径，那正是本次要避免的双重来源。
+  it("document 缺省时 currentDocument 落到空串，而不是回退去读 D1", async () => {
     const gen = vi.spyOn(generateModule, "generateContent").mockResolvedValue("下一句提问");
     await call("/api/marketing-context/chat", {
       method: "POST",
@@ -165,13 +205,7 @@ describe("POST /api/marketing-context/chat", () => {
     });
 
     const params = gen.mock.calls[0][1];
-    // 运行时契约仍要在，但存档文档正文不该被手动拼进来（generateContent 内部按 skillId 对应的
-    // repo 自动注入同一份 skill_context 行；这里是被 mock 掉的，所以只要 operationContext 里
-    // 没有出现文档正文，就证明 chatMarketingContext 自己没有再内联一份）。
-    expect(params.operationContext).toContain("no filesystem");
-    expect(params.operationContext).not.toContain(marker);
-    assertNoSkillStructureRestatement(params.operationContext!);
-    assertHandsBackStructuralAuthority(params.operationContext!);
+    expect(params.currentDocument).toBe("");
   });
 
   it("messages 为空时 400", async () => {
@@ -327,5 +361,56 @@ describe("POST /api/marketing-context/generate — 端到端：只有一份「�
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ document: "# fresh first document" });
     expect(aiRun).toHaveBeenCalled();
+  });
+});
+
+// Finding 2 的端到端回归：commit 6cabcbb 给 /generate 修过"编辑框草稿 vs D1 旧存档"的双重
+// 来源问题，/chat 当时被漏掉了——同一个 bug、同一种修法，这里用同一套端到端手法（真实
+// skill_context D1 表 + 能读到发给模型的完整 system prompt 的 AI.run 桩）复核一遍，而不是
+// 只在 mock 层面证明"参数被转发"。
+describe("POST /api/marketing-context/chat — 端到端：只有一份「当前文档」抵达模型", () => {
+  const CHAT_H = { Cookie: "session=mc-chat", "Content-Type": "application/json" };
+  const callWithAi = (path: string, init: RequestInit, aiRun: (...args: unknown[]) => unknown) =>
+    worker.fetch(
+      new Request(`https://content-dev.uni-scrm.com${path}`, { headers: CHAT_H, ...init }),
+      { ...env, AI: { run: aiRun } } as never
+    );
+
+  beforeAll(async () => {
+    await seedSession(env as never, "mc-chat", 97);
+  });
+
+  it("浏览器里未保存的草稿是模型看到的唯一「当前文档」——D1 里的旧存档不会被并列注入", async () => {
+    vi.spyOn(skillContentModule, "getSkillContent").mockResolvedValue("SKILL BODY");
+    // D1 里存着一份旧版本：用户之前保存过，但此刻编辑框里已经是另一份还没保存的草稿。
+    await env.CONTENT_DB.prepare(
+      `INSERT INTO skill_context (tenant_id, skill_repo, content, version, updated_at)
+       VALUES (97, 'coreyhaines31/marketingskills', '# SAVED-OLD-VERSION', 1, ?)`
+    ).bind(new Date().toISOString()).run();
+
+    const systemPrompts: string[] = [];
+    const aiRun = vi.fn(async (_model: string, opts: { messages: { role: string; content: string }[] }) => {
+      systemPrompts.push(opts.messages.find((m) => m.role === "system")?.content ?? "");
+      return { response: "下一句提问" };
+    });
+
+    const res = await callWithAi(
+      "/api/marketing-context/chat",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "帮我缩短一下定价那节" }],
+          document: "# BROWSER-DRAFT-UNSAVED",
+        }),
+      },
+      aiRun
+    );
+
+    expect(res.status).toBe(200);
+    const sys = systemPrompts[0];
+    expect(sys).toContain("# BROWSER-DRAFT-UNSAVED");
+    expect(sys).not.toContain("SAVED-OLD-VERSION");
+    // 不只是"出现过"，还要求恰好出现一次——排除"浏览器版本 + D1 版本"两份都被拼进去的回归。
+    expect(sys.split("BROWSER-DRAFT-UNSAVED").length - 1).toBe(1);
   });
 });

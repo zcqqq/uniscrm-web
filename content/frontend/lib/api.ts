@@ -47,8 +47,13 @@ export const api = {
       request("/api/marketing-context"),
     draft: (): Promise<{ draft: string }> =>
       request("/api/marketing-context/draft", { method: "POST", body: "{}" }),
-    chat: (messages: { role: "user" | "assistant"; content: string }[]): Promise<{ reply: string }> =>
-      request("/api/marketing-context/chat", { method: "POST", body: JSON.stringify({ messages }) }),
+    // document 是编辑框当前的实时内容（可能从未保存过）——服务端拿它当"用户当前的文档"，
+    // 镜像 generate() 下面同一条注释：不会再回头去读 D1 里可能不存在或已过期的存档版本。
+    chat: (
+      messages: { role: "user" | "assistant"; content: string }[],
+      document: string
+    ): Promise<{ reply: string }> =>
+      request("/api/marketing-context/chat", { method: "POST", body: JSON.stringify({ messages, document }) }),
     // messages 允许为空数组——用户可能起草完/手改完编辑框就直接点"生成文档"，一句话没说。
     // document 是编辑框当前的实时内容（可能从未保存过）——服务端拿它当"用户当前的文档"，
     // 不会再回头去读 D1 里可能不存在或已过期的存档版本。

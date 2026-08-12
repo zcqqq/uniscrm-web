@@ -99,10 +99,11 @@ export interface ChatMessage {
 // 改走独立的 /generate 端点（见 generateMarketingContextDocument），聊天这条路径此后只负责
 // 提问，不再兼职吐文档。
 //
-// 不在这里手动拼租户现有文档：generateContent() 已经按 skillId 对应的 repo 自动注入了同一份
-// skill_context 行（见 generate.ts 的 tenantContext），紧挨在这段合同文本之前。这里只需用
-// 指代性措辞告诉模型"如果上文出现了当前文档就更新它"，覆盖有/无文档两种情况，不重复内联文档
-// 本身——否则每一轮对话都会把整份文档在 system prompt 里放两遍，白烧 token 且随文档增长恶化。
+// 不在这里手动拼租户现有文档：chatMarketingContext 把调用方转发来的 currentDocument 原样
+// 传给 generateContent，由它注入到系统提示里（见 generate.ts 的 tenantContext），紧挨在这段
+// 合同文本之前。这里只需用指代性措辞告诉模型"如果上文出现了当前文档就更新它"，覆盖有/无
+// 文档两种情况，不重复内联文档本身——否则每一轮对话都会把整份文档在 system prompt 里放
+// 两遍，白烧 token 且随文档增长恶化。
 //
 // "一次问一节"里的"一节"指的是谁的节？我们没有小节列表，这个概念完全来自技能。以前这句话
 // 没有显式指回"上文"，模型能不能对上"一节"= 技能定义的那个小节，全靠它自己猜。补一句
@@ -136,13 +137,25 @@ export function buildChatPrompt(messages: ChatMessage[]): string {
   return messages.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`).join("\n\n");
 }
 
-export async function chatMarketingContext(env: Env, tenantId: number, messages: ChatMessage[]): Promise<string> {
+// currentDocument 是编辑框里的实时内容，由前端随请求一起发来——同一个 bug、同一个修法
+// 在 6cabcbb 里已经给 /generate 修过（见下面 generateMarketingContextDocument 的注释），
+// 这里只是把同一条线接到 /chat：真实流程是「帮我起草」把草稿落进编辑框（从不落库）→
+// 用户接着聊几句 → 这时聊天看到的必须是编辑框里那份草稿，而不是 D1 里空的或更旧的存档。
+// 转发给 generateContent 的 currentDocument 参数会取代它默认的 D1 读取（见 generate.ts），
+// 保证同一次调用只有一份"当前文档"抵达模型——不会既读浏览器草稿又读 D1 存档。
+export async function chatMarketingContext(
+  env: Env,
+  tenantId: number,
+  messages: ChatMessage[],
+  currentDocument: string
+): Promise<string> {
   return generateContent(env, {
     tenantId,
     prompt: buildChatPrompt(messages),
     provider: await resolveContextProvider(env, tenantId),
     skillId: PRODUCT_MARKETING_SKILL_ID,
     operationContext: buildChatContract(),
+    currentDocument,
   });
 }
 

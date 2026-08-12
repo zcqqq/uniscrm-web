@@ -34,6 +34,12 @@ describe("MarketingContextCard 接线", () => {
     expect(cardSource).toContain("api.marketingContext.generate(messages, doc)");
   });
 
+  // 同一个 bug 的姊妹修复（Finding 1 之外单独的一处）：/chat 之前被漏掉了，只有 /generate
+  // 修过。对话看到的必须是编辑框里正在编辑的草稿，不是服务端自己去读的旧存档/空存档。
+  it("对话时也把编辑框当前内容（doc）一起发给服务端，跟生成文档同一套做法", () => {
+    expect(cardSource).toContain("const { reply } = await api.marketingContext.chat(next, doc)");
+  });
+
   // 不自动保存是这个功能最重要的一条约束：无论起草、对话生成回复、生成文档，都只改本地
   // state；唯一一条会调用 api.marketingContext.save 的路径必须是用户点击保存按钮触发的。
   it("没有任何自动保存路径，save 只在保存按钮的 onClick 里被调用", () => {

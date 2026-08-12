@@ -66,11 +66,14 @@ export function MarketingContextCard() {
     }
   });
 
+  // 编辑框当前内容（doc）一起发给服务端——镜像 runGenerate：真实流程是「帮我起草」把草稿
+  // 落进编辑框（从不落库）→ 接着聊几句，这时对话必须看到编辑框里那份草稿，而不是服务端
+  // 自己去读 D1 里空的或过期的旧存档（同一个 bug、同一个修法，见设计文档 §8）。
   const handleSend = () => run(async () => {
     const next = [...messages, { role: "user" as const, content: input }];
     setMessages(next);
     setInput("");
-    const { reply } = await api.marketingContext.chat(next);
+    const { reply } = await api.marketingContext.chat(next, doc);
     setMessages([...next, { role: "assistant", content: reply }]);
   });
 

@@ -237,12 +237,16 @@ app.put("/api/marketing-context", async (c) => {
   return c.json(await setSkillContext(c.env, tenantId, MARKETING_SKILLS_REPO, content));
 });
 
+// document 是编辑框当前的实时内容（真实流程里可能从未被保存过），前端随请求一起带来，
+// 转发给 chatMarketingContext 的 currentDocument 参数——跟下面 /generate 端点同一个理由、
+// 同一种做法（同一个 bug 修了两处，见设计文档 §8 与 6cabcbb）：不能让它按 skillId 自己去
+// D1 读旧存档，那样对话会看不到用户正盯着的草稿。document 缺省时按空串处理。
 app.post("/api/marketing-context/chat", async (c) => {
   const tenantId = Number(c.get("tenantId"));
-  const { messages } = await c.req.json<{ messages: ChatMessage[] }>();
+  const { messages, document } = await c.req.json<{ messages: ChatMessage[]; document?: string }>();
   if (!Array.isArray(messages) || messages.length === 0) return c.json({ error: "messages required" }, 400);
   try {
-    return c.json({ reply: await chatMarketingContext(c.env, tenantId, messages) });
+    return c.json({ reply: await chatMarketingContext(c.env, tenantId, messages, document ?? "") });
   } catch (err) {
     console.error(JSON.stringify({ event: "marketing_context_chat_failed", tenantId, error: String(err) }));
     return c.json({ error: "Chat failed" }, 502);

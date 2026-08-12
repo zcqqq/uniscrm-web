@@ -1,7 +1,18 @@
 import type { Env } from "../types";
 import { getSkillDefinition } from "../skills/catalog";
+import { UPLOAD_PREFIX, getTenantSkillContent } from "./tenant-skill";
 
-export async function getSkillContent(env: Env, skillId: string): Promise<string | null> {
+// 两个来源：预置技能在全局的 skill_content_cache（跨租户共享，无 tenant_id），租户上传的在
+// tenant_skill（租户私有）。只看 id 前缀分派，且 upload: 一律不回退查预置表——两张表若碰巧
+// 有同名 id，回退就意味着 A 租户能读到一份本不属于它的正文。
+export async function getSkillContent(
+  env: Env,
+  tenantId: number,
+  skillId: string
+): Promise<string | null> {
+  if (skillId.startsWith(UPLOAD_PREFIX)) {
+    return getTenantSkillContent(env, tenantId, skillId);
+  }
   const row = await env.CONTENT_DB.prepare(
     "SELECT content FROM skill_content_cache WHERE skill_id = ?"
   ).bind(skillId).first<{ content: string }>();

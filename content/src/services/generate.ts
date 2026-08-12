@@ -24,7 +24,7 @@ export interface GenerateParams {
 
 export async function generateContent(env: Env, params: GenerateParams): Promise<string> {
   const useSkill = !!params.skillId && params.skillId !== "none";
-  const skillContent = useSkill ? (await getSkillContent(env, params.skillId!)) ?? undefined : undefined;
+  const skillContent = useSkill ? (await getSkillContent(env, params.tenantId, params.skillId!)) ?? undefined : undefined;
   // 缓存未命中在 prod 上不该静默：refreshSkillContent 只能手动触发（POST
   // /internal/skills/:id/refresh），一次新部署如果没人手动跑过它，skill_content_cache 里
   // 对应的技能行就是空的——这一路仍会正常出文档/出图（不 throw，见下方注释），只是契约

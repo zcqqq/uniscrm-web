@@ -65,4 +65,12 @@ export const api = {
     save: (content: string, baseVersion?: number): Promise<{ version: number }> =>
       request("/api/marketing-context", { method: "PUT", body: JSON.stringify({ content, baseVersion }) }),
   },
+  skills: {
+    list: (): Promise<{ skills: { id: string; label: string; hasCachedContent: boolean; uploaded: boolean }[] }> =>
+      request("/api/skills"),
+    import: (skills: { name: string; source: string; overwrite?: boolean; files: { path: string; content: string }[] }[]) =>
+      request<{ imported: number }>("/api/skills/import", { method: "POST", body: JSON.stringify({ skills }) }),
+    remove: (skillId: string): Promise<{ ok: boolean }> =>
+      request(`/api/skills/${encodeURIComponent(skillId)}`, { method: "DELETE" }),
+  },
 };

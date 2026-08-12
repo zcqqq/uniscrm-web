@@ -3,12 +3,9 @@ import { MARKETING_SKILLS_REPO } from "../skills/catalog";
 import { listRecentTenantContent, type RecentContentRow } from "./tenant-content";
 import { generateContent } from "./generate";
 import { listConfiguredProviders } from "./llm-credentials";
-// 哨兵字符串的唯一定义处在 shared/（前端 content/frontend/lib/context-block.ts 也从这里
-// import）——两侧各写一份字面量会悄悄失配，且失配时没有任何报错，只是保存按钮永远不出现。
-import { CONTEXT_SENTINEL } from "../../../shared/marketing-context-sentinel";
 
 export const PRODUCT_MARKETING_SKILL_ID = "marketingskills-product-marketing";
-export { MARKETING_SKILLS_REPO, CONTEXT_SENTINEL };
+export { MARKETING_SKILLS_REPO };
 
 export interface ChannelSummaryRow {
   channelType: string;
@@ -80,8 +77,10 @@ export interface ChatMessage {
   content: string;
 }
 
-// 哨兵写在围栏的语言标签位，而不是认 ```markdown：模型在对话里会为了举例输出各种
-// markdown 块，只有这个串明确表示"这是可保存的成品文档"。
+// 哨兵围栏契约在 dev 实测 0/6 合规后删除（详见设计文档 §8.1–§8.2）：技能自带的 9KB 指令里
+// 就有"展示完整文档"这一条，跟我们哨兵契约的"先别写"直接打架，模型选择听技能的。文档生成
+// 改走独立的 /generate 端点（见 generateMarketingContextDocument），聊天这条路径此后只负责
+// 提问，不再兼职吐文档。
 //
 // 不在这里手动拼租户现有文档：generateContent() 已经按 skillId 对应的 repo 自动注入了同一份
 // skill_context 行（见 generate.ts 的 tenantContext），紧挨在这段合同文本之前。这里只需用
@@ -90,12 +89,23 @@ export interface ChatMessage {
 export function buildChatContract(): string {
   return (
     "You are interviewing this user to produce their Product Marketing Context document." +
+    " You have no filesystem and no tools; do not propose saving a file or reading a codebase." +
     " If their current document appears above this instruction, update it rather than starting" +
     " over from scratch; if none appears above, you are starting fresh." +
-    " Ask about one section at a time; never dump every question at once." +
-    " When — and only when — you have enough to write the full document, output it as a fenced" +
-    ` code block whose info string is exactly ${CONTEXT_SENTINEL}, containing the complete markdown` +
-    " document and nothing else. Until then, do not emit a block with that info string."
+    " Ask about one section at a time; never dump every question at once."
+  );
+}
+
+// 生成文档的契约里刻意不出现任何小节名、字段名或文档结构——技能内容会随公开仓库改版，
+// 我们必须永远适配最新版，硬编码它的结构等于把自己焊死在某个快照上。结构的权威完全交还
+// "上文的指令"（技能全文，由 generateContent 按 skillId 自动注入，见 generate.ts）；这份
+// 契约只描述我们自己运行时缺什么（文件系统、工具）以及响应体的形状（纯文档、无解释、无围栏）。
+export function buildDocumentContract(): string {
+  return (
+    "You have no filesystem and no tools. Do not propose saving a file or reading a codebase." +
+    " The user's current document, if any, appears above this instruction." +
+    " Output the complete document itself now — no explanation, no code fence, no alternatives —" +
+    " following the structure the instructions above describe."
   );
 }
 
@@ -110,5 +120,23 @@ export async function chatMarketingContext(env: Env, tenantId: number, messages:
     provider: await resolveContextProvider(env, tenantId),
     skillId: PRODUCT_MARKETING_SKILL_ID,
     operationContext: buildChatContract(),
+  });
+}
+
+// 文档始终活在编辑框里，对话只是修改它的手段：这一步是单独一次调用，响应体本身就是完整文档，
+// 直接覆盖编辑框——不需要哨兵、不需要解析、不存在合规率。messages 允许为空（用户可能起草完
+// 就直接点"生成文档"，一句话都没说）；此时给一句占位提示而不是空字符串，因为部分 provider
+// （如 Anthropic）的 API 拒绝空 content 的 user turn。
+export async function generateMarketingContextDocument(
+  env: Env,
+  tenantId: number,
+  messages: ChatMessage[]
+): Promise<string> {
+  return generateContent(env, {
+    tenantId,
+    prompt: messages.length ? buildChatPrompt(messages) : "Generate the document now.",
+    provider: await resolveContextProvider(env, tenantId),
+    skillId: PRODUCT_MARKETING_SKILL_ID,
+    operationContext: buildDocumentContract(),
   });
 }

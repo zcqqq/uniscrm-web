@@ -73,8 +73,9 @@ describe("POST /api/marketing-context/chat", () => {
     expect(params.skillId).toBe("marketingskills-product-marketing");
     expect(params.prompt).toContain("你的产品叫什么？");
     expect(params.prompt).toContain("UniSCRM");
-    // 出成品文档的哨兵约定必须进 system，否则前端永远解析不出可保存的块
-    expect(params.operationContext).toContain("PRODUCT-MARKETING-CONTEXT-V1");
+    // 聊天契约只负责"没文件系统/别提议存文件"这类运行时事实，不再兼职吐文档——
+    // 哨兵围栏方案已删（dev 实测 0/6 合规，见设计文档 §8.1）。
+    expect(params.operationContext).toContain("no filesystem");
   });
 
   it("已有存档文档时，不把文档正文重复塞进 operationContext——generateContent 自己按 repo 注入一份，" +
@@ -89,15 +90,62 @@ describe("POST /api/marketing-context/chat", () => {
     });
 
     const params = gen.mock.calls[0][1];
-    // 哨兵合同仍要在，但存档文档正文不该被手动拼进来（generateContent 内部按 skillId 对应的
+    // 运行时契约仍要在，但存档文档正文不该被手动拼进来（generateContent 内部按 skillId 对应的
     // repo 自动注入同一份 skill_context 行；这里是被 mock 掉的，所以只要 operationContext 里
     // 没有出现文档正文，就证明 chatMarketingContext 自己没有再内联一份）。
-    expect(params.operationContext).toContain("PRODUCT-MARKETING-CONTEXT-V1");
+    expect(params.operationContext).toContain("no filesystem");
     expect(params.operationContext).not.toContain(marker);
   });
 
   it("messages 为空时 400", async () => {
     const res = await call("/api/marketing-context/chat", { method: "POST", body: JSON.stringify({ messages: [] }) });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/marketing-context/generate", () => {
+  it("原样返回模型输出，字段名是 document", async () => {
+    const gen = vi.spyOn(generateModule, "generateContent").mockResolvedValue("# 完整文档正文");
+    const res = await call("/api/marketing-context/generate", {
+      method: "POST",
+      body: JSON.stringify({ messages: [{ role: "user", content: "生成文档" }] }),
+    });
+
+    expect(await res.json()).toEqual({ document: "# 完整文档正文" });
+  });
+
+  it("传 skillId 让 generateContent 自动注入全文技能与租户上下文", async () => {
+    const gen = vi.spyOn(generateModule, "generateContent").mockResolvedValue("doc");
+    await call("/api/marketing-context/generate", {
+      method: "POST",
+      body: JSON.stringify({ messages: [] }),
+    });
+
+    const params = gen.mock.calls[0][1];
+    expect(params.skillId).toBe("marketingskills-product-marketing");
+  });
+
+  // 治理原则的回归守卫：契约里一旦出现小节名/字段名，就说明有人把技能的结构又手抄回了
+  // 代码里——技能会改版，硬编码的小节列表会悄悄跟真实技能脱节且没有任何报错。
+  it("契约里不出现任何技能专属词汇", async () => {
+    const gen = vi.spyOn(generateModule, "generateContent").mockResolvedValue("doc");
+    await call("/api/marketing-context/generate", {
+      method: "POST",
+      body: JSON.stringify({ messages: [] }),
+    });
+
+    const params = gen.mock.calls[0][1];
+    for (const forbidden of ["Product Overview", "Brand Voice", "Target Audience", "12"]) {
+      expect(params.operationContext).not.toContain(forbidden);
+    }
+  });
+
+  it("messages 为空数组时不 400——用户可能起草完就直接点生成，没多说一句话", async () => {
+    vi.spyOn(generateModule, "generateContent").mockResolvedValue("doc");
+    const res = await call("/api/marketing-context/generate", {
+      method: "POST",
+      body: JSON.stringify({ messages: [] }),
+    });
+    expect(res.status).toBe(200);
   });
 });

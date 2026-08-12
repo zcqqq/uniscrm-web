@@ -27,6 +27,7 @@ import { SKILL_CATALOG, MARKETING_SKILLS_REPO } from "./skills/catalog";
 import {
   draftMarketingContext,
   chatMarketingContext,
+  generateMarketingContextDocument,
   type ChatMessage,
 } from "./services/marketing-context";
 import { getSkillContextRow, setSkillContext } from "./services/skill-context";
@@ -245,6 +246,21 @@ app.post("/api/marketing-context/chat", async (c) => {
   } catch (err) {
     console.error(JSON.stringify({ event: "marketing_context_chat_failed", tenantId, error: String(err) }));
     return c.json({ error: "Chat failed" }, 502);
+  }
+});
+
+// 与 /chat 不同：这里空 messages 不是错误请求，而是合法输入——用户可能刚点了"帮我起草"或
+// 手改了编辑框，一句话没说就直接点"生成文档"。响应体本身就是完整文档，前端直接拿去覆盖
+// 编辑框，不需要像旧的哨兵围栏方案那样再解析一层。
+app.post("/api/marketing-context/generate", async (c) => {
+  const tenantId = Number(c.get("tenantId"));
+  const { messages } = await c.req.json<{ messages: ChatMessage[] }>();
+  if (!Array.isArray(messages)) return c.json({ error: "messages required" }, 400);
+  try {
+    return c.json({ document: await generateMarketingContextDocument(c.env, tenantId, messages) });
+  } catch (err) {
+    console.error(JSON.stringify({ event: "marketing_context_generate_failed", tenantId, error: String(err) }));
+    return c.json({ error: "Generate failed" }, 502);
   }
 });
 

@@ -288,6 +288,19 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
+      # 预置技能的正文缓存在 skill_content_cache 里，refreshSkillContent 不会自己跑——不刷
+      # 就一直是上一次刷的版本，全新环境更是空的。缓存为空是静默的：generate.ts 照常出文，
+      # 只是模型没看到技能，只留一行 skill_content_cache_miss 日志。所以每次部署完刷一次。
+      # 技能清单由 worker 端从 SKILL_CATALOG 读，这里不列 id —— 加技能不用改 workflow。
+      # dev 的 INTERNAL_SECRET 是 wrangler.toml 里的明文 var，从那里读，不另存一份副本。
+      - name: Refresh preset skill cache
+        if: matrix.module == 'content'
+        run: |
+          SECRET=$(grep -m1 '^INTERNAL_SECRET' content/wrangler.toml | cut -d'"' -f2)
+          curl -sS --fail-with-body -X POST \
+            -H "X-Internal-Secret: $SECRET" \
+            https://content-dev.uni-scrm.com/internal/skills/refresh-all
+
   setup-stripe:
     needs: [deploy]
     runs-on: ubuntu-latest

@@ -238,6 +238,17 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
+      # 见 deploy-dev.yml 同名步骤。prod 的 INTERNAL_SECRET 只在 GitHub Secrets 里，没有明文。
+      # 刷新只写 skill_content_cache 一张表的既有行（全量成功才覆盖），不建也不删任何资源。
+      - name: Refresh preset skill cache
+        if: matrix.module == 'content'
+        run: |
+          curl -sS --fail-with-body -X POST \
+            -H "X-Internal-Secret: $INTERNAL_SECRET" \
+            https://content.uni-scrm.com/internal/skills/refresh-all
+        env:
+          INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
+
   setup-stripe:
     needs: [deploy]
     runs-on: ubuntu-latest

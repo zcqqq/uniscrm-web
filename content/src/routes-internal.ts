@@ -3,6 +3,7 @@ import type { Env } from "./types";
 import { generateContent } from "./services/generate";
 import { generateImage } from "./services/generate-image";
 import { refreshSkillContent } from "./services/skill-content";
+import { SKILL_CATALOG } from "./skills/catalog";
 
 export function internalRoutes() {
   const router = new Hono<{ Bindings: Env }>();
@@ -64,8 +65,31 @@ export function internalRoutes() {
     }
   });
 
-  // Manual, developer-triggered refresh of a skill's cached content from its source
-  // (e.g. a public GitHub repo). Never called from the generation hot path.
+  // 部署后由 CI 调用（deploy-dev.yml / deploy-prod.yml 的 content 那一格），把预置技能的
+  // 缓存刷到上游最新版本。放在这里而不是让 CI 逐个 id 去 curl：技能清单只有 SKILL_CATALOG
+  // 一份，往里加一个技能不该还要记得改两个 workflow —— 忘了改就是一份永远为空的缓存，而
+  // 缓存为空是静默的（generate.ts 只打一行 skill_content_cache_miss 日志照常出文）。
+  //
+  // 逐个技能各自 try/catch：一个技能的源 404 了，不该连累其余技能停在旧版本。全部成功才
+  // 200，有任何一个失败返回 502 并列出失败项，让 CI 那一步变红——刷新失败不回滚已经部署好
+  // 的代码，但必须看得见。
+  router.post("/skills/refresh-all", async (c) => {
+    const refreshed: string[] = [];
+    const failed: { skillId: string; error: string }[] = [];
+    for (const def of SKILL_CATALOG) {
+      try {
+        await refreshSkillContent(c.env, def.id);
+        refreshed.push(def.id);
+      } catch (err) {
+        console.error(JSON.stringify({ event: "skill_refresh_failed", skillId: def.id, error: String(err) }));
+        failed.push({ skillId: def.id, error: String(err) });
+      }
+    }
+    return c.json({ refreshed, failed }, failed.length > 0 ? 502 : 200);
+  });
+
+  // 单个技能的刷新，供手动立即生效（改了 catalog 里的 sourceUrl、或想在不部署的情况下拉
+  // 一次最新版）。Never called from the generation hot path.
   router.post("/skills/:id/refresh", async (c) => {
     const skillId = c.req.param("id");
     try {

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import worker from "../src/index";
 import * as generateImageModule from "../src/services/generate-image";
+import { SKILL_CATALOG } from "../src/skills/catalog";
 
 describe("POST /internal/generate", () => {
   // Stub env.AI.run so this route test stays deterministic and free: every other test in this
@@ -145,6 +146,75 @@ describe("POST /internal/skills/:id/refresh", () => {
       testEnv
     );
     expect(res.status).toBe(502);
+  });
+});
+
+// 部署后 CI 调的就是这个端点。之所以由服务端遍历 SKILL_CATALOG 而不是 CI 逐个 id 去 curl：
+// 往 catalog 里加技能时不该还要记得改两个 workflow —— 忘了改的后果是一份永远为空的缓存，
+// 而缓存为空完全静默（照常出文，只是模型没看到技能）。
+describe("POST /internal/skills/refresh-all", () => {
+  const testEnv = { ...env, INTERNAL_SECRET: "test-internal-secret" };
+
+  beforeEach(async () => {
+    await env.CONTENT_DB.prepare(
+      `CREATE TABLE IF NOT EXISTS skill_content_cache (
+         skill_id TEXT PRIMARY KEY,
+         content TEXT NOT NULL,
+         source_url TEXT NOT NULL,
+         fetched_at TEXT NOT NULL
+       )`
+    ).run();
+    await env.CONTENT_DB.prepare("DELETE FROM skill_content_cache").run();
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  const call = () =>
+    worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/skills/refresh-all", {
+        method: "POST",
+        headers: { "X-Internal-Secret": "test-internal-secret" },
+      }),
+      testEnv
+    );
+
+  it("rejects requests missing the internal secret", async () => {
+    const res = await worker.fetch(
+      new Request("https://content-dev.uni-scrm.com/internal/skills/refresh-all", { method: "POST" }),
+      testEnv
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("刷新 catalog 里的每一个技能——不是只刷第一个，也不是靠调用方列 id", async () => {
+    // 每次调用新建一个 Response：mockResolvedValue 会把同一个实例发给三次 fetch，第二次
+    // 读 body 就是 "Body has already been read"，测试会假失败。
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("# Latest guide", { status: 200 })));
+
+    const res = await call();
+
+    expect(res.status).toBe(200);
+    const body = await res.json<{ refreshed: string[]; failed: unknown[] }>();
+    expect(body.refreshed.sort()).toEqual(SKILL_CATALOG.map((s) => s.id).sort());
+    expect(body.failed).toEqual([]);
+
+    const rows = await env.CONTENT_DB.prepare("SELECT skill_id FROM skill_content_cache").all<{ skill_id: string }>();
+    expect(rows.results.map((r) => r.skill_id).sort()).toEqual(SKILL_CATALOG.map((s) => s.id).sort());
+  });
+
+  it("一个技能的源挂了不连累其余技能，但整体返回 502 让 CI 那一步变红", async () => {
+    const failing = SKILL_CATALOG[0].sourceUrl;
+    vi.stubGlobal("fetch", vi.fn(async (url: unknown) =>
+      String(url) === failing ? new Response("nope", { status: 404 }) : new Response("# Latest guide", { status: 200 })
+    ));
+
+    const res = await call();
+
+    expect(res.status).toBe(502);
+    const body = await res.json<{ refreshed: string[]; failed: { skillId: string }[] }>();
+    expect(body.failed.map((f) => f.skillId)).toEqual([SKILL_CATALOG[0].id]);
+    // 关键：其余技能仍然被刷新了，没有在第一个失败处停下。
+    expect(body.refreshed.sort()).toEqual(SKILL_CATALOG.slice(1).map((s) => s.id).sort());
   });
 });
 

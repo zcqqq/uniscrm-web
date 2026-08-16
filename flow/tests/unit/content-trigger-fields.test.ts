@@ -52,6 +52,33 @@ describe("getContentTriggerFields", () => {
   });
 });
 
+describe("getContentTriggerFields — language", () => {
+  // 前端零改动的全部依据：language 声明成 ENUM_TEXT 之后，propToField 自动给出
+  // dataType:"enum" + enums + ENUM_OPS，Inspector 的 enum 分支就渲染成下拉框。
+  // 这三条断言塌了任何一条，"语言 != 日语" 就退化成要用户手敲 "ja" 的文本框。
+  it("是 enum 字段，值渲染成下拉框而不是文本框", () => {
+    const fields = getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos", "zh");
+    const language = fields.find((f) => f.id === "language");
+    expect(language).toBeDefined();
+    expect(language!.dataType).toBe("enum");
+    expect(language!.group).toBe("content");
+  });
+
+  it("算子收窄到 == / !=，不出现对语言无意义的比较符", () => {
+    const fields = getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos", "zh");
+    const language = fields.find((f) => f.id === "language")!;
+    expect(language.operators).toEqual(["==", "!="]);
+  });
+
+  it("下拉选项带本地化标签，且含 unknown 哨兵", () => {
+    const fields = getContentTriggerFields(ContentMetadata_YouTube, "watch:get-videos", "zh");
+    const enums = fields.find((f) => f.id === "language")!.enums!;
+    expect(enums.find((e) => e.value === "ja")!.label).toBe("日语");
+    // 哨兵必须可选：判不出语言的视频用 "语言 != 未知" 才收得紧。
+    expect(enums.some((e) => e.value === "unknown")).toBe(true);
+  });
+});
+
 describe("getContentTriggerFields — 作者字段", () => {
   it("X List Posts 的作者字段 id 是限定名、group 是 user", () => {
     const fields = getContentTriggerFields(ContentMetadata_X, "get-list-posts", "en");

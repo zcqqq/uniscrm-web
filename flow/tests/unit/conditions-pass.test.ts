@@ -102,3 +102,30 @@ describe("conditionsPass — $user. 未解析引用", () => {
     expect(conditionsPass([USER_REF_COND, TRUE_COND], CONDITION_LOGIC_AND, PAYLOAD)).toBe(false);
   });
 });
+
+describe("conditionsPass — 语言条件的端到端语义", () => {
+  // 用户的实际用法只有一条："语言不为日文"。这里锁住它在三种视频上的结果。
+  const NOT_JA = { field: "language", operator: "!=", value: "ja" };
+
+  it("日语视频被挡掉", () => {
+    expect(conditionsPass([NOT_JA], CONDITION_LOGIC_AND, { language: "ja" })).toBe(false);
+  });
+
+  it("其它语言放行", () => {
+    expect(conditionsPass([NOT_JA], CONDITION_LOGIC_AND, { language: "zh" })).toBe(true);
+    expect(conditionsPass([NOT_JA], CONDITION_LOGIC_AND, { language: "pt" })).toBe(true);
+  });
+
+  it("判不出语言的视频放行——这正是 unknown 哨兵存在的理由", () => {
+    // link 侧若改回"判不出就不写 key"，evaluateCondition 会在进算子分支之前
+    // `actual == null → false`，这条断言立刻变红。哨兵是唯一让它成立的东西。
+    expect(conditionsPass([NOT_JA], CONDITION_LOGIC_AND, { language: "unknown" })).toBe(true);
+    expect(conditionsPass([NOT_JA], CONDITION_LOGIC_AND, {})).toBe(false);
+  });
+
+  it("想连未知一起排掉，就再加一条 != 未知", () => {
+    const conds = [NOT_JA, { field: "language", operator: "!=", value: "unknown" }];
+    expect(conditionsPass(conds, CONDITION_LOGIC_AND, { language: "unknown" })).toBe(false);
+    expect(conditionsPass(conds, CONDITION_LOGIC_AND, { language: "zh" })).toBe(true);
+  });
+});

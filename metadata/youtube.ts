@@ -25,6 +25,14 @@ export const ContentMetadata_YouTube: ContentMetadata[] = [
       // getContentTriggerFields). resolveProps skips entries with neither `value` nor
       // `dataId`, so this is a safe no-op during ingestion mapping.
       { propId: "duration" },
+      // language 同 duration：computed，不是 resolveProps 能映射的单个 dataId。
+      // 它是三级推导的结果（snippet.defaultAudioLanguage → snippet.defaultLanguage →
+      // 标题+描述的脚本判定，见 link/src/services/detect-language.ts），只写第一级的
+      // dataId 会让人以为它就是那个字段。声明在这里是为了让 flow Inspector 的
+      // ConditionsEditor 字段列表包含它（getContentTriggerFields）；resolveProps 跳过
+      // 既无 value 又无 dataId 的条目，映射期是安全的 no-op。
+      // 前两级来自 videos.list 已经在打的 part=snippet，零额外配额。
+      { propId: "language" },
     ],
     // 系统级限制：只有 <=xxx 秒的视频才触发 content flow（link 端入队前拦截）。
     contentPropsFilter: [

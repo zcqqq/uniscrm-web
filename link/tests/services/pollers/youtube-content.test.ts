@@ -256,6 +256,49 @@ describe("fetchYouTubeVideoProps — 作者频道 id", () => {
   });
 });
 
+describe("fetchYouTubeVideoProps — language", () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+
+  it("优先用 snippet.defaultAudioLanguage，并归一到主子标签", async () => {
+    vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
+      ...VIDEO_ITEM,
+      snippet: { ...VIDEO_ITEM.snippet, defaultAudioLanguage: "ja-JP" },
+    });
+    const out = await fetchYouTubeVideoProps("key", "vid1");
+    expect(out!.props.language).toBe("ja");
+  });
+
+  it("没有声明时从标题/描述判定", async () => {
+    vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue({
+      ...VIDEO_ITEM,
+      snippet: {
+        ...VIDEO_ITEM.snippet,
+        title: "IQVIAジャパンによるクリニック経営アシストサービス",
+        description: "院長が診療に専念できるよう経営を現場で伴走支援するサービスです",
+      },
+    });
+    const out = await fetchYouTubeVideoProps("key", "vid1");
+    expect(out!.props.language).toBe("ja");
+  });
+
+  it("判不出时写 unknown 哨兵，绝不留空", async () => {
+    // 留空的话 flow/src/engine.ts 在进算子分支前就 fail-closed，"语言 != 日语" 会把
+    // 判不出语言的视频一起挡掉——与用户"只想排掉日语"的意图相反。这条测试是那个
+    // 设计决定的守门人，删了它这个 bug 会静默复活。
+    vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue(VIDEO_ITEM);
+    const out = await fetchYouTubeVideoProps("key", "vid1");
+    expect(out!.props.language).toBe("unknown");
+  });
+
+  it("不额外发起任何 API 调用——前两级来自已经在打的 part=snippet", async () => {
+    const videoSpy = vi.spyOn(youtubeApi, "fetchVideoDetails").mockResolvedValue(VIDEO_ITEM);
+    const channelSpy = vi.spyOn(youtubeApi, "fetchChannelDetails");
+    await fetchYouTubeVideoProps("key", "vid1");
+    expect(videoSpy).toHaveBeenCalledTimes(1);
+    expect(channelSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe("fetchYouTubeAuthorProps", () => {
   beforeEach(() => { vi.restoreAllMocks(); });
 

@@ -196,6 +196,30 @@ export const PROPS = definePropDefinitions([
   // entity:["content"]，导致 Content 列表渲染三个永远为空的死列；
   // analytics/tests/unit/content-stream-schema.test.ts 现在机器对账，加回 entity 而
   // 不加列会直接红。
+  // 同上：flow-payload-only，无 entity（不是任何快照表上的列，不落 D1 也不落 R2）。
+  // 由 link/src/services/detect-language.ts 三级推导，写进 trigger payload 供
+  // YouTube trigger / youtubeCondition 节点的条件使用。
+  // ENUM_TEXT + enums 让 flow 的 ConditionsEditor 自动渲染成下拉框（Inspector.tsx 的
+  // enum 分支），算子自动收窄到 ==/!=（trigger-fields.ts 的 ENUM_OPS）——零前端代码。
+  // 短表只列系统真能产出的值。两点要知道：
+  //   1. "en" 只可能来自上传者声明（拉丁字母系不做概率猜测，见 detect-language.ts），
+  //      所以选它匹配到的是"声明了英语的视频"，不是"所有英语视频"。
+  //   2. enums 约束的是"用户能选什么"，不是"payload 里能有什么"——上传者声明 pt/de 时
+  //      payload 里就是 pt/de，"语言 != 日语" 照样正确放行它们。
+  {
+    propId: "language",
+    dataType: "ENUM_TEXT",
+    label: { en: "Language", zh: "语言" },
+    enums: [
+      { value: "ja", label: { en: "Japanese", zh: "日语" } },
+      { value: "zh", label: { en: "Chinese", zh: "中文" } },
+      { value: "ko", label: { en: "Korean", zh: "韩语" } },
+      { value: "ru", label: { en: "Russian", zh: "俄语" } },
+      { value: "ar", label: { en: "Arabic", zh: "阿拉伯语" } },
+      { value: "en", label: { en: "English", zh: "英语" } },
+      { value: "unknown", label: { en: "Unknown", zh: "未知" } },
+    ],
+  },
   {
     propId: "processed_video_url",
     dataType: "TEXT",

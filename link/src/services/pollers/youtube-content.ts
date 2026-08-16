@@ -4,6 +4,7 @@ import type { EntityStateStore } from "../entity-state";
 import { ContentService } from "../content";
 import { fetchVideoDetails, fetchChannelDetails, parseISO8601Duration } from "../youtube-api";
 import { resolveProps, resolveAuthorProps } from "./resolve-props";
+import { resolveVideoLanguage } from "../detect-language";
 import { ContentMetadata_YouTube } from "../../../../metadata/youtube";
 import { passesPropsFilter } from "../../../../metadata/props-filter";
 
@@ -61,6 +62,16 @@ export async function fetchYouTubeVideoProps(
   if (parsedDuration !== null) {
     props.duration = parsedDuration;
   }
+  // duration 判不出时**不写 key**（fail-closed），language 反过来永远写值——判不出写
+  // "unknown" 哨兵。两者的差别是有意的：duration 的条件是数值比较，缺失就该不通过；
+  // 而 language 的典型用法是 "!= 日语"（排除某个语种），留空会让 engine 在进算子之前
+  // 就 fail-closed，把判不出语言的视频一起挡掉，与用户意图相反。见 detect-language.ts。
+  props.language = resolveVideoLanguage({
+    defaultAudioLanguage: snippet?.defaultAudioLanguage,
+    defaultLanguage: snippet?.defaultLanguage,
+    title: props.title,
+    description: props.content_text,
+  });
   return {
     props,
     authorChannelId: typeof snippet?.channelId === "string" ? snippet.channelId : "",

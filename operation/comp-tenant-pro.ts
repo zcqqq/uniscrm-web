@@ -81,7 +81,7 @@ async function main() {
   const subRows = d1Query(
     "uniscrm-admin",
     "admin/wrangler.toml",
-    `SELECT tier, status, stripe_subscription_id FROM subscriptions WHERE tenant_id = ${tenantId}`
+    `SELECT tier, status, stripe_customer_id, stripe_subscription_id FROM subscriptions WHERE tenant_id = ${tenantId}`
   );
   if (subRows.length === 0) throw new Error(`prod 订阅表中没有租户 ${tenantId} 的行`);
   if (subRows[0].stripe_subscription_id) {
@@ -102,13 +102,24 @@ async function main() {
   const trialEndIso = new Date(trialEndTs * 1000).toISOString();
   console.log(`租户 ${tenantId} (${email})：开通 Pro，试用到 ${trialEndIso.slice(0, 10)}`);
 
-  const customer = await stripePost(key, "customers", {
-    email,
-    "metadata[tenant_id]": String(tenantId),
-    description: `UniSCRM tenant ${tenantId} (comped 2-year pro)`,
-  });
-  const customerId = assertSafeId(String(customer.id), "customer id");
-  console.log(`  customer: ${customerId}`);
+  // 客户可能自己走过 checkout（哪怕没付成），那时 app 已经建了 customer 并写进 D1。
+  // 复用它，否则同一邮箱会留下两个 customer，且 D1 里的旧 id 被覆盖成孤儿。
+  const existingCustomerId = subRows[0].stripe_customer_id
+    ? assertSafeId(String(subRows[0].stripe_customer_id), "existing customer id")
+    : null;
+  let customerId: string;
+  if (existingCustomerId) {
+    customerId = existingCustomerId;
+    console.log(`  customer: ${customerId}（复用 D1 中已有的）`);
+  } else {
+    const customer = await stripePost(key, "customers", {
+      email,
+      "metadata[tenant_id]": String(tenantId),
+      description: `UniSCRM tenant ${tenantId} (comped 2-year pro)`,
+    });
+    customerId = assertSafeId(String(customer.id), "customer id");
+    console.log(`  customer: ${customerId}`);
+  }
 
   const sub = await stripePost(key, "subscriptions", {
     customer: customerId,

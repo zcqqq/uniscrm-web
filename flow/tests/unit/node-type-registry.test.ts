@@ -5,6 +5,7 @@ import {
   USER_FLOW_SIDEBAR_ORDER,
   CONTENT_FLOW_SIDEBAR_ORDER,
   CONTENT_X_TRIGGER_MODE_LIST_POSTS,
+  CHANNEL_BOUND_TRIGGER_TYPES,
 } from "../../nodeTypeRegistry";
 import { ContentMetadata_X } from "../../../metadata/x-byok";
 import { ContentMetadata_TikTok } from "../../../metadata/tiktok";
@@ -113,6 +114,38 @@ describe("NODE_TYPE_REGISTRY", () => {
       .map(([key]) => key)
       .sort();
     expect(keys).toEqual(["waitForEvent", "xContentTrigger", "xTrigger", "youtubeCondition", "youtubeContentTrigger", "githubContentTrigger"].sort());
+  });
+
+  // channelBound 驱动两侧的"trigger 没选账号"发布门禁（frontend/lib/validate-flow-graph.ts、
+  // src/trigger-health.ts）和编辑器的批量账号自动填充。漏标一个新 trigger，就等于给它开了
+  // 一条"发布成功但永不触发"的静默失败路径 —— 2026-08-21 排查生产租户 100001 时正是如此。
+  it("tags exactly the triggers whose matcher compares data.channelId, and never cronTrigger", () => {
+    const keys = Object.entries(NODE_TYPE_REGISTRY)
+      .filter(([, cfg]) => cfg.channelBound === true)
+      .map(([key]) => key)
+      .sort();
+    expect(keys).toEqual(["githubContentTrigger", "xContentTrigger", "xTrigger", "youtubeContentTrigger"]);
+    expect(keys).not.toContain("cronTrigger");
+  });
+
+  it("only ever tags trigger-role entries channelBound", () => {
+    for (const [key, cfg] of Object.entries(NODE_TYPE_REGISTRY)) {
+      if (cfg.channelBound) expect(cfg.role, `"${key}" is channelBound but not a trigger`).toBe("trigger");
+    }
+  });
+
+  it("CHANNEL_BOUND_TRIGGER_TYPES mirrors the tagged entries", () => {
+    expect([...CHANNEL_BOUND_TRIGGER_TYPES].sort()).toEqual(
+      ["githubContentTrigger", "xContentTrigger", "xTrigger", "youtubeContentTrigger"]
+    );
+  });
+
+  // channelBound 的 trigger 必须自带 channelId 这一格，否则新建的节点连"没选账号"这个
+  // 状态都表达不出来，门禁判的是一个不存在的字段。
+  it("gives every channelBound trigger a channelId key in its defaultData", () => {
+    for (const key of CHANNEL_BOUND_TRIGGER_TYPES) {
+      expect(NODE_TYPE_REGISTRY[key].defaultData(), key).toHaveProperty("channelId");
+    }
   });
 
   it("derives xContentTrigger/xContentAction Sidebar descriptions from ContentMetadata_X's flowType counts, computed once into both languages", () => {

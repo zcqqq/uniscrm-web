@@ -22,6 +22,20 @@ const githubWithRepo = JSON.stringify({
   nodes: [{ id: "t1", type: "githubContentTrigger", data: { channelId: "chan-live", repos: [{ fullName: "oven-sh/bun" }] }, position: { x: 0, y: 0 } }],
   edges: [],
 });
+// 生产真实形态（租户 100001，flow f701b9fe）：模板把每个节点的 channelId 都留成 ""，
+// 用户补齐了 action 节点，唯独 trigger 没补。运行时 TRIGGER_MATCHERS 拿 "" 去比真实
+// channel id，这条 flow 发布成功、显示"已发布"、一次都没触发过。
+const triggerNoChannel = JSON.stringify({
+  nodes: [
+    { id: "t1", type: "xTrigger", data: { channelType: "X", eventType: "follow.follow", channelId: "" }, position: { x: 0, y: 0 } },
+    { id: "a1", type: "action", data: { actionType: "xAction", xEvent: "create-dm", channelId: "chan-live" }, position: { x: 320, y: 0 } },
+  ],
+  edges: [{ id: "e1", source: "t1", target: "a1" }],
+});
+const contentTriggerNoChannel = JSON.stringify({
+  nodes: [{ id: "t1", type: "xContentTrigger", data: { channelId: "", mode: "get-list-posts", listId: "l1" }, position: { x: 0, y: 0 } }],
+  edges: [],
+});
 const cronOnly = JSON.stringify({
   nodes: [{ id: "t1", type: "cronTrigger", data: { scheduleType: "daily", dailyTime: "09:00" }, position: { x: 0, y: 0 } }],
   edges: [],
@@ -84,6 +98,14 @@ describe("POST /api/flows/:id/publish trigger gate", () => {
         `INSERT INTO flows (id, tenant_id, name, graph_json, domain, status, created_at, updated_at)
          VALUES ('p-gh-ok', ?, 'gh ok', ?, 'content', 'draft', datetime('now'), datetime('now'))`
       ).bind(TENANT_ID, githubWithRepo),
+      env.FLOW_DB.prepare(
+        `INSERT INTO flows (id, tenant_id, name, graph_json, domain, status, created_at, updated_at)
+         VALUES ('p-no-chan', ?, 'no chan', ?, 'user', 'draft', datetime('now'), datetime('now'))`
+      ).bind(TENANT_ID, triggerNoChannel),
+      env.FLOW_DB.prepare(
+        `INSERT INTO flows (id, tenant_id, name, graph_json, domain, status, created_at, updated_at)
+         VALUES ('p-content-no-chan', ?, 'content no chan', ?, 'content', 'draft', datetime('now'), datetime('now'))`
+      ).bind(TENANT_ID, contentTriggerNoChannel),
     ]);
   });
 
@@ -145,6 +167,37 @@ describe("POST /api/flows/:id/publish trigger gate", () => {
     const res = await worker.fetch(publishReq("p-gh-ok"), env);
     expect(res.status).toBe(200);
     expect(await statusOf("p-gh-ok")).toBe("published");
+  });
+
+  // 这一组是 2026-08-21 那次排查的回归：租户 100001 唯一一条 published flow 的 trigger
+  // 没选账号，从 2026-07-25 起一次都没触发，flow_log / credit_usage_log 全空。
+  it("refuses to publish an xTrigger with no account selected, and leaves it a draft", async () => {
+    stubFetch({ status: 200, body: { channelIds: ["chan-live"] } });
+    const res = await worker.fetch(publishReq("p-no-chan"), env);
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    // "没选账号"必须与 findBrokenTrigger 的"选的那个账号断了"说成两句话：后者会把用户
+    // 打发去 Channels 页重连一个连得好好的账号。
+    expect(body.error).toContain("no X account selected");
+    expect(body.error).not.toContain("not connected");
+    expect(await statusOf("p-no-chan")).toBe("draft");
+  });
+
+  it("refuses an xContentTrigger with no account selected too", async () => {
+    stubFetch({ status: 200, body: { channelIds: ["chan-live"] } });
+    const res = await worker.fetch(publishReq("p-content-no-chan"), env);
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: string }).error).toContain("no X account selected");
+    expect(await statusOf("p-content-no-chan")).toBe("draft");
+  });
+
+  // 纯本地判据，排在问 link 之前 —— link 挂着的时候也拦得住，而且不会退化成 503
+  // "验证不了、请重试"，那会把用户指向一个跟他的问题无关的方向。
+  it("catches the missing account even when link is unreachable — 400, not 503", async () => {
+    stubFetch("throw");
+    const res = await worker.fetch(publishReq("p-no-chan"), env);
+    expect(res.status).toBe(400);
+    expect(await statusOf("p-no-chan")).toBe("draft");
   });
 
   it("still 404s on another tenant's flow", async () => {

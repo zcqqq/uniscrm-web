@@ -80,6 +80,19 @@ export interface NodeTypeConfig {
    */
   propsConditions?: boolean;
   /**
+   * Trigger-role entries only: true when this trigger fires for one specific connected account
+   * and its runtime matcher compares `data.channelId` against the event's `payload.channel_id`
+   * (src/node-executors.ts's TRIGGER_MATCHERS). False/absent for cronTrigger, which fires on a
+   * schedule and binds no account.
+   *
+   * Drives the "trigger has no account selected" publish gate on both sides
+   * (frontend/lib/validate-flow-graph.ts, src/trigger-health.ts) and the editor's bulk
+   * channel auto-fill. An empty `data.channelId` on one of these makes the matcher compare
+   * "" against a real channel id — the flow publishes, looks healthy, and never fires once.
+   * That is how prod tenant 100001's only published flow sat dead from 2026-07-25 on.
+   */
+  channelBound?: boolean;
+  /**
    * Action-role entries only: true when the action calls a third-party platform API and thus
    * has success/failed branches resolved asynchronously (flow/CLAUDE.md: 2xx→success,
    * 4xx/5xx/timeout→failed). Drives buildActionData's hasBranches — formerly a hand-maintained
@@ -149,6 +162,7 @@ const REGISTRY = {
     reactFlowType: "xTrigger",
     domain: "user",
     role: "trigger",
+    channelBound: true,
     generatable: true,
     sidebarSection: "triggers",
     propsConditions: true,
@@ -235,6 +249,7 @@ const REGISTRY = {
     description: { en: `${CONTENT_X_TRIGGER_COUNT} triggers`, zh: `${CONTENT_X_TRIGGER_COUNT} 个触发器` },
     domain: "content",
     role: "trigger",
+    channelBound: true,
     generatable: true,
     sidebarSection: "triggers",
     propsConditions: true,
@@ -250,6 +265,7 @@ const REGISTRY = {
     description: { en: "Watches a subscribed YouTube channel", zh: "监听已订阅的 YouTube 频道" },
     domain: "content",
     role: "trigger",
+    channelBound: true,
     generatable: true,
     sidebarSection: "triggers",
     propsConditions: true,
@@ -265,6 +281,7 @@ const REGISTRY = {
     description: { en: "Watches releases of selected repos", zh: "监听所选仓库的发版" },
     domain: "content",
     role: "trigger",
+    channelBound: true,
     generatable: true,
     sidebarSection: "triggers",
     propsConditions: true,
@@ -490,6 +507,13 @@ export const VALID_CONNECTION_TARGET_TYPES: string[] = uniqueReactFlowTypes(ALL_
 
 /** Node types whose data.conditions is a ConditionsEditor props-conditions array (see propsConditions). */
 export const PROPS_CONDITION_NODE_TYPES: string[] = uniqueReactFlowTypes(ALL_ENTRIES.filter((e) => e.propsConditions === true));
+
+/**
+ * Trigger types that fire for one specific connected account (see channelBound). Consumed by
+ * both publish gates and by the editor's bulk channel auto-fill, so a new channel-bound trigger
+ * is covered everywhere the moment it is tagged in the registry.
+ */
+export const CHANNEL_BOUND_TRIGGER_TYPES: string[] = uniqueReactFlowTypes(ALL_ENTRIES.filter((e) => e.channelBound === true));
 
 // Sidebar item order within each domain — deliberately separate from NODE_TYPE_REGISTRY's own
 // declaration order (which only needs to agree with itself for the shared "both" entries, e.g.

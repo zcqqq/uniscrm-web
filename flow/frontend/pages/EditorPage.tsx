@@ -110,7 +110,7 @@ function EditorToolbar() {
         size="sm"
         onClick={async () => {
           const { nodes, edges } = useFlowEditor.getState();
-          const { valid, orphanNodeIds, misplacedNodeIds, emptyConditionNodeIds, orLogicEmptyNodeIds, youtubeNoSubscriptionNodeIds, githubNoRepoNodeIds, xMediaConflictNodeIds } =
+          const { valid, orphanNodeIds, misplacedNodeIds, emptyConditionNodeIds, orLogicEmptyNodeIds, youtubeNoSubscriptionNodeIds, githubNoRepoNodeIds, xMediaConflictNodeIds, triggerNoChannelNodeIds } =
             validateFlowGraph(nodes, edges);
           // Always resolve against the current graph first, so a second Publish click
           // after a partial fix doesn't compound a stale highlight from the first click.
@@ -120,9 +120,9 @@ function EditorToolbar() {
           // still a smell worth not carrying forward.
           useFlowEditor
             .getState()
-            .setErrorNodeIds([...new Set([...orphanNodeIds, ...misplacedNodeIds, ...emptyConditionNodeIds, ...orLogicEmptyNodeIds, ...youtubeNoSubscriptionNodeIds, ...githubNoRepoNodeIds, ...xMediaConflictNodeIds])]);
+            .setErrorNodeIds([...new Set([...orphanNodeIds, ...misplacedNodeIds, ...emptyConditionNodeIds, ...orLogicEmptyNodeIds, ...youtubeNoSubscriptionNodeIds, ...githubNoRepoNodeIds, ...xMediaConflictNodeIds, ...triggerNoChannelNodeIds])]);
           if (!valid) {
-            // 七类错误的修法完全不同（连线 / 填条件 / 改回 AND / 选订阅 / 选仓库 / 换 trigger / 二选一媒体），文案必须分开，
+            // 八类错误的修法完全不同（连线 / 填条件 / 改回 AND / 选订阅 / 选仓库 / 选账号 / 换 trigger / 二选一媒体），文案必须分开，
             // 否则用户会对着一个连得好好的节点找"哪里没连上"。孤儿优先——它更常见也更基础。
             // 「换 trigger」的文案不能说成"需要 YouTube Trigger"：这一条在"图里有两个
             // trigger、其中一个正是 YouTube Trigger"时也会触发，那样会把人打发去找一个
@@ -133,20 +133,25 @@ function EditorToolbar() {
             const title =
               orphanNodeIds.length > 0
                 ? T({ en: `${orphanNodeIds.length} node(s) not connected, cannot publish`, zh: `${orphanNodeIds.length} 个节点未连接，无法发布` })
-                : emptyConditionNodeIds.length > 0
-                  ? T({ en: `${youtubeConditionLabel} has no conditions set, cannot publish`, zh: `${youtubeConditionLabel} 没有设置条件，无法发布` })
-                  : orLogicEmptyNodeIds.length > 0
-                    ? T({ en: `${orLogicEmptyNodeIds.length} node(s) selected OR but have no conditions, cannot publish`, zh: `${orLogicEmptyNodeIds.length} 个节点选了 OR 但没有条件，无法发布` })
-                    : youtubeNoSubscriptionNodeIds.length > 0
-                      ? T({ en: `${youtubeNoSubscriptionNodeIds.length} ${youtubeTriggerLabel}(s) have no subscription selected, cannot publish`, zh: `${youtubeNoSubscriptionNodeIds.length} 个 ${youtubeTriggerLabel} 没有选择 subscription，无法发布` })
-                      : githubNoRepoNodeIds.length > 0
-                        ? T({ en: `${githubNoRepoNodeIds.length} ${githubTriggerLabel}(s) have no repository selected, cannot publish`, zh: `${githubNoRepoNodeIds.length} 个 ${githubTriggerLabel} 没有选择仓库，无法发布` })
-                        : xMediaConflictNodeIds.length > 0
-                          ? T({
-                              en: `${xMediaConflictNodeIds.length} X Content Action(s) can only attach either an image or a video, not both, cannot publish`,
-                              zh: `${xMediaConflictNodeIds.length} 个 X Content Action 只能附加图片或视频之一，不能同时勾选，无法发布`,
-                            })
-                          : T({ en: `${youtubeConditionLabel} can only be used in a flow whose sole trigger is ${youtubeTriggerLabel}, cannot publish`, zh: `${youtubeConditionLabel} 只能用在唯一 trigger 是 ${youtubeTriggerLabel} 的流程里，无法发布` });
+                : triggerNoChannelNodeIds.length > 0
+                  ? T({
+                      en: "The trigger has no account selected, so this flow would never fire. Pick one in the trigger node.",
+                      zh: "触发器没有选择账号，这个流程永远不会触发。请在 trigger 节点里选一个账号。",
+                    })
+                  : emptyConditionNodeIds.length > 0
+                    ? T({ en: `${youtubeConditionLabel} has no conditions set, cannot publish`, zh: `${youtubeConditionLabel} 没有设置条件，无法发布` })
+                    : orLogicEmptyNodeIds.length > 0
+                      ? T({ en: `${orLogicEmptyNodeIds.length} node(s) selected OR but have no conditions, cannot publish`, zh: `${orLogicEmptyNodeIds.length} 个节点选了 OR 但没有条件，无法发布` })
+                      : youtubeNoSubscriptionNodeIds.length > 0
+                        ? T({ en: `${youtubeNoSubscriptionNodeIds.length} ${youtubeTriggerLabel}(s) have no subscription selected, cannot publish`, zh: `${youtubeNoSubscriptionNodeIds.length} 个 ${youtubeTriggerLabel} 没有选择 subscription，无法发布` })
+                        : githubNoRepoNodeIds.length > 0
+                          ? T({ en: `${githubNoRepoNodeIds.length} ${githubTriggerLabel}(s) have no repository selected, cannot publish`, zh: `${githubNoRepoNodeIds.length} 个 ${githubTriggerLabel} 没有选择仓库，无法发布` })
+                          : xMediaConflictNodeIds.length > 0
+                            ? T({
+                                en: `${xMediaConflictNodeIds.length} X Content Action(s) can only attach either an image or a video, not both, cannot publish`,
+                                zh: `${xMediaConflictNodeIds.length} 个 X Content Action 只能附加图片或视频之一，不能同时勾选，无法发布`,
+                              })
+                            : T({ en: `${youtubeConditionLabel} can only be used in a flow whose sole trigger is ${youtubeTriggerLabel}, cannot publish`, zh: `${youtubeConditionLabel} 只能用在唯一 trigger 是 ${youtubeTriggerLabel} 的流程里，无法发布` });
             toast({ title, variant: "destructive" });
             return;
           }

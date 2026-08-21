@@ -15,6 +15,7 @@ import {
   NODE_TYPE_REGISTRY,
   VALID_CONNECTION_SOURCE_TYPES,
   VALID_CONNECTION_TARGET_TYPES,
+  CHANNEL_BOUND_TRIGGER_TYPES,
   type FlowDomain,
 } from "../../nodeTypeRegistry";
 
@@ -49,9 +50,10 @@ export interface FlowEditorState {
   markClean: () => void;
   toGraphJson: () => string;
   replaceGraph: (nodes: Node[], edges: Edge[]) => void;
-  // Auto-fills data.channelId on any action node whose actionType is in ACTION_CHANNEL_TYPE
-  // and still has no channelId, provided the tenant has exactly one connected account for
-  // that channelType. No-ops (and skips the API call) if nothing needs filling.
+  // Auto-fills data.channelId on any node that binds one account and still has none, provided
+  // the tenant has exactly one connected account of that channelType: action nodes whose
+  // actionType is in ACTION_CHANNEL_TYPE, and channel-bound trigger nodes (see
+  // channelTypeForNode). No-ops (and skips the API call) if nothing needs filling.
   // i18n-ok: "Promise<void>" is a TS return type, not text — audit's regex false-matches "=> Promise<"
   autoFillChannelIds: () => Promise<void>;
   setErrorNodeIds: (ids: string[]) => void;
@@ -65,6 +67,37 @@ export const ACTION_CHANNEL_TYPE: Record<string, string> = {
   xAction: "X",
   tiktokContentAction: "TIKTOK",
 };
+
+// Channel-bound trigger types whose account list comes from `GET /api/channels?type=` — the
+// same source ACTION_CHANNEL_TYPE feeds. youtubeContentTrigger/githubContentTrigger are
+// deliberately absent: their account is derived from their own endpoints
+// (channels.youtubeSubscriptions / channels.githubRepos, which return accountChannelId) and
+// their Inspectors already write channelId when the user picks a subscription/repo — which
+// their own publish gates then require. xTrigger's channelType is dynamic (data.channelType),
+// so it is resolved per node rather than listed here.
+const TRIGGER_CHANNEL_TYPE: Record<string, string> = {
+  xContentTrigger: "X",
+};
+
+// The channelType whose account list can fill this node's data.channelId, or null when the
+// node doesn't bind an account this way. One function so the "which nodes need filling" pass
+// and the "write the id back" pass can never disagree about a node.
+//
+// Covering triggers here (not just actions) is the point of this pass: a channel-bound trigger
+// left with an empty channelId publishes a flow that never fires once, because the runtime
+// matcher compares "" against a real channel id (src/node-executors.ts). The Inspector's own
+// single-account safety net only fires if the user actually opens that node's panel, and
+// nothing makes them — a template hands you a graph where every channelId is blank, the user
+// fills in the visible action nodes and never clicks the trigger. That is how prod tenant
+// 100001's only published flow sat dead from 2026-07-25 on; see
+// lib/validate-flow-graph.ts's findTriggerNoChannelIds for the rest of the story.
+function channelTypeForNode(node: { type?: string; data?: unknown }): string | null {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  if (node.type === "action") return ACTION_CHANNEL_TYPE[data.actionType as string] ?? null;
+  if (!CHANNEL_BOUND_TRIGGER_TYPES.includes(node.type ?? "")) return null;
+  // xTrigger carries its own channelType ("X" today, more later); the rest are fixed.
+  return TRIGGER_CHANNEL_TYPE[node.type ?? ""] ?? (data.channelType as string) ?? null;
+}
 
 // Shared by the store's onConnect below and by Canvas.tsx's isValidConnection prop
 // (React Flow gates connection drags with that prop before onConnect ever runs) --
@@ -151,7 +184,9 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
     };
     set((state) => ({ nodes: [...state.nodes, node], isDirty: true }));
 
-    if (ACTION_CHANNEL_TYPE[type]) {
+    // Triggers count too, not just actions — a freshly dropped xTrigger binds an account the
+    // same way an xAction does, and channelTypeForNode is the single judge of that.
+    if (channelTypeForNode(node)) {
       void get().autoFillChannelIds();
     }
     return true;
@@ -190,9 +225,7 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
   autoFillChannelIds: async () => {
     const neededTypes = new Set<string>();
     for (const n of get().nodes) {
-      if (n.type !== "action") continue;
-      const actionType = (n.data as Record<string, unknown>).actionType as string;
-      const channelType = ACTION_CHANNEL_TYPE[actionType];
+      const channelType = channelTypeForNode(n);
       if (channelType && !(n.data as Record<string, unknown>).channelId) neededTypes.add(channelType);
     }
     if (neededTypes.size === 0) return;
@@ -209,9 +242,8 @@ export const useFlowEditor = create<FlowEditorState>((set, get) => ({
 
     let changed = false;
     const nodes = get().nodes.map((n) => {
-      if (n.type !== "action") return n;
       const data = n.data as Record<string, unknown>;
-      const channelType = ACTION_CHANNEL_TYPE[data.actionType as string];
+      const channelType = channelTypeForNode(n);
       if (!channelType || data.channelId) return n;
       const channels = channelsByType[channelType];
       if (channels?.length !== 1) return n;

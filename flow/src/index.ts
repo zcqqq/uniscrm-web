@@ -7,7 +7,7 @@ import { passesPropsFilter } from "../../metadata/props-filter";
 import { r2Query, latestRowsSql, sqlStr, sqlInt } from "../../shared/r2-sql";
 import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-prompt";
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY, CONDITION_LOGIC_OR, resolveYouTubeSubscriptions, resolveGitHubRepos } from "../nodeTypeRegistry";
-import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage, findGitHubTriggerNoRepos, githubNoRepoMessage } from "./trigger-health";
+import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage, findTriggerNoChannel, triggerNoChannelMessage, findGitHubTriggerNoRepos, githubNoRepoMessage } from "./trigger-health";
 import { conditionsNeedAuthor, youtubeConditionRequest, resolveYouTubeCondition, type VideoStatsResponse } from "./youtube-condition";
 import { createInternalAuthMiddleware, resolveAuthMe, resolveSession, spaLoginGuard } from "../../shared/auth";
 
@@ -1470,6 +1470,12 @@ app.post("/api/flows/:id/publish", async (c) => {
     `SELECT graph_json FROM flows WHERE id = ? AND tenant_id = ?`
   ).bind(flowId, tenantId).first<{ graph_json: string }>();
   if (!flow) return c.json({ error: "Not found" }, 404);
+
+  // 排在所有问 link 的判据之前：这一条是纯本地判据（trigger 压根没选账号），link 抖动时
+  // 也拦得住，而且不会退化成"验证不了、请重试"那种指错方向的提示。顺序也是语义上的先后 ——
+  // "还没选账号"比"选的那个账号断了"更早一步。
+  const noChannel = findTriggerNoChannel(flow.graph_json);
+  if (noChannel) return c.json({ error: triggerNoChannelMessage(noChannel.nodeType) }, 400);
 
   // cronTrigger 之类不绑 channel 的 flow 不问 link —— 它的可发布性与 link 无关，
   // 不该因为 link 抖动就发布不了。

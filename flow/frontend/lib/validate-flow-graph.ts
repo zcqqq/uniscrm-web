@@ -1,4 +1,4 @@
-import { CONDITION_LOGIC_OR, resolveYouTubeSubscriptions, resolveGitHubRepos, TRIGGER_REACT_FLOW_TYPES, PROPS_CONDITION_NODE_TYPES } from "../../nodeTypeRegistry";
+import { CONDITION_LOGIC_OR, resolveYouTubeSubscriptions, resolveGitHubRepos, TRIGGER_REACT_FLOW_TYPES, PROPS_CONDITION_NODE_TYPES, CHANNEL_BOUND_TRIGGER_TYPES } from "../../nodeTypeRegistry";
 
 // Derived from the registry's role: "trigger" entries — re-exported under this module's
 // historical name for its existing consumers.
@@ -136,6 +136,26 @@ export function findXImageVideoConflictIds(
     .map((n) => n.id);
 }
 
+// 一个 channel-bound trigger 却没选账号：运行时 TRIGGER_MATCHERS 拿 data.channelId 去比
+// payload.channel_id（src/node-executors.ts），"" 与任何真实 channel id 都不相等，于是这条
+// flow 发布成功、列表里显示"已发布"、画布上看不出任何异常，却一次都不会触发——与产品坏了
+// 无法区分。生产租户 100001 唯一一条 published flow 正是这样从 2026-07-25 起静默死掉的：
+// 模板把每个节点的 channelId 都留成 ""，用户在三个 action 节点上补齐了账号，唯独 trigger
+// 上没补。
+//
+// 服务端 src/trigger-health.ts 的 findTriggerNoChannel 是同一条判据的权威副本（直连 API
+// 发布绕开前端）。两边共用注册表的 channelBound 标记，不可能各判各的。
+// 判 node.type 而不是 data 里的什么字段：trigger 家族每种都有自己的 reactFlowType
+// （与 action 家族统一收敛成 "action" 不同），CHANNEL_BOUND_TRIGGER_TYPES 就是它们的集合。
+export function findTriggerNoChannelIds(
+  nodes: { id: string; type?: string; data?: Record<string, unknown> }[]
+): string[] {
+  return nodes
+    .filter((n) => CHANNEL_BOUND_TRIGGER_TYPES.includes(n.type ?? ""))
+    .filter((n) => String(n.data?.channelId ?? "") === "")
+    .map((n) => n.id);
+}
+
 export function validateFlowGraph(
   nodes: { id: string; type?: string; data?: Record<string, unknown> }[],
   edges: { source: string; target: string }[]
@@ -148,6 +168,7 @@ export function validateFlowGraph(
   youtubeNoSubscriptionNodeIds: string[];
   githubNoRepoNodeIds: string[];
   xMediaConflictNodeIds: string[];
+  triggerNoChannelNodeIds: string[];
 } {
   const orphanNodeIds = findOrphanNodeIds(nodes, edges);
   const misplacedNodeIds = findMisplacedYouTubeConditionIds(nodes);
@@ -156,6 +177,7 @@ export function validateFlowGraph(
   const youtubeNoSubscriptionNodeIds = findYouTubeTriggerNoSubscriptionIds(nodes);
   const githubNoRepoNodeIds = findGitHubTriggerNoRepoIds(nodes);
   const xMediaConflictNodeIds = findXImageVideoConflictIds(nodes);
+  const triggerNoChannelNodeIds = findTriggerNoChannelIds(nodes);
   return {
     valid:
       orphanNodeIds.length === 0 &&
@@ -164,7 +186,8 @@ export function validateFlowGraph(
       orLogicEmptyNodeIds.length === 0 &&
       youtubeNoSubscriptionNodeIds.length === 0 &&
       githubNoRepoNodeIds.length === 0 &&
-      xMediaConflictNodeIds.length === 0,
+      xMediaConflictNodeIds.length === 0 &&
+      triggerNoChannelNodeIds.length === 0,
     orphanNodeIds,
     misplacedNodeIds,
     emptyConditionNodeIds,
@@ -172,5 +195,6 @@ export function validateFlowGraph(
     youtubeNoSubscriptionNodeIds,
     githubNoRepoNodeIds,
     xMediaConflictNodeIds,
+    triggerNoChannelNodeIds,
   };
 }

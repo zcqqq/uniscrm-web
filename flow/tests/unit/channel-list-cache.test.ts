@@ -143,6 +143,71 @@ describe("autoFillChannelIds", () => {
     expect((useFlowEditor.getState().nodes[0].data as Record<string, unknown>).channelId).toBe("c1");
   });
 
+  // 2026-08-21 排查：这一段此前只看 node.type === "action"，trigger 一律跳过。模板给出的图
+  // 里每个节点的 channelId 都是 ""，于是 action 被补齐、trigger 留空 —— 发布成功、显示
+  // "已发布"、一次都不触发（生产租户 100001 的 flow f701b9fe 正是这样）。
+  it("channel-bound trigger 也要自动填充，不只是 action", async () => {
+    useFlowEditor.setState({
+      nodes: [
+        { id: "t1", type: "xTrigger", position: { x: 0, y: 0 }, data: { channelType: "X", eventType: "follow.follow", channelId: "" } },
+        { id: "a1", type: "action", position: { x: 320, y: 0 }, data: { actionType: "xAction", xEvent: "create-dm", channelId: "" } },
+      ] as never,
+      edges: [],
+      isDirty: false,
+    });
+
+    await useFlowEditor.getState().autoFillChannelIds();
+    const [t1, a1] = useFlowEditor.getState().nodes;
+    expect((t1.data as Record<string, unknown>).channelId).toBe("c1");
+    expect((a1.data as Record<string, unknown>).channelId).toBe("c1");
+    // trigger 和 action 同属 "X"，只该问一次账号列表。
+    expect(stub.urls).toEqual(["/api/channels?type=X"]);
+  });
+
+  it("xContentTrigger 的 channelType 固定为 X（它的 data 里没有 channelType 这一格）", async () => {
+    useFlowEditor.setState({
+      nodes: [{ id: "t1", type: "xContentTrigger", position: { x: 0, y: 0 }, data: { channelId: "", mode: "get-list-posts" } }] as never,
+      edges: [],
+      isDirty: false,
+    });
+
+    await useFlowEditor.getState().autoFillChannelIds();
+    expect((useFlowEditor.getState().nodes[0].data as Record<string, unknown>).channelId).toBe("c1");
+    expect(stub.urls).toEqual(["/api/channels?type=X"]);
+  });
+
+  // cronTrigger 不绑账号；youtube/github trigger 的账号来自它们各自的端点
+  // （youtubeSubscriptions / githubRepos 的 accountChannelId），不是 /api/channels。
+  // 为它们发一次 /api/channels?type=undefined 只会白打一个 404。
+  it("不给 cronTrigger / youtube / github trigger 发请求", async () => {
+    useFlowEditor.setState({
+      nodes: [
+        { id: "t1", type: "cronTrigger", position: { x: 0, y: 0 }, data: { scheduleType: "daily" } },
+        { id: "t2", type: "youtubeContentTrigger", position: { x: 0, y: 0 }, data: { channelId: "", subscriptions: [] } },
+        { id: "t3", type: "githubContentTrigger", position: { x: 0, y: 0 }, data: { channelId: "", repos: [] } },
+      ] as never,
+      edges: [],
+      isDirty: false,
+    });
+
+    await useFlowEditor.getState().autoFillChannelIds();
+    expect(stub.urls).toEqual([]);
+    expect(useFlowEditor.getState().isDirty).toBe(false);
+  });
+
+  it("trigger 已经选了账号就不覆盖", async () => {
+    useFlowEditor.setState({
+      nodes: [{ id: "t1", type: "xTrigger", position: { x: 0, y: 0 }, data: { channelType: "X", channelId: "already-picked" } }] as never,
+      edges: [],
+      isDirty: false,
+    });
+
+    await useFlowEditor.getState().autoFillChannelIds();
+    expect((useFlowEditor.getState().nodes[0].data as Record<string, unknown>).channelId).toBe("already-picked");
+    expect(stub.urls).toEqual([]);
+    expect(useFlowEditor.getState().isDirty).toBe(false);
+  });
+
   it("不参与作废：仍走记忆化，不调用 invalidateListCache", async () => {
     // 它是加载 flow 时的后台便利逻辑，没有任何用户可见的"刷新"入口；在那里作废缓存
     // 只会把这份缓存本来要挡的并发重复请求放回来。用户点了别处的刷新按钮之后，

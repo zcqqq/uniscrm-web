@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findOrphanNodeIds, validateFlowGraph, findEmptyYouTubeConditionIds, findOrLogicEmptyNodeIds, findYouTubeTriggerNoSubscriptionIds, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
+import { findOrphanNodeIds, validateFlowGraph, findEmptyYouTubeConditionIds, findOrLogicEmptyNodeIds, findYouTubeTriggerNoSubscriptionIds, findTriggerNoChannelIds, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
 import { CONDITION_LOGIC_OR } from "../../nodeTypeRegistry";
 
 describe("TRIGGER_NODE_TYPES", () => {
@@ -89,9 +89,11 @@ describe("findOrphanNodeIds", () => {
 
 describe("validateFlowGraph", () => {
   it("is valid when there are no orphan nodes", () => {
-    const nodes = [{ id: "t1", type: "xTrigger" }, { id: "a1", type: "action" }];
+    // trigger 必须带上 channelId：这个 case 要验的是"有没有孤儿"，别让"没选账号"那条规则
+    // 顺带把它判失败。
+    const nodes = [{ id: "t1", type: "xTrigger", data: { channelId: "chan-1" } }, { id: "a1", type: "action" }];
     const edges = [{ source: "t1", target: "a1" }];
-    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [], orLogicEmptyNodeIds: [], youtubeNoSubscriptionNodeIds: [], githubNoRepoNodeIds: [], xMediaConflictNodeIds: [] });
+    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [], orLogicEmptyNodeIds: [], youtubeNoSubscriptionNodeIds: [], githubNoRepoNodeIds: [], xMediaConflictNodeIds: [], triggerNoChannelNodeIds: [] });
   });
 
   it("is invalid and lists orphan ids when nodes are unreachable", () => {
@@ -118,7 +120,7 @@ describe("validateFlowGraph", () => {
   it("accepts a youtubeCondition under a YouTube trigger", () => {
     // 带一条真条件：这个 case 要验的是"位置对不对"，不能让空条件那条规则顺带把它判失败。
     const nodes = [
-      { id: "t1", type: "youtubeContentTrigger", data: { subscriptions: [{ channelId: "UCa", channelName: "A" }] } },
+      { id: "t1", type: "youtubeContentTrigger", data: { channelId: "chan-1", subscriptions: [{ channelId: "UCa", channelName: "A" }] } },
       { id: "yc1", type: "youtubeCondition", data: { conditions: [{ field: "view_count", operator: ">", value: "1" }] } },
     ];
     const edges = [{ source: "t1", target: "yc1" }];
@@ -258,7 +260,7 @@ describe("validateFlowGraph — empty youtubeCondition conditions", () => {
 
   it("passes a fully configured YouTube condition flow", () => {
     const nodes = [
-      { id: "t1", type: "youtubeContentTrigger", data: { subscriptions: [{ channelId: "UCa", channelName: "A" }] } },
+      { id: "t1", type: "youtubeContentTrigger", data: { channelId: "chan-1", subscriptions: [{ channelId: "UCa", channelName: "A" }] } },
       { id: "w1", type: "wait" },
       { id: "yc1", type: "youtubeCondition", data: { conditions: [{ field: "view_count", operator: ">=", value: "$user.view_count / 1000" }] } },
       { id: "a1", type: "action" },
@@ -277,6 +279,7 @@ describe("validateFlowGraph — empty youtubeCondition conditions", () => {
       youtubeNoSubscriptionNodeIds: [],
       githubNoRepoNodeIds: [],
       xMediaConflictNodeIds: [],
+      triggerNoChannelNodeIds: [],
     });
   });
 
@@ -395,5 +398,62 @@ describe("validateFlowGraph: youtube trigger without subscription", () => {
     const result = validateFlowGraph(nodes, [{ source: "t1", target: "a1" }]);
     expect(result.valid).toBe(false);
     expect(result.youtubeNoSubscriptionNodeIds).toEqual(["t1"]);
+  });
+});
+
+// 2026-08-21 排查：生产租户 100001 唯一一条 published flow 的 xTrigger 没选账号，
+// TRIGGER_MATCHERS 拿 "" 去比真实 channel id，从 2026-07-25 起一次都没触发过。
+describe("findTriggerNoChannelIds", () => {
+  it("flags a channel-bound trigger whose channelId is empty, missing, or non-string", () => {
+    const nodes = [
+      { id: "t1", type: "xTrigger", data: { channelType: "X", eventType: "follow.follow", channelId: "" } },
+      { id: "t2", type: "xContentTrigger", data: {} },
+      { id: "t3", type: "youtubeContentTrigger", data: { channelId: null } },
+      { id: "t4", type: "githubContentTrigger", data: { channelId: undefined } },
+    ];
+    expect(findTriggerNoChannelIds(nodes)).toEqual(["t1", "t2", "t3", "t4"]);
+  });
+
+  it("passes a trigger that has an account selected", () => {
+    const nodes = [{ id: "t1", type: "xTrigger", data: { channelType: "X", channelId: "chan-1" } }];
+    expect(findTriggerNoChannelIds(nodes)).toEqual([]);
+  });
+
+  // cronTrigger 按计划触发，压根不绑账号 —— 拦它等于把一整类合法流程锁死。
+  it("never flags cronTrigger, which binds no account", () => {
+    const nodes = [{ id: "t1", type: "cronTrigger", data: { scheduleType: "daily", dailyTime: "09:00" } }];
+    expect(findTriggerNoChannelIds(nodes)).toEqual([]);
+  });
+
+  // action 节点的空 channelId 不归这条判据管：它不会让 flow 静默不触发，而是让那一步走
+  // failed 分支并在 flow_log 里留下 failure_reason —— 可诊断，与"整条流程从不启动"不同。
+  it("ignores action nodes and unknown types", () => {
+    const nodes = [
+      { id: "a1", type: "action", data: { actionType: "xAction", channelId: "" } },
+      { id: "z1", type: "someLegacyType", data: {} },
+    ];
+    expect(findTriggerNoChannelIds(nodes)).toEqual([]);
+  });
+});
+
+describe("validateFlowGraph: trigger without an account", () => {
+  it("is invalid and lists the trigger id — the exact shape of prod flow f701b9fe", () => {
+    const nodes = [
+      { id: "t1", type: "xTrigger", data: { channelType: "X", eventType: "follow.follow", channelId: "" } },
+      { id: "a1", type: "action", data: { actionType: "xAction", xEvent: "create-dm", channelId: "chan-1" } },
+    ];
+    const result = validateFlowGraph(nodes, [{ source: "t1", target: "a1" }]);
+    expect(result.valid).toBe(false);
+    expect(result.triggerNoChannelNodeIds).toEqual(["t1"]);
+  });
+
+  it("is valid once the trigger has an account", () => {
+    const nodes = [
+      { id: "t1", type: "xTrigger", data: { channelType: "X", eventType: "follow.follow", channelId: "chan-1" } },
+      { id: "a1", type: "action", data: { actionType: "xAction", xEvent: "create-dm", channelId: "chan-1" } },
+    ];
+    const result = validateFlowGraph(nodes, [{ source: "t1", target: "a1" }]);
+    expect(result.valid).toBe(true);
+    expect(result.triggerNoChannelNodeIds).toEqual([]);
   });
 });

@@ -1,4 +1,19 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+
+// addNode 落下一个 channel-bound trigger 后会 void 一次 autoFillChannelIds()（"只有一个账号
+// 就自动选上"），它会真的去打 /api/channels。测试环境里那是个相对 URL，fetch 直接抛
+// Invalid URL，噪音落在这个与账号无关的用例文件上。把出网这一层换掉，回一个"两个账号"的
+// 列表——自动填充只在恰好一个账号时才动图，所以这里的图保持不变，用例断言的仍是纯粹的
+// 单 trigger 约束。
+vi.mock("../../../shared/frontend/lib/auth-fetch", () => ({
+  authFetch: async () =>
+    new Response(JSON.stringify([{ id: "c1", username: "a" }, { id: "c2", username: "b" }]), {
+      status: 200,
+      // i18n-ok: HTTP header name/value, not user-facing text
+      headers: { "Content-Type": "application/json" },
+    }),
+}));
+
 import { useFlowEditor } from "../../frontend/store/flow-editor";
 
 describe("addNode: single-trigger-node constraint", () => {

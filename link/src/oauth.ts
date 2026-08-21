@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { resolveSession as resolveSharedSession } from "../../shared/auth";
+import { storeOAuthState, consumeOAuthState } from "../../shared/oauth-state";
 import { Twitter, Google, generateState, generateCodeVerifier, decodeIdToken } from "arctic";
 import type { Env } from "./types";
 import { XTokenService } from "./services/x-token";
@@ -81,7 +82,7 @@ export function oauthRoutes() {
     const arcticUrl = twitter.createAuthorizationURL(state, codeVerifier, scopes);
     const oauthUrl = new URL(arcticUrl.toString().replace("https://twitter.com/", "https://x.com/"));
 
-    await c.env.KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier, tenantId, memberId, byokChannelId }), { expirationTtl: 300 });
+    await storeOAuthState(c.env.WEB_DB, state, { codeVerifier, tenantId, memberId, byokChannelId });
     return c.redirect(oauthUrl.toString(), 302);
   });
 
@@ -93,12 +94,11 @@ export function oauthRoutes() {
     const state = c.req.query("state");
     if (!code || !state) return c.json({ error: "Missing code or state" }, 400);
 
-    const stored = await c.env.KV.get(`oauth_state:${state}`);
-    if (!stored) return c.json({ error: "Invalid or expired state" }, 400);
-    await c.env.KV.delete(`oauth_state:${state}`);
-    const { codeVerifier, tenantId, memberId, byokChannelId } = JSON.parse(stored) as {
+    const stored = await consumeOAuthState<{
       codeVerifier: string; tenantId?: string; memberId?: string; byokChannelId?: string;
-    };
+    }>(c.env.WEB_DB, state);
+    if (!stored) return c.json({ error: "Invalid or expired state" }, 400);
+    const { codeVerifier, tenantId, memberId, byokChannelId } = stored;
 
     let clientId = c.env.X_CLIENT_ID;
     let clientSecret = c.env.X_CLIENT_SECRET;
@@ -350,7 +350,7 @@ export function oauthRoutes() {
 
     const url = new URL(c.req.url);
     const state = crypto.randomUUID();
-    await c.env.KV.put(`oauth_state:${state}`, JSON.stringify({ tenantId, memberId, provider: "tiktok" }), { expirationTtl: 300 });
+    await storeOAuthState(c.env.WEB_DB, state, { tenantId, memberId, provider: "tiktok" });
 
     const redirectUri = encodeURIComponent(`${url.origin}/api/auth/tiktok/callback`);
     const tiktokUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${c.env.TIKTOK_CLIENT_KEY}&scope=user.info.basic,video.list,video.upload&response_type=code&redirect_uri=${redirectUri}&state=${state}`;
@@ -364,10 +364,9 @@ export function oauthRoutes() {
     const state = c.req.query("state");
     if (!code || !state) return c.json({ error: "Missing code or state" }, 400);
 
-    const stored = await c.env.KV.get(`oauth_state:${state}`);
+    const stored = await consumeOAuthState<{ tenantId?: string; memberId?: string }>(c.env.WEB_DB, state);
     if (!stored) return c.json({ error: "Invalid or expired state" }, 400);
-    await c.env.KV.delete(`oauth_state:${state}`);
-    const { tenantId, memberId } = JSON.parse(stored) as { tenantId?: string; memberId?: string };
+    const { tenantId, memberId } = stored;
 
     const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
       method: "POST",
@@ -466,11 +465,7 @@ export function oauthRoutes() {
 
     const url = new URL(c.req.url);
     const state = crypto.randomUUID();
-    await c.env.KV.put(
-      `oauth_state:${state}`,
-      JSON.stringify({ tenantId: String(session.tenant_id), memberId: session.member_id, provider: "github" }),
-      { expirationTtl: 300 }
-    );
+    await storeOAuthState(c.env.WEB_DB, state, { tenantId: String(session.tenant_id), memberId: session.member_id, provider: "github" });
 
     const redirectUri = `${url.origin}/api/auth/github/callback`;
     const authUrl = new URL("https://github.com/login/oauth/authorize");
@@ -488,10 +483,9 @@ export function oauthRoutes() {
     const state = c.req.query("state");
     if (!code || !state) return c.json({ error: "Missing code or state" }, 400);
 
-    const stored = await c.env.KV.get(`oauth_state:${state}`);
+    const stored = await consumeOAuthState<{ tenantId?: string; memberId?: string }>(c.env.WEB_DB, state);
     if (!stored) return c.json({ error: "Invalid or expired state" }, 400);
-    await c.env.KV.delete(`oauth_state:${state}`);
-    const { tenantId, memberId } = JSON.parse(stored) as { tenantId?: string; memberId?: string };
+    const { tenantId, memberId } = stored;
 
     const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
       method: "POST",
@@ -586,7 +580,7 @@ export function oauthRoutes() {
       c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, `${url.origin}/api/auth/youtube/callback`
     );
 
-    await c.env.KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier, tenantId, memberId }), { expirationTtl: 300 });
+    await storeOAuthState(c.env.WEB_DB, state, { codeVerifier, tenantId, memberId });
     return c.redirect(oauthUrl.toString(), 302);
   });
 
@@ -597,12 +591,11 @@ export function oauthRoutes() {
     const state = c.req.query("state");
     if (!code || !state) return c.json({ error: "Missing code or state" }, 400);
 
-    const stored = await c.env.KV.get(`oauth_state:${state}`);
-    if (!stored) return c.json({ error: "Invalid or expired state" }, 400);
-    await c.env.KV.delete(`oauth_state:${state}`);
-    const { codeVerifier, tenantId, memberId } = JSON.parse(stored) as {
+    const stored = await consumeOAuthState<{
       codeVerifier: string; tenantId?: string; memberId?: string;
-    };
+    }>(c.env.WEB_DB, state);
+    if (!stored) return c.json({ error: "Invalid or expired state" }, 400);
+    const { codeVerifier, tenantId, memberId } = stored;
     if (!tenantId || !memberId) return c.json({ error: "Must be logged in to connect YouTube" }, 401);
 
     const google = new Google(c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET, `${url.origin}/api/auth/youtube/callback`);

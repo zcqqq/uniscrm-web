@@ -1,4 +1,5 @@
 import { normalizeEmail } from "./email-identity";
+import { storeOAuthState, consumeOAuthState } from "../../../shared/oauth-state";
 
 export interface OAuthState {
   codeVerifier: string;
@@ -37,16 +38,11 @@ export class OAuthService {
   ) {}
 
   async storeState(state: string, data: OAuthState): Promise<void> {
-    await this.kv.put(`oauth_state:${state}`, JSON.stringify(data), {
-      expirationTtl: 300,
-    });
+    await storeOAuthState(this.db, state, data);
   }
 
   async getState(state: string): Promise<OAuthState | null> {
-    const raw = await this.kv.get(`oauth_state:${state}`);
-    if (!raw) return null;
-    await this.kv.delete(`oauth_state:${state}`);
-    return JSON.parse(raw) as OAuthState;
+    return consumeOAuthState<OAuthState>(this.db, state);
   }
 
   async resolveUser(

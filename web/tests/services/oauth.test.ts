@@ -40,38 +40,48 @@ describe("OAuthService", () => {
     service = new OAuthService(db as any, kv as any);
   });
 
+  // State moved off KV onto D1 (shared/oauth-state.ts): KV is only eventually consistent
+  // across edge colos, and the /authorize write and /callback read almost always land on
+  // different colos — a fast round trip (account already consented, no consent screen) could
+  // beat the write's propagation and produce a false "Invalid or expired state" on an
+  // otherwise legitimate login. See the 2026-08-21 tenant 100005 investigation.
   describe("storeState", () => {
-    it("stores state in KV with 5min TTL", async () => {
+    it("stores state in D1 with a 10-minute expiry, after pruning already-expired rows", async () => {
       const data = { codeVerifier: "verifier123", mode: "login" as const };
       await service.storeState("state-abc", data);
 
-      expect(kv.put).toHaveBeenCalledWith(
-        "oauth_state:state-abc",
-        JSON.stringify(data),
-        { expirationTtl: 300 }
-      );
+      expect(db.prepare).toHaveBeenCalledWith("DELETE FROM oauth_states WHERE expires_at <= datetime('now')");
+      expect(db.prepare).toHaveBeenCalledWith("INSERT INTO oauth_states (state, data, expires_at) VALUES (?, ?, datetime('now', ?))");
+      const insertCall = db._bind.mock.calls.find((args: unknown[]) => args[0] === "state-abc");
+      expect(insertCall).toBeDefined();
+      expect(insertCall![1]).toBe(JSON.stringify(data));
+      // expires_at is computed by SQLite itself (datetime('now', '+N seconds')), not formatted
+      // in JS — an ISO-formatted expiry would lexicographically outrank datetime('now')'s
+      // space-separated output for any same-day timestamp and never compare as expired.
+      expect(insertCall![2]).toBe("+600 seconds");
     });
   });
 
   describe("getState", () => {
-    it("retrieves state and deletes it (one-time use)", async () => {
+    it("consumes state via one atomic DELETE ... RETURNING (one-time use)", async () => {
       const data = { codeVerifier: "verifier123", mode: "login" };
-      kv.get.mockResolvedValue(JSON.stringify(data));
+      db._first.mockResolvedValueOnce({ data: JSON.stringify(data) });
 
       const result = await service.getState("state-abc");
 
-      expect(kv.get).toHaveBeenCalledWith("oauth_state:state-abc");
-      expect(kv.delete).toHaveBeenCalledWith("oauth_state:state-abc");
+      expect(db.prepare).toHaveBeenCalledWith(
+        "DELETE FROM oauth_states WHERE state = ? AND expires_at > datetime('now') RETURNING data"
+      );
+      expect(db._bind).toHaveBeenCalledWith("state-abc");
       expect(result).toEqual(data);
     });
 
-    it("returns null if state not found", async () => {
-      kv.get.mockResolvedValue(null);
+    it("returns null if state not found, already consumed, or expired", async () => {
+      db._first.mockResolvedValueOnce(null);
 
       const result = await service.getState("nonexistent");
 
       expect(result).toBeNull();
-      expect(kv.delete).not.toHaveBeenCalled();
     });
   });
 

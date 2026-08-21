@@ -53,7 +53,8 @@ export class OAuthService {
     provider: string,
     providerUserId: string,
     email: string | null,
-    timezone = "UTC"
+    timezone = "UTC",
+    language = "en"
   ): Promise<ResolveUserResult> {
     const existing = await this.db
       .prepare(
@@ -108,8 +109,8 @@ export class OAuthService {
     let isNew = true;
     try {
       await this.db
-        .prepare("INSERT INTO members (id, tenant_id, email, preferred_location, timezone, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(memberId, tenantId, normalizedEmail, "global", timezone, now)
+        .prepare("INSERT INTO members (id, tenant_id, email, preferred_location, language, timezone, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(memberId, tenantId, normalizedEmail, "global", language, timezone, now)
         .run();
     } catch (e) {
       // members.email 上的唯一索引堵住了上面那次「按邮箱查无此人」与这次 INSERT 之间的窗口。并发

@@ -7,6 +7,7 @@ import { EmailService } from "../services/email";
 import { PendingTaskService } from "../services/pending-tasks";
 import { executePendingTask } from "../services/task-executor";
 import { cfTimezone, resolveSignupTimezone } from "../services/timezone";
+import { resolveSignupLanguage } from "../services/language";
 import { dummyVerify, hashPassword, needsUpgrade, verifyPassword } from "../services/password";
 import { LoginThrottle } from "../services/login-throttle";
 import { normalizeEmail } from "../services/email-identity";
@@ -184,12 +185,14 @@ export function createAuthRouter() {
       const tenantId = tenant!.tenant_id;
 
       const tz = resolveSignupTimezone(link.timezone, cfTimezone(c.req.raw));
+      // magic link 是在用户自己的浏览器里点开的，这个请求带着他的 Accept-Language。
+      const lang = resolveSignupLanguage(c.req.header("accept-language"));
       let createdMember = true;
       try {
         await c.env.WEB_DB.prepare(
-          "INSERT INTO members (id, tenant_id, email, preferred_location, timezone, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+          "INSERT INTO members (id, tenant_id, email, preferred_location, language, timezone, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
         )
-          .bind(memberId, tenantId, normalizedEmail, "global", tz, now)
+          .bind(memberId, tenantId, normalizedEmail, "global", lang, tz, now)
           .run();
       } catch (e) {
         // members.email 上的唯一索引堵住了上面那次 SELECT 与这次 INSERT 之间的窗口。并发点开同一
@@ -213,7 +216,7 @@ export function createAuthRouter() {
         c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t1));
         c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t2));
 
-        member = { id: memberId, tenant_id: tenantId, email: normalizedEmail, preferred_location: "global", language: "en", timezone: tz };
+        member = { id: memberId, tenant_id: tenantId, email: normalizedEmail, preferred_location: "global", language: lang, timezone: tz };
       }
     }
 

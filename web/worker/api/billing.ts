@@ -29,13 +29,21 @@ export function createBillingRouter() {
 
   router.post("/subscribe", async (c) => {
     const tenantId = c.get("tenantId" as never) as string;
+    const memberId = c.get("memberId" as never) as string;
     const { tier } = await c.req.json<{ tier: string }>();
     const svc = new BillingService(c.env.ADMIN_URL, c.env.INTERNAL_SECRET);
 
     const returnUrl = `${c.env.WEB_URL}/api/billing/return`;
     const cancelUrl = `${c.env.WEB_URL}/billing?cancelled=true`;
 
-    const result = await svc.createSubscription(tenantId, tier, returnUrl, cancelUrl);
+    // 让 Stripe 收银台跟着下单这个人的界面语言走，而不是让 Stripe 按浏览器去猜。否则中文用户会
+    // 在中文收银台和英文 /billing 页之间来回跳（2026-08-20 租户 100005）。
+    // tenant-scope-ok: id bound to session memberId (a member belongs to one tenant — the scoping key)
+    const member = await c.env.WEB_DB.prepare("SELECT language FROM members WHERE id = ?")
+      .bind(memberId)
+      .first<{ language: string }>();
+
+    const result = await svc.createSubscription(tenantId, tier, returnUrl, cancelUrl, member?.language);
     return c.json(result);
   });
 

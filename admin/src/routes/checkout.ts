@@ -4,11 +4,12 @@ import { SubscriptionDB } from "../services/subscription-db";
 import { createStripeClient, findOrCreateCustomer, createCheckoutSession } from "../services/stripe";
 
 export async function checkoutRoute(c: Context<{ Bindings: Env }>) {
-  const { tenant_id, tier, return_url, cancel_url } = await c.req.json<{
+  const { tenant_id, tier, return_url, cancel_url, locale } = await c.req.json<{
     tenant_id: string;
     tier: string;
     return_url: string;
     cancel_url: string;
+    locale?: string;
   }>();
 
   const tenant = await c.env.WEB_DB
@@ -43,6 +44,9 @@ export async function checkoutRoute(c: Context<{ Bindings: Env }>) {
       priceId,
       returnUrl: return_url,
       cancelUrl: cancel_url,
+      // 只放行产品支持的两种语言，其余（含缺省）交回 Stripe 按浏览器猜 —— 别把没校验过的
+      // 字符串直接塞给 Stripe，它对无效 locale 是直接报错的。
+      locale: locale === "zh" || locale === "en" ? locale : "auto",
     });
 
     return c.json({ approval_url: approvalUrl });

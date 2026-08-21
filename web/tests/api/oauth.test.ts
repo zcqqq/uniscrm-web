@@ -58,12 +58,14 @@ describe("POST /auth/verify-code", () => {
     vi.restoreAllMocks();
   });
 
-  function post() {
+  function post(acceptLanguage?: string) {
+    const headers: Record<string, string> = { "Content-Type": "application/json", Cookie: "pending_oauth=pending-1" };
+    if (acceptLanguage) headers["Accept-Language"] = acceptLanguage;
     return app.request(
       "/auth/verify-code",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", Cookie: "pending_oauth=pending-1" },
+        headers,
         body: JSON.stringify({ email: "new@example.com", code: "123456" }),
       },
       undefined,
@@ -75,7 +77,7 @@ describe("POST /auth/verify-code", () => {
     const res = await post();
 
     expect(res.status).toBe(200);
-    expect(resolveUser).toHaveBeenCalledWith("x", "x-123", "new@example.com", "Asia/Shanghai");
+    expect(resolveUser).toHaveBeenCalledWith("x", "x-123", "new@example.com", "Asia/Shanghai", "en");
   });
 
   it("falls back to UTC when the pending record has no timezone", async () => {
@@ -87,7 +89,15 @@ describe("POST /auth/verify-code", () => {
 
     await post();
 
-    expect(resolveUser).toHaveBeenCalledWith("x", "x-123", "new@example.com", "UTC");
+    expect(resolveUser).toHaveBeenCalledWith("x", "x-123", "new@example.com", "UTC", "en");
+  });
+
+  // members.language 以前压根没被写过，所有账号都吃建表默认值 'en'——中文用户注册完就落在英文
+  // 界面里。语言取这个请求自己带的 Accept-Language，见 worker/services/language.ts。
+  it("carries the browser's language into the member it creates", async () => {
+    await post("zh-CN,zh;q=0.9,en;q=0.8");
+
+    expect(resolveUser).toHaveBeenCalledWith("x", "x-123", "new@example.com", "Asia/Shanghai", "zh");
   });
 
   it("kicks off provision-db and activate-trial tasks when the signup is brand-new", async () => {

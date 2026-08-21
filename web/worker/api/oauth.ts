@@ -9,9 +9,11 @@ import { X_CHANNEL_SCOPES } from "../../../shared/x-scopes";
 import { PendingTaskService } from "../services/pending-tasks";
 import { executePendingTask } from "../services/task-executor";
 import { cfTimezone, resolveSignupTimezone } from "../services/timezone";
+import { resolveSignupLanguage } from "../services/language";
 
-async function memberLanguage(db: Env["WEB_DB"], memberId: string, isNew: boolean): Promise<string> {
-  if (isNew) return "en";
+// 建号时 members.language 已由 resolveSignupLanguage 写入真实值（早先这里对 isNew 直接返回
+// "en"，是因为那时这一列只会是建表默认值），所以一律以库里那行为准。
+async function memberLanguage(db: Env["WEB_DB"], memberId: string): Promise<string> {
   // tenant-scope-ok: id bound to the OAuth-resolved memberId (a member belongs to one tenant — the scoping key)
   const row = await db.prepare("SELECT language FROM members WHERE id = ?")
     .bind(memberId)
@@ -70,8 +72,8 @@ export function createOAuthRouter() {
       return c.redirect("/settings");
     }
 
-    const { memberId, tenantId, isNew } = await oauthService.resolveUser("google", sub, email, resolveSignupTimezone(stored.timezone, cfTimezone(c.req.raw)));
-    const lang = await memberLanguage(c.env.WEB_DB, memberId, isNew);
+    const { memberId, tenantId, isNew } = await oauthService.resolveUser("google", sub, email, resolveSignupTimezone(stored.timezone, cfTimezone(c.req.raw)), resolveSignupLanguage(c.req.header("accept-language")));
+    const lang = await memberLanguage(c.env.WEB_DB, memberId);
     if (isNew) {
       const tasks = new PendingTaskService(c.env.WEB_DB);
       const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
@@ -80,7 +82,7 @@ export function createOAuthRouter() {
       c.executionCtx.waitUntil(executePendingTask(c.env, tasks, t2));
     }
     const sessions = new SessionService(c.env.WEB_DB);
-    const newSessionId = await sessions.create(memberId, tenantId, email);
+    const newSessionId = await sessions.create(memberId, tenantId, email, lang);
 
     setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/" });
     setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/", domain: "uni-scrm.com" });
@@ -161,8 +163,8 @@ export function createOAuthRouter() {
     const email = emailData.data?.email;
 
     if (email) {
-      const { memberId, tenantId, isNew } = await oauthService.resolveUser("x", xUserId, email, resolveSignupTimezone(stored.timezone, cfTimezone(c.req.raw)));
-      const lang = await memberLanguage(c.env.WEB_DB, memberId, isNew);
+      const { memberId, tenantId, isNew } = await oauthService.resolveUser("x", xUserId, email, resolveSignupTimezone(stored.timezone, cfTimezone(c.req.raw)), resolveSignupLanguage(c.req.header("accept-language")));
+      const lang = await memberLanguage(c.env.WEB_DB, memberId);
       if (isNew) {
         const tasks = new PendingTaskService(c.env.WEB_DB);
         const t1 = await tasks.create("provision-db", { tenant_id: tenantId });
@@ -181,7 +183,7 @@ export function createOAuthRouter() {
       );
 
       const sessions = new SessionService(c.env.WEB_DB);
-      const newSessionId = await sessions.create(memberId, tenantId, email);
+      const newSessionId = await sessions.create(memberId, tenantId, email, lang);
 
       setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/" });
       setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/", domain: "uni-scrm.com" });
@@ -257,7 +259,7 @@ export function createOAuthRouter() {
     }
 
     await c.env.KV.delete(`email_code:${email}`);
-    const { memberId, tenantId, isNew } = await oauthService.resolveUser(pending.provider, pending.providerUserId, email, resolveSignupTimezone(pending.timezone, cfTimezone(c.req.raw)));
+    const { memberId, tenantId, isNew } = await oauthService.resolveUser(pending.provider, pending.providerUserId, email, resolveSignupTimezone(pending.timezone, cfTimezone(c.req.raw)), resolveSignupLanguage(c.req.header("accept-language")));
     await oauthService.deletePendingOAuth(pendingId);
     if (isNew) {
       const tasks = new PendingTaskService(c.env.WEB_DB);
@@ -278,8 +280,9 @@ export function createOAuthRouter() {
       );
     }
 
+    const lang = await memberLanguage(c.env.WEB_DB, memberId);
     const sessions = new SessionService(c.env.WEB_DB);
-    const newSessionId = await sessions.create(memberId, tenantId, email);
+    const newSessionId = await sessions.create(memberId, tenantId, email, lang);
     setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/" });
     setCookie(c, "session", "", { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 0, path: "/", domain: "uni-scrm.com" });
     setCookie(c, "session", newSessionId, {
@@ -299,7 +302,7 @@ export function createOAuthRouter() {
       domain: "uni-scrm.com",
     });
     // Readable by the static help center (help.uni-scrm.com) to pick the doc language
-    setCookie(c, "lang", await memberLanguage(c.env.WEB_DB, memberId, isNew), {
+    setCookie(c, "lang", lang, {
       httpOnly: false,
       secure: true,
       sameSite: "Lax",

@@ -64,7 +64,9 @@ export class BillingService {
     tenantId: string,
     tier: string,
     returnUrl: string,
-    cancelUrl: string
+    cancelUrl: string,
+    // 下单这个人的界面语言，用来决定 Stripe 收银台说什么语言；缺省时 admin 侧回落 "auto"。
+    locale?: string
   ): Promise<{ approval_url: string }> {
     const res = await fetch(`${this.adminUrl}/internal/subscriptions/create`, {
       method: "POST",
@@ -72,7 +74,7 @@ export class BillingService {
         "X-Internal-Secret": this.internalSecret,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ tenant_id: tenantId, tier, return_url: returnUrl, cancel_url: cancelUrl }),
+      body: JSON.stringify({ tenant_id: tenantId, tier, return_url: returnUrl, cancel_url: cancelUrl, locale }),
     });
     if (!res.ok) {
       const err = (await res.json()) as { error: string };

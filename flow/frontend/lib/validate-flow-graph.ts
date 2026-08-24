@@ -59,6 +59,28 @@ export function findEmptyYouTubeConditionIds(
     .map((n) => n.id);
 }
 
+// 与 findMisplacedYouTubeConditionIds 同构：githubCondition 复查的是"触发这条流程的那个
+// repo"，只在唯一 trigger 是 githubContentTrigger 的流程里有意义。
+export function findMisplacedGitHubConditionIds(
+  nodes: { id: string; type?: string }[]
+): string[] {
+  const triggers = nodes.filter((n) => TRIGGER_NODE_TYPES.includes(n.type ?? ""));
+  const onlyGitHubTrigger = triggers.length === 1 && triggers[0].type === "githubContentTrigger";
+  if (onlyGitHubTrigger) return [];
+  return nodes.filter((n) => n.type === "githubCondition").map((n) => n.id);
+}
+
+// 与 findEmptyYouTubeConditionIds 同构：空条件的 githubCondition 恒走 true 分支
+// （evaluateCondition 的 every() on [] === true），却仍然为每条内容打一次 GitHub API。
+export function findEmptyGitHubConditionIds(
+  nodes: { id: string; type?: string; data?: Record<string, unknown> }[]
+): string[] {
+  return nodes
+    .filter((n) => n.type === "githubCondition")
+    .filter((n) => countUsableConditions(n.data?.conditions) === 0)
+    .map((n) => n.id);
+}
+
 // 与运行时对"有几条条件"的判断保持一致，否则会出现「发布拦不住但运行时当没条件」或反之。
 // - 非数组一律算 0：executeContentActions 的 Array.isArray 守卫（index.ts）会把手改坏的
 //   或 AI 生成的畸形值降级成"没有条件"，运行时行为与空数组完全相同。
@@ -164,6 +186,8 @@ export function validateFlowGraph(
   orphanNodeIds: string[];
   misplacedNodeIds: string[];
   emptyConditionNodeIds: string[];
+  misplacedGitHubConditionNodeIds: string[];
+  emptyGitHubConditionNodeIds: string[];
   orLogicEmptyNodeIds: string[];
   youtubeNoSubscriptionNodeIds: string[];
   githubNoRepoNodeIds: string[];
@@ -173,6 +197,8 @@ export function validateFlowGraph(
   const orphanNodeIds = findOrphanNodeIds(nodes, edges);
   const misplacedNodeIds = findMisplacedYouTubeConditionIds(nodes);
   const emptyConditionNodeIds = findEmptyYouTubeConditionIds(nodes);
+  const misplacedGitHubConditionNodeIds = findMisplacedGitHubConditionIds(nodes);
+  const emptyGitHubConditionNodeIds = findEmptyGitHubConditionIds(nodes);
   const orLogicEmptyNodeIds = findOrLogicEmptyNodeIds(nodes);
   const youtubeNoSubscriptionNodeIds = findYouTubeTriggerNoSubscriptionIds(nodes);
   const githubNoRepoNodeIds = findGitHubTriggerNoRepoIds(nodes);
@@ -183,6 +209,8 @@ export function validateFlowGraph(
       orphanNodeIds.length === 0 &&
       misplacedNodeIds.length === 0 &&
       emptyConditionNodeIds.length === 0 &&
+      misplacedGitHubConditionNodeIds.length === 0 &&
+      emptyGitHubConditionNodeIds.length === 0 &&
       orLogicEmptyNodeIds.length === 0 &&
       youtubeNoSubscriptionNodeIds.length === 0 &&
       githubNoRepoNodeIds.length === 0 &&
@@ -191,6 +219,8 @@ export function validateFlowGraph(
     orphanNodeIds,
     misplacedNodeIds,
     emptyConditionNodeIds,
+    misplacedGitHubConditionNodeIds,
+    emptyGitHubConditionNodeIds,
     orLogicEmptyNodeIds,
     youtubeNoSubscriptionNodeIds,
     githubNoRepoNodeIds,

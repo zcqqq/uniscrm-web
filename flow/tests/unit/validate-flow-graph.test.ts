@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findOrphanNodeIds, validateFlowGraph, findEmptyYouTubeConditionIds, findOrLogicEmptyNodeIds, findYouTubeTriggerNoSubscriptionIds, findTriggerNoChannelIds, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
+import { findOrphanNodeIds, validateFlowGraph, findEmptyYouTubeConditionIds, findOrLogicEmptyNodeIds, findYouTubeTriggerNoSubscriptionIds, findTriggerNoChannelIds, findMisplacedGitHubConditionIds, findEmptyGitHubConditionIds, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
 import { CONDITION_LOGIC_OR } from "../../nodeTypeRegistry";
 
 describe("TRIGGER_NODE_TYPES", () => {
@@ -93,7 +93,7 @@ describe("validateFlowGraph", () => {
     // 顺带把它判失败。
     const nodes = [{ id: "t1", type: "xTrigger", data: { channelId: "chan-1" } }, { id: "a1", type: "action" }];
     const edges = [{ source: "t1", target: "a1" }];
-    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [], orLogicEmptyNodeIds: [], youtubeNoSubscriptionNodeIds: [], githubNoRepoNodeIds: [], xMediaConflictNodeIds: [], triggerNoChannelNodeIds: [] });
+    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [], misplacedGitHubConditionNodeIds: [], emptyGitHubConditionNodeIds: [], orLogicEmptyNodeIds: [], youtubeNoSubscriptionNodeIds: [], githubNoRepoNodeIds: [], xMediaConflictNodeIds: [], triggerNoChannelNodeIds: [] });
   });
 
   it("is invalid and lists orphan ids when nodes are unreachable", () => {
@@ -275,6 +275,8 @@ describe("validateFlowGraph — empty youtubeCondition conditions", () => {
       orphanNodeIds: [],
       misplacedNodeIds: [],
       emptyConditionNodeIds: [],
+      misplacedGitHubConditionNodeIds: [],
+      emptyGitHubConditionNodeIds: [],
       orLogicEmptyNodeIds: [],
       youtubeNoSubscriptionNodeIds: [],
       githubNoRepoNodeIds: [],
@@ -455,5 +457,66 @@ describe("validateFlowGraph: trigger without an account", () => {
     const result = validateFlowGraph(nodes, [{ source: "t1", target: "a1" }]);
     expect(result.valid).toBe(true);
     expect(result.triggerNoChannelNodeIds).toEqual([]);
+  });
+});
+
+const ghTrigger = { id: "ght", type: "githubContentTrigger" };
+
+describe("findMisplacedGitHubConditionIds", () => {
+  it("flags a githubCondition whose flow is triggered by something other than GitHub", () => {
+    const nodes = [
+      { id: "t1", type: "xContentTrigger" },
+      { id: "gc1", type: "githubCondition" },
+    ];
+    expect(findMisplacedGitHubConditionIds(nodes)).toEqual(["gc1"]);
+  });
+
+  it("accepts a githubCondition under a GitHub trigger", () => {
+    const nodes = [
+      ghTrigger,
+      { id: "gc1", type: "githubCondition", data: { conditions: [{ field: "is_latest_release", operator: "==", value: "1" }] } },
+    ];
+    expect(findMisplacedGitHubConditionIds(nodes)).toEqual([]);
+  });
+
+  it("flags every misplaced githubCondition, not just the first", () => {
+    const nodes = [
+      { id: "t1", type: "xContentTrigger" },
+      { id: "gc1", type: "githubCondition" },
+      { id: "gc2", type: "githubCondition" },
+    ];
+    expect(findMisplacedGitHubConditionIds(nodes)).toEqual(["gc1", "gc2"]);
+  });
+
+  it("stays quiet about flows that contain no githubCondition", () => {
+    expect(findMisplacedGitHubConditionIds([{ id: "t1", type: "xContentTrigger" }])).toEqual([]);
+  });
+});
+
+describe("findEmptyGitHubConditionIds", () => {
+  it("flags a githubCondition whose conditions array is empty", () => {
+    const nodes = [ghTrigger, { id: "gc1", type: "githubCondition", data: { conditions: [] } }];
+    expect(findEmptyGitHubConditionIds(nodes)).toEqual(["gc1"]);
+  });
+
+  it("accepts a githubCondition with one usable condition", () => {
+    const nodes = [ghTrigger, { id: "gc1", type: "githubCondition", data: { conditions: [{ field: "is_latest_release", operator: "==", value: "1" }] } }];
+    expect(findEmptyGitHubConditionIds(nodes)).toEqual([]);
+  });
+
+  it("ignores nodes that are not githubCondition, even with empty conditions", () => {
+    const nodes = [ghTrigger, { id: "w1", type: "wait", data: { conditions: [] } }];
+    expect(findEmptyGitHubConditionIds(nodes)).toEqual([]);
+  });
+});
+
+describe("validateFlowGraph — githubCondition fields", () => {
+  it("misplacedGitHubConditionNodeIds / emptyGitHubConditionNodeIds surface through validateFlowGraph", () => {
+    const nodes = [{ id: "t1", type: "xContentTrigger" }, { id: "gc1", type: "githubCondition", data: { conditions: [] } }];
+    const edges: { source: string; target: string }[] = [];
+    const result = validateFlowGraph(nodes, edges);
+    expect(result.misplacedGitHubConditionNodeIds).toEqual(["gc1"]);
+    expect(result.emptyGitHubConditionNodeIds).toEqual(["gc1"]);
+    expect(result.valid).toBe(false);
   });
 });

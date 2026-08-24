@@ -337,4 +337,11 @@ export const PROPS = definePropDefinitions([
     dataType: "INT",
     label: { en: "Releases (30d)", zh: "30天发版数" },
   },
+  // 1 天窗口内带文本的 release 列表，JSON 数组字符串（每条 {title, content_text}）。
+  // 同样是 flow-payload-only，不带 entity；值同样由 flow 侧注入，见上面 release_count_* 的注释。
+  {
+    propId: "release_notes_1d",
+    dataType: "TEXT",
+    label: { en: "Release Notes (24h)", zh: "24小时发版说明" },
+  },
 ]);

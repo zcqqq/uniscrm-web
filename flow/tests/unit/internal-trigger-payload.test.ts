@@ -23,7 +23,7 @@ const DAY = 24 * HOUR;
 // 1d = 1, 7d = 1, 30d = 2.
 function releaseHistory() {
   return [
-    { published_at: new Date(Date.now() - 2 * HOUR).toISOString(), prerelease: false },
+    { published_at: new Date(Date.now() - 2 * HOUR).toISOString(), prerelease: false, title: "v1.4.0", content_text: "dark mode" },
     { published_at: new Date(Date.now() - 3 * DAY).toISOString(), prerelease: true },
     { published_at: new Date(Date.now() - 10 * DAY).toISOString(), prerelease: false },
   ];
@@ -117,5 +117,20 @@ describe("POST /internal/trigger runs actions against the trigger-enriched paylo
     const body = JSON.parse((call![1] as RequestInit).body as string);
     expect(body.release_history).toBeUndefined();
     expect(body.release_count_30d).toBe(2);
+  });
+
+  it("release_notes_1d reaches the action payload as the JSON array the trigger computed", async () => {
+    await env.FLOW_DB.prepare(`UPDATE flows SET graph_json = ? WHERE id = 'flow-trigger-gh'`)
+      .bind(graphJson.replace(',"body":"count7=$event.release_count_7d"', ""))
+      .run();
+
+    const { fetchMock } = await trigger({
+      channel_id: "gh-chan", repo_full_name: "oven-sh/bun", is_prerelease: 0,
+      release_history: releaseHistory(),
+    });
+
+    const call = fetchMock.mock.calls.find(([u]) => String(u) === "https://hook.test/x");
+    const body = JSON.parse((call![1] as RequestInit).body as string);
+    expect(body.release_notes_1d).toBe(JSON.stringify([{ title: "v1.4.0", content_text: "dark mode" }]));
   });
 });

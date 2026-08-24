@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeReleaseCounts, parseReleaseHistory } from "../../src/github-release-count";
+import { computeReleaseCounts, computeReleaseNotes1d, parseReleaseHistory } from "../../src/github-release-count";
 
 const NOW = Date.parse("2026-08-10T00:00:00Z");
 const H = [
@@ -51,5 +51,44 @@ describe("parseReleaseHistory", () => {
   it("非数组返回空数组", () => {
     expect(parseReleaseHistory(undefined)).toEqual([]);
     expect(parseReleaseHistory({})).toEqual([]);
+  });
+
+  it("保留 title/content_text（是字符串时）—— link 侧现在会带上它们", () => {
+    expect(parseReleaseHistory([
+      { published_at: "2026-08-09T00:00:00Z", prerelease: false, title: "v1.4.0", content_text: "notes" },
+    ])).toEqual([{ published_at: "2026-08-09T00:00:00Z", prerelease: false, title: "v1.4.0", content_text: "notes" }]);
+  });
+
+  it("title/content_text 不是字符串就丢掉这两个字段，不是丢掉整条", () => {
+    expect(parseReleaseHistory([
+      { published_at: "2026-08-09T00:00:00Z", prerelease: false, title: 123, content_text: null },
+    ])).toEqual([{ published_at: "2026-08-09T00:00:00Z", prerelease: false }]);
+  });
+});
+
+describe("computeReleaseNotes1d", () => {
+  const NOW2 = Date.parse("2026-08-10T00:00:00Z");
+  const withText = [
+    { published_at: "2026-08-09T12:00:00Z", prerelease: false, title: "v1.4.0", content_text: "dark mode" }, // 1d 内
+    { published_at: "2026-08-09T06:00:00Z", prerelease: true, title: "v1.4.0-rc1", content_text: "rc" },      // 1d 内，预发布
+    { published_at: "2026-08-06T00:00:00Z", prerelease: false, title: "v1.3.0", content_text: "old" },        // 1d 外
+    { published_at: "2026-08-09T18:00:00Z", prerelease: false },                                              // 1d 内但没文本（超出 48h 文本窗口或字节预算）
+  ];
+
+  it("默认口径只收正式版、只收窗口内、只收带文本的条目，title/content_text 分开存", () => {
+    expect(computeReleaseNotes1d(withText, false, NOW2)).toEqual([
+      { title: "v1.4.0", content_text: "dark mode" },
+    ]);
+  });
+
+  it("includePrerelease 打开时把预发布也收进来", () => {
+    expect(computeReleaseNotes1d(withText, true, NOW2)).toEqual([
+      { title: "v1.4.0", content_text: "dark mode" },
+      { title: "v1.4.0-rc1", content_text: "rc" },
+    ]);
+  });
+
+  it("空历史返回空数组", () => {
+    expect(computeReleaseNotes1d([], false, NOW2)).toEqual([]);
   });
 });

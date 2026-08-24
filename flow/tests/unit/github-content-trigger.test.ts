@@ -21,7 +21,7 @@ function payload(over: Record<string, unknown> = {}) {
     content_text: "notes",
     is_prerelease: 0,
     release_history: [
-      { published_at: "2026-08-09T12:00:00Z", prerelease: false },
+      { published_at: "2026-08-09T12:00:00Z", prerelease: false, title: "v1.4.0", content_text: "dark mode" },
       { published_at: "2026-08-06T00:00:00Z", prerelease: true },
       { published_at: "2026-07-20T00:00:00Z", prerelease: false },
     ],
@@ -69,6 +69,18 @@ describe("githubContentTrigger 的计数注入", () => {
     expect(r.payload.release_count_7d).toBe(1);   // 8-06 那条是预发布，默认不数
     expect(r.payload.release_count_30d).toBe(2);
     expect(r.payload.release_history).toBeUndefined();
+  });
+
+  it("同时注入 release_notes_1d —— 1天内带文本的 release，JSON 数组字符串，title/content_text 分开存", () => {
+    const r = executeFlow(graph({}), "content.created", payload(), NOW);
+    expect(r.payload.release_notes_1d).toBe(JSON.stringify([{ title: "v1.4.0", content_text: "dark mode" }]));
+  });
+
+  it("1天内没有带文本的 release 时，release_notes_1d 是空数组的 JSON，不是 undefined", () => {
+    const r = executeFlow(graph({}), "content.created", payload({
+      release_history: [{ published_at: "2026-08-06T00:00:00Z", prerelease: false, title: "old", content_text: "x" }],
+    }), NOW);
+    expect(r.payload.release_notes_1d).toBe("[]");
   });
 
   it("勾了 includePrerelease 时计数把预发布算进来", () => {

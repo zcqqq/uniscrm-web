@@ -1,7 +1,7 @@
 import { CONDITION_LOGIC_OR } from "../nodeTypeRegistry";
 import { USER_PROP_PREFIX } from "../../metadata/dataTypes";
 import { getNodeExecutor, getTriggerMatcher } from "./node-executors";
-import { computeReleaseCounts, parseReleaseHistory } from "./github-release-count";
+import { computeReleaseCounts, computeReleaseNotes1d, parseReleaseHistory } from "./github-release-count";
 
 // Kept exported from engine.ts (its historical home) for index.ts and the tests; the
 // implementation now lives in node-executors.ts next to the per-actionType builder map.
@@ -305,15 +305,17 @@ function enrichPayloadForTrigger(
 ): Record<string, unknown> {
   if (trigger.type !== "githubContentTrigger") return payload;
 
-  const counts = computeReleaseCounts(
-    parseReleaseHistory(payload.release_history),
-    trigger.data.includePrerelease === true,
-    now
-  );
+  const history = parseReleaseHistory(payload.release_history);
+  const includePrerelease = trigger.data.includePrerelease === true;
+  const counts = computeReleaseCounts(history, includePrerelease, now);
+  // release_notes_1d 走 JSON 字符串注入，和三个计数一个待遇：$content.release_notes_1d
+  // 插值出来就是这段 JSON，具体怎么读、怎么按 hosting/sponsoring 这类分类总结交给
+  // 下游 skill 的 prompt，这里不替它决定格式。
+  const notes1d = JSON.stringify(computeReleaseNotes1d(history, includePrerelease, now));
   // release_history 是中间数据，算完就丢：它对条件编辑器不可见，留在 payload 里只会
   // 让 flow 日志和 content_flow_pending 白白变大。
   const { release_history: _dropped, ...rest } = payload;
-  return { ...rest, ...counts };
+  return { ...rest, ...counts, release_notes_1d: notes1d };
 }
 
 export function resumeFromNode(

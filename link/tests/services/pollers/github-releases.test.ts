@@ -77,10 +77,50 @@ describe("buildReleaseHistory", () => {
       ] as never,
       NOW
     );
+    // 第一条在 48h 文本窗口内带 title/content_text；第三条（9 天前）超出文本窗口，
+    // 退回不带文本的老形状——它只用来算 release_count_7d/30d，1 天聚合用不到它。
     expect(h).toEqual([
-      { published_at: "2026-08-09T00:00:00Z", prerelease: false },
+      { published_at: "2026-08-09T00:00:00Z", prerelease: false, title: "v1", content_text: "notes" },
       { published_at: "2026-08-01T00:00:00Z", prerelease: true },
     ]);
+  });
+
+  it("48h 文本窗口外的条目不带 title/content_text", () => {
+    const h = buildReleaseHistory(
+      [rel({ published_at: "2026-08-07T00:00:00Z" })],   // 3 天前，超出 48h
+      NOW
+    );
+    expect(h).toEqual([{ published_at: "2026-08-07T00:00:00Z", prerelease: false }]);
+  });
+
+  it("title 为空时历史条目里也回退 tag_name，和主发射路径一致", () => {
+    const h = buildReleaseHistory(
+      [rel({ published_at: "2026-08-09T00:00:00Z", name: null, tag_name: "bun-v1.3.14" })],
+      NOW
+    );
+    expect(h[0].title).toBe("bun-v1.3.14");
+  });
+
+  it("单条历史正文超过 2000 字截断", () => {
+    const h = buildReleaseHistory(
+      [rel({ published_at: "2026-08-09T00:00:00Z", body: "x".repeat(5_000) })],
+      NOW
+    );
+    expect(h[0].content_text).toHaveLength(2_000);
+  });
+
+  it("带文本的条目累计超过字节预算后，后续条目退回不带文本的形状", () => {
+    // 48KB 预算，每条 2000 字符正文（ASCII，1 字节/字符）—— 第 25 条左右预算耗尽。
+    const releases = Array.from({ length: 30 }, (_, i) =>
+      rel({ id: i, published_at: "2026-08-09T00:00:00Z", body: "x".repeat(2_000) })
+    );
+    const h = buildReleaseHistory(releases as never, NOW);
+    const withText = h.filter((e) => e.content_text !== undefined);
+    const withoutText = h.filter((e) => e.content_text === undefined);
+    expect(withText.length).toBeGreaterThan(0);
+    expect(withoutText.length).toBeGreaterThan(0);
+    // 退回的条目仍然保留 published_at/prerelease —— 计数不受影响。
+    expect(withoutText[0].published_at).toBe("2026-08-09T00:00:00Z");
   });
 });
 

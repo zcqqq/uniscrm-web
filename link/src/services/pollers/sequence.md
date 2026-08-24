@@ -38,8 +38,9 @@ sequenceDiagram
             end
         end
     end
+    Note over Cron: release_history 每条只在 published_at 48h 内才带 title/content_text<br/>（超出的、或累计字节预算耗尽的条目仍保留 published_at/prerelease）
     Q->>FW: 消费
     FW->>FW: TRIGGER_MATCHERS.githubContentTrigger（含 includePrerelease 过滤）
-    FW->>FW: 按节点口径算 release_count_1d/7d/30d，删 release_history
+    FW->>FW: 按节点口径算 release_count_1d/7d/30d 与 release_notes_1d（JSON 数组），删 release_history
     FW->>FW: conditionsPass → 后续节点
 ```

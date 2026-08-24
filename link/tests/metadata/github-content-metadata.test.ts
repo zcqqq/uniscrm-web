@@ -33,6 +33,13 @@ describe("ContentMetadata_GitHub", () => {
     }
   });
 
+  it("release_notes_1d 同样只声明、不给 dataId/value —— 值由 flow 侧注入的 JSON 字符串", () => {
+    const m = META.contentProps.find((p) => p.propId === "release_notes_1d")!;
+    expect(m).toBeDefined();
+    expect(m.dataId).toBeUndefined();
+    expect(m.value).toBeUndefined();
+  });
+
   it("作者字段是 repo，star 复用 followers_count", () => {
     const byId = Object.fromEntries((META.userProps ?? []).map((p) => [p.propId, p]));
     expect(byId.source_user_id.dataId).toBe("id");
@@ -45,7 +52,7 @@ describe("ContentMetadata_GitHub", () => {
 
   it("新增的 prop 都不带 entity —— 它们只活在 flow payload 里", () => {
     // entity 的契约是「表上的真实列」，标了不建列会被 stream-schema 对账测试判红
-    for (const id of ["tag_name", "is_prerelease", "release_count_1d", "release_count_7d", "release_count_30d"]) {
+    for (const id of ["tag_name", "is_prerelease", "release_count_1d", "release_count_7d", "release_count_30d", "release_notes_1d"]) {
       const def = PROPS.find((p) => p.propId === id);
       expect(def, `prop ${id} 未注册`).toBeDefined();
       expect(def!.entity, `prop ${id} 不该带 entity`).toBeUndefined();

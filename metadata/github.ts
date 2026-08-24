@@ -29,6 +29,10 @@ export const ContentMetadata_GitHub: ContentMetadata[] = [
       { propId: "release_count_1d" },
       { propId: "release_count_7d" },
       { propId: "release_count_30d" },
+      // 1 天窗口内、带文本的 release 列表——JSON 数组字符串，每条 {title, content_text}
+      // 分开存。同样只声明不给 dataId/value：只服务 1 天聚合这一个场景，没有 7d/30d 版本
+      // （见 flow/src/github-release-count.ts 的 computeReleaseNotes1d）。
+      { propId: "release_notes_1d" },
     ],
     // 作者 = repo 本身（不是 owner，不是 release 的发布者）。dataId 相对 repo 对象，
     // **不走 contentProps 的 linkPrefix** —— /releases 的响应里根本没有 repo 信息

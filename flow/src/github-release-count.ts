@@ -5,6 +5,13 @@
 export interface ReleaseHistoryEntry {
   published_at: string;
   prerelease: boolean;
+  title?: string;
+  content_text?: string;
+}
+
+export interface ReleaseNote {
+  title: string;
+  content_text: string;
 }
 
 const WINDOWS: [keyof ReleaseCounts, number][] = [
@@ -32,7 +39,14 @@ export function parseReleaseHistory(raw: unknown): ReleaseHistoryEntry[] {
     const publishedAt = (e as { published_at?: unknown }).published_at;
     if (typeof publishedAt !== "string") continue;
     if (Number.isNaN(Date.parse(publishedAt))) continue;
-    out.push({ published_at: publishedAt, prerelease: (e as { prerelease?: unknown }).prerelease === true });
+    const entry: ReleaseHistoryEntry = { published_at: publishedAt, prerelease: (e as { prerelease?: unknown }).prerelease === true };
+    // title/content_text 是后加的可选字段——旧的存量 payload（写进 content_flow_pending
+    // 再取回的那种）不会有它们，畸形类型也只丢这两个字段，不连坐整条历史。
+    const title = (e as { title?: unknown }).title;
+    if (typeof title === "string") entry.title = title;
+    const contentText = (e as { content_text?: unknown }).content_text;
+    if (typeof contentText === "string") entry.content_text = contentText;
+    out.push(entry);
   }
   return out;
 }
@@ -50,4 +64,27 @@ export function computeReleaseCounts(
     counts[key] = eligible.filter((e) => Date.parse(e.published_at) >= cutoff).length;
   }
   return counts;
+}
+
+// 只服务 1 天聚合这一个场景——不像 computeReleaseCounts 那样对 1d/7d/30d 都算：目前只有
+// 1 天窗口有下游消费者（同一天内多条 release 合并总结），7d/30d 的计数已经够用，不为它们
+// 多算一份可能很大的文本数组。title/content_text 分开存在数组元素里（不拼成一段文本）——
+// 具体怎么呈现、怎么按 hosting/sponsoring 这类分类总结，留给下游 skill 的 prompt 决定，
+// 这里只出结构化数据。
+export function computeReleaseNotes1d(
+  history: ReleaseHistoryEntry[],
+  includePrerelease: boolean,
+  now: number
+): ReleaseNote[] {
+  const cutoff = now - 24 * 60 * 60 * 1000;
+  const eligible = includePrerelease ? history : history.filter((e) => !e.prerelease);
+  const notes: ReleaseNote[] = [];
+  for (const e of eligible) {
+    if (Date.parse(e.published_at) < cutoff) continue;
+    // link 侧只给 48h 内的条目带文本（TEXT_WINDOW_MS，见 github-releases.ts）并有字节预算——
+    // 超出的条目会落在 1d 窗口内却没有 title/content_text，静默跳过而不是拼出半条数据。
+    if (typeof e.title !== "string" || typeof e.content_text !== "string") continue;
+    notes.push({ title: e.title, content_text: e.content_text });
+  }
+  return notes;
 }

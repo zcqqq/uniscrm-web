@@ -13,6 +13,30 @@ const MAX_CONTENT_TEXT = 32_768;
 const HISTORY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_HISTORY = 100;
 
+// 只给「可能落在 1 天聚合窗口」内的条目带上标题/正文——更早的条目只用来算既有的
+// release_count_7d/30d，1 天聚合用不到它们的文本。48h 而不是严格 24h：flow 侧用触发时刻
+// 重新算精确的 24h 窗口，这里宁可多带一点，也不能因为轮询时机差几小时漏了该带文本的条目。
+const TEXT_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+// 单条 release 正文进 release_history 的上限——比 emitContentTriggerEvent 里「当前这条
+// release」的 32KB 松得多，因为 release_history 里可能同时有好几条，要给下面的字节预算、
+// 以及 Queues 单条消息 128KB 上限留够余量。
+const MAX_HISTORY_ENTRY_TEXT = 2_000;
+
+// release_history 里「带文本」的条目，累计 UTF-8 字节预算（中文最坏 3 倍/字符）。48h 窗口
+// 内正常只有个位数条目，这个预算几乎用不到；真遇到病态高频发版，超预算的条目退回不带
+// 文本的老形状，只贡献计数——不会把这条队列消息，连同当前 release 自己最多 32KB 的正文，
+// 一起撑爆 128KB 上限。
+const TEXT_BUDGET_BYTES = 48 * 1024;
+const textEncoder = new TextEncoder();
+
+export interface ReleaseHistoryEntry {
+  published_at: string;
+  prerelease: boolean;
+  title?: string;
+  content_text?: string;
+}
+
 /**
  * channel_poll_state 的 poller_name。ETag 与 seed 标记都是**每 repo** 的，而该表主键是
  * (channel_id, poller_name)，所以 repo 编码进 poller_name —— 与 x-list-posts 的
@@ -23,19 +47,35 @@ export function pollerNameFor(fullName: string): string {
 }
 
 /**
- * 近 30 天的发版历史，供 flow 侧按节点的 includePrerelease 算 1d/7d/30d 三个计数。
- * 计数不能在这里算：口径取决于节点配置，而轮询按 repo 走，同一个 repo 可能被两个
- * 勾选框状态不同的 flow 盯着。
+ * 近 30 天的发版历史，供 flow 侧按节点的 includePrerelease 算 1d/7d/30d 三个计数，以及
+ * 1 天窗口内每条 release 的标题/正文（release_notes_1d）。计数与文本窗口都不能在这里按
+ * 节点口径过滤：口径取决于节点配置，而轮询按 repo 走，同一个 repo 可能被两个勾选框状态
+ * 不同的 flow 盯着；这里只按「是不是最近」筛，节点相关的口径留给 flow 侧。
  */
 export function buildReleaseHistory(
   releases: GitHubRelease[],
   now: number
-): { published_at: string; prerelease: boolean }[] {
+): ReleaseHistoryEntry[] {
+  let textBudget = TEXT_BUDGET_BYTES;
   return releases
     .filter((r) => !r.draft && r.published_at !== null)
     .filter((r) => now - Date.parse(r.published_at as string) <= HISTORY_WINDOW_MS)
     .slice(0, MAX_HISTORY)
-    .map((r) => ({ published_at: r.published_at as string, prerelease: r.prerelease === true }));
+    .map((r): ReleaseHistoryEntry => {
+      const publishedAt = r.published_at as string;
+      const entry: ReleaseHistoryEntry = { published_at: publishedAt, prerelease: r.prerelease === true };
+      if (now - Date.parse(publishedAt) > TEXT_WINDOW_MS) return entry;
+
+      // 与 upsertPage 里「当前这条 release」完全同一套解析 + tag_name 回退，两条路径
+      // 不会因为各写一份而分叉。
+      const resolved = resolveProps(r as unknown as Record<string, unknown>, GITHUB_METADATA.contentProps);
+      const title = String(resolved.title || r.tag_name || "").slice(0, MAX_HISTORY_ENTRY_TEXT);
+      const contentText = String(resolved.content_text || "").slice(0, MAX_HISTORY_ENTRY_TEXT);
+      const cost = textEncoder.encode(title + contentText).length;
+      if (cost > textBudget) return entry;
+      textBudget -= cost;
+      return { ...entry, title, content_text: contentText };
+    });
 }
 
 export interface GitHubReleasePollerContext {

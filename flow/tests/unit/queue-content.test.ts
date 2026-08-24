@@ -1272,7 +1272,7 @@ describe("queue(): githubContentTrigger's enriched payload reaches every downstr
   // Expected: 1d = 1, 7d = 1 (the 3-day-old one is a prerelease), 30d = 2.
   function releaseHistory() {
     return [
-      { published_at: new Date(Date.now() - 2 * HOUR).toISOString(), prerelease: false },
+      { published_at: new Date(Date.now() - 2 * HOUR).toISOString(), prerelease: false, title: "v1.4.0", content_text: "dark mode" },
       { published_at: new Date(Date.now() - 3 * DAY).toISOString(), prerelease: true },
       { published_at: new Date(Date.now() - 10 * DAY).toISOString(), prerelease: false },
     ];
@@ -1336,6 +1336,8 @@ describe("queue(): githubContentTrigger's enriched payload reaches every downstr
     expect(stored.release_count_1d).toBe(1);
     expect(stored.release_count_7d).toBe(1); // the 3-day-old release is a prerelease; node default excludes it
     expect(stored.release_count_30d).toBe(2);
+    // release_notes_1d survives a round trip through content_flow_pending, same as the counts.
+    expect(stored.release_notes_1d).toBe(JSON.stringify([{ title: "v1.4.0", content_text: "dark mode" }]));
     // Intermediate data, dropped after counting — it must not bloat every stored payload.
     expect(stored.release_history).toBeUndefined();
     // The envelope fields matchPayload contributes are still there (the enriched payload is a

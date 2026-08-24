@@ -344,4 +344,24 @@ export const PROPS = definePropDefinitions([
     dataType: "TEXT",
     label: { en: "Release Notes (24h)", zh: "24小时发版说明" },
   },
+  // githubCondition 复查后的新鲜值，回看窗口是节点自己的 maxWaitDays——不是固定 24 小时。
+  {
+    propId: "is_latest_release",
+    dataType: "ENUM_INT",
+    label: { en: "Is Latest Release", zh: "是否是窗口内最新" },
+    enums: [
+      { value: 0, label: { en: "Not latest", zh: "不是最新" } },
+      { value: 1, label: { en: "Latest", zh: "最新" } },
+    ],
+  },
+  {
+    propId: "release_count_window",
+    dataType: "INT",
+    label: { en: "Releases (window)", zh: "窗口内发版数" },
+  },
+  {
+    propId: "release_notes_window",
+    dataType: "TEXT",
+    label: { en: "Release Notes (window)", zh: "窗口内发版说明" },
+  },
 ]);

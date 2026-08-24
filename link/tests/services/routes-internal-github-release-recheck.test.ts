@@ -127,4 +127,17 @@ describe("POST /internal/github/release-recheck", () => {
     const body = (await res.json()) as { ok: boolean };
     expect(body.ok).toBe(false);
   });
+
+  // listReleases 抛出（而不是返回 rateLimited/notFound 标志）时，catch 块必须接住并走
+  // boundedGitHubReason —— 与 boundedYouTubeReason 在 routes-internal-youtube-video-stats.test.ts
+  // 里的覆盖对称，同时证明 catch 块确实把 helper 接上了，不是死代码。
+  it("listReleases 抛错 → ok:false, reason 经 boundedGitHubReason 有界化", async () => {
+    listReleasesMock.mockRejectedValue(new Error("listReleases(o/r) failed 500: boom"));
+    const res = await recheck({
+      channelId: "gh-chan", repoFullName: "o/r", includePrerelease: false, maxWaitDays: 7,
+      sourceContentId: "1", publishedAt: new Date().toISOString(), contentId: "c1", flowId: "f1",
+    });
+    const body = (await res.json()) as { ok: boolean; reason: string };
+    expect(body).toEqual({ ok: false, reason: "github_api_error: o/r HTTP 500" });
+  });
 });

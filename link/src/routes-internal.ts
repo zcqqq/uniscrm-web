@@ -22,6 +22,8 @@ import { rateVideo, insertPlaylistItem } from "./services/youtube-actions";
 import { recordYouTubeQuota } from "./services/youtube-quota";
 import { fetchYouTubeVideoProps, fetchYouTubeAuthorProps, type YouTubeVideoProps } from "./services/pollers/youtube-content";
 import { handleGitHubReleases, githubReleasesEnabled } from "./cron";
+import { listReleases } from "./services/github-api";
+import { buildReleaseWindow, isLatestRelease } from "./services/github-release-window";
 
 // User-approved system-prompt line for LLM-backed node operations (spec 2026-08-09):
 // operation-level metadata only — prop-level metadata is the user's own prompt's business.
@@ -233,6 +235,17 @@ export function boundedYouTubeReason(e: unknown): string {
   const [, endpoint, status] = m;
   if (status === "403") return `youtube_quota_exceeded: ${endpoint} HTTP 403`;
   return `youtube_api_error: ${endpoint} HTTP ${status}`;
+}
+
+// listReleases/getRepo throw `listReleases(<repo>) failed <status>: <body>` / `getRepo(<repo>)
+// failed <status>: <body>` (github-api.ts) — same reasoning as boundedYouTubeReason: strip the
+// full response body (raw external payloads don't belong in D1/content_flow_log), keep only
+// what's diagnosable.
+export function boundedGitHubReason(e: unknown): string {
+  const m = /(?:listReleases|getRepo)\(([\w./-]+)\) failed (\d{3})\b/.exec(String(e instanceof Error ? e.message : e));
+  if (!m) return "github_api_error: request failed";
+  const [, repo, status] = m;
+  return `github_api_error: ${repo} HTTP ${status}`;
 }
 
 export function internalRoutes() {
@@ -877,6 +890,55 @@ export function internalRoutes() {
     }
 
     console.log(JSON.stringify({ event: "youtube_video_stats", videoId, contentId: contentId || null, flowId: flowId || null, withAuthor: !!withAuthor, view_count: props.view_count, like_count: props.like_count }));
+    return c.json({ ok: true, props });
+  });
+
+  // githubCondition 节点用它做"发布若干天后（或更多 release 陆续到来后）复查"。
+  // 走 channel 自己的 GitHub token（不是 API key），channels.config.access_token 明文存储，
+  // 与 cron.ts 解析 channel token 的方式一致。
+  router.post("/github/release-recheck", async (c) => {
+    const { channelId, repoFullName, includePrerelease, maxWaitDays, sourceContentId, publishedAt, contentId, flowId } = await c.req
+      .json<{
+        channelId?: string; repoFullName?: string; includePrerelease?: boolean; maxWaitDays?: number;
+        sourceContentId?: string; publishedAt?: string; contentId?: string; flowId?: string | null;
+      }>()
+      .catch(() => ({}) as Record<string, never>);
+
+    if (!channelId || !repoFullName || !publishedAt) {
+      return c.json({ ok: false, reason: "release_unavailable: missing channelId/repoFullName/publishedAt" }, 400);
+    }
+
+    const channel = await c.env.LINK_DB
+      .prepare("SELECT config FROM channels WHERE id = ? AND channel_type = 'GITHUB' AND is_active = 1")
+      .bind(channelId)
+      .first<{ config: string }>();
+    const token = channel ? (JSON.parse(channel.config) as { access_token?: string }).access_token : undefined;
+    if (!token) {
+      console.log(JSON.stringify({ event: "github_release_recheck_no_token", channelId, repoFullName, contentId: contentId || null, flowId: flowId || null }));
+      return c.json({ ok: false, reason: "channel_not_authorized: no GitHub token on this channel" });
+    }
+
+    let releases: Awaited<ReturnType<typeof listReleases>>["releases"];
+    try {
+      const r = await listReleases(token, repoFullName, null);
+      if (r.rateLimited) return c.json({ ok: false, reason: "rate_limited" });
+      if (r.notFound || r.releases === null) return c.json({ ok: false, reason: "repo_unavailable: not found or no access" });
+      releases = r.releases;
+    } catch (e) {
+      console.log(JSON.stringify({ event: "github_release_recheck_error", channelId, repoFullName, contentId: contentId || null, flowId: flowId || null, error: String(e) }));
+      return c.json({ ok: false, reason: boundedGitHubReason(e) });
+    }
+
+    const days = Number(maxWaitDays) > 0 ? Number(maxWaitDays) : 1;
+    const window = buildReleaseWindow(releases!, days, includePrerelease === true, Date.now());
+    const isLatest = isLatestRelease(window, publishedAt, days, Date.now());
+
+    const props = {
+      release_count_window: window.length,
+      release_notes_window: JSON.stringify(window.map(({ title, content_text }) => ({ title, content_text }))),
+      is_latest_release: isLatest ? 1 : 0,
+    };
+    console.log(JSON.stringify({ event: "github_release_recheck", channelId, repoFullName, contentId: contentId || null, flowId: flowId || null, release_count_window: props.release_count_window, is_latest_release: props.is_latest_release }));
     return c.json({ ok: true, props });
   });
 

@@ -1327,6 +1327,48 @@ function YouTubeConditionInspector({ nodeId, data }: { nodeId: string; data: Rec
   );
 }
 
+// 与 GitHubContentTriggerInspector 共用同一套字段与同一个 ConditionsEditor：判定语义必须
+// 与 trigger 完全一致。maxWaitDays 单一个数字同时是"往回看多久"和"强制发帖上限"——
+// 见 spec「Why one window number, not two」，两个数字会让 notes 悄悄漏内容。
+function GitHubConditionInspector({ nodeId, data }: { nodeId: string; data: Record<string, any> }) {
+  const T = useT();
+  const { locale } = useLocale();
+  const { updateNodeData } = useFlowEditor();
+  const conditions = (data.conditions as Condition[]) || [];
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-primary mb-3">{T(nodeLabel("githubCondition"))}</h4>
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs block mb-1">{T({ en: "Max wait (days)", zh: "最长等待（天）" })}</Label>
+          <Input
+            type="number"
+            min="1"
+            value={data.maxWaitDays || ""}
+            onChange={(e: InputChange) => updateNodeData(nodeId, { maxWaitDays: parseInt(e.target.value) || 0 })}
+            placeholder={T({ en: "Enter days...", zh: "输入天数…" })}
+            className="w-full h-9 text-sm"
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            {T({ en: "How far back to look for other releases, and the safety cap that force-fires past it.", zh: "往回查看其它release的窗口，也是超过后强制发帖的上限。" })}
+          </p>
+        </div>
+        <ConditionsEditor
+          conditions={conditions}
+          fields={getContentTriggerFields(ContentMetadata_GitHub, "watch:get-releases", locale)}
+          onChange={(c) => updateNodeData(nodeId, { conditions: c })}
+          logic={data.conditionLogic}
+          onLogicChange={(l) => updateNodeData(nodeId, { conditionLogic: l })}
+        />
+        <p className="text-xs text-muted-foreground">
+          {T({ en: "Re-reads the repo's current releases from GitHub. Put a Wait node before this to let releases published during the wait accumulate.", zh: "重新从 GitHub 读取该仓库的当前发版情况。可在此节点前加一个等待节点，让等待期间新发布的release一起被算进来。" })}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 const VIDEO_ACTION_LANGUAGES: { value: string; label: LocalizedString }[] = [
   { value: "zh", label: { en: "Chinese", zh: "中文" } },
   { value: "en", label: { en: "English", zh: "英语" } },
@@ -1743,6 +1785,7 @@ const NODE_INSPECTORS: Record<ReactFlowNodeType, InspectorComponent> = {
   webhook: WebhookInspector,
   videoCondition: VideoConditionInspector,
   youtubeCondition: YouTubeConditionInspector,
+  githubCondition: GitHubConditionInspector,
 };
 
 export default function Inspector() {

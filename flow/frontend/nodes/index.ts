@@ -14,6 +14,7 @@ import AbSplitNode from "./AbSplitNode";
 import WebhookNode from "./WebhookNode";
 import VideoConditionNode from "./VideoConditionNode";
 import YouTubeConditionNode from "./YouTubeConditionNode";
+import GitHubConditionNode from "./GitHubConditionNode";
 
 // Exhaustively keyed by the registry's ReactFlowNodeType union: a new registry entry with a new
 // reactFlowType fails to compile until its canvas component is added here. (The legacy
@@ -34,4 +35,5 @@ export const nodeTypes: Record<ReactFlowNodeType, ComponentType<any>> = {
   webhook: WebhookNode,
   videoCondition: VideoConditionNode,
   youtubeCondition: YouTubeConditionNode,
+  githubCondition: GitHubConditionNode,
 };

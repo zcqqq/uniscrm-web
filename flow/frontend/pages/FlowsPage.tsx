@@ -33,6 +33,7 @@ export function getNodeIcon(type: string, data: Record<string, unknown>) {
   // 否则这里会掉到兜底的 ClockIcon，模板卡片上看起来像个等待节点。
   if (type === "videoCondition") return ClapperboardIcon;
   if (type === "youtubeCondition") return YouTubeIcon;
+  if (type === "githubCondition") return GitHubIcon;
   if (type === "action") {
     const at = data.actionType as string;
     if (at === "addToList") return ListIcon;

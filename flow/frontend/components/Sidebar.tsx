@@ -121,6 +121,7 @@ const NODE_ICONS: Record<NodeTypeKey, React.ReactNode> = {
   // Sidebar 分区（动作 / 触发器 / 流程控制）本身已经把它们分开了，图标重复不会混淆。
   videoCondition: "🎬",
   youtubeCondition: <YouTubeIcon className="w-4 h-4" />,
+  githubCondition: <GitHubIcon className="w-4 h-4" />,
   wait: "⏳",
   timeCondition: "🕐",
   abSplit: "⚡",

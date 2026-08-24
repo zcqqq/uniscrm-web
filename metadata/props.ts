@@ -197,7 +197,7 @@ export const PROPS = definePropDefinitions([
   // analytics/tests/unit/content-stream-schema.test.ts 现在机器对账，加回 entity 而
   // 不加列会直接红。
   // 同上：flow-payload-only，无 entity（不是任何快照表上的列，不落 D1 也不落 R2）。
-  // 由 link/src/services/detect-language.ts 三级推导，写进 trigger payload 供
+  // 由 link/src/services/detect-language.ts 两级推导，写进 trigger payload 供
   // YouTube trigger / youtubeCondition 节点的条件使用。
   // ENUM_TEXT + enums 让 flow 的 ConditionsEditor 自动渲染成下拉框（Inspector.tsx 的
   // enum 分支），算子自动收窄到 ==/!=（trigger-fields.ts 的 ENUM_OPS）——零前端代码。

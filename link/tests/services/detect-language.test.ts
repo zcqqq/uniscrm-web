@@ -90,22 +90,38 @@ describe("detectScriptLanguage — 只在脚本无歧义时出值", () => {
   });
 });
 
-describe("resolveVideoLanguage — 三级推导", () => {
-  it("defaultAudioLanguage 优先于一切", () => {
+describe("resolveVideoLanguage — 两级推导", () => {
+  it("defaultAudioLanguage 优先于文本判定", () => {
     expect(
       resolveVideoLanguage({
         defaultAudioLanguage: "ja-JP",
-        defaultLanguage: "en",
         title: "北京旅游攻略",
       })
     ).toBe("ja");
   });
 
-  it("没有 defaultAudioLanguage 时退到 defaultLanguage", () => {
-    expect(resolveVideoLanguage({ defaultLanguage: "ko", title: "How I built it" })).toBe("ko");
+  it("defaultLanguage（元数据语言）不是有效输入字段，不影响判定——只看 defaultAudioLanguage", () => {
+    // 回归测试：曾经的三级设计里 defaultLanguage 是二级兜底，已砍掉（见 detect-language.ts
+    // 头部注释）。这里传一个 defaultLanguage 字段确认它被忽略，判定落到文本脚本判定。
+    expect(
+      resolveVideoLanguage({ defaultLanguage: "ko", title: "東京の夜を歩いてみた" } as never)
+    ).toBe("ja");
   });
 
-  it("两个声明都没有时才看文本", () => {
+  it("Despacito 场景：西语歌但标题是英文写的，declared 声明缺失时不猜成英语，落到 unknown", () => {
+    // 真实 bug：kJQP7kiw5Fk（Despacito）没有 defaultAudioLanguage，标题
+    // "Luis Fonsi - Despacito ft. Daddy Yankee" 全拉丁字母。旧版 defaultLanguage
+    // 兜底会读到 "en"（因为标题文本是英文写的），让 "语言 == 英语" 静默匹配到一首
+    // 西语歌。砍掉那一级后，拉丁字母标题判不出，落到 unknown——不猜比猜错好。
+    expect(
+      resolveVideoLanguage({
+        title: "Luis Fonsi - Despacito ft. Daddy Yankee",
+        description: "Luis Fonsi - Despacito ft. Daddy Yankee (Official Video)",
+      })
+    ).toBe(LANGUAGE_UNKNOWN);
+  });
+
+  it("没有声明时才看文本", () => {
     expect(
       resolveVideoLanguage({
         title: "IQVIAジャパンによるクリニック経営アシストサービス",
@@ -127,7 +143,7 @@ describe("resolveVideoLanguage — 三级推导", () => {
     expect(resolveVideoLanguage({ defaultAudioLanguage: "zxx", title: "東京の夜を歩いてみた" })).toBe("ja");
   });
 
-  it("三级全落空 → unknown 哨兵，绝不留空", () => {
+  it("两级全落空 → unknown 哨兵，绝不留空", () => {
     // 这是整个设计的关键：engine.ts 的 evaluateCondition 在进算子分支之前就
     // `actual == null → false`，所以留空会让 "语言 != 日语" 在判不出语言的视频上
     // 返回 false（视频被挡掉），与用户"只想排掉日语"的意图正好相反。

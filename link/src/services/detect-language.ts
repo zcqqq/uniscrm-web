@@ -1,6 +1,12 @@
-// 视频语言的推导。三级：上传者声明的口语语言 → 上传者声明的元数据语言 → 标题+描述的
-// 脚本判定。全部零 API 成本——前两个来自 videos.list 已经在打的 part=snippet，第三个
-// 来自 payload 里本就有的 title / content_text。
+// 视频语言的推导。两级：上传者声明的口语语言 → 标题+描述的脚本判定。全部零 API
+// 成本——前者来自 videos.list 已经在打的 part=snippet，后者来自 payload 里本就有的
+// title / content_text。
+//
+// 曾经有第三级——snippet.defaultLanguage（元数据语言）夹在中间当兜底，已砍掉：
+// 它标的是标题/描述文本用什么语言写的，不是视频本身说什么语言。实测 Despacito
+// （西语歌）的 defaultLanguage 是 "en"（因为标题是英文写的 "Luis Fonsi - Despacito
+// ft. Daddy Yankee"），会让 "语言 == 英语" 静默匹配到一首西语歌。覆盖率换准确性
+// 不划算——判不出就 unknown，好过判错。
 //
 // 这里刻意**不做**概率式语种识别。脚本区间判定（假名→ja、谚文→ko、西里尔→ru）是确定性的；
 // 而拉丁字母系要分 en/es/fr/de 只能靠 n-gram 统计，在一个 40 字的标题上接近掷硬币，
@@ -92,9 +98,6 @@ export function detectScriptLanguage(text: unknown): string | null {
 export interface VideoLanguageInput {
   // videos.list 的 snippet.defaultAudioLanguage —— 上传者声明的**口语**语言，最权威。
   defaultAudioLanguage?: unknown;
-  // snippet.defaultLanguage —— 上传者声明的标题/描述语言。语义上是元数据语言而非口语
-  // 语言，所以只当二级兜底。
-  defaultLanguage?: unknown;
   title?: unknown;
   description?: unknown;
 }
@@ -103,8 +106,7 @@ export interface VideoLanguageInput {
 // 返回值不受 metadata 里 enum 短表的约束：下拉框约束的是"用户能选什么"，不是
 // "payload 里能有什么"。一个葡萄牙语视频必须真的带 "pt"，"语言 != 日语" 才能正确放行它。
 export function resolveVideoLanguage(input: VideoLanguageInput): string {
-  const declared =
-    normalizeLanguageTag(input.defaultAudioLanguage) ?? normalizeLanguageTag(input.defaultLanguage);
+  const declared = normalizeLanguageTag(input.defaultAudioLanguage);
   if (declared) return declared;
 
   const title = typeof input.title === "string" ? input.title : "";

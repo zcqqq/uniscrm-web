@@ -66,9 +66,10 @@ export async function fetchYouTubeVideoProps(
   // "unknown" 哨兵。两者的差别是有意的：duration 的条件是数值比较，缺失就该不通过；
   // 而 language 的典型用法是 "!= 日语"（排除某个语种），留空会让 engine 在进算子之前
   // 就 fail-closed，把判不出语言的视频一起挡掉，与用户意图相反。见 detect-language.ts。
+  // 只传 defaultAudioLanguage（口语声明），不传 defaultLanguage（元数据语言）——后者
+  // 曾经是二级兜底，已砍掉：Despacito 这类标题写成英文的外语视频会被它误判成 en。
   props.language = resolveVideoLanguage({
     defaultAudioLanguage: snippet?.defaultAudioLanguage,
-    defaultLanguage: snippet?.defaultLanguage,
     title: props.title,
     description: props.content_text,
   });

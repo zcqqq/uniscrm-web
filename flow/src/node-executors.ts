@@ -252,6 +252,13 @@ export const NODE_EXECUTORS: Record<ExecutableNodeType, NodeExecutor> = {
     ctx.actions.push({ type: "youtubeCondition", nodeId: targetNode.id, hasBranches: true });
     ctx.nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
   },
+
+  githubCondition: (targetNode, ctx) => {
+    // conditions/maxWaitDays 留在 graph 里（executeContentActions 用 nodeId 回查），
+    // 与 youtubeCondition 把阈值留在 graph 的做法一致：改配置是纯配置变更。
+    ctx.actions.push({ type: "githubCondition", nodeId: targetNode.id, hasBranches: true });
+    ctx.nodeLogs.push({ nodeId: targetNode.id, direction: "exit" });
+  },
 };
 
 /** Runtime lookup for possibly-unknown node types; undefined = unknown (caller logs + skips). */

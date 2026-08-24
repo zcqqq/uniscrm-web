@@ -397,6 +397,24 @@ ${CONTENT_YOUTUBE_ACTION_BULLETS}`,
    - Fields are the same content props youtubeContentTrigger filters on (view_count, like_count, title, duration, ...), re-read live rather than taken from the trigger-time snapshot.
    - All conditions must pass (AND) for "true"; "failed" means the video is gone/private or the API errored — never guessed.`,
   },
+  githubCondition: {
+    reactFlowType: "githubCondition",
+    label: { en: "GitHub Release Condition", zh: "GitHub 发版条件" },
+    description: { en: "Re-check current releases in a repo and branch (e.g. only the latest one wins)", zh: "重新检查repo当前发版情况并分支（例如只让最新的那条通过）" },
+    domain: "content",
+    role: "condition",
+    generatable: true,
+    sidebarSection: "flowControl",
+    branches: ["true", "false", "failed"],
+    propsConditions: true,
+    defaultData: () => ({ conditions: [], maxWaitDays: 7 }),
+    promptFragment: `githubCondition - re-fetches the current release list for the trigger's repo and branches on it, has "true"/"false"/"failed" branches
+   data: { conditions: [{ field: string, operator: string, value: string }], maxWaitDays: number }
+   - Requires a githubContentTrigger in the same flow. Put a wait node before it to let releases published during the wait accumulate.
+   - Injects fresh release_count_window (int), release_notes_window (JSON array of {title, content_text}), is_latest_release (0/1) computed over the trailing maxWaitDays.
+   - is_latest_release is forced to 1 once this release has itself been waiting longer than maxWaitDays, so a chain can never stall forever.
+   - "failed" means the repo/GitHub API errored — never guessed.`,
+  },
   // --- shared across both domains ---
   wait: {
     reactFlowType: "wait",
@@ -525,7 +543,7 @@ export const USER_FLOW_SIDEBAR_ORDER: string[] = [
 ];
 
 export const CONTENT_FLOW_SIDEBAR_ORDER: string[] = [
-  "xContentTrigger", "youtubeContentTrigger", "githubContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition", "youtubeCondition",
+  "xContentTrigger", "youtubeContentTrigger", "githubContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition", "youtubeCondition", "githubCondition",
   "wait", "timeCondition", "abSplit", "webhook",
 ];
 

@@ -9,6 +9,7 @@ import { buildFlowGenerateSystemPrompt, type FlowDomain } from "./generate-promp
 import { CONTENT_X_TRIGGER_MODE_LIST_POSTS, NODE_TYPE_REGISTRY, CONDITION_LOGIC_OR, resolveYouTubeSubscriptions, resolveGitHubRepos } from "../nodeTypeRegistry";
 import { fetchActiveChannelIds, triggerBindsChannel, findBrokenTrigger, brokenTriggerMessage, findTriggerNoChannel, triggerNoChannelMessage, findGitHubTriggerNoRepos, githubNoRepoMessage } from "./trigger-health";
 import { conditionsNeedAuthor, youtubeConditionRequest, resolveYouTubeCondition, type VideoStatsResponse } from "./youtube-condition";
+import { githubConditionRequest, resolveGithubCondition, type GithubReleaseCheckResponse } from "./github-condition";
 import { createInternalAuthMiddleware, resolveAuthMe, resolveSession, spaLoginGuard } from "../../shared/auth";
 
 // node ids are NOT always UUIDs: flow/frontend/config/templates.ts hardcodes short ids like
@@ -872,6 +873,39 @@ async function executeContentActions(
       // reason 一并打出来：Finding 2 之后 link 的 reason 是有界的短码，flow 这边不再有
       // 别的地方留下"为什么 failed"。
       console.log(JSON.stringify({ event: "content_condition_youtube", contentId, flowId: flowId || null, nodeId, branch: outcome.branch, ok: resp.ok, withAuthor, logic: conditionLogic === CONDITION_LOGIC_OR ? "or" : "and", reason: outcome.failureReason || resp.reason || null }));
+
+      await recordContentOutcome(nodeId, outcome.branch, outcome.failureReason, outcome.payload);
+    } else if (action.type === "githubCondition") {
+      // 同步执行：GitHub /releases 是一次几百毫秒的读调用，跟 youtubeCondition 一样不进队列。
+      const nodeId = action.nodeId as string;
+      const conditionNode = graph.nodes.find((n) => n.id === nodeId);
+      const rawConditions = conditionNode?.data?.conditions;
+      const conditions = (Array.isArray(rawConditions) ? rawConditions : []) as
+        { field: string; operator: string; value: string }[];
+      const conditionLogic = conditionNode?.data?.conditionLogic;
+      const maxWaitDays = Number(conditionNode?.data?.maxWaitDays) > 0 ? Number(conditionNode?.data?.maxWaitDays) : 1;
+      // includePrerelease 跟随图里那个 githubContentTrigger 的节点配置——githubCondition
+      // 自己不重复这个字段，跟 youtubeCondition 不重复 trigger 上的 duration 上限一个道理。
+      const triggerNode = graph.nodes.find((n) => n.type === "githubContentTrigger");
+      const includePrerelease = triggerNode?.data?.includePrerelease === true;
+      const { url, body } = githubConditionRequest({ env, contentId, flowId, payload, maxWaitDays, includePrerelease });
+
+      let resp: GithubReleaseCheckResponse;
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Secret": env.INTERNAL_SECRET },
+          body,
+        });
+        resp = res.ok
+          ? (await res.json().catch(() => ({ ok: false, reason: "github_api_error: malformed response" })) as GithubReleaseCheckResponse)
+          : { ok: false, reason: `github_api_error: link returned ${res.status}` };
+      } catch (e) {
+        resp = { ok: false, reason: `github_api_error: ${String(e)}` };
+      }
+
+      const outcome = resolveGithubCondition(conditions, payload, resp, conditionLogic);
+      console.log(JSON.stringify({ event: "content_condition_github", contentId, flowId: flowId || null, nodeId, branch: outcome.branch, ok: resp.ok, logic: conditionLogic === CONDITION_LOGIC_OR ? "or" : "and", reason: outcome.failureReason || resp.reason || null }));
 
       await recordContentOutcome(nodeId, outcome.branch, outcome.failureReason, outcome.payload);
     } else if (action.type === "videoAction" || action.type === "videoCondition") {

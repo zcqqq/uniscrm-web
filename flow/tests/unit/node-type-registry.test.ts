@@ -108,12 +108,12 @@ describe("NODE_TYPE_REGISTRY", () => {
     }
   });
 
-  it("tags exactly the six ConditionsEditor-driven types propsConditions (drives the OR-empty publish gate)", () => {
+  it("tags exactly the seven ConditionsEditor-driven types propsConditions (drives the OR-empty publish gate)", () => {
     const keys = Object.entries(NODE_TYPE_REGISTRY)
       .filter(([, cfg]) => cfg.propsConditions === true)
       .map(([key]) => key)
       .sort();
-    expect(keys).toEqual(["waitForEvent", "xContentTrigger", "xTrigger", "youtubeCondition", "youtubeContentTrigger", "githubContentTrigger"].sort());
+    expect(keys).toEqual(["waitForEvent", "xContentTrigger", "xTrigger", "youtubeCondition", "youtubeContentTrigger", "githubContentTrigger", "githubCondition"].sort());
   });
 
   // channelBound 驱动两侧的"trigger 没选账号"发布门禁（frontend/lib/validate-flow-graph.ts、
@@ -309,7 +309,7 @@ describe("generatableKeysForDomain", () => {
   it("content domain: every domain:'content'/'both' type/actionType, now that all of them are generatable", () => {
     expect(generatableKeysForDomain("content").sort()).toEqual(
       [
-        "xContentTrigger", "youtubeContentTrigger", "githubContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition", "youtubeCondition",
+        "xContentTrigger", "youtubeContentTrigger", "githubContentTrigger", "xContentAction", "tiktokContentAction", "youtubeContentAction", "videoAction", "videoCondition", "youtubeCondition", "githubCondition",
         "wait", "timeCondition", "abSplit", "webhook",
       ].sort()
     );

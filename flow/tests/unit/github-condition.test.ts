@@ -102,6 +102,20 @@ describe("resolveGithubCondition", () => {
     expect(r.failureReason).toBeUndefined();
   });
 
+  // link 的复查只回三个字段（is_latest_release / release_count_window /
+  // release_notes_window）；条件编辑器却把 watch:get-releases 的全部 ~22 个字段都列出来。
+  // 守卫必须只盯这三个"应该新鲜却没新鲜"的字段，否则 tag_name / title / is_prerelease /
+  // user.* 这 19 个不可变属性上的条件会被无差别拦成 failed。
+  it("does not fail on a condition field the recheck never returns (e.g. tag_name) — evaluates against the stale payload instead", () => {
+    const r = resolveGithubCondition(
+      [{ field: "tag_name", operator: "==", value: "v2.0.0" }],
+      { ...stale, tag_name: "v2.0.0" },
+      { ok: true, props: { is_latest_release: 1 } }
+    );
+    expect(r.branch).toBe("true");
+    expect(r.failureReason).toBeUndefined();
+  });
+
   it("skips half-filled rows whose field is still empty", () => {
     const r = resolveGithubCondition([{ field: "", operator: "==", value: "" }], stale, { ok: true, props: { is_latest_release: 0 } });
     expect(r.branch).toBe("true");

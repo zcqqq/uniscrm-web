@@ -1355,7 +1355,7 @@ function GitHubConditionInspector({ nodeId, data }: { nodeId: string; data: Reco
             className="w-full h-9 text-sm"
           />
           <p className="text-xs text-muted-foreground mt-1">
-            {T({ en: "How far back to look for other releases, and the safety cap that force-fires past it.", zh: "往回查看其它release的窗口，也是超过后强制发帖的上限。" })}
+            {T({ en: "How far back to look for other releases. Set it to at least the Wait node's own duration — a release older than this window is force-published even if a newer one exists.", zh: "往回查看其它release的窗口。至少要设成前面等待节点的时长——比这个窗口还旧的release会被强制发布，哪怕已经有更新的release了。" })}
           </p>
         </div>
         <ConditionsEditor

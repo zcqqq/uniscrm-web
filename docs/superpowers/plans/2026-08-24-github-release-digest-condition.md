@@ -1071,7 +1071,7 @@ In `flow/nodeTypeRegistry.ts`, add after the `youtubeCondition` entry (after lin
    data: { conditions: [{ field: string, operator: string, value: string }], maxWaitDays: number }
    - Requires a githubContentTrigger in the same flow. Put a wait node before it to let releases published during the wait accumulate.
    - Injects fresh release_count_window (int), release_notes_window (JSON array of {title, content_text}), is_latest_release (0/1) computed over the trailing maxWaitDays.
-   - is_latest_release is forced to 1 once this release has itself been waiting longer than maxWaitDays, so a chain can never stall forever.
+   - Set maxWaitDays to at least the preceding wait node's own duration. If the wait node's duration ever exceeds maxWaitDays, is_latest_release is forced to 1 regardless of whether a newer release exists (which produces extra posts) — keep wait <= maxWaitDays so this stays inert and only the recency check decides the branch.
    - "failed" means the repo/GitHub API errored — never guessed.`,
   },
 ```

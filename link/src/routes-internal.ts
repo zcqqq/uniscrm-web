@@ -908,6 +908,14 @@ export function internalRoutes() {
       return c.json({ ok: false, reason: "release_unavailable: missing channelId/repoFullName/publishedAt" }, 400);
     }
 
+    // publishedAt 经 content_flow_pending.payload 的 D1 往返而来，也可能出自手改或 AI 生成
+    // 的图。非空但解析不出来时 Date.parse 给 NaN，cap 判断和同秒 tie-break 的比较全部悄悄
+    // 取假值，链路会落在 false 分支上无声死掉——那是"猜"，本特性的第一原则不允许。守卫形状
+    // 沿用 flow/src/github-release-count.ts 的 parseReleaseHistory（Number.isNaN 同一判据）。
+    if (!Number.isFinite(Date.parse(publishedAt))) {
+      return c.json({ ok: false, reason: "release_unavailable: unparseable publishedAt" }, 400);
+    }
+
     const channel = await c.env.LINK_DB
       .prepare("SELECT config FROM channels WHERE id = ? AND channel_type = 'GITHUB' AND is_active = 1")
       .bind(channelId)
@@ -931,7 +939,7 @@ export function internalRoutes() {
 
     const days = Number(maxWaitDays) > 0 ? Number(maxWaitDays) : 1;
     const window = buildReleaseWindow(releases!, days, includePrerelease === true, Date.now());
-    const isLatest = isLatestRelease(window, publishedAt, days, Date.now());
+    const isLatest = isLatestRelease(window, publishedAt, String(sourceContentId ?? ""), days, Date.now());
 
     const props = {
       release_count_window: window.length,

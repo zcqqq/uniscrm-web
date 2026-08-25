@@ -21,6 +21,9 @@ export interface ReleaseWindowEntry {
   published_at: string;
   title: string;
   content_text: string;
+  // GitHub release 的数值 id（metadata/github.ts 里 source_content_id 解析的同一个字段）。
+  // 只为 isLatestRelease 的同秒 tie-break 服务，不进 release_notes_window。
+  source_content_id: string;
 }
 
 export function buildReleaseWindow(
@@ -45,7 +48,7 @@ export function buildReleaseWindow(
     if (cost > textBudget) continue;
     textBudget -= cost;
 
-    out.push({ published_at: r.published_at as string, title, content_text: contentText });
+    out.push({ published_at: r.published_at as string, title, content_text: contentText, source_content_id: String(r.id) });
   }
 
   return out;
@@ -54,13 +57,23 @@ export function buildReleaseWindow(
 // 单一个 maxWaitDays 同时做两件事：往回看多久算"是否最新"，以及强制发帖的上限。
 // 见 spec「Why one window number, not two」——分开两个数字会让 notes 悄悄漏内容。
 export function isLatestRelease(
-  window: { published_at: string }[],
+  window: { published_at: string; source_content_id: string }[],
   publishedAt: string,
+  sourceContentId: string,
   maxWaitDays: number,
   now: number
 ): boolean {
   const capMs = maxWaitDays * 24 * 60 * 60 * 1000;
   if (now - Date.parse(publishedAt) > capMs) return true;
-  const maxPublishedAt = window.reduce((max, r) => Math.max(max, Date.parse(r.published_at)), -Infinity);
-  return Date.parse(publishedAt) >= maxPublishedAt;
+  const myTime = Date.parse(publishedAt);
+  // GitHub release id 是自增的，数值更大 = 更晚创建，与"更晚发布"同向；同一秒内多条
+  // release（CI 批量发布常见）时间戳打平，用 id 兜底判出唯一胜者。显式转数字比较——
+  // 纯字符串比较在位数不同时给错答案（"9" > "10"）。
+  const myId = Number(sourceContentId);
+  return !window.some((r) => {
+    const t = Date.parse(r.published_at);
+    if (t > myTime) return true;
+    if (t < myTime) return false;
+    return Number(r.source_content_id) > myId;
+  });
 }

@@ -128,6 +128,41 @@ describe("POST /internal/github/release-recheck", () => {
     expect(body.ok).toBe(false);
   });
 
+  // publishedAt 来自 content_flow_pending.payload，经过一次 D1 往返，也可能出自手改或 AI
+  // 生成的图。非空但解析不出来时，Date.parse 返回 NaN，cap 判断和 tie-break 比较全都
+  // 悄悄取假值——链路会落在 false 分支上无声死掉。那是"猜"，本特性的第一原则不允许。
+  it("publishedAt 解析不出来 → ok:false, 不猜 false", async () => {
+    listReleasesMock.mockResolvedValue({
+      releases: [rel({ id: 1 })],
+      etag: null, rateLimited: false, notFound: false,
+    });
+    const res = await recheck({
+      channelId: "gh-chan", repoFullName: "o/r", includePrerelease: false, maxWaitDays: 7,
+      sourceContentId: "1", publishedAt: "not-a-date", contentId: "c1", flowId: "f1",
+    });
+    const body = (await res.json()) as { ok: boolean; reason: string };
+    expect(body.ok).toBe(false);
+    expect(body.reason).toContain("unparseable");
+  });
+
+  // 路由层证明 sourceContentId 真的被传给了 isLatestRelease——纯函数测试证明不了这段接线。
+  it("同一秒内两条 release：只有 id 更大的那条拿到 is_latest_release: 1", async () => {
+    const sameSecond = new Date(Math.floor(Date.now() / 1000) * 1000).toISOString();
+    listReleasesMock.mockResolvedValue({
+      releases: [rel({ id: 10, published_at: sameSecond }), rel({ id: 20, published_at: sameSecond })],
+      etag: null, rateLimited: false, notFound: false,
+    });
+
+    const base = {
+      channelId: "gh-chan", repoFullName: "o/r", includePrerelease: false, maxWaitDays: 7,
+      publishedAt: sameSecond, contentId: "c1", flowId: "f1",
+    };
+    const winner = (await (await recheck({ ...base, sourceContentId: "20" })).json()) as { props: { is_latest_release: number } };
+    const loser = (await (await recheck({ ...base, sourceContentId: "10" })).json()) as { props: { is_latest_release: number } };
+    expect(winner.props.is_latest_release).toBe(1);
+    expect(loser.props.is_latest_release).toBe(0);
+  });
+
   // listReleases 抛出（而不是返回 rateLimited/notFound 标志）时，catch 块必须接住并走
   // boundedGitHubReason —— 与 boundedYouTubeReason 在 routes-internal-youtube-video-stats.test.ts
   // 里的覆盖对称，同时证明 catch 块确实把 helper 接上了，不是死代码。

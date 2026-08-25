@@ -93,6 +93,49 @@ export function findGitHubConditionInvalidWindowIds(
     .map((n) => n.id);
 }
 
+// githubCondition 的"只让最新的那条通过"完全依赖它前面接了一个 wait 节点——没有 wait，
+// 复查发生在触发的同一时刻，release_count_window/release_notes_window 里只有它自己，
+// is_latest_release 恒为 1，这个节点因此形同虚设：每条 release 各自都会通过 true 分支，
+// 恰好是这个节点存在的目的要防止的那个行为（重复发帖）。generatable: true 意味着 AI
+// 流程生成器可以直接产出这种图，所以必须挡在发布前。
+//
+// 判的是"上游可达存在 wait"，不是"直接前驱是 wait"：只要 wait 在上游，等待就已经发生过，
+// 中间隔着别的无害节点不影响复查的新鲜度，按直接前驱判会对
+// trigger → wait → 某节点 → githubCondition 这种能正常工作的图误报。方向与
+// findOrphanNodeIds 相反（反向 BFS），reached 集合同样兼作环路保护。
+export function findGitHubConditionNoWaitIds(
+  nodes: { id: string; type?: string }[],
+  edges: { source: string; target: string }[]
+): string[] {
+  const typeById = new Map(nodes.map((n) => [n.id, n.type]));
+  const incoming = new Map<string, string[]>();
+  for (const edge of edges) {
+    const sources = incoming.get(edge.target) ?? [];
+    sources.push(edge.source);
+    incoming.set(edge.target, sources);
+  }
+
+  const hasWaitUpstream = (startId: string): boolean => {
+    const seen = new Set<string>([startId]);
+    const queue = [...(incoming.get(startId) ?? [])];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (typeById.get(id) === "wait") return true;
+      for (const prevId of incoming.get(id) ?? []) {
+        if (!seen.has(prevId)) queue.push(prevId);
+      }
+    }
+    return false;
+  };
+
+  return nodes
+    .filter((n) => n.type === "githubCondition")
+    .filter((n) => !hasWaitUpstream(n.id))
+    .map((n) => n.id);
+}
+
 // 与运行时对"有几条条件"的判断保持一致，否则会出现「发布拦不住但运行时当没条件」或反之。
 // - 非数组一律算 0：executeContentActions 的 Array.isArray 守卫（index.ts）会把手改坏的
 //   或 AI 生成的畸形值降级成"没有条件"，运行时行为与空数组完全相同。
@@ -201,6 +244,7 @@ export function validateFlowGraph(
   misplacedGitHubConditionNodeIds: string[];
   emptyGitHubConditionNodeIds: string[];
   githubConditionInvalidWindowNodeIds: string[];
+  githubConditionNoWaitNodeIds: string[];
   orLogicEmptyNodeIds: string[];
   youtubeNoSubscriptionNodeIds: string[];
   githubNoRepoNodeIds: string[];
@@ -213,6 +257,7 @@ export function validateFlowGraph(
   const misplacedGitHubConditionNodeIds = findMisplacedGitHubConditionIds(nodes);
   const emptyGitHubConditionNodeIds = findEmptyGitHubConditionIds(nodes);
   const githubConditionInvalidWindowNodeIds = findGitHubConditionInvalidWindowIds(nodes);
+  const githubConditionNoWaitNodeIds = findGitHubConditionNoWaitIds(nodes, edges);
   const orLogicEmptyNodeIds = findOrLogicEmptyNodeIds(nodes);
   const youtubeNoSubscriptionNodeIds = findYouTubeTriggerNoSubscriptionIds(nodes);
   const githubNoRepoNodeIds = findGitHubTriggerNoRepoIds(nodes);
@@ -226,6 +271,7 @@ export function validateFlowGraph(
       misplacedGitHubConditionNodeIds.length === 0 &&
       emptyGitHubConditionNodeIds.length === 0 &&
       githubConditionInvalidWindowNodeIds.length === 0 &&
+      githubConditionNoWaitNodeIds.length === 0 &&
       orLogicEmptyNodeIds.length === 0 &&
       youtubeNoSubscriptionNodeIds.length === 0 &&
       githubNoRepoNodeIds.length === 0 &&
@@ -237,6 +283,7 @@ export function validateFlowGraph(
     misplacedGitHubConditionNodeIds,
     emptyGitHubConditionNodeIds,
     githubConditionInvalidWindowNodeIds,
+    githubConditionNoWaitNodeIds,
     orLogicEmptyNodeIds,
     youtubeNoSubscriptionNodeIds,
     githubNoRepoNodeIds,

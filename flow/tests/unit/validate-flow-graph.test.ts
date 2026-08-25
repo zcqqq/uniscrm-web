@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findOrphanNodeIds, validateFlowGraph, findEmptyYouTubeConditionIds, findOrLogicEmptyNodeIds, findYouTubeTriggerNoSubscriptionIds, findTriggerNoChannelIds, findMisplacedGitHubConditionIds, findEmptyGitHubConditionIds, findGitHubConditionInvalidWindowIds, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
+import { findOrphanNodeIds, validateFlowGraph, findEmptyYouTubeConditionIds, findOrLogicEmptyNodeIds, findYouTubeTriggerNoSubscriptionIds, findTriggerNoChannelIds, findMisplacedGitHubConditionIds, findEmptyGitHubConditionIds, findGitHubConditionInvalidWindowIds, findGitHubConditionNoWaitIds, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
 import { CONDITION_LOGIC_OR } from "../../nodeTypeRegistry";
 
 describe("TRIGGER_NODE_TYPES", () => {
@@ -93,7 +93,7 @@ describe("validateFlowGraph", () => {
     // 顺带把它判失败。
     const nodes = [{ id: "t1", type: "xTrigger", data: { channelId: "chan-1" } }, { id: "a1", type: "action" }];
     const edges = [{ source: "t1", target: "a1" }];
-    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [], misplacedGitHubConditionNodeIds: [], emptyGitHubConditionNodeIds: [], githubConditionInvalidWindowNodeIds: [], orLogicEmptyNodeIds: [], youtubeNoSubscriptionNodeIds: [], githubNoRepoNodeIds: [], xMediaConflictNodeIds: [], triggerNoChannelNodeIds: [] });
+    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [], misplacedGitHubConditionNodeIds: [], emptyGitHubConditionNodeIds: [], githubConditionInvalidWindowNodeIds: [], githubConditionNoWaitNodeIds: [], orLogicEmptyNodeIds: [], youtubeNoSubscriptionNodeIds: [], githubNoRepoNodeIds: [], xMediaConflictNodeIds: [], triggerNoChannelNodeIds: [] });
   });
 
   it("is invalid and lists orphan ids when nodes are unreachable", () => {
@@ -278,6 +278,7 @@ describe("validateFlowGraph — empty youtubeCondition conditions", () => {
       misplacedGitHubConditionNodeIds: [],
       emptyGitHubConditionNodeIds: [],
       githubConditionInvalidWindowNodeIds: [],
+      githubConditionNoWaitNodeIds: [],
       orLogicEmptyNodeIds: [],
       youtubeNoSubscriptionNodeIds: [],
       githubNoRepoNodeIds: [],
@@ -540,7 +541,78 @@ describe("findGitHubConditionInvalidWindowIds", () => {
   });
 });
 
+describe("findGitHubConditionNoWaitIds", () => {
+  it("accepts a githubCondition wired directly after a wait node", () => {
+    const nodes = [ghTrigger, { id: "w1", type: "wait" }, { id: "gc1", type: "githubCondition" }];
+    const edges = [{ source: "ght", target: "w1" }, { source: "w1", target: "gc1" }];
+    expect(findGitHubConditionNoWaitIds(nodes, edges)).toEqual([]);
+  });
+
+  it("flags a githubCondition wired straight off the trigger — the recheck would run at trigger time", () => {
+    const nodes = [ghTrigger, { id: "gc1", type: "githubCondition" }];
+    const edges = [{ source: "ght", target: "gc1" }];
+    expect(findGitHubConditionNoWaitIds(nodes, edges)).toEqual(["gc1"]);
+  });
+
+  it("flags a githubCondition when the graph's only wait sits on a different branch, not upstream", () => {
+    const nodes = [
+      ghTrigger,
+      { id: "w1", type: "wait" },
+      { id: "a1", type: "action" },
+      { id: "gc1", type: "githubCondition" },
+    ];
+    const edges = [
+      { source: "ght", target: "w1" },
+      { source: "w1", target: "a1" },
+      { source: "ght", target: "gc1" },
+    ];
+    expect(findGitHubConditionNoWaitIds(nodes, edges)).toEqual(["gc1"]);
+  });
+
+  // 只要 wait 在上游，等待就已经发生过了，中间隔着别的节点不影响复查的新鲜度——
+  // 拦下来会是一个对正常图的误报。所以判的是"上游可达"，不是"直接前驱"。
+  it("accepts a wait that is upstream but not the direct predecessor", () => {
+    const nodes = [
+      ghTrigger,
+      { id: "w1", type: "wait" },
+      { id: "a1", type: "action" },
+      { id: "gc1", type: "githubCondition" },
+    ];
+    const edges = [
+      { source: "ght", target: "w1" },
+      { source: "w1", target: "a1" },
+      { source: "a1", target: "gc1" },
+    ];
+    expect(findGitHubConditionNoWaitIds(nodes, edges)).toEqual([]);
+  });
+
+  it("does not hang on a cycle upstream of the githubCondition", () => {
+    const nodes = [ghTrigger, { id: "a1", type: "action" }, { id: "a2", type: "action" }, { id: "gc1", type: "githubCondition" }];
+    const edges = [
+      { source: "a1", target: "a2" },
+      { source: "a2", target: "a1" },
+      { source: "a1", target: "gc1" },
+    ];
+    expect(findGitHubConditionNoWaitIds(nodes, edges)).toEqual(["gc1"]);
+  });
+
+  it("stays quiet about flows that contain no githubCondition", () => {
+    expect(findGitHubConditionNoWaitIds([ghTrigger, { id: "a1", type: "action" }], [{ source: "ght", target: "a1" }])).toEqual([]);
+  });
+});
+
 describe("validateFlowGraph — githubCondition fields", () => {
+  it("githubConditionNoWaitNodeIds surfaces through validateFlowGraph and flips valid to false", () => {
+    const nodes = [
+      ghTrigger,
+      { id: "gc1", type: "githubCondition", data: { conditions: [{ field: "is_latest_release", operator: "==", value: "1" }], maxWaitDays: 7 } },
+    ];
+    const edges = [{ source: "ght", target: "gc1" }];
+    const result = validateFlowGraph(nodes, edges);
+    expect(result.githubConditionNoWaitNodeIds).toEqual(["gc1"]);
+    expect(result.valid).toBe(false);
+  });
+
   it("githubConditionInvalidWindowNodeIds surfaces through validateFlowGraph and flips valid to false", () => {
     const nodes = [
       ghTrigger,

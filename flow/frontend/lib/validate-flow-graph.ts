@@ -81,6 +81,18 @@ export function findEmptyGitHubConditionIds(
     .map((n) => n.id);
 }
 
+// maxWaitDays < 1（清空输入框存 0，或 AI 生成的畸形图给出非法值）会让两处运行时的
+// "> 0 ? … : 7" 兜底悄悄换成别的数字——用户以为自己配了 N 天，实际跑的是 7。这和
+// findEmptyGitHubConditionIds 同一类问题：静默偏离配置，不是报错，发布前挡住。
+export function findGitHubConditionInvalidWindowIds(
+  nodes: { id: string; type?: string; data?: Record<string, unknown> }[]
+): string[] {
+  return nodes
+    .filter((n) => n.type === "githubCondition")
+    .filter((n) => !(Number(n.data?.maxWaitDays) >= 1))
+    .map((n) => n.id);
+}
+
 // 与运行时对"有几条条件"的判断保持一致，否则会出现「发布拦不住但运行时当没条件」或反之。
 // - 非数组一律算 0：executeContentActions 的 Array.isArray 守卫（index.ts）会把手改坏的
 //   或 AI 生成的畸形值降级成"没有条件"，运行时行为与空数组完全相同。
@@ -188,6 +200,7 @@ export function validateFlowGraph(
   emptyConditionNodeIds: string[];
   misplacedGitHubConditionNodeIds: string[];
   emptyGitHubConditionNodeIds: string[];
+  githubConditionInvalidWindowNodeIds: string[];
   orLogicEmptyNodeIds: string[];
   youtubeNoSubscriptionNodeIds: string[];
   githubNoRepoNodeIds: string[];
@@ -199,6 +212,7 @@ export function validateFlowGraph(
   const emptyConditionNodeIds = findEmptyYouTubeConditionIds(nodes);
   const misplacedGitHubConditionNodeIds = findMisplacedGitHubConditionIds(nodes);
   const emptyGitHubConditionNodeIds = findEmptyGitHubConditionIds(nodes);
+  const githubConditionInvalidWindowNodeIds = findGitHubConditionInvalidWindowIds(nodes);
   const orLogicEmptyNodeIds = findOrLogicEmptyNodeIds(nodes);
   const youtubeNoSubscriptionNodeIds = findYouTubeTriggerNoSubscriptionIds(nodes);
   const githubNoRepoNodeIds = findGitHubTriggerNoRepoIds(nodes);
@@ -211,6 +225,7 @@ export function validateFlowGraph(
       emptyConditionNodeIds.length === 0 &&
       misplacedGitHubConditionNodeIds.length === 0 &&
       emptyGitHubConditionNodeIds.length === 0 &&
+      githubConditionInvalidWindowNodeIds.length === 0 &&
       orLogicEmptyNodeIds.length === 0 &&
       youtubeNoSubscriptionNodeIds.length === 0 &&
       githubNoRepoNodeIds.length === 0 &&
@@ -221,6 +236,7 @@ export function validateFlowGraph(
     emptyConditionNodeIds,
     misplacedGitHubConditionNodeIds,
     emptyGitHubConditionNodeIds,
+    githubConditionInvalidWindowNodeIds,
     orLogicEmptyNodeIds,
     youtubeNoSubscriptionNodeIds,
     githubNoRepoNodeIds,

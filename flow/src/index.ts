@@ -883,7 +883,11 @@ async function executeContentActions(
       const conditions = (Array.isArray(rawConditions) ? rawConditions : []) as
         { field: string; operator: string; value: string }[];
       const conditionLogic = conditionNode?.data?.conditionLogic;
-      const maxWaitDays = Number(conditionNode?.data?.maxWaitDays) > 0 ? Number(conditionNode?.data?.maxWaitDays) : 1;
+      // 兜底 7 = 注册表 githubCondition.defaultData 的 maxWaitDays，也是画布组件
+      // （GitHubConditionNode.tsx 的 `|| 7`）和 link 路由兜底用的同一个数。四处必须一致：
+      // 之前这里和 link 兜底 1、画布显示 7，清空输入框后用户看到 "Max wait: 7d"、
+      // 实际按 1 天跑，窗口窄到丢掉早先 release 的正文——正是单 maxWaitDays 设计要防的 bug。
+      const maxWaitDays = Number(conditionNode?.data?.maxWaitDays) > 0 ? Number(conditionNode?.data?.maxWaitDays) : 7;
       // includePrerelease 跟随图里那个 githubContentTrigger 的节点配置——githubCondition
       // 自己不重复这个字段，跟 youtubeCondition 不重复 trigger 上的 duration 上限一个道理。
       const triggerNode = graph.nodes.find((n) => n.type === "githubContentTrigger");

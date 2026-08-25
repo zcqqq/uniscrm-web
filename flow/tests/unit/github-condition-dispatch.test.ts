@@ -201,13 +201,15 @@ describe("executeContentActions: githubCondition dispatch", () => {
     expect(reached).toEqual(["aTrue", "aTrue"]);
   });
 
-  it("falls back to maxWaitDays: 1 when the node's config is missing/invalid", async () => {
+  // 兜底值必须与注册表 defaultData 的 7 一致：画布上写着 "Max wait: 7d"、运行时却按别的
+  // 天数跑，就是 spec 里那个"窗口太窄，早先 release 的正文被悄悄丢掉"的老 bug 换个入口。
+  it("falls back to maxWaitDays: 7 (the registry's own default) when the node's config is missing/invalid", async () => {
     const { fetchMock } = await runCondition(
       graphWithConditions([{ field: "is_latest_release", operator: "==", value: "1" }], "not-a-number"),
       () => new Response(JSON.stringify({ ok: true, props: { is_latest_release: 1 } }), { status: 200 }),
       "content-gh-8"
     );
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).maxWaitDays).toBe(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).maxWaitDays).toBe(7);
   });
 
   it("includePrerelease follows the graph's githubContentTrigger node, not a field on githubCondition itself", async () => {

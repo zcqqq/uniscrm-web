@@ -1346,7 +1346,11 @@ function GitHubConditionInspector({ nodeId, data }: { nodeId: string; data: Reco
             type="number"
             min="1"
             value={data.maxWaitDays || ""}
-            onChange={(e: InputChange) => updateNodeData(nodeId, { maxWaitDays: parseInt(e.target.value) || 0 })}
+            // 清空输入框曾经存下 0：运行时两处 "> 0 ? … : 7" 的兜底改判成 7，画布也显示
+            // 7，用户却以为自己配的是空/0——四处各说各话。这里直接把 0 与 NaN 挡在存储之外，
+            // 保底 7 与注册表 defaultData 同值。updateNodeData 是浅合并（{...n.data, ...data}），
+            // 存 undefined 只会留下一个值为 undefined 的键、不会真正删掉它，所以不用 undefined。
+            onChange={(e: InputChange) => updateNodeData(nodeId, { maxWaitDays: Math.max(1, parseInt(e.target.value) || 7) })}
             placeholder={T({ en: "Enter days...", zh: "输入天数…" })}
             className="w-full h-9 text-sm"
           />

@@ -110,7 +110,7 @@ function EditorToolbar() {
         size="sm"
         onClick={async () => {
           const { nodes, edges } = useFlowEditor.getState();
-          const { valid, orphanNodeIds, misplacedNodeIds, emptyConditionNodeIds, misplacedGitHubConditionNodeIds, emptyGitHubConditionNodeIds, orLogicEmptyNodeIds, youtubeNoSubscriptionNodeIds, githubNoRepoNodeIds, xMediaConflictNodeIds, triggerNoChannelNodeIds } =
+          const { valid, orphanNodeIds, misplacedNodeIds, emptyConditionNodeIds, misplacedGitHubConditionNodeIds, emptyGitHubConditionNodeIds, githubConditionInvalidWindowNodeIds, orLogicEmptyNodeIds, youtubeNoSubscriptionNodeIds, githubNoRepoNodeIds, xMediaConflictNodeIds, triggerNoChannelNodeIds } =
             validateFlowGraph(nodes, edges);
           // Always resolve against the current graph first, so a second Publish click
           // after a partial fix doesn't compound a stale highlight from the first click.
@@ -120,7 +120,7 @@ function EditorToolbar() {
           // still a smell worth not carrying forward.
           useFlowEditor
             .getState()
-            .setErrorNodeIds([...new Set([...orphanNodeIds, ...misplacedNodeIds, ...emptyConditionNodeIds, ...misplacedGitHubConditionNodeIds, ...emptyGitHubConditionNodeIds, ...orLogicEmptyNodeIds, ...youtubeNoSubscriptionNodeIds, ...githubNoRepoNodeIds, ...xMediaConflictNodeIds, ...triggerNoChannelNodeIds])]);
+            .setErrorNodeIds([...new Set([...orphanNodeIds, ...misplacedNodeIds, ...emptyConditionNodeIds, ...misplacedGitHubConditionNodeIds, ...emptyGitHubConditionNodeIds, ...githubConditionInvalidWindowNodeIds, ...orLogicEmptyNodeIds, ...youtubeNoSubscriptionNodeIds, ...githubNoRepoNodeIds, ...xMediaConflictNodeIds, ...triggerNoChannelNodeIds])]);
           if (!valid) {
             // 八类错误的修法完全不同（连线 / 填条件 / 改回 AND / 选订阅 / 选仓库 / 选账号 / 换 trigger / 二选一媒体），文案必须分开，
             // 否则用户会对着一个连得好好的节点找"哪里没连上"。孤儿优先——它更常见也更基础。
@@ -143,6 +143,8 @@ function EditorToolbar() {
                     ? T({ en: `${youtubeConditionLabel} has no conditions set, cannot publish`, zh: `${youtubeConditionLabel} 没有设置条件，无法发布` })
                     : emptyGitHubConditionNodeIds.length > 0
                       ? T({ en: `${githubConditionLabel} has no conditions set, cannot publish`, zh: `${githubConditionLabel} 没有设置条件，无法发布` })
+                      : githubConditionInvalidWindowNodeIds.length > 0
+                        ? T({ en: `${githubConditionLabel} needs a max wait of at least 1 day, cannot publish`, zh: `${githubConditionLabel} 的最长等待天数至少为 1，无法发布` })
                       : orLogicEmptyNodeIds.length > 0
                         ? T({ en: `${orLogicEmptyNodeIds.length} node(s) selected OR but have no conditions, cannot publish`, zh: `${orLogicEmptyNodeIds.length} 个节点选了 OR 但没有条件，无法发布` })
                         : youtubeNoSubscriptionNodeIds.length > 0

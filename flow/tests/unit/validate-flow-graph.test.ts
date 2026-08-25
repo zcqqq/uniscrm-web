@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findOrphanNodeIds, validateFlowGraph, findEmptyYouTubeConditionIds, findOrLogicEmptyNodeIds, findYouTubeTriggerNoSubscriptionIds, findTriggerNoChannelIds, findMisplacedGitHubConditionIds, findEmptyGitHubConditionIds, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
+import { findOrphanNodeIds, validateFlowGraph, findEmptyYouTubeConditionIds, findOrLogicEmptyNodeIds, findYouTubeTriggerNoSubscriptionIds, findTriggerNoChannelIds, findMisplacedGitHubConditionIds, findEmptyGitHubConditionIds, findGitHubConditionInvalidWindowIds, TRIGGER_NODE_TYPES } from "../../frontend/lib/validate-flow-graph";
 import { CONDITION_LOGIC_OR } from "../../nodeTypeRegistry";
 
 describe("TRIGGER_NODE_TYPES", () => {
@@ -93,7 +93,7 @@ describe("validateFlowGraph", () => {
     // 顺带把它判失败。
     const nodes = [{ id: "t1", type: "xTrigger", data: { channelId: "chan-1" } }, { id: "a1", type: "action" }];
     const edges = [{ source: "t1", target: "a1" }];
-    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [], misplacedGitHubConditionNodeIds: [], emptyGitHubConditionNodeIds: [], orLogicEmptyNodeIds: [], youtubeNoSubscriptionNodeIds: [], githubNoRepoNodeIds: [], xMediaConflictNodeIds: [], triggerNoChannelNodeIds: [] });
+    expect(validateFlowGraph(nodes, edges)).toEqual({ valid: true, orphanNodeIds: [], misplacedNodeIds: [], emptyConditionNodeIds: [], misplacedGitHubConditionNodeIds: [], emptyGitHubConditionNodeIds: [], githubConditionInvalidWindowNodeIds: [], orLogicEmptyNodeIds: [], youtubeNoSubscriptionNodeIds: [], githubNoRepoNodeIds: [], xMediaConflictNodeIds: [], triggerNoChannelNodeIds: [] });
   });
 
   it("is invalid and lists orphan ids when nodes are unreachable", () => {
@@ -277,6 +277,7 @@ describe("validateFlowGraph — empty youtubeCondition conditions", () => {
       emptyConditionNodeIds: [],
       misplacedGitHubConditionNodeIds: [],
       emptyGitHubConditionNodeIds: [],
+      githubConditionInvalidWindowNodeIds: [],
       orLogicEmptyNodeIds: [],
       youtubeNoSubscriptionNodeIds: [],
       githubNoRepoNodeIds: [],
@@ -510,7 +511,48 @@ describe("findEmptyGitHubConditionIds", () => {
   });
 });
 
+describe("findGitHubConditionInvalidWindowIds", () => {
+  const cond = [{ field: "is_latest_release", operator: "==", value: "1" }];
+
+  it("flags a githubCondition with no maxWaitDays at all", () => {
+    expect(findGitHubConditionInvalidWindowIds([ghTrigger, { id: "gc1", type: "githubCondition", data: { conditions: cond } }])).toEqual(["gc1"]);
+  });
+
+  it("flags maxWaitDays: 0 — what the Inspector used to store on a cleared input", () => {
+    expect(findGitHubConditionInvalidWindowIds([ghTrigger, { id: "gc1", type: "githubCondition", data: { conditions: cond, maxWaitDays: 0 } }])).toEqual(["gc1"]);
+  });
+
+  it("flags a negative maxWaitDays", () => {
+    expect(findGitHubConditionInvalidWindowIds([ghTrigger, { id: "gc1", type: "githubCondition", data: { conditions: cond, maxWaitDays: -3 } }])).toEqual(["gc1"]);
+  });
+
+  it("flags a non-numeric maxWaitDays (an AI-generated malformed graph)", () => {
+    expect(findGitHubConditionInvalidWindowIds([ghTrigger, { id: "gc1", type: "githubCondition", data: { conditions: cond, maxWaitDays: "a week" } }])).toEqual(["gc1"]);
+  });
+
+  it("accepts maxWaitDays: 7 (the registry default) and the minimum 1", () => {
+    expect(findGitHubConditionInvalidWindowIds([ghTrigger, { id: "gc1", type: "githubCondition", data: { conditions: cond, maxWaitDays: 7 } }])).toEqual([]);
+    expect(findGitHubConditionInvalidWindowIds([ghTrigger, { id: "gc1", type: "githubCondition", data: { conditions: cond, maxWaitDays: 1 } }])).toEqual([]);
+  });
+
+  it("ignores nodes that are not githubCondition, even with a bogus maxWaitDays", () => {
+    expect(findGitHubConditionInvalidWindowIds([ghTrigger, { id: "w1", type: "wait", data: { maxWaitDays: 0 } }])).toEqual([]);
+  });
+});
+
 describe("validateFlowGraph — githubCondition fields", () => {
+  it("githubConditionInvalidWindowNodeIds surfaces through validateFlowGraph and flips valid to false", () => {
+    const nodes = [
+      ghTrigger,
+      { id: "w1", type: "wait", data: {} },
+      { id: "gc1", type: "githubCondition", data: { conditions: [{ field: "is_latest_release", operator: "==", value: "1" }], maxWaitDays: 0 } },
+    ];
+    const edges = [{ source: "ght", target: "w1" }, { source: "w1", target: "gc1" }];
+    const result = validateFlowGraph(nodes, edges);
+    expect(result.githubConditionInvalidWindowNodeIds).toEqual(["gc1"]);
+    expect(result.valid).toBe(false);
+  });
+
   it("misplacedGitHubConditionNodeIds / emptyGitHubConditionNodeIds surface through validateFlowGraph", () => {
     const nodes = [{ id: "t1", type: "xContentTrigger" }, { id: "gc1", type: "githubCondition", data: { conditions: [] } }];
     const edges: { source: string; target: string }[] = [];

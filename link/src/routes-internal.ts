@@ -937,7 +937,9 @@ export function internalRoutes() {
       return c.json({ ok: false, reason: boundedGitHubReason(e) });
     }
 
-    const days = Number(maxWaitDays) > 0 ? Number(maxWaitDays) : 1;
+    // 兜底 7 = flow 注册表 githubCondition.defaultData 的 maxWaitDays，与 flow/src/index.ts
+    // 的同名兜底、画布组件的 `|| 7` 保持同一个数。见那两处的注释。
+    const days = Number(maxWaitDays) > 0 ? Number(maxWaitDays) : 7;
     const window = buildReleaseWindow(releases!, days, includePrerelease === true, Date.now());
     const isLatest = isLatestRelease(window, publishedAt, String(sourceContentId ?? ""), days, Date.now());
 

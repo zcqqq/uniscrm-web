@@ -496,6 +496,5 @@ async function pollGitHubRepo(
     tenantId,
     linkDb: env.LINK_DB,
     contentService,
-    now: Date.now(),
   });
 }

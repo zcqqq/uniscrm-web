@@ -8,9 +8,7 @@ vi.mock("../../../src/services/github-api", async (importActual) => ({
   getRepo: (...a: unknown[]) => getRepoMock(...a),
 }));
 
-import { runGitHubReleasePoller, buildReleaseHistory, pollerNameFor } from "../../../src/services/pollers/github-releases";
-
-const NOW = Date.parse("2026-08-10T00:00:00Z");
+import { runGitHubReleasePoller, pollerNameFor } from "../../../src/services/pollers/github-releases";
 
 function rel(over: Partial<Record<string, unknown>> = {}) {
   return {
@@ -66,64 +64,6 @@ function fakeContentService() {
 
 beforeEach(() => { listReleasesMock.mockReset(); getRepoMock.mockReset(); });
 
-describe("buildReleaseHistory", () => {
-  it("只留 30 天内、有 published_at 的条目，最多 100 条", () => {
-    const h = buildReleaseHistory(
-      [
-        rel({ published_at: "2026-08-09T00:00:00Z" }),
-        rel({ published_at: "2026-06-01T00:00:00Z" }),   // 30 天以外
-        rel({ published_at: null }),                      // 无发布时间
-        rel({ published_at: "2026-08-01T00:00:00Z", prerelease: true }),
-      ] as never,
-      NOW
-    );
-    // 第一条在 48h 文本窗口内带 title/content_text；第三条（9 天前）超出文本窗口，
-    // 退回不带文本的老形状——它只用来算 release_count_7d/30d，1 天聚合用不到它。
-    expect(h).toEqual([
-      { published_at: "2026-08-09T00:00:00Z", prerelease: false, title: "v1", content_text: "notes" },
-      { published_at: "2026-08-01T00:00:00Z", prerelease: true },
-    ]);
-  });
-
-  it("48h 文本窗口外的条目不带 title/content_text", () => {
-    const h = buildReleaseHistory(
-      [rel({ published_at: "2026-08-07T00:00:00Z" })],   // 3 天前，超出 48h
-      NOW
-    );
-    expect(h).toEqual([{ published_at: "2026-08-07T00:00:00Z", prerelease: false }]);
-  });
-
-  it("title 为空时历史条目里也回退 tag_name，和主发射路径一致", () => {
-    const h = buildReleaseHistory(
-      [rel({ published_at: "2026-08-09T00:00:00Z", name: null, tag_name: "bun-v1.3.14" })],
-      NOW
-    );
-    expect(h[0].title).toBe("bun-v1.3.14");
-  });
-
-  it("单条历史正文超过 2000 字截断", () => {
-    const h = buildReleaseHistory(
-      [rel({ published_at: "2026-08-09T00:00:00Z", body: "x".repeat(5_000) })],
-      NOW
-    );
-    expect(h[0].content_text).toHaveLength(2_000);
-  });
-
-  it("带文本的条目累计超过字节预算后，后续条目退回不带文本的形状", () => {
-    // 48KB 预算，每条 2000 字符正文（ASCII，1 字节/字符）—— 第 25 条左右预算耗尽。
-    const releases = Array.from({ length: 30 }, (_, i) =>
-      rel({ id: i, published_at: "2026-08-09T00:00:00Z", body: "x".repeat(2_000) })
-    );
-    const h = buildReleaseHistory(releases as never, NOW);
-    const withText = h.filter((e) => e.content_text !== undefined);
-    const withoutText = h.filter((e) => e.content_text === undefined);
-    expect(withText.length).toBeGreaterThan(0);
-    expect(withoutText.length).toBeGreaterThan(0);
-    // 退回的条目仍然保留 published_at/prerelease —— 计数不受影响。
-    expect(withoutText[0].published_at).toBe("2026-08-09T00:00:00Z");
-  });
-});
-
 describe("pollerNameFor", () => {
   it("每个 repo 一行 poll state", () => {
     expect(pollerNameFor("oven-sh/bun")).toBe("github-releases:oven-sh/bun");
@@ -133,7 +73,7 @@ describe("pollerNameFor", () => {
 describe("runGitHubReleasePoller", () => {
   const base = () => ({
     channelId: "chan-1", fullName: "oven-sh/bun", token: "tok",
-    tenantId: 7, now: NOW,
+    tenantId: 7,
   });
 
   it("seed 阶段只记不发，且真的记进了 dedup —— 下一轮增量必须一条都不发", async () => {
@@ -187,7 +127,7 @@ describe("runGitHubReleasePoller", () => {
     expect(cs.seenIds()).toEqual([]);
   });
 
-  it("增量阶段发新 release，并带上 repo 作者字段与 release_history", async () => {
+  it("增量阶段发新 release，并带上 repo 作者字段", async () => {
     const { db } = fakeLinkDb({ cursor: 'W/"old"', backfill_complete: 1, last_polled_at: "2026-08-09T00:00:00Z", since_id: null });
     const cs = fakeContentService();
     listReleasesMock.mockResolvedValue({ releases: [rel({ id: 9, name: "Bun v1", body: "hello" })], etag: 'W/"b"', rateLimited: false, notFound: false });
@@ -204,7 +144,6 @@ describe("runGitHubReleasePoller", () => {
     expect(props.is_prerelease).toBe(0);                       // 布尔归一成 ENUM_INT
     expect(props["user.followers_count"]).toBe(70000);         // star → followers_count
     expect(props["user.name"]).toBe("oven-sh/bun");
-    expect(props.release_history).toHaveLength(1);
   });
 
   it("title 为空时回退 tag_name", async () => {

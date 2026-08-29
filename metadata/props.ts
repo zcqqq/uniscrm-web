@@ -320,31 +320,7 @@ export const PROPS = definePropDefinitions([
       { value: 1, label: { en: "Prerelease", zh: "预发布" } },
     ],
   },
-  // 三个窗口的发版数。值不在轮询时算 —— 计数口径跟随触发节点的 includePrerelease，
-  // 而轮询按 repo 走、看不到节点配置。flow 侧 trigger 命中后从 release_history 算出来注入。
-  {
-    propId: "release_count_1d",
-    dataType: "INT",
-    label: { en: "Releases (24h)", zh: "24小时发版数" },
-  },
-  {
-    propId: "release_count_7d",
-    dataType: "INT",
-    label: { en: "Releases (7d)", zh: "7天发版数" },
-  },
-  {
-    propId: "release_count_30d",
-    dataType: "INT",
-    label: { en: "Releases (30d)", zh: "30天发版数" },
-  },
-  // 1 天窗口内带文本的 release 列表，JSON 数组字符串（每条 {title, content_text}）。
-  // 同样是 flow-payload-only，不带 entity；值同样由 flow 侧注入，见上面 release_count_* 的注释。
-  {
-    propId: "release_notes_1d",
-    dataType: "TEXT",
-    label: { en: "Release Notes (24h)", zh: "24小时发版说明" },
-  },
-  // githubCondition 复查后的新鲜值，回看窗口是节点自己的 maxWaitDays——不是固定 24 小时。
+  // githubCondition 复查后的新鲜值，回看窗口是节点自己的 maxWaitDays——不是固定窗口。
   {
     propId: "is_latest_release",
     dataType: "ENUM_INT",

@@ -23,18 +23,9 @@ export const ContentMetadata_GitHub: ContentMetadata[] = [
       { propId: "tag_name", dataId: "tag_name" },
       // GitHub 返回布尔，轮询器归一成 0/1（ENUM_INT）。
       { propId: "is_prerelease", dataId: "prerelease" },
-      // 只声明不给 dataId/value：resolveProps 会跳过，声明的唯一目的是让条件编辑器的
-      // 字段列表带上它们（同 metadata/youtube.ts 的 duration）。值由 flow 侧注入 ——
-      // 计数口径跟随节点的 includePrerelease，轮询器看不到节点配置。
-      { propId: "release_count_1d" },
-      { propId: "release_count_7d" },
-      { propId: "release_count_30d" },
-      // 1 天窗口内、带文本的 release 列表——JSON 数组字符串，每条 {title, content_text}
-      // 分开存。同样只声明不给 dataId/value：只服务 1 天聚合这一个场景，没有 7d/30d 版本
-      // （见 flow/src/github-release-count.ts 的 computeReleaseNotes1d）。
-      { propId: "release_notes_1d" },
-      // githubCondition 节点复查后注入的新鲜值——只服务 1d 的固定窗口不一样，这三个的
-      // 回看窗口是节点自己的 maxWaitDays 配置。同样只声明、不给 dataId/value。
+      // githubCondition 节点复查后注入的新鲜值——只声明、不给 dataId/value：resolveProps
+      // 会跳过，声明的唯一目的是让条件编辑器的字段列表带上它们（同 metadata/youtube.ts
+      // 的 duration）。回看窗口是节点自己的 maxWaitDays 配置，不是固定窗口。
       { propId: "is_latest_release" },
       { propId: "release_count_window" },
       { propId: "release_notes_window" },

@@ -1021,11 +1021,9 @@ app.post("/internal/trigger", async (c) => {
     const graph: FlowGraph = JSON.parse(flow.graph_json);
     const result = executeFlow(graph, eventType, payload || {});
     if (result.matched) {
-      // result.payload，不是入参 payload：executeFlow 的条件求值跑在**加工后**的 payload 上
-      // （githubContentTrigger 的 release_count_1d/7d/30d 在那一步注入、release_history 在那一步
-      // 剥掉）。这里回退到原始 payload 会让 action 里的 $content.release_count_7d 插值成空串，
-      // 还会把 release_history 整个漏进 action —— 与队列消费者那三个调用点的行为不一致。
-      // 见 ExecutionResult.payload 的契约注释。
+      // result.payload，不是入参 payload：目前对每种 trigger 类型都逐字相同（没有 trigger
+      // 会再加工 payload 了），但 ExecutionResult.payload 才是契约上"条件求值实际用的那份"，
+      // 队列消费者的三个调用点也都传这个——保持一致，不因为"现在两者相等"就抄近路传原始值。
       const { stmts, nodeLogs } = await executeActions(result.actions, userId || "", String(tenantId), c.env, result.payload, flow.id, graph);
       if (nodeLogs.length > 0) await emitNodeLogs(nodeLogs, flow.id, userId || "", Number(tenantId), c.env);
       if (stmts.length > 0) await c.env.FLOW_DB.batch(stmts);

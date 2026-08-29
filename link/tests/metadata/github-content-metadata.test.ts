@@ -22,25 +22,9 @@ describe("ContentMetadata_GitHub", () => {
     expect(byId.is_prerelease.dataId).toBe("prerelease");
   });
 
-  it("三个计数只声明、不给 dataId/value —— 值由 flow 侧注入", () => {
+  it("githubCondition 复查值只声明、不给 dataId/value —— 值由 flow 侧发 recheck 之后注入", () => {
     // resolveProps 会跳过既无 value 也无 dataId 的条目；声明的唯一目的是让条件编辑器
     // 的字段列表带上它们（同 metadata/youtube.ts 的 duration）
-    for (const id of ["release_count_1d", "release_count_7d", "release_count_30d"]) {
-      const m = META.contentProps.find((p) => p.propId === id)!;
-      expect(m).toBeDefined();
-      expect(m.dataId).toBeUndefined();
-      expect(m.value).toBeUndefined();
-    }
-  });
-
-  it("release_notes_1d 同样只声明、不给 dataId/value —— 值由 flow 侧注入的 JSON 字符串", () => {
-    const m = META.contentProps.find((p) => p.propId === "release_notes_1d")!;
-    expect(m).toBeDefined();
-    expect(m.dataId).toBeUndefined();
-    expect(m.value).toBeUndefined();
-  });
-
-  it("githubCondition 复查值同样只声明、不给 dataId/value —— 值由 flow 侧发 recheck 之后注入", () => {
     for (const id of ["is_latest_release", "release_count_window", "release_notes_window"]) {
       const m = META.contentProps.find((p) => p.propId === id)!;
       expect(m, `prop ${id} 未声明`).toBeDefined();
@@ -62,8 +46,7 @@ describe("ContentMetadata_GitHub", () => {
   it("新增的 prop 都不带 entity —— 它们只活在 flow payload 里", () => {
     // entity 的契约是「表上的真实列」，标了不建列会被 stream-schema 对账测试判红
     for (const id of [
-      "tag_name", "is_prerelease", "release_count_1d", "release_count_7d", "release_count_30d",
-      "release_notes_1d", "is_latest_release", "release_count_window", "release_notes_window",
+      "tag_name", "is_prerelease", "is_latest_release", "release_count_window", "release_notes_window",
     ]) {
       const def = PROPS.find((p) => p.propId === id);
       expect(def, `prop ${id} 未注册`).toBeDefined();

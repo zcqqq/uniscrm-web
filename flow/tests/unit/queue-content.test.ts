@@ -1246,44 +1246,21 @@ describe("queue(): videoAction dispatch", () => {
   });
 });
 
-describe("queue(): githubContentTrigger's enriched payload reaches every downstream consumer", () => {
-  // executeFlow returns the trigger-enriched payload on result.payload; for githubContentTrigger
-  // that is the ONLY place the three release counts exist (link's poller ships raw
-  // release_history — it polls per repo and cannot know each node's includePrerelease).
-  // The queue consumer must therefore hand `result.payload`, not `matchPayload`, to every
-  // downstream consumer. These tests pin the two sites where the difference is observable:
-  //   - the content-action dispatch (interpolatable via $content.release_count_30d)
-  //   - the rows persisted into content_flow_pending (the wait row and the rate-limit retry row)
-  // Reverting any of those call sites back to `matchPayload` makes a test here fail.
-  //
-  // A wait row with no counts is the dangerous one: scheduled()'s sweep re-evaluates the
-  // node's conditions against this stored JSON, and a missing release_count_* resolves to
-  // undefined -> fail-closed -> the branch silently never fires, with nothing logged.
-  //
-  // Not pinned here (deliberately): emitContentNodeLogs. It projects only
-  // title/content_text/content_url/processed_video_url out of the payload, none of which the
-  // enrichment touches, so its call site has no observable difference to assert on.
-
-  const HOUR = 60 * 60 * 1000;
-  const DAY = 24 * HOUR;
-
-  // Counted with includePrerelease:false (the node's default), relative to Date.now() — the
-  // queue path calls executeFlow without the `now` override, so these must be relative.
-  // Expected: 1d = 1, 7d = 1 (the 3-day-old one is a prerelease), 30d = 2.
-  function releaseHistory() {
-    return [
-      { published_at: new Date(Date.now() - 2 * HOUR).toISOString(), prerelease: false, title: "v1.4.0", content_text: "dark mode" },
-      { published_at: new Date(Date.now() - 3 * DAY).toISOString(), prerelease: true },
-      { published_at: new Date(Date.now() - 10 * DAY).toISOString(), prerelease: false },
-    ];
-  }
+describe("queue(): githubContentTrigger's payload reaches every downstream consumer unchanged", () => {
+  // githubContentTrigger no longer enriches its payload (release_count_1d/7d/30d and
+  // release_notes_1d were removed — githubCondition computes its own fresh window directly
+  // from GitHub, it never reused these). What's still worth pinning: the queue consumer hands
+  // `result.payload`, not a differently-shaped `matchPayload`, to every downstream consumer —
+  // these tests exercise that plumbing with a plain field (tag_name) at the two sites where a
+  // wrong call site would be observable: the content-action dispatch and the rows persisted
+  // into content_flow_pending (the wait row and the rate-limit retry row).
 
   // trigger fans out to BOTH the action and the wait node, so one queue run exercises the
   // content-action call site and the pending-wait call site together.
   const graphJson = JSON.stringify({
     nodes: [
       { id: "t1", type: "githubContentTrigger", data: { channelId: "gh-chan", repos: [{ fullName: "oven-sh/bun" }], conditions: [] }, position: { x: 0, y: 0 } },
-      { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-post", prompt: "Releases this month: $content.release_count_30d", provider: "default" }, position: { x: 200, y: 0 } },
+      { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-post", prompt: "Tag: $content.tag_name", provider: "default" }, position: { x: 200, y: 0 } },
       { id: "w1", type: "wait", data: { duration: 5, unit: "minutes" }, position: { x: 200, y: 120 } },
     ],
     edges: [
@@ -1305,7 +1282,7 @@ describe("queue(): githubContentTrigger's enriched payload reaches every downstr
     vi.unstubAllGlobals();
   });
 
-  it("persists the release counts (and not release_history) into the pending-wait row, and interpolates them into the action prompt", async () => {
+  it("persists the payload into the pending-wait row, and interpolates it into the action prompt", async () => {
     const fetchMock = vi.fn().mockImplementation(
       async () => new Response(JSON.stringify({ ok: true }), { status: 200 })
     );
@@ -1315,17 +1292,15 @@ describe("queue(): githubContentTrigger's enriched payload reaches every downstr
       makeBatch({
         tenantId: "1", eventType: "content.created", contentId: "content-gh-1",
         channelId: "gh-chan", repoFullName: "oven-sh/bun",
-        payload: { is_prerelease: 0, tag_name: "v1.2.3", release_history: releaseHistory() },
+        payload: { is_prerelease: 0, tag_name: "v1.2.3" },
       }),
       env
     );
 
-    // Call site: executeContentActions(..., flowPayload, ...). With matchPayload the
-    // interpolation would resolve release_count_30d to "" (the ?? "" fallback).
     const createPostCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/internal/content/create-post"));
     expect(createPostCall, "expected a fetch to /internal/content/create-post").toBeDefined();
     const body = JSON.parse((createPostCall![1] as RequestInit).body as string);
-    expect(body.interpolatedPrompt).toBe("Releases this month: 2");
+    expect(body.interpolatedPrompt).toBe("Tag: v1.2.3");
 
     // Call site: the content_flow_pending wait-row insert.
     const waitRow = await env.FLOW_DB.prepare(
@@ -1333,21 +1308,12 @@ describe("queue(): githubContentTrigger's enriched payload reaches every downstr
     ).first<{ payload: string }>();
     expect(waitRow, "expected a pending wait row for w1").toBeTruthy();
     const stored = JSON.parse(waitRow!.payload);
-    expect(stored.release_count_1d).toBe(1);
-    expect(stored.release_count_7d).toBe(1); // the 3-day-old release is a prerelease; node default excludes it
-    expect(stored.release_count_30d).toBe(2);
-    // release_notes_1d survives a round trip through content_flow_pending, same as the counts.
-    expect(stored.release_notes_1d).toBe(JSON.stringify([{ title: "v1.4.0", content_text: "dark mode" }]));
-    // Intermediate data, dropped after counting — it must not bloat every stored payload.
-    expect(stored.release_history).toBeUndefined();
-    // The envelope fields matchPayload contributes are still there (the enriched payload is a
-    // superset of it, not a replacement).
     expect(stored.channel_id).toBe("gh-chan");
     expect(stored.repo_full_name).toBe("oven-sh/bun");
     expect(stored.tag_name).toBe("v1.2.3");
   });
 
-  it("persists the release counts into the rate-limited retry row too", async () => {
+  it("persists the payload into the rate-limited retry row too", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(
@@ -1359,7 +1325,7 @@ describe("queue(): githubContentTrigger's enriched payload reaches every downstr
       makeBatch({
         tenantId: "1", eventType: "content.created", contentId: "content-gh-2",
         channelId: "gh-chan", repoFullName: "oven-sh/bun",
-        payload: { is_prerelease: 0, release_history: releaseHistory() },
+        payload: { is_prerelease: 0, tag_name: "v1.2.3" },
       }),
       env
     );
@@ -1371,8 +1337,7 @@ describe("queue(): githubContentTrigger's enriched payload reaches every downstr
     expect(retryRow, "expected a rate-limited retry row").toBeTruthy();
     expect(JSON.parse(retryRow!.retry_action)).toMatchObject({ type: "xContentAction" });
     const stored = JSON.parse(retryRow!.payload);
-    expect(stored.release_count_30d).toBe(2);
-    expect(stored.release_history).toBeUndefined();
+    expect(stored.tag_name).toBe("v1.2.3");
   });
 
   it("does not fire at all when the envelope's repoFullName is not one the node selected", async () => {
@@ -1383,7 +1348,7 @@ describe("queue(): githubContentTrigger's enriched payload reaches every downstr
       makeBatch({
         tenantId: "1", eventType: "content.created", contentId: "content-gh-3",
         channelId: "gh-chan", repoFullName: "some/other-repo",
-        payload: { is_prerelease: 0, release_history: releaseHistory() },
+        payload: { is_prerelease: 0 },
       }),
       env
     );

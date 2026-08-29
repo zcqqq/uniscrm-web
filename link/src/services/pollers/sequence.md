@@ -32,15 +32,21 @@ sequenceDiagram
                 Cron->>GH: GET /repos/{o}/{r}（仅此时才打，取 star 等作者字段）
                 Note over Cron: 失败/抛错都降级成「无作者字段」照发 ——<br/>markSeen 已消费，跳过就是永久丢失
                 loop 每条 fresh release
-                    Cron->>Q: content.created {repoFullName, payload + release_history}
+                    Cron->>Q: content.created {repoFullName, payload}
                     Note over Cron: 单条 emit 失败只记 github_release_emit_failed，不连坐后面的
                 end
             end
         end
     end
-    Note over Cron: release_history 每条只在 published_at 48h 内才带 title/content_text<br/>（超出的、或累计字节预算耗尽的条目仍保留 published_at/prerelease）
     Q->>FW: 消费
     FW->>FW: TRIGGER_MATCHERS.githubContentTrigger（含 includePrerelease 过滤）
-    FW->>FW: 按节点口径算 release_count_1d/7d/30d 与 release_notes_1d（JSON 数组），删 release_history
     FW->>FW: conditionsPass → 后续节点
 ```
+
+## 多条 release 合并成一条帖子
+
+上面这条链路每条 release 各自独立触发，不做任何聚合——githubCondition 节点（另见
+`link/src/services/github-release-window.ts` + `flow/src/github-condition.ts`）走的是完全
+独立的第二条路径：trigger 后接一个 wait 节点，wait 醒来时同步调用
+`POST /internal/github/release-recheck`，实时重新拉取仓库当前的 release 列表算窗口，
+不依赖也不复用上面这条轮询链路产出的任何数据。

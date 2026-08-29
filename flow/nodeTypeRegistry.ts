@@ -290,7 +290,8 @@ const REGISTRY = {
    data: { channelId: "", repos: [], includePrerelease: false, conditions: [] }
    - channelId and repos are left blank — the user picks one or more repos from a multi-select in the Inspector after generation, sourced from the repos they watch on their connected GitHub account (OAuth) on the Social page.
    - includePrerelease defaults to false: prereleases (rc/nightly) do not trigger unless the user opts in.
-   - conditions may filter on "release_count_1d" / "release_count_7d" / "release_count_30d" (how many releases the repo published in that window — counted with the same prerelease rule as includePrerelease), "is_prerelease", "tag_name", "title", "content_text", and author fields such as "user.followers_count" (the repo's star count).`,
+   - conditions may filter on "is_prerelease", "tag_name", "title", "content_text", and author fields such as "user.followers_count" (the repo's star count).
+   - To combine multiple same-day releases into one downstream action instead of firing once per release, put a wait node after this trigger, then a githubCondition node (see its own promptFragment) — do not try to gate this trigger's own conditions on a release count.`,
   },
   xContentAction: {
     reactFlowType: "action",

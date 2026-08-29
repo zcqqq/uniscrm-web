@@ -1,7 +1,6 @@
 import { CONDITION_LOGIC_OR } from "../nodeTypeRegistry";
 import { USER_PROP_PREFIX } from "../../metadata/dataTypes";
 import { getNodeExecutor, getTriggerMatcher } from "./node-executors";
-import { computeReleaseCounts, computeReleaseNotes1d, parseReleaseHistory } from "./github-release-count";
 
 // Kept exported from engine.ts (its historical home) for index.ts and the tests; the
 // implementation now lives in node-executors.ts next to the per-actionType builder map.
@@ -280,7 +279,7 @@ export function executeFlow(
   let resolvedPayload = payload;
 
   for (const trigger of triggerNodes) {
-    resolvedPayload = enrichPayloadForTrigger(trigger, payload, now);
+    resolvedPayload = payload;
     nodeLogs.push({ nodeId: trigger.id, direction: "enter" });
     const allPass = conditionsPass(trigger.data.conditions, trigger.data.conditionLogic, resolvedPayload);
     if (allPass) {
@@ -290,32 +289,6 @@ export function executeFlow(
   }
 
   return { matched: actions.length > 0 || pendingWaits.length > 0, actions, pendingWaits, nodeLogs, payload: resolvedPayload };
-}
-
-/**
- * trigger 命中之后、条件求值之前的唯一加工点。只有 githubContentTrigger 需要它：
- * 发版计数的口径取决于节点的 includePrerelease，而 link 的轮询器按 repo 走、看不到
- * 节点配置，只能下发原始的 release_history 让这里按口径算。
- * 其它每一种 trigger 类型都原样返回传入的对象引用，行为逐字不变。
- */
-function enrichPayloadForTrigger(
-  trigger: FlowNode,
-  payload: Record<string, unknown>,
-  now: number
-): Record<string, unknown> {
-  if (trigger.type !== "githubContentTrigger") return payload;
-
-  const history = parseReleaseHistory(payload.release_history);
-  const includePrerelease = trigger.data.includePrerelease === true;
-  const counts = computeReleaseCounts(history, includePrerelease, now);
-  // release_notes_1d 走 JSON 字符串注入，和三个计数一个待遇：$content.release_notes_1d
-  // 插值出来就是这段 JSON，具体怎么读、怎么按 hosting/sponsoring 这类分类总结交给
-  // 下游 skill 的 prompt，这里不替它决定格式。
-  const notes1d = JSON.stringify(computeReleaseNotes1d(history, includePrerelease, now));
-  // release_history 是中间数据，算完就丢：它对条件编辑器不可见，留在 payload 里只会
-  // 让 flow 日志和 content_flow_pending 白白变大。
-  const { release_history: _dropped, ...rest } = payload;
-  return { ...rest, ...counts, release_notes_1d: notes1d };
 }
 
 export function resumeFromNode(

@@ -244,7 +244,9 @@ describe("scheduled(): content_flow_pending retry_action handling", () => {
 
     await worker.scheduled({} as any, env);
 
-    const row = await env.FLOW_DB.prepare(`SELECT retry_count, execute_at FROM content_flow_pending WHERE id = 'pend-retry-1'`).first<{ retry_count: number; execute_at: string }>();
+    // The claimed row (id 'pend-retry-1') is deleted and re-inserted under a fresh id — see
+    // rescheduleContentPending — so look it up by the stable content_id, not the original row id.
+    const row = await env.FLOW_DB.prepare(`SELECT retry_count, execute_at FROM content_flow_pending WHERE content_id = 'content-retry-1'`).first<{ retry_count: number; execute_at: string }>();
     expect(row?.retry_count).toBe(1);
     expect(row?.execute_at).toBe("2099-01-01T00:00:00.000Z");
   });
@@ -450,8 +452,9 @@ describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
     await worker.scheduled({} as any, testEnv as any);
 
     // Rate limit is transient: the row survives with retry_count+1, no branch is resolved
-    // ("Rate limit重试耗尽后才走failed分支").
-    const row = await env.FLOW_DB.prepare(`SELECT retry_count, execute_at FROM content_flow_pending WHERE id = 'pend-vpoll-6'`).first<{ retry_count: number; execute_at: string }>();
+    // ("Rate limit重试耗尽后才走failed分支"). Re-inserted under a fresh id (rescheduleContentPending)
+    // — look it up by the stable content_id, not the original row id.
+    const row = await env.FLOW_DB.prepare(`SELECT retry_count, execute_at FROM content_flow_pending WHERE content_id = 'content-vpoll-6'`).first<{ retry_count: number; execute_at: string }>();
     expect(row?.retry_count).toBe(2);
     expect(new Date(row!.execute_at).getTime()).toBeGreaterThan(Date.now());
     expect(pipelineSend).not.toHaveBeenCalled();
@@ -474,7 +477,9 @@ describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
 
     await worker.scheduled({} as any, env);
 
-    const row = await env.FLOW_DB.prepare(`SELECT retry_count, execute_at FROM content_flow_pending WHERE id = 'pend-vpoll-3'`).first<{ retry_count: number; execute_at: string }>();
+    // Re-inserted under a fresh id (rescheduleContentPending) — look it up by the stable
+    // content_id, not the original row id.
+    const row = await env.FLOW_DB.prepare(`SELECT retry_count, execute_at FROM content_flow_pending WHERE content_id = 'content-vpoll-3'`).first<{ retry_count: number; execute_at: string }>();
     expect(row?.retry_count).toBe(2);
     expect(new Date(row!.execute_at).getTime()).toBeGreaterThan(Date.now());
   });
@@ -508,5 +513,49 @@ describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
     expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
     expect(records[0].outcome).toBe("failed");
     expect(records[0].failure_reason).toMatch(/^video_processing_timeout(:|$)/);
+  });
+
+  // Regression test for the 2026-09-03 production incident (flow ac2461dd-...): two scheduled()
+  // invocations overlapping on the same minute both read the same due xVideoStatusPoll row,
+  // both polled x-video-status, both saw "succeeded", and both actually posted the tweet —
+  // because the row was only DELETEd/UPDATEd *after* the poll, with no claim beforehand. The fix
+  // moves an atomic `DELETE ... WHERE id=?` claim to the very top of the per-row loop, before any
+  // async work, so only one of two racing invocations can ever proceed past it for a given row.
+  it("does not double-post when two scheduled() sweeps race on the same xVideoStatusPoll row", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-vpoll1', 1, 'vpoll flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBranches).run();
+
+    const pollAction = { type: "xVideoStatusPoll", channelId: "src-chan", mediaId: "media-race", text: "caption", nodeId: "a1" };
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+       VALUES ('pend-vpoll-race', 'flow-vpoll1', 'a1', 'content-vpoll-race', 1, ?, ?, datetime('now'), ?, 0)`
+    ).bind(JSON.stringify({ channel_id: "src-chan" }), past, JSON.stringify(pollAction)).run();
+
+    // The video finished processing: both racing invocations that get past the claim would see
+    // ok:true and both would actually create the post.
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, id: "tweet-race-1" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pipelineSend = vi.fn().mockResolvedValue(undefined);
+    const testEnv = { ...env, PIPELINE_CONTENT_FLOW_LOG: { send: pipelineSend } };
+
+    await Promise.all([
+      worker.scheduled({} as any, testEnv as any),
+      worker.scheduled({} as any, testEnv as any),
+    ]);
+
+    const statusCalls = fetchMock.mock.calls.filter(([u]: [string]) => String(u).includes("/internal/content/x-video-status"));
+    expect(statusCalls).toHaveLength(1);
+
+    const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE content_id = 'content-vpoll-race'`).all();
+    expect(remaining.results).toHaveLength(0);
+
+    // Exactly one branch resolution (one "success" outcome), not two.
+    expect(pipelineSend).toHaveBeenCalledTimes(1);
+    const [records] = pipelineSend.mock.calls[0];
+    expect(records[0].outcome).toBe("success");
   });
 });

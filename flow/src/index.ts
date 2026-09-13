@@ -1944,10 +1944,10 @@ export default {
     // block — the two sweeps are independent (different tables), so order between them doesn't
     // matter functionally.
     const contentPending = await env.FLOW_DB.prepare(
-      `SELECT id, flow_id, node_id, content_id, tenant_id, payload, awaiting_event, conditions, condition_logic, retry_action, retry_count FROM content_flow_pending WHERE execute_at <= ?`
+      `SELECT id, flow_id, node_id, content_id, tenant_id, payload, awaiting_event, conditions, condition_logic, retry_action, retry_count, created_at FROM content_flow_pending WHERE execute_at <= ?`
     )
       .bind(now)
-      .all<{ id: string; flow_id: string; node_id: string; content_id: string; tenant_id: string; payload: string; awaiting_event: string; conditions: string; condition_logic: string; retry_action: string; retry_count: number }>();
+      .all<{ id: string; flow_id: string; node_id: string; content_id: string; tenant_id: string; payload: string; awaiting_event: string; conditions: string; condition_logic: string; retry_action: string; retry_count: number; created_at: string }>();
 
     // content sweep 三个分支解析点（xVideoStatusPoll 兑现、重试耗尽、到期 claim）共用的
     // recordBranchOutcome 绑定：storedPayload 直接复用行里已有的原串（channel_id 早已混在
@@ -1980,18 +1980,23 @@ export default {
     // transcoding, action still rate-limited) as a brand-new row. The original row is already
     // claimed (deleted) atomically at the top of the loop below before this is ever called — an
     // UPDATE-in-place on the old id would silently match zero rows once it's gone.
+    // createdAt is threaded through from the claimed row rather than re-stamped here: this is a
+    // continuation of an existing pending row, not a new one, so created_at must keep reporting
+    // when the row first entered pending state — otherwise "how long has this been stuck
+    // retrying" queries always read back a near-current timestamp regardless of retry_count.
     const rescheduleContentPending = (
       row: { flow_id: string; node_id: string; content_id: string; tenant_id: string; payload: string; awaiting_event: string; conditions: string; condition_logic: string },
       executeAt: string,
       retryAction: string,
-      retryCount: number
+      retryCount: number,
+      createdAt: string
     ) =>
       env.FLOW_DB.prepare(
         `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, awaiting_event, conditions, condition_logic, retry_action, retry_count)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         crypto.randomUUID(), row.flow_id, row.node_id, row.content_id, row.tenant_id, row.payload,
-        executeAt, new Date().toISOString(), row.awaiting_event, row.conditions, row.condition_logic,
+        executeAt, createdAt, row.awaiting_event, row.conditions, row.condition_logic,
         retryAction, retryCount
       ).run();
 
@@ -2011,14 +2016,34 @@ export default {
         if (!claim.meta.changes) continue; // Already claimed by a concurrent invocation
 
         if (row.retry_action) {
-          const action = JSON.parse(row.retry_action) as ActionResult;
-          const flow = await env.FLOW_DB.prepare(`SELECT graph_json, status FROM flows WHERE id = ?`)
-            .bind(row.flow_id)
-            .first<{ graph_json: string; status: string }>();
-          if (!flow || flow.status !== "published") continue;
-          const graph: FlowGraph = JSON.parse(flow.graph_json);
-          const payload = JSON.parse(row.payload);
-          const channelId = String(payload.channel_id ?? "");
+          // Everything up to the first outbound call (JSON.parse, the flows SELECT, more
+          // JSON.parse) is local/infra work with no side effect yet — a throw here (bad JSON, a
+          // D1 blip) is safe to retry, unlike a throw after dispatch below (see the outer catch),
+          // which must NOT be retried or it recreates the 2026-09-03 double-post incident this
+          // claim exists to prevent. retry_count is deliberately left unchanged on this path: it
+          // is an infra retry, not a business rate-limit retry, and the two must not mix — several
+          // messages below read `row.retry_count + 1` into user-facing "after N polls/retries" text.
+          let prep: { action: ActionResult; graph: FlowGraph; payload: Record<string, unknown>; channelId: string } | undefined;
+          try {
+            const action = JSON.parse(row.retry_action) as ActionResult;
+            const flow = await env.FLOW_DB.prepare(`SELECT graph_json, status FROM flows WHERE id = ?`)
+              .bind(row.flow_id)
+              .first<{ graph_json: string; status: string }>();
+            if (!flow || flow.status !== "published") continue;
+            const graph: FlowGraph = JSON.parse(flow.graph_json);
+            const payload = JSON.parse(row.payload);
+            const channelId = String(payload.channel_id ?? "");
+            prep = { action, graph, payload, channelId };
+          } catch (prepErr) {
+            console.error(JSON.stringify({ event: "content_flow_pending_prep_error", id: row.id, error: String(prepErr) }));
+            try {
+              await rescheduleContentPending(row, new Date(Date.now() + 60_000).toISOString(), row.retry_action, row.retry_count, row.created_at);
+            } catch (reErr) {
+              console.error(JSON.stringify({ event: "content_flow_pending_reclaim_failed", id: row.id, error: String(reErr) }));
+            }
+            continue;
+          }
+          const { action, graph, payload, channelId } = prep;
 
           if (action.type === "xVideoStatusPoll") {
             const statusRes = await fetch(`${env.LINK_URL}/internal/content/x-video-status`, {
@@ -2036,7 +2061,7 @@ export default {
 
             if (statusBody.pending && row.retry_count < 5) {
               const nextAt = new Date(Date.now() + Math.max(statusBody.checkAfterSecs || 60, 60) * 1000).toISOString();
-              await rescheduleContentPending(row, nextAt, row.retry_action, row.retry_count + 1);
+              await rescheduleContentPending(row, nextAt, row.retry_action, row.retry_count + 1, row.created_at);
               console.log(JSON.stringify({ event: "x_video_poll_rescheduled", id: row.id, retryCount: row.retry_count + 1 }));
               continue;
             }
@@ -2045,7 +2070,7 @@ export default {
             // pending does ("Rate limit重试耗尽后才走failed分支").
             if (statusBody.rateLimited && row.retry_count < 5) {
               const nextAt = statusBody.rateLimitReset || new Date(Date.now() + 15 * 60 * 1000).toISOString();
-              await rescheduleContentPending(row, nextAt, row.retry_action, row.retry_count + 1);
+              await rescheduleContentPending(row, nextAt, row.retry_action, row.retry_count + 1, row.created_at);
               console.log(JSON.stringify({ event: "x_video_poll_rate_limited", id: row.id, retryCount: row.retry_count + 1 }));
               continue;
             }
@@ -2063,7 +2088,7 @@ export default {
           const { rateLimited } = await executeContentActions(graph, [action], row.content_id, channelId, row.tenant_id, env, payload, row.flow_id);
 
           if (rateLimited.length > 0 && row.retry_count < 5) {
-            await rescheduleContentPending(row, rateLimited[0].retryAt, row.retry_action, row.retry_count + 1);
+            await rescheduleContentPending(row, rateLimited[0].retryAt, row.retry_action, row.retry_count + 1, row.created_at);
             console.log(JSON.stringify({ event: "content_flow_retry_rescheduled", id: row.id, retryCount: row.retry_count + 1 }));
           } else if (rateLimited.length > 0) {
             // Retries exhausted (retry_count >= 5, still rate-limited): resolve the "failed"
@@ -2122,28 +2147,31 @@ export default {
     }
 
     const pending = await env.FLOW_DB.prepare(
-      `SELECT id, flow_id, node_id, user_id, tenant_id, payload, awaiting_event, retry_action, retry_count FROM flow_pending WHERE execute_at <= ?`
+      `SELECT id, flow_id, node_id, user_id, tenant_id, payload, awaiting_event, retry_action, retry_count, created_at FROM flow_pending WHERE execute_at <= ?`
     )
       .bind(now)
-      .all<{ id: string; flow_id: string; node_id: string; user_id: string; tenant_id: string; payload: string; awaiting_event: string; retry_action: string; retry_count: number }>();
+      .all<{ id: string; flow_id: string; node_id: string; user_id: string; tenant_id: string; payload: string; awaiting_event: string; retry_action: string; retry_count: number; created_at: string }>();
 
     if (pending.results.length === 0) return;
 
     // Re-inserts a flow_pending row that's still rate-limited as a brand-new row — mirrors
     // rescheduleContentPending above (same 2026-09-03 duplicate-action root cause). The original
-    // row is already claimed (deleted) atomically before this is ever called.
+    // row is already claimed (deleted) atomically before this is ever called. createdAt is
+    // threaded through from the claimed row (not re-stamped) for the same reason as
+    // rescheduleContentPending: this continues an existing pending row's lifetime.
     const rescheduleFlowPending = (
       row: { flow_id: string; node_id: string; user_id: string; tenant_id: string; payload: string; awaiting_event: string },
       executeAt: string,
       retryAction: string,
-      retryCount: number
+      retryCount: number,
+      createdAt: string
     ) =>
       env.FLOW_DB.prepare(
         `INSERT INTO flow_pending (id, flow_id, node_id, user_id, tenant_id, payload, execute_at, created_at, awaiting_event, retry_action, retry_count)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         crypto.randomUUID(), row.flow_id, row.node_id, row.user_id, row.tenant_id, row.payload,
-        executeAt, now, row.awaiting_event, retryAction, retryCount
+        executeAt, createdAt, row.awaiting_event, retryAction, retryCount
       ).run();
 
     for (const row of pending.results) {
@@ -2157,23 +2185,50 @@ export default {
 
         // Handle retry actions (rate-limited actions being retried)
         if (row.retry_action) {
-          const action = JSON.parse(row.retry_action) as ActionResult & { userId?: string };
-          const retryUserId = (action.userId as string) || row.user_id;
-          // A retried action's success/failed branch has to continue like any other action's, so
-          // the graph is loaded here too. A retry row for a flow that has since been unpublished
-          // or deleted still executes (that was always true), just without branch continuation.
-          const retryFlow = await env.FLOW_DB.prepare(`SELECT graph_json, status FROM flows WHERE id = ?`)
-            .bind(row.flow_id).first<{ graph_json: string; status: string }>();
-          const retryGraph = retryFlow && retryFlow.status === "published"
-            ? JSON.parse(retryFlow.graph_json) as FlowGraph : undefined;
-          const retryPayload = JSON.parse(row.payload || "{}");
+          // Everything up to the first outbound call inside executeActions is local/infra work
+          // with no side effect yet — a throw here (bad JSON, a D1 blip) is safe to retry, unlike
+          // a throw after dispatch (see the outer catch), which must NOT be retried or it
+          // recreates the 2026-09-03 double-fire incident this claim exists to prevent.
+          // retry_count is deliberately left unchanged on this path: it is an infra retry, not a
+          // business rate-limit retry, and the two must not mix — `rate_limit_exhausted: still
+          // rate limited after ${row.retry_count + 1} retries` below reads it into user-facing text.
+          let prep: { action: ActionResult & { userId?: string }; retryUserId: string; retryGraph: FlowGraph | undefined; retryPayload: Record<string, unknown> } | undefined;
+          try {
+            const action = JSON.parse(row.retry_action) as ActionResult & { userId?: string };
+            const retryUserId = (action.userId as string) || row.user_id;
+            // A retried action's success/failed branch has to continue like any other action's, so
+            // the graph is loaded here too. A retry row for a flow that has since been unpublished
+            // or deleted still executes (that was always true), just without branch continuation.
+            const retryFlow = await env.FLOW_DB.prepare(`SELECT graph_json, status FROM flows WHERE id = ?`)
+              .bind(row.flow_id).first<{ graph_json: string; status: string }>();
+            const retryGraph = retryFlow && retryFlow.status === "published"
+              ? JSON.parse(retryFlow.graph_json) as FlowGraph : undefined;
+            const retryPayload = JSON.parse(row.payload || "{}");
+            prep = { action, retryUserId, retryGraph, retryPayload };
+          } catch (prepErr) {
+            console.error(JSON.stringify({ event: "flow_pending_prep_error", id: row.id, error: String(prepErr) }));
+            try {
+              await rescheduleFlowPending(row, new Date(Date.now() + 60_000).toISOString(), row.retry_action, row.retry_count, row.created_at);
+            } catch (reErr) {
+              console.error(JSON.stringify({ event: "flow_pending_reclaim_failed", id: row.id, error: String(reErr) }));
+            }
+            continue;
+          }
+          const { action, retryUserId, retryGraph, retryPayload } = prep;
           const { stmts: actionStmts, rateLimited: rl, nodeLogs } = await executeActions([action], retryUserId, row.tenant_id, env, retryPayload, row.flow_id, retryGraph);
           if (nodeLogs.length > 0) await emitNodeLogs(nodeLogs, row.flow_id, retryUserId, Number(row.tenant_id), env);
 
           if (rl.length > 0 && row.retry_count < 5) {
-            await rescheduleFlowPending(row, rl[0].retryAt, row.retry_action, row.retry_count + 1);
+            await rescheduleFlowPending(row, rl[0].retryAt, row.retry_action, row.retry_count + 1, row.created_at);
             console.log(JSON.stringify({ event: "flow_retry_rescheduled", id: row.id, retryCount: row.retry_count + 1, retryAt: rl[0].retryAt }));
           } else {
+            // No longer one batch with the claim-DELETE (pre-fix: `batch([DELETE, ...actionStmts])`)
+            // — actionStmts don't exist until after executeActions runs, and the claim has to
+            // precede executeActions (not follow it) to stop two racing sweeps from both firing
+            // the retried action. So there's an unavoidable window between the row being claimed
+            // and these statements committing; an eviction inside it loses the outcome record but
+            // not the already-fired action. Not fixable without reopening the race this claim
+            // exists to close.
             if (actionStmts.length > 0) await env.FLOW_DB.batch(actionStmts);
             if (rl.length > 0) {
               console.log(JSON.stringify({ event: "flow_retry_exhausted", id: row.id, retryCount: row.retry_count }));

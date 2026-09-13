@@ -110,7 +110,7 @@ sequenceDiagram
     LW-->>FW: { ok:true } | { ok:false } | { ok:false, rateLimited:true, rateLimitReset }
     alt rateLimited
         FW->>CFP: INSERT content_flow_pending (retry_action, retry_count: 0)
-        Note over FW,CFP: scheduled() sweep retries at rateLimitReset;<br/>retry_count < 5 reschedules;<br/>retry_count >= 5 resolves resumeFromNode(graph, nodeId, payload, "failed") before deleting the row<br/>(per flow/CLAUDE.md's "重试耗尽后才走failed分支" rule)
+        Note over FW,CFP: scheduled() sweep claims the row (DELETE) before any of this work,<br/>so two overlapping sweeps can't both act on it (2026-09-03 double-post incident);<br/>retry_count < 5 re-inserts a fresh row (rescheduleContentPending) to reschedule;<br/>retry_count >= 5 resolves resumeFromNode(graph, nodeId, payload, "failed") — row stays claimed<br/>(per flow/CLAUDE.md's "重试耗尽后才走failed分支" rule)
     else resolved (ok or non-rate-limited failure)
         FW->>FW: resumeFromNode(graph, nodeId, payload, ok ? "success" : "failed")
     end

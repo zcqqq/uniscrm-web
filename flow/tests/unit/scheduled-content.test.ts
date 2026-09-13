@@ -314,6 +314,47 @@ describe("scheduled(): content_flow_pending retry_action handling", () => {
     expect(records.map((r: any) => `${r.node_id}:${r.direction}`)).toEqual(["a1:outcome", "a3:enter", "a3:exit"]);
     expect(records[0].outcome).toBe("failed");
   });
+
+  // Regression test for the loss this commit's atomic claim introduced: the row is claimed
+  // (DELETEd) before row.retry_action is even parsed, so a JSON.parse throw used to be caught
+  // only by the generic per-row catch, which just logs — the row was gone for good. Nothing
+  // outbound has happened yet at this point (JSON.parse is local), so it must be safe to put the
+  // row back, unlike a throw after the fetch dispatch below.
+  it("reschedules a retry_action row (retry_count unchanged) when its stored JSON is malformed, without calling fetch", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-retry1', 1, 'retry flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithBranches).run();
+
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+       VALUES ('pend-retry-badjson', 'flow-retry1', '', 'content-retry-badjson', 1, '{}', ?, '2026-01-01T00:00:00.000Z', '{not valid json', 2)`
+    ).bind(past).run();
+
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await worker.scheduled({} as any, env);
+
+    // recomputeFlowCounts() (unrelated, runs at the top of every scheduled() tick) also calls
+    // global fetch — filter those out; what matters here is that nothing tried to dispatch the
+    // unparseable retry_action.
+    const dispatchCalls = fetchMock.mock.calls.filter(([u]: [string]) => !String(u).includes("r2-sql"));
+    expect(dispatchCalls).toHaveLength(0);
+
+    // Re-inserted under a fresh id (rescheduleContentPending) — look it up by the stable
+    // content_id. retry_count and created_at both survive unchanged: this is an infra retry
+    // (bad JSON), not a business rate-limit retry, so it must not consume the retry_count budget
+    // that "after N retries" messages elsewhere read, nor reset how long the row has been pending.
+    const row = await env.FLOW_DB.prepare(
+      `SELECT retry_count, retry_action, created_at, execute_at FROM content_flow_pending WHERE content_id = 'content-retry-badjson'`
+    ).first<{ retry_count: number; retry_action: string; created_at: string; execute_at: string }>();
+    expect(row?.retry_count).toBe(2);
+    expect(row?.retry_action).toBe("{not valid json");
+    expect(row?.created_at).toBe("2026-01-01T00:00:00.000Z");
+    expect(new Date(row!.execute_at).getTime()).toBeGreaterThan(Date.now());
+  });
 });
 
 describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
@@ -557,5 +598,64 @@ describe("scheduled(): content_flow_pending xVideoStatusPoll handling", () => {
     expect(pipelineSend).toHaveBeenCalledTimes(1);
     const [records] = pipelineSend.mock.calls[0];
     expect(records[0].outcome).toBe("success");
+  });
+
+  // Regression test proving the narrow prep-phase reschedule added alongside the atomic claim
+  // (see the "malformed retry_action JSON" test above) does NOT extend past the x-video-status
+  // dispatch. Once that fetch has fired, the row must be dropped on any later exception, not put
+  // back — putting it back would re-poll x-video-status next sweep and, since link already
+  // posted the tweet on the first poll, that would recreate the exact 2026-09-03 double-post
+  // incident the upfront claim exists to prevent.
+  const graphWithRealDownstreamAction = JSON.stringify({
+    nodes: [
+      { id: "t1", type: "xContentTrigger", data: { conditions: [] }, position: { x: 0, y: 0 } },
+      { id: "a1", type: "action", data: { actionType: "xContentAction", operation: "create-post", attachVideo: true }, position: { x: 200, y: 0 } },
+      // Unlike graphWithBranches's noopLeaf a2, this is a real dispatching action so entering the
+      // "success" branch triggers a second, genuinely outbound fetch call.
+      { id: "a2", type: "action", data: { actionType: "xContentAction", operation: "like-post" }, position: { x: 400, y: 0 } },
+    ],
+    edges: [
+      { id: "e1", source: "t1", target: "a1" },
+      { id: "e2", source: "a1", target: "a2", sourceHandle: "success" },
+    ],
+  });
+
+  it("does not re-insert the row when a later step throws after the x-video-status dispatch already ran", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, status, created_at, updated_at)
+       VALUES ('flow-vpoll1', 1, 'vpoll flow', ?, 'published', datetime('now'), datetime('now'))`
+    ).bind(graphWithRealDownstreamAction).run();
+
+    const pollAction = { type: "xVideoStatusPoll", channelId: "src-chan", mediaId: "media-postdispatch", text: "caption", nodeId: "a1" };
+    const past = new Date(Date.now() - 1000).toISOString();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_pending (id, flow_id, node_id, content_id, tenant_id, payload, execute_at, created_at, retry_action, retry_count)
+       VALUES ('pend-vpoll-postdispatch', 'flow-vpoll1', 'a1', 'content-vpoll-postdispatch', 1, ?, ?, datetime('now'), ?, 0)`
+    ).bind(JSON.stringify({ channel_id: "src-chan" }), past, JSON.stringify(pollAction)).run();
+
+    // First call: x-video-status reports the video is done (the real, already-happened dispatch).
+    // Second call: the downstream like-post action, simulating a failure that occurs strictly
+    // after the video-status dispatch has already taken effect.
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => new Response(JSON.stringify({ ok: true, id: "tweet-postdispatch" }), { status: 200 }))
+      .mockImplementationOnce(async () => { throw new Error("simulated network failure after dispatch"); });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await worker.scheduled({} as any, env);
+
+    const statusCalls = fetchMock.mock.calls.filter(([u]: [string]) => String(u).includes("/internal/content/x-video-status"));
+    expect(statusCalls).toHaveLength(1);
+
+    // The row must be gone for good — not re-inserted for the next sweep to pick up, which would
+    // call x-video-status a second time for an already-posted tweet.
+    const remaining = await env.FLOW_DB.prepare(`SELECT id FROM content_flow_pending WHERE content_id = 'content-vpoll-postdispatch'`).all();
+    expect(remaining.results).toHaveLength(0);
+
+    // A second sweep (nothing left to pick up) makes no further x-video-status calls.
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    await worker.scheduled({} as any, env);
+    const secondSweepStatusCalls = fetchMock.mock.calls.filter(([u]: [string]) => String(u).includes("/internal/content/x-video-status"));
+    expect(secondSweepStatusCalls).toHaveLength(0);
   });
 });

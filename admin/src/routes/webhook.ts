@@ -5,6 +5,24 @@ import { SubscriptionDB } from "../services/subscription-db";
 import { getTierByPriceId, canUseFeature } from "../../../shared/plans";
 import type { Tier } from "../../../shared/plans";
 
+// stripe-node 17.7.0's types describe API version 2025-02-24.acacia, where
+// Subscription.current_period_end lived at the top level. This account's webhook
+// endpoint has no api_version pinned, so delivered payloads free-ride the account's
+// current default — which by 2026-06-24.dahlia had moved current_period_end onto
+// each subscription item instead (2026-09-13/17 real events confirmed this: the
+// field is undefined on the top-level object, present under items.data[0]). That
+// turned `new Date(undefined * 1000).toISOString()` into a thrown RangeError on every
+// checkout.session.completed and customer.subscription.updated delivery — Stripe saw
+// it as a failed webhook, and paid signups silently never got their subscription
+// row activated. Read the item first; fall back to the top-level field so this still
+// works if the account's default version is ever on something older than dahlia.
+export function subscriptionPeriodEnd(subscription: Stripe.Subscription): number {
+  const item = subscription.items.data[0] as
+    | (Stripe.SubscriptionItem & { current_period_end?: number })
+    | undefined;
+  return item?.current_period_end ?? subscription.current_period_end;
+}
+
 export async function webhookRoute(c: Context<{ Bindings: Env }>) {
   const stripe = new Stripe(c.env.STRIPE_SECRET_KEY);
   const body = await c.req.text();
@@ -65,7 +83,7 @@ async function handleCheckoutCompleted(
   const customerId = session.customer as string;
 
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-  const periodEnd = new Date(subscription.current_period_end * 1000).toISOString();
+  const periodEnd = new Date(subscriptionPeriodEnd(subscription) * 1000).toISOString();
 
   await db.upsert(tenantId, {
     stripe_customer_id: customerId,
@@ -85,7 +103,7 @@ export async function handleSubscriptionUpdated(db: SubscriptionDB, linkDb: D1Da
   await db.updateByStripeSubscriptionId(subscription.id, {
     tier: newTier,
     status: subscription.status,
-    current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+    current_period_end: new Date(subscriptionPeriodEnd(subscription) * 1000).toISOString(),
     cancel_at_period_end: subscription.cancel_at_period_end ? 1 : 0,
   });
 

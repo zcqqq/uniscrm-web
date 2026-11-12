@@ -211,6 +211,20 @@ async function getUserNames(env: Env, tenantId: number, sourceUserIds: string[])
   return new Map(rows.map((r) => [r.source_user_id, r.name ?? null]));
 }
 
+// The rebuild is a full-table reconcile and used to run on EVERY one-minute tick: 2 DELETEs plus
+// ~100 INSERTs per tick, ~577k rows written/day once D1 bills each row's index entries. That is
+// 5.8× the free plan's entire 100k rows/day allowance, spent re-writing a 100-row snapshot that
+// had not changed. The R2 aggregate mirror only moves when node logs land, so hourly is already
+// far fresher than the underlying data; the pending/timeCondition sweeps further down keep their
+// every-minute cadence because they genuinely need it.
+export function shouldRecomputeCounts(event: { scheduledTime?: number }): boolean {
+  const ms = Number(event?.scheduledTime);
+  // No trigger timestamp (a test driving scheduled() with a bare object, an older runtime): keep
+  // the historic every-tick behaviour rather than silently never rebuilding.
+  if (!Number.isFinite(ms)) return true;
+  return new Date(ms).getUTCMinutes() === 0;
+}
+
 export async function recomputeFlowCounts(env: Env): Promise<void> {
   const [flowRows, contentFlowRows] = await Promise.all([
     queryR2Counts(env, "uniscrm.flow_log"),
@@ -219,29 +233,59 @@ export async function recomputeFlowCounts(env: Env): Promise<void> {
 
   const now = new Date().toISOString();
 
-  // Full replace, not upsert: the R2 aggregate above is the complete source of truth, and the
-  // log tables can be rebuilt (schema changes archive/drop them) — upsert-only left ghost
-  // counts behind for combos that no longer exist in R2. DELETE + INSERT run in one D1 batch
-  // (a transaction), so a failure keeps the previous counts intact rather than leaving a
-  // half-wiped table.
-  const replaceCounts = async (table: "flow_counts" | "content_flow_counts", rows: CountRow[] | null) => {
-    if (rows === null) return; // query failed — last good counts beat a wipe
-    const stmts = [env.FLOW_DB.prepare(`DELETE FROM ${table}`)];
+  // Reconcile, not rebuild: the R2 aggregate above is still the complete source of truth (the log
+  // tables can be rebuilt, so combos that vanished must vanish here too), but rows whose
+  // count/tenant did not change are left alone. An unchanged table now costs zero writes instead
+  // of a delete+insert per row. The statements for a table still go out in one D1 batch (a
+  // transaction), so a failure keeps the previous counts intact rather than leaving a
+  // half-reconciled table. Returns the number of rows written, for the recompute log line.
+  const replaceCounts = async (table: "flow_counts" | "content_flow_counts", rows: CountRow[] | null): Promise<number> => {
+    if (rows === null) return 0; // query failed — last good counts beat a wipe
+    const existing = await env.FLOW_DB.prepare(
+      `SELECT tenant_id, flow_id, node_id, direction, count FROM ${table}`
+    ).all<{ tenant_id: number; flow_id: string; node_id: string; direction: string; count: number }>();
+
+    const comboOf = (r: { flow_id: string; node_id: string; direction: string }) =>
+      `${r.flow_id}\u0000${r.node_id}\u0000${r.direction}`;
+    const current = new Map(existing.results.map((r) => [comboOf(r), r]));
+
+    const stmts: D1PreparedStatement[] = [];
+    const seen = new Set<string>();
     for (const r of rows) {
+      const combo = comboOf(r);
+      seen.add(combo);
+      const prior = current.get(combo);
+      // Numeric compare on both sides: R2 SQL can hand COUNT() back as a string, and a "42" vs 42
+      // mismatch would rewrite the row on every tick — exactly the cost this path exists to avoid.
+      if (prior && Number(prior.count) === Number(r.cnt) && Number(prior.tenant_id) === Number(r.tenant_id)) continue;
       stmts.push(
-        env.FLOW_DB.prepare(
-          `INSERT INTO ${table} (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
-        ).bind(r.tenant_id, r.flow_id, r.node_id, r.direction, r.cnt, now)
+        prior
+          ? env.FLOW_DB.prepare(
+              `UPDATE ${table} SET count = ?, tenant_id = ?, updated_at = ? WHERE flow_id = ? AND node_id = ? AND direction = ?`
+            ).bind(r.cnt, r.tenant_id, now, r.flow_id, r.node_id, r.direction)
+          : env.FLOW_DB.prepare(
+              `INSERT INTO ${table} (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+            ).bind(r.tenant_id, r.flow_id, r.node_id, r.direction, r.cnt, now)
       );
     }
+    for (const [combo, prior] of current) {
+      if (seen.has(combo)) continue; // combo still present in R2
+      stmts.push(
+        env.FLOW_DB.prepare(`DELETE FROM ${table} WHERE flow_id = ? AND node_id = ? AND direction = ?`)
+          .bind(prior.flow_id, prior.node_id, prior.direction)
+      );
+    }
+    if (stmts.length === 0) return 0;
     try {
       await env.FLOW_DB.batch(stmts);
     } catch (e) {
-      console.error(JSON.stringify({ event: `${table}_replace_error`, rows: rows.length, error: String(e) }));
+      console.error(JSON.stringify({ event: `${table}_replace_error`, rows: rows.length, writes: stmts.length, error: String(e) }));
+      return 0;
     }
+    return stmts.length;
   };
-  await replaceCounts("flow_counts", flowRows);
-  await replaceCounts("content_flow_counts", contentFlowRows);
+  const flowWrites = await replaceCounts("flow_counts", flowRows);
+  const contentWrites = await replaceCounts("content_flow_counts", contentFlowRows);
 
   // trigger_count needs BOTH aggregates (a content flow's count would be zeroed by a view that
   // only includes flow_log) — skip the pass entirely if either query failed.
@@ -259,7 +303,7 @@ export async function recomputeFlowCounts(env: Env): Promise<void> {
     if (r.direction === "enter") enterCountByFlowNode.set(`${r.flow_id}:${r.node_id}`, r.cnt);
   }
 
-  const flows = await env.FLOW_DB.prepare(`SELECT id, graph_json FROM flows`).all<{ id: string; graph_json: string }>();
+  const flows = await env.FLOW_DB.prepare(`SELECT id, graph_json, trigger_count FROM flows`).all<{ id: string; graph_json: string; trigger_count: number | null }>();
   for (const flow of flows.results) {
     let triggerNodeId: string | undefined;
     try {
@@ -274,6 +318,9 @@ export async function recomputeFlowCounts(env: Env): Promise<void> {
     // rows must not keep its pre-rebuild count forever. NULL (not 0) keeps "no data yet" and
     // "never counted" identical, which is what the list page already renders.
     const count = enterCountByFlowNode.get(`${flow.id}:${triggerNodeId}`) ?? null;
+    // Same reconcile rule as the counts tables: an unchanged cache value is not written. The
+    // every-minute tick used to rewrite all of these unconditionally, which alone was ~7 rows/tick.
+    if (count === (flow.trigger_count ?? null)) continue;
     try {
       await env.FLOW_DB.prepare(`UPDATE flows SET trigger_count = ? WHERE id = ?`).bind(count, flow.id).run();
     } catch (e) {
@@ -281,7 +328,7 @@ export async function recomputeFlowCounts(env: Env): Promise<void> {
     }
   }
 
-  console.log(JSON.stringify({ event: "flow_counts_recomputed", flowRows: flowRows.length, contentFlowRows: contentFlowRows.length }));
+  console.log(JSON.stringify({ event: "flow_counts_recomputed", flowRows: flowRows.length, contentFlowRows: contentFlowRows.length, writes: flowWrites + contentWrites }));
 }
 
 function shouldCronFire(data: Record<string, unknown>, now: Date): boolean {
@@ -1904,12 +1951,14 @@ export default {
     }
   },
 
-  async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
+  async scheduled(event: ScheduledEvent, env: Env): Promise<void> {
     const now = new Date().toISOString();
 
-    await recomputeFlowCounts(env).catch((e) => {
-      console.error(JSON.stringify({ event: "flow_counts_recompute_fatal", error: String(e) }));
-    });
+    if (shouldRecomputeCounts(event)) {
+      await recomputeFlowCounts(env).catch((e) => {
+        console.error(JSON.stringify({ event: "flow_counts_recompute_fatal", error: String(e) }));
+      });
+    }
 
     // Cron trigger: check published flows with cronTrigger nodes
     const cronFlows = await env.FLOW_DB.prepare(

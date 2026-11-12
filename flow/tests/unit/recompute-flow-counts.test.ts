@@ -187,4 +187,85 @@ describe("recomputeFlowCounts", () => {
     const row = await env.FLOW_DB.prepare(`SELECT trigger_count FROM flows WHERE id = 'flow-quiet'`).first<{ trigger_count: number | null }>();
     expect(row?.trigger_count).toBeNull();
   });
+
+  // --- write budget (D1 free tier: 100k rows written/day) --------------------------------
+  // The recompute used to DELETE + re-INSERT every count row on every one-minute tick, which cost
+  // ~577k rows written/day on dev's 100-row tables and single-handedly exceeded the account's
+  // daily allowance. The reconcile path below must issue NO write statements when nothing moved.
+  function trackWrites(db: D1Database) {
+    const queries: string[] = [];
+    const tracked = {
+      prepare: (query: string) => {
+        queries.push(query);
+        return db.prepare(query);
+      },
+      batch: (stmts: D1PreparedStatement[]) => db.batch(stmts),
+    } as unknown as D1Database;
+    return { db: tracked, queries };
+  }
+
+  const WRITE_SQL = /^\s*(INSERT|UPDATE|DELETE)/i;
+
+  it("issues zero write statements when the R2 aggregate already matches the tables", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (1, 'f-same', 'n1', 'enter', 5, '2020-01-01T00:00:00.000Z')`
+    ).run();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO content_flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (1, 'cf-same', 'n1', 'enter', 3, '2020-01-01T00:00:00.000Z')`
+    ).run();
+    fetchMock
+      .mockResolvedValueOnce(mockR2Response([{ tenant_id: 1, flow_id: "f-same", node_id: "n1", direction: "enter", cnt: 5 }]))
+      .mockResolvedValueOnce(mockR2Response([{ tenant_id: 1, flow_id: "cf-same", node_id: "n1", direction: "enter", cnt: 3 }]));
+    const { db, queries } = trackWrites(env.FLOW_DB);
+
+    await recomputeFlowCounts({ ...env, FLOW_DB: db } as any);
+
+    expect(queries.filter((q) => WRITE_SQL.test(q))).toEqual([]);
+    // updated_at is the write receipt: an untouched row keeps its old stamp.
+    const row = await env.FLOW_DB.prepare(`SELECT updated_at FROM flow_counts WHERE flow_id = 'f-same'`).first<{ updated_at: string }>();
+    expect(row?.updated_at).toBe("2020-01-01T00:00:00.000Z");
+  });
+
+  it("writes only the rows whose count changed, not the whole table", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (1, 'f-steady', 'n1', 'enter', 5, '2020-01-01T00:00:00.000Z')`
+    ).run();
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flow_counts (tenant_id, flow_id, node_id, direction, count, updated_at) VALUES (1, 'f-moved', 'n1', 'enter', 1, '2020-01-01T00:00:00.000Z')`
+    ).run();
+    fetchMock
+      .mockResolvedValueOnce(mockR2Response([
+        { tenant_id: 1, flow_id: "f-steady", node_id: "n1", direction: "enter", cnt: 5 },
+        { tenant_id: 1, flow_id: "f-moved", node_id: "n1", direction: "enter", cnt: 9 },
+      ]))
+      .mockResolvedValueOnce(mockR2Response([]));
+    const { db, queries } = trackWrites(env.FLOW_DB);
+
+    await recomputeFlowCounts({ ...env, FLOW_DB: db } as any);
+
+    const writes = queries.filter((q) => WRITE_SQL.test(q));
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatch(/^UPDATE flow_counts/);
+    const steady = await env.FLOW_DB.prepare(`SELECT updated_at FROM flow_counts WHERE flow_id = 'f-steady'`).first<{ updated_at: string }>();
+    expect(steady?.updated_at).toBe("2020-01-01T00:00:00.000Z");
+    const moved = await env.FLOW_DB.prepare(`SELECT count, updated_at FROM flow_counts WHERE flow_id = 'f-moved'`).first<{ count: number; updated_at: string }>();
+    expect(moved?.count).toBe(9);
+    expect(moved?.updated_at).not.toBe("2020-01-01T00:00:00.000Z");
+  });
+
+  it("does not rewrite flows.trigger_count when the cached value already matches", async () => {
+    await env.FLOW_DB.prepare(
+      `INSERT INTO flows (id, tenant_id, name, graph_json, domain, status, trigger_count, created_at, updated_at) VALUES ('flow-cached', 1, 'c', ?, 'user', 'published', 42, datetime('now'), datetime('now'))`
+    ).bind(userFlowGraph).run();
+    fetchMock
+      .mockResolvedValueOnce(mockR2Response([{ tenant_id: 1, flow_id: "flow-cached", node_id: "t1", direction: "enter", cnt: 42 }]))
+      .mockResolvedValueOnce(mockR2Response([]));
+    const { db, queries } = trackWrites(env.FLOW_DB);
+
+    await recomputeFlowCounts({ ...env, FLOW_DB: db } as any);
+
+    expect(queries.filter((q) => /^UPDATE flows/.test(q.trim()))).toEqual([]);
+    const row = await env.FLOW_DB.prepare(`SELECT trigger_count FROM flows WHERE id = 'flow-cached'`).first<{ trigger_count: number | null }>();
+    expect(row?.trigger_count).toBe(42);
+  });
 });

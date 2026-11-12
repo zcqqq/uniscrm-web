@@ -337,8 +337,9 @@ describe("scheduled(): content_flow_pending retry_action handling", () => {
 
     await worker.scheduled({} as any, env);
 
-    // recomputeFlowCounts() (unrelated, runs at the top of every scheduled() tick) also calls
-    // global fetch — filter those out; what matters here is that nothing tried to dispatch the
+    // recomputeFlowCounts() (unrelated) also calls global fetch. Real ticks only reconcile counts
+    // on the hour, but this test passes a bare controller, which keeps the historic every-tick
+    // recompute — filter those calls out; what matters here is that nothing tried to dispatch the
     // unparseable retry_action.
     const dispatchCalls = fetchMock.mock.calls.filter(([u]: [string]) => !String(u).includes("r2-sql"));
     expect(dispatchCalls).toHaveLength(0);

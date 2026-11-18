@@ -19,6 +19,11 @@ function makeBatch(body: Record<string, unknown>) {
 
 describe("emitNodeLogs: sends directly to PIPELINE_FLOW_LOG, no queue", () => {
   beforeEach(async () => {
+    // The addToList action POSTs to LINK_URL. That must not reach the network: with the dev
+    // workers torn down (Workers Free cron cap work) the call fails, recordOutcome never runs,
+    // and the outcome batch this test asserts on simply is not sent. Stub it like the other
+    // action-level tests do.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })));
     await env.FLOW_DB.prepare(
       `CREATE TABLE IF NOT EXISTS flows (
          id TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, member_id TEXT NOT NULL DEFAULT '',
@@ -35,6 +40,7 @@ describe("emitNodeLogs: sends directly to PIPELINE_FLOW_LOG, no queue", () => {
 
   afterEach(async () => {
     await env.FLOW_DB.prepare(`DELETE FROM flows WHERE id = 'flow-elog1'`).run();
+    vi.unstubAllGlobals();
   });
 
   it("calls PIPELINE_FLOW_LOG.send with the expected records and never touches FLOW_LOG_QUEUE", async () => {

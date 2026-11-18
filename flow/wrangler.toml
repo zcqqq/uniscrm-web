@@ -72,8 +72,11 @@ stream = "005a014602b148bbb9a7de472e042186"
 [env.dev.ai]
 binding = "AI"
 
+# No cron here on purpose: Workers Free allows 5 cron triggers per account and
+# production holds all of them. Local runs can still drive scheduled() with
+# `wrangler dev --test-scheduled`.
 [env.dev.triggers]
-crons = ["* * * * *"]
+crons = []
 
 [env.production]
 name = "flow"

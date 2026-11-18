@@ -17,8 +17,11 @@ head_sampling_rate = 1
 name = "admin-dev"
 routes = [{ pattern = "admin-dev.uni-scrm.com", custom_domain = true }]
 
+# No cron here on purpose: Workers Free allows 5 cron triggers per account and
+# production holds all of them. Local runs can still drive scheduled() with
+# `wrangler dev --test-scheduled`.
 [env.dev.triggers]
-crons = ["0 */6 * * *"]
+crons = []
 
 [env.dev.vars]
 CF_ACCOUNT_ID = "b34f3ff4aec4c36584672d5bf1320757"

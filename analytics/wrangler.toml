@@ -20,8 +20,11 @@ invocation_logs = true
 name = "analytics-dev"
 routes = [{ pattern = "analytics-dev.uni-scrm.com", custom_domain = true }]
 
+# No cron here on purpose: Workers Free allows 5 cron triggers per account and
+# production holds all of them. Local runs can still drive scheduled() with
+# `wrangler dev --test-scheduled`.
 [env.dev.triggers]
-crons = ["0 2 * * *"]
+crons = []
 
 [env.dev.vars]
 WEB_URL = "https://web-dev.uni-scrm.com"

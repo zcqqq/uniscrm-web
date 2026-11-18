@@ -89,8 +89,11 @@ binding = "ENCRYPTION_KEY"
 store_id = "358a0014b2254c2eafb877e4182fd977"
 secret_name = "uniscrm-encryption-key-dev"
 
+# No cron here on purpose: Workers Free allows 5 cron triggers per account and
+# production holds all of them. Local runs can still drive scheduled() with
+# `wrangler dev --test-scheduled`.
 [env.dev.triggers]
-crons = ["0 * * * *"]
+crons = []
 
 [env.production]
 name = "link"

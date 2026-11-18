@@ -17,8 +17,11 @@ head_sampling_rate = 1
 name = "web-dev"
 routes = [{ pattern = "web-dev.uni-scrm.com", custom_domain = true }]
 
+# No cron here on purpose: Workers Free allows 5 cron triggers per account and
+# production holds all of them. Local runs can still drive scheduled() with
+# `wrangler dev --test-scheduled`.
 [env.dev.triggers]
-crons = ["*/5 * * * *"]
+crons = []
 
 [env.dev.vars]
 GOOGLE_CLIENT_ID = "1038882920781-unbsoa2prpnvqufeicaqqe1mlgso5ac9.apps.googleusercontent.com"
